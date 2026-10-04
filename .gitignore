@@ -11,6 +11,9 @@
 # art extracted from the user's OWN install -- never commit) and its work dir.
 /data/mods/classic_original/
 /build/classic-assets/
+# Classic UI: native DOSBox captures of the original game, the pixel
+# references for the classic screens (copyrighted -- never commit).
+/screenshots/
 # Classic UI: console-capture log from the test-loop one-liner (see plan).
 /classic_run.txt
 # Classic UI: scratch review/feedback notes (transient; folded into the plan).

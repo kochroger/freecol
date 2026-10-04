@@ -222,6 +222,13 @@ final class ClassicMapViewer extends JPanel {
     private int edgeDX;
     private int edgeDY;
 
+    /**
+     * Set by {@link #dispose}.  The viewer can stay the content pane for a
+     * moment after it is disposed (until the queued title panel replaces it),
+     * and a mouse event still queued for it must not restart the timer.
+     */
+    private boolean disposed = false;
+
     /** Longest edge (px) of the whole-map minimap raster (drawn by the info panel). */
     private static final int MINIMAP_MAX = 200;
 
@@ -801,7 +808,7 @@ final class ClassicMapViewer extends JPanel {
         else if (p.y >= getHeight() - margin) dy = 1;
         this.edgeDX = dx;
         this.edgeDY = dy;
-        if (dx == 0 && dy == 0) {
+        if ((dx == 0 && dy == 0) || this.disposed) {
             this.edgeScrollTimer.stop();
         } else if (!this.edgeScrollTimer.isRunning()) {
             this.edgeScrollTimer.start();
@@ -813,6 +820,17 @@ final class ClassicMapViewer extends JPanel {
         this.edgeDX = 0;
         this.edgeDY = 0;
         this.edgeScrollTimer.stop();
+    }
+
+    /**
+     * Release this viewer for good.  Called by {@code ClassicGUI.teardownInGame}
+     * when the game is left for the title screen: the edge-scroll Swing
+     * {@code Timer} (the only one in this class) would otherwise keep firing
+     * against a game that no longer exists.
+     */
+    void dispose() {
+        this.disposed = true;
+        stopEdgeScroll();
     }
 
     /** Resolve the map {@link Tile} under a screen point, or null if off-map. */

@@ -23,11 +23,11 @@ ant classic-assets -Dcol.install="C:\Program Files (x86)\GOG Galaxy\Games\Coloni
 ```
 
 `col.install` must point at the directory holding the original `*.SS`,
-`*.PIK`, and `VICEROY.PAL` files (the GOG/Steam "Classic" release keeps them
+`*.PIK`, `*.FF` (bitmap fonts) and `VICEROY.PAL` files (the GOG/Steam "Classic" release keeps them
 under `MPS\COLONIZE\`).
 
 Output: `data/mods/classic_original/` — `mod.xml`, `resources.properties`, and
-`resources/images/{pik,ss}/*.png`.
+`resources/images/{pik,ss,ff}/*.png`.
 
 ## How it works
 
@@ -40,13 +40,25 @@ The `classic-assets` Ant target compiles the source and runs
    containers into `BufferedImage`s and writes them as PNG:
    - `.PIK` → `resources/images/pik/NAME.PIK.png`
    - `.SS` frames → `resources/images/ss/NAME.SS.000.png`, `.001.png`, …
+   - `.FF` bitmap fonts → `resources/images/ff/NAME.FF.png`, one 16×8-cell
+     2-bit palette atlas per font (index 0 transparent, the glyph's raw pixel
+     values 1–3 as indices), plus the metrics as a quoted string resource
+     `image.classic_original.ff.NAME.FF.properties="format=1,height=..,cell=..,widths=w0;...;w127"`.
+     One atlas per font instead of one PNG per glyph: FreeCol lists the whole
+     directory for every image it maps (~2 s for ~480 glyph files), and the
+     many zero-width glyph slots cannot be stored as images at all. The
+     runtime reader is `net.sf.freecol.client.gui.classic.ClassicFont`.
 3. Writes `resources.properties` exposing every frame under a stable
    `image.classic_original.*` key namespace, plus `mod.xml` and messages.
 
 The decode path (MADSPACK container, FAB decompression, `.SS` linemode RLE,
-`.PIK` indexed images, VGA palettes) is implemented directly in Java —
+`.PIK` indexed images, VGA palettes, `.FF` fonts) is implemented directly in Java —
 clean-room from the format documentation — and unit-tested in
 `net.sf.freecol.tools.classicassets.ClassicAssetDecoderTest`.
+
+The 6-bit VGA palette values are expanded to 8 bits exactly as DOSBox does,
+`(v<<2)|(v>>4)`, so the pack's PNGs equal native DOSBox captures bit for bit
+and screens can be pixel-diffed against them without any tolerance.
 
 ## A2 — mapping to FreeCol keys
 
@@ -55,7 +67,7 @@ map FreeCol resource keys onto them in a committed `aliases.properties` beside
 this file (real FreeCol key `=resource:` scaffold key), e.g.:
 
 ```
-image.background.MainPanel=resource:image.classic_original.pik.OPENING.PIK
+image.background.MainPanel=resource:image.classic_original.pik.OPENMENU.PIK
 image.tile.model.tile.ocean.center=resource:image.classic_original.ss.TERRAIN.SS.010
 ```
 

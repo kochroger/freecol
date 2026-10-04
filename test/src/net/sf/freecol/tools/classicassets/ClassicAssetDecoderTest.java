@@ -94,9 +94,120 @@ public class ClassicAssetDecoderTest extends TestCase {
         byte[] part = new byte[768];
         part[0] = 0;    // R: 0   -> 0
         part[1] = 63;   // G: 63  -> 255
-        part[2] = 32;   // B: 32  -> 129
+        part[2] = 32;   // B: 32  -> 130 (DOSBox: (32<<2)|(32>>4))
         Palette pal = Palette.readCol(part);
-        assertEquals(0xFF00FF81, pal.argb[0]);
+        assertEquals(0xFF00FF82, pal.argb[0]);
+    }
+
+    // --- bitmap fonts (.FF) --------------------------------------------------
+
+    /**
+     * Build a decompressed .FF part.  {@code glyphSpec} rows are
+     * {@code {code, width, v(0,0), v(1,0), ..., v(w-1,h-1)}} (row-major
+     * values 0..3); every glyph is packed 2 bpp, high bits first, at the
+     * running data offset starting at 386.  Public because
+     * {@code ClassicFontTest} builds its synthetic font with it too.
+     */
+    public static byte[] ffPart(int height, int maxWidth, int[][] glyphSpec) {
+        java.io.ByteArrayOutputStream data = new java.io.ByteArrayOutputStream();
+        byte[] head = new byte[FfDecoder.GLYPH_BASE];
+        head[0] = (byte) height;
+        head[1] = (byte) maxWidth;
+        int off = FfDecoder.GLYPH_BASE;
+        for (int c = 1; c < 128; c++) putU16(head, 130 + 2 * (c - 1), off);
+        for (int[] g : glyphSpec) {
+            int c = g[0], w = g[1];
+            int bpr = (w - 1) / 4 + 1;
+            head[2 + c - 1] = (byte) w;
+            putU16(head, 130 + 2 * (c - 1), off);
+            for (int y = 0; y < height; y++) {
+                byte[] row = new byte[bpr];
+                for (int x = 0; x < w; x++) {
+                    row[x / 4] |= (byte) (g[2 + y * w + x] << (6 - 2 * (x % 4)));
+                }
+                data.write(row, 0, bpr);
+            }
+            off += height * bpr;
+        }
+        putU16(head, 384, off);
+        byte[] out = new byte[off];
+        System.arraycopy(head, 0, out, 0, head.length);
+        byte[] d = data.toByteArray();
+        System.arraycopy(d, 0, out, head.length, d.length);
+        return out;
+    }
+
+    /** Height 2: 'A' (65) width 5 with all four values, ' ' (32) width 2. */
+    private static byte[] sampleFont() {
+        return ffPart(2, 5, new int[][] {
+            { 65, 5,  1, 2, 3, 0, 1,   0, 0, 0, 0, 3 },
+            { 32, 2,  0, 0,   0, 0 },
+        });
+    }
+
+    public void testFfDecodeGlyphs() {
+        byte[] part = sampleFont();
+        // The packed rows of 'A' are exactly the documented bytes.
+        assertEquals((byte) 0x6C, part[386]);
+        assertEquals((byte) 0x40, part[387]);
+        assertEquals((byte) 0x00, part[388]);
+        assertEquals((byte) 0xC0, part[389]);
+        FfDecoder.Font f = FfDecoder.decode(madspack(part));
+        assertEquals(2, f.height);
+        assertEquals(5, f.maxWidth);
+        assertEquals(5, f.width(65));
+        assertEquals(0, f.width(66));
+        assertEquals(2, f.width(32));
+        assertEquals(1, f.pixel(65, 0, 0));
+        assertEquals(2, f.pixel(65, 1, 0));
+        assertEquals(3, f.pixel(65, 2, 0));
+        assertEquals(0, f.pixel(65, 3, 0));
+        assertEquals(1, f.pixel(65, 4, 0));   // x=4 lives in the second byte
+        assertEquals(0, f.pixel(65, 0, 1));
+        assertEquals(3, f.pixel(65, 4, 1));
+        assertEquals(0, f.pixel(65, 5, 0));   // beyond the width
+        assertEquals(2, f.glyphCount());
+    }
+
+    public void testFfRejectsTruncatedGlyph() {
+        byte[] part = sampleFont();
+        putU16(part, 130 + 2 * (65 - 1), part.length - 1);   // overruns
+        try {
+            FfDecoder.decodePart(part);
+            fail("expected IllegalArgumentException");
+        } catch (IllegalArgumentException expected) {
+            // ok
+        }
+    }
+
+    public void testFfAtlasRoundTrip() throws Exception {
+        FfDecoder.Font f = FfDecoder.decodePart(sampleFont());
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(FfDecoder.toAtlas(f), "png", bos);
+        BufferedImage img = javax.imageio.ImageIO.read(
+            new java.io.ByteArrayInputStream(bos.toByteArray()));
+        assertEquals(16 * 5, img.getWidth());
+        assertEquals(8 * 2, img.getHeight());
+        assertTrue(img.getColorModel() instanceof java.awt.image.IndexColorModel);
+        assertEquals(4, ((java.awt.image.IndexColorModel) img.getColorModel())
+            .getMapSize());
+        int ox = (65 % 16) * 5, oy = (65 / 16) * 2;
+        for (int y = 0; y < 2; y++) {
+            for (int x = 0; x < 5; x++) {
+                assertEquals("pixel " + x + "," + y, f.pixel(65, x, y),
+                    img.getRaster().getSample(ox + x, oy + y, 0));
+            }
+        }
+        net.sf.freecol.common.resources.PropertyList pl
+            = new net.sf.freecol.common.resources.PropertyList(FfDecoder.metrics(f));
+        assertEquals(1, pl.getInt("format"));
+        assertEquals(2, pl.getInt("height"));
+        assertEquals(5, pl.getInt("cell"));
+        String[] widths = pl.getString("widths").split(";");
+        assertEquals(128, widths.length);
+        assertEquals("5", widths[65]);
+        assertEquals("2", widths[32]);
+        assertEquals("0", widths[0]);
     }
 
     public void testFabLiteralAndHalt() {

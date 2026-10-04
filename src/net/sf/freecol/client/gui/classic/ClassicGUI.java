@@ -24,8 +24,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Frame;
-import java.awt.Graphics;
-import java.awt.image.BufferedImage;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -39,25 +38,25 @@ import java.util.stream.Collectors;
 import javax.swing.BorderFactory;
 import javax.swing.ImageIcon;
 import javax.swing.JFrame;
-import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.KeyStroke;
-import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
 
 import net.sf.freecol.FreeCol;
 import net.sf.freecol.client.FreeColClient;
+import net.sf.freecol.client.control.PreGameController;
 import net.sf.freecol.client.gui.ChoiceItem;
 import net.sf.freecol.client.gui.action.ActionManager;
 import net.sf.freecol.client.gui.action.FreeColAction;
 import net.sf.freecol.client.gui.DialogHandler;
 import net.sf.freecol.client.gui.GUI;
 import net.sf.freecol.client.gui.ImageLibrary;
+import net.sf.freecol.client.gui.LoadingSavegameInfo;
 import net.sf.freecol.client.gui.FontLibrary;
 import net.sf.freecol.client.gui.menu.InGameMenuBar;
 import net.sf.freecol.client.gui.panel.FreeColImageBorder;
@@ -71,8 +70,10 @@ import net.sf.freecol.common.model.HighScore;
 import net.sf.freecol.common.model.IndianNationType;
 import net.sf.freecol.common.model.ModelMessage;
 import net.sf.freecol.common.model.Monarch.MonarchAction;
+import net.sf.freecol.common.model.Nation;
 import net.sf.freecol.common.model.NationSummary;
 import net.sf.freecol.common.model.Player;
+import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.StringTemplate;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Unit;
@@ -90,9 +91,11 @@ import net.sf.freecol.common.resources.ImageCache;
  * else degrades gracefully to a no-op.  Screens are therefore added incrementally,
  * one {@code GUI} method at a time.
  *
- * Phase 0: scaffold only.  Brings up a placeholder window to prove the seam.
- * Map rendering, HUD, colony/europe panels and dialogs follow in later phases
- * (see CLASSIC_UI_PLAN.md).
+ * The window opens on the original title screen and main menu
+ * ({@link ClassicMainMenuPanel}); a started or loaded game replaces it with
+ * the map and HUD ({@link #reconnectGUI}), and leaving the game brings the
+ * title back ({@link #showMainPanel}).  See README.md in this package and
+ * CLASSIC_UI_PLAN.md for the screens done so far.
  */
 public class ClassicGUI extends GUI {
 
@@ -142,6 +145,20 @@ public class ClassicGUI extends GUI {
      */
     private ClassicInfoPanel infoPanel;
 
+    /**
+     * The title screen and main menu (EDT only).  Created by
+     * {@link #startGUI}, it is the frame's content pane whenever no game is
+     * shown: passive while a game loads, live after {@link #showMainPanel}.
+     */
+    private ClassicMainMenuPanel mainMenuPanel;
+
+    /**
+     * The nation chosen for the single-player game being started, applied in
+     * {@link #showStartGamePanel} (the server ignores the nation at login and
+     * hands out the first free one); null = keep the server's choice.
+     */
+    private String pendingNationId;
+
     /** Persistent image cache, shared by the image libraries. */
     private final ImageCache imageCache;
 
@@ -175,11 +192,16 @@ public class ClassicGUI extends GUI {
     /**
      * {@inheritDoc}
      *
-     * Phase 0: create and show a placeholder main window.
+     * Create and show the main window on a <b>passive</b> title backdrop: the
+     * original title picture ({@link ClassicMainMenuPanel} in
+     * {@code PASSIVE} mode) with no menu and no input.  Only
+     * {@link #showMainPanel} makes the menu live, so the {@code --fast} path
+     * (which goes straight to a game and never calls it) is unchanged -- it
+     * merely loads over the clean title picture instead of a placeholder.
      */
     @Override
     public void startGUI(final Dimension desiredWindowSize) {
-        logger.info("Starting ClassicGUI (Phase 0 scaffold).");
+        logger.info("Starting ClassicGUI.");
         // FreeCol passes Dimension(-1,-1) (WINDOWSIZE_FALLBACK) when no explicit
         // --windowsize is given, meaning "use the full screen".  A plain
         // null-check treats that sentinel as a real size and yields a 1x1 window,
@@ -192,31 +214,11 @@ public class ClassicGUI extends GUI {
         SwingUtilities.invokeLater(() -> {
             this.frame = new JFrame("FreeCol — Classic UI (experimental)");
             this.frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
-            final JLabel placeholder = new JLabel(
-                "<html><center>Classic UI scaffold (Phase 0)<br>"
-                + "map &amp; panels coming next.</center></html>",
-                SwingConstants.CENTER);
-            // A2 end-to-end proof: paint the original-Colonization title screen
-            // as the background, fetched through the normal ImageLibrary path via
-            // the FreeCol key image.background.MainPanel.  That key is aliased to
-            // image.classic_original.pik.OPENING.PIK in the classic_original pack
-            // (tools/classic_assets/aliases.properties), so this shows original
-            // art only when the pack is loaded (A3) — otherwise the base FreeCol
-            // background shows and the scaffold still works.
-            final BufferedImage background =
-                ImageLibrary.getUnscaledImage("image.background.MainPanel");
-            final JPanel content = new JPanel(new BorderLayout()) {
-                @Override
-                protected void paintComponent(Graphics g) {
-                    super.paintComponent(g);
-                    if (background != null) {
-                        g.drawImage(background, 0, 0, getWidth(), getHeight(), this);
-                    }
-                }
-            };
-            placeholder.setForeground(java.awt.Color.WHITE);
-            content.add(placeholder, BorderLayout.CENTER);
-            this.frame.setContentPane(content);
+            // The original title picture (OPENMENU.PIK, 1:1 in a letterboxed
+            // 320x200 canvas), passive until showMainPanel; without the pack a
+            // dark ground.  reconnectGUI replaces it with the in-game view.
+            mainMenu().showPassive();
+            this.frame.setContentPane(this.mainMenuPanel);
             this.frame.setSize(size);
             this.frame.setLocationByPlatform(true);
             if (!explicitSize) {
@@ -226,6 +228,299 @@ public class ClassicGUI extends GUI {
             logger.info("ClassicGUI window shown.");
         });
         logger.info("ClassicGUI started.");
+    }
+
+
+    // Title screen and main menu
+
+    /**
+     * What the original's new-game screens collect before a game in the New
+     * World starts: the difficulty ({@code opening_034}), the European power
+     * ({@code 035}) and the leader's name ({@code 036}).  Null fields mean
+     * "FreeCol's default".
+     */
+    static final class NewWorldSetup {
+
+        /** A difficulty level id such as {@code model.difficulty.veryEasy}. */
+        final String difficultyId;
+        /** A nation id such as {@code model.nation.english}, or null. */
+        final String nationId;
+        /** The leader's name, or null for {@code FreeCol.getName()}. */
+        final String playerName;
+
+        NewWorldSetup(String difficultyId, String nationId, String playerName) {
+            this.difficultyId = difficultyId;
+            this.nationId = nationId;
+            this.playerName = playerName;
+        }
+
+        /** FreeCol's current defaults (command line or rules difficulty). */
+        static NewWorldSetup defaults() {
+            return new NewWorldSetup(FreeCol.getDifficulty(), null, null);
+        }
+    }
+
+    /** The title panel, created on first use (EDT only). */
+    private ClassicMainMenuPanel mainMenu() {
+        if (this.mainMenuPanel == null) {
+            this.mainMenuPanel = new ClassicMainMenuPanel(menuActions());
+        }
+        return this.mainMenuPanel;
+    }
+
+    /** The title menu's actions, routed into this GUI. */
+    private ClassicMainMenuPanel.Actions menuActions() {
+        return new ClassicMainMenuPanel.Actions() {
+            @Override
+            public void newWorld() {
+                beginNewWorldSetup();
+            }
+
+            @Override
+            public void loadGame(File file) {
+                loadSavedGame(file);
+            }
+
+            @Override
+            public void hallOfFame() {
+                // Client-side scores (HighScore.loadHighScores, HighScore.java:420)
+                // work before any game; ReportHighScoresAction would ask a
+                // server that does not exist yet (InGameController.highScore).
+                showHighScoresPanel(null, HighScore.loadHighScores());
+            }
+        };
+    }
+
+    /**
+     * THE SEAM for the original's new-game screens.  The difficulty
+     * ({@code opening_034}), nation ({@code 035}) and name ({@code 036})
+     * screens chain in here, painted on the same title canvas, and finish by
+     * calling {@link #startNewWorldGame} with what the player chose.  Until
+     * they exist, the game starts at once with FreeCol's defaults.
+     */
+    void beginNewWorldSetup() {
+        startNewWorldGame(NewWorldSetup.defaults());
+    }
+
+    /**
+     * Start a fresh single-player game in a generated New World -- the same
+     * path as FreeCol's own new-game panel; it never resumes a save.  Deferred
+     * with {@code invokeLater} so the busy box paints before the server start
+     * blocks the EDT.  Does not call {@code FreeCol.setDifficulty}, so a later
+     * {@code --fast} keeps its default.
+     *
+     * <p>Any {@code RuntimeException} is caught, shown, and leads back to the
+     * title.  The title panel sits in its input-ignoring BUSY mode while this
+     * runs, and nothing on this path reports a runtime failure by itself:
+     * {@code FreeColClient.startServer} catches only {@code IOException},
+     * {@code startSinglePlayerGame} loads mods and message bundles unguarded,
+     * and the client's uncaught-exception handler merely logs.  Without the
+     * catch the player would face "Neues Spiel wird vorbereitet ..." forever.
+     * FreeCol's own {@code NewPanel} guards the same calls the same way
+     * (NewPanel.java:613-615).
+     *
+     * @param setup The player's choices.
+     */
+    void startNewWorldGame(final NewWorldSetup setup) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                // A fresh Specification per call (FreeCol.java:981-994).
+                final Specification spec = FreeCol.loadSpecification(
+                    FreeCol.getRulesFile(), FreeCol.getAdvantages(),
+                    setup.difficultyId);
+                if (spec == null) {
+                    showMainPanel(Messages.message("classic.mainMenu.startFailed"));
+                    return;
+                }
+                if (setup.playerName != null) FreeCol.setName(setup.playerName);
+                this.pendingNationId = setup.nationId;
+                if (!getFreeColClient().getConnectController()
+                        .startSinglePlayerGame(spec)) {
+                    this.pendingNationId = null;
+                    showMainPanel(null);
+                }
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "ClassicGUI: new game failed.", e);
+                this.pendingNationId = null;
+                // Shows the error, then returns to the title (GUI.java:945-951).
+                showErrorPanel(e,
+                    StringTemplate.key("classic.mainMenu.startFailed"));
+            }
+        });
+    }
+
+    /**
+     * Load a save picked in the title screen's load box.  Runs on the EDT
+     * like every FreeCol caller of {@code startSavedGame}
+     * (FreeColClient.java:324-337); on failure the engine has already shown
+     * its error (via {@link #showErrorPanel}) and the title comes back.  A
+     * {@code RuntimeException} the engine does not catch itself is shown here
+     * and also leads back to the title, so the BUSY box cannot get stuck (see
+     * {@link #startNewWorldGame}).
+     *
+     * @param file The save to load.
+     */
+    void loadSavedGame(final File file) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                if (!getFreeColClient().getConnectController()
+                        .startSavedGame(file)) {
+                    showMainPanel(null);
+                }
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "ClassicGUI: loading " + file
+                    + " failed.", e);
+                // Shows the error, then returns to the title (GUI.java:945-951).
+                showErrorPanel(e, FreeCol.badFile("error.couldNotLoad", file));
+            }
+        });
+    }
+
+    /**
+     * Take the in-game view down so the title can replace it, and so the next
+     * {@link #reconnectGUI} builds a fresh one (it only does while
+     * {@code mapViewer} is null).  Closes the colony, build-queue, Europe and
+     * report windows -- except an open high-score window, which an ended game
+     * leaves for the player to read over the title -- stops the map's timer and
+     * removes the menu bar.  EDT only; a no-op when no game was shown.
+     */
+    private void teardownInGame() {
+        closeColonyPanel();
+        closeBuildQueuePanel();
+        closeEuropePanel();
+        if (this.reportFrame != null && !(this.reportFrame.getContentPane()
+                instanceof ClassicReportHighScoresPanel)) {
+            closeReportPanel();
+        }
+        if (this.mapViewer != null) this.mapViewer.dispose();
+        if (this.frame != null) this.frame.setJMenuBar(null);
+        this.mapViewer = null;
+        this.infoPanel = null;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * Show the live title menu ({@code opening_033}), tearing down any game
+     * view first.  The base {@code GUI} no-ops this (GUI.java:2213), which is
+     * why the old placeholder never went away.  Posted with
+     * {@code invokeLater}, so at startup it runs after the frame creation
+     * {@link #startGUI} queued (FIFO).
+     *
+     * @param userMsg An optional notice shown over the menu.
+     * @return {@code null} (the classic UI hosts its own panels).
+     */
+    @Override
+    public FreeColPanel showMainPanel(final String userMsg) {
+        SwingUtilities.invokeLater(() -> {
+            if (this.frame == null) return;
+            teardownInGame();
+            mainMenu().showTitle(userMsg);
+            if (this.frame.getContentPane() != this.mainMenuPanel) {
+                this.frame.setContentPane(this.mainMenuPanel);
+            }
+            this.frame.revalidate();
+            this.frame.repaint();
+            this.mainMenuPanel.requestFocusInWindow();
+            updateActions();
+        });
+        return null;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * Back to the title from a running game ({@code ConnectController.mainTitle},
+     * which logs out and stops the server right after this), with the intro
+     * music as in {@code SwingGUI}.
+     */
+    @Override
+    public void showMainTitle() {
+        showMainPanel(null);
+        playSound("sound.intro.general");
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * A game is about to be shown (GUI.java:1758): leave just the picture up,
+     * with input off, until {@link #reconnectGUI} replaces it.
+     */
+    @Override
+    public void closeMainPanel() {
+        SwingUtilities.invokeLater(() -> {
+            if (this.mainMenuPanel != null) this.mainMenuPanel.showPassive();
+        });
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * The in-game "new game" ({@code ConnectController.newGame}) calls this
+     * before {@link #showNewPanel}; drop the game view.
+     */
+    @Override
+    public void removeInGameComponents() {
+        invokeNowOrLater(this::teardownInGame);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * The in-game load ({@code InGameController.loadGame}) calls this before
+     * {@code startSavedGame}: drop the game view and show the passive title
+     * picture, so {@link #reconnectGUI} rebuilds the view for the loaded game.
+     */
+    @Override
+    public void prepareShowingMainMenu() {
+        invokeNowOrLater(() -> {
+            teardownInGame();
+            if (this.frame == null) return;
+            mainMenu().showPassive();
+            if (this.frame.getContentPane() != this.mainMenuPanel) {
+                this.frame.setContentPane(this.mainMenuPanel);
+                this.frame.revalidate();
+                this.frame.repaint();
+            }
+        });
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * The original's intro is not recreated yet, so go straight on.  The base
+     * no-op (GUI.java:1141) never ran {@code callback}, so a classic start
+     * without {@code --no-intro} or {@code --fast} never reached any menu.
+     */
+    @Override
+    public void showOpeningVideo(final String userMsg, Runnable callback) {
+        if (callback != null) SwingUtilities.invokeLater(callback);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * The in-game "new game" lands on the classic title menu, from where a
+     * new game starts (the base no-op left an empty window).
+     */
+    @Override
+    public FreeColPanel showNewPanel(Specification spec) {
+        showMainPanel(null);
+        return null;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * FreeCol asks this for saves marked multiplayer, or when the client
+     * option says to always ask (ConnectController.java:417-427); a null
+     * answer (the base no-op) silently aborts the load.  The classic UI only
+     * plays single-player, locally.
+     */
+    @Override
+    public LoadingSavegameInfo showLoadingSavegameDialog(boolean publicServer,
+                                                         boolean singlePlayer) {
+        return new LoadingSavegameInfo(true, null, -1, null, false);
     }
 
     // Pre-game lobby
@@ -247,6 +542,25 @@ public class ClassicGUI extends GUI {
         if (singlePlayerMode && player != null) {
             logger.info("ClassicGUI: auto-launching single-player game "
                 + "(no lobby panel in Phase 0).");
+            // A nation picked on the title screens (NewWorldSetup) replaces the
+            // one the server assigned at login (always the first free one).
+            // Without a pick (--fast, today's defaults) nothing changes.
+            final String nid = this.pendingNationId;
+            this.pendingNationId = null;
+            if (nid != null && !nid.equals(player.getNationId()) && game != null) {
+                try {
+                    final Nation n = game.getSpecification().getNation(nid);
+                    if (n != null) {
+                        final PreGameController pgc
+                            = getFreeColClient().getPreGameController();
+                        pgc.setNation(n);
+                        pgc.setNationType(n.getType());
+                    }
+                } catch (RuntimeException e) {
+                    logger.log(Level.WARNING, "ClassicGUI: cannot select nation "
+                        + nid, e);
+                }
+            }
             player.setReady(true);
             getFreeColClient().getPreGameController().requestLaunch();
         }
@@ -260,8 +574,11 @@ public class ClassicGUI extends GUI {
      *
      * Called from {@code FreeColClient.restoreGUI} once a game is ready (the
      * initial active unit / focus tile are supplied here).  Phase 1: build the
-     * {@link ClassicMapViewer} and swap it in for the title-screen placeholder,
-     * then set the initial view state so the map renders centred on the action.
+     * {@link ClassicMapViewer} and swap it in for the title screen
+     * ({@link ClassicMainMenuPanel}), then set the initial view state so the
+     * map renders centred on the action.  The view is only built while
+     * {@code mapViewer} is null; {@link #teardownInGame} resets it on the way
+     * back to the title, which is what lets this run again for the next game.
      */
     @Override
     public void reconnectGUI(Unit active, Tile tile) {

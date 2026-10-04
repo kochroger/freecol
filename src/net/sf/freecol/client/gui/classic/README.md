@@ -36,10 +36,12 @@ fastest way to the in-game view. It starts at sea: the ship on an ocean patch.
 
 `ClassicGUI extends GUI` and overrides only the methods it implements:
 
-- **Lifecycle.** `startGUI` shows the main `JFrame` (title-screen background is
-  the original `OPENING.PIK`, painted via the FreeCol key
-  `image.background.MainPanel` when the `classic_original` asset pack is loaded;
-  otherwise base art). `reconnectGUI(active, tile)` — the game-start hook fired
+- **Lifecycle.** `startGUI` shows the main `JFrame` with the title screen
+  (`ClassicMainMenuPanel`) in **passive** mode: the original title picture
+  `OPENMENU.PIK`, no menu, no input — so `--fast` loads over a clean backdrop
+  and its code path is unchanged. `showMainPanel` makes the menu live (see
+  "Title screen & main menu" below); a private `teardownInGame()` lets the HUD
+  and the title replace each other in both directions. `reconnectGUI(active, tile)` — the game-start hook fired
   by `FreeColClient.restoreGUI` — builds the Phase-2 HUD: a `BorderLayout`
   content pane with the `ClassicMapViewer` in the centre, the `ClassicInfoPanel`
   on the right (`EAST`), and the reused `InGameMenuBar` as the frame's menu bar;
@@ -1482,6 +1484,144 @@ generates none, which is why the first attempt saw nothing.
 > **Awaiting expert sign-off.** The popup metrics and the green-on-wood palette
 > are read off the original's screenshots by eye, not measured from the art —
 > a considered guess, like the Colony Advisor's paging keys.
+
+## Title screen & main menu (`ClassicMainMenuPanel`, `ClassicMenuBox`, `ClassicFont`)
+
+Reference: `screenshots/start-sequence/opening_033.png` (native 320×200). The
+headless preview renders it with **0 differing pixels** over the whole frame,
+the original mouse arrow at (160,100) included, and the 055 load box with 0
+differing pixels.
+
+- **Canvas.** `ClassicMainMenuPanel` paints a 320×200 virtual canvas at the
+  largest whole scale, nearest-neighbour, black letterbox (as the colony and
+  Europe screens do). The background is `OPENMENU.PIK` drawn 1:1. It is *not*
+  `OPENING.PIK`, which is a 960×132 sea chart. Only the menu box is drawn on
+  top. Modes: `PASSIVE` (picture only), `TITLE`, `LOAD`, `NOTICE`, `BUSY`. In
+  PASSIVE and BUSY all input is ignored, which guards against starting twice.
+  All painting is in package-private **static** methods (`paintTitleScreen`,
+  `paintLoadBox`, `paintNotice`) taking explicit `MenuAssets`. A scratch
+  harness calls them from a jar classpath without a `FreeColClient` and diffs
+  the result against the captures.
+- **Mouse arrow.** The original's own arrow `CURSOR.SS.000` (hot spot = sprite
+  origin; the game puts it at (160,100) at start) is drawn *into the canvas*
+  (`paintCursor`) at the canvas scale, on the 320×200 grid, and the system
+  cursor is hidden meanwhile. A custom system cursor cannot do this: Windows
+  caps it at `Toolkit.getBestCursorSize` = 32×32 and Java shrinks bigger
+  images, so it could not exceed ×2, while the canvas runs at ×4/×5. The
+  system arrow comes back in the letterbox and in PASSIVE/BUSY (the EDT may
+  block then, which would freeze a drawn arrow). The two CURSOR frames — and
+  no other SS frame — carry an opaque `#5555FF` key pixel in their top-right
+  and bottom-left corners; `cursorSprite` clears them.
+- **Notices** are drawn plain (no `{}`/`~` markup), with characters FONTTINY
+  lacks mapped to near equivalents (`\` → `/`, `_` → `-`, …; a literal `\`
+  would draw `Ü`), and cut to 20 lines (a cut text ends in "..." and is logged
+  in full) so the box stays on the 200-px canvas.
+- **Box rules** (`ClassicMenuBox`, from GAME.TXT `@BEGINMENU @width=160
+  @y=91` and `@LOADGAME @width=190`, all measured):
+  - Outer width = `@width + 6`, centred horizontally. Top = `@y`, or centred
+    vertically when there is none.
+  - Height = `8·(promptLines + rows) + 16`.
+  - Fill: the 32×24 `OPENTILE.SS.000` (title) or `WOODTILE.SS.000` (in game),
+    tiled from the **outer** corner. Not `WOODPANL`, so `ClassicWood` is not
+    reused.
+  - Frame: a black ring, a flat ring, then a bevel (light on top and right,
+    dark on left and bottom).
+  - Prompt text at `(X+5, Y+9+8k)`. Rows at `(X+9, Y+11+8P+8i)`. Selection bar
+    `(X+4, rowTop-1, W-8, 7)` in the dark colour; text on it stays green.
+  - The title box is `(77,91,166,64)`. The load box with 10 rows is
+    `(62,48,196,104)`.
+  - Two themes: `TITLE` and `GAME` (the colours measured from 054/055).
+    `paintDropdown` (the SPIEL menu, 053) is ready but not wired yet.
+- **Title line:** `{COLONIZATION} Version 2.26 -- 19-Sept-94`. The version is
+  **2.26**, not 1.26: VICEROY.EXE holds only 2.26, and the capture's pixels
+  beside the cursor fit '2'. `{..}` marks the gold word.
+- **Fonts** (`ClassicFont`):
+  - The original `.FF` bitmap fonts are converted by `ant classic-assets`
+    (`FfDecoder`). Each becomes a 2-bit palette atlas `ff/NAME.FF.png` plus a
+    quoted metrics string `image.classic_original.ff.NAME.FF.properties`.
+  - Roles: FONTTINY = menus, dialogs, info panel and menu bar (the menu
+    matches with 0 differing pixels). FONTINTR = nation texts and captions.
+    FONTKING = the king's scroll.
+  - The advance is the glyph width, with no extra spacing. `y` is the glyph
+    top.
+  - Colours are a per-call table (`colours(rgb)`); recolouring swaps the
+    `IndexColorModel` on the shared raster (no copy).
+  - Markup: `{`/`}` toggle the highlight colour, and `~` highlights the next
+    letter.
+  - German letters use the game's own codes (ä 96, ö 28, ü 127, Ä 30, Ö 31,
+    Ü 92, ß 29).
+  - Without the pack, a 7 px Swing font is used and one INFO line is logged.
+    Misses are cached, so the pack is not probed on every paint.
+- **The pack palette** is expanded the way DOSBox does it, `(v<<2)|(v>>4)`, so
+  pack PNGs, the colour constants and the captures compare bit for bit.
+- **Menu actions** (`ClassicGUI.menuActions`):
+  - NEUE WELT → `beginNewWorldSetup()`. This is **the seam** for the
+    difficulty, nation and name screens (034/035/036), which will build a
+    `NewWorldSetup(difficultyId, nationId, playerName)`. Today it calls
+    `startNewWorldGame(NewWorldSetup.defaults())`. That loads a fresh spec and
+    calls `startSinglePlayerGame`; it never resumes a save.
+    `showStartGamePanel` applies a chosen nation via
+    `PreGameController.setNation`/`setNationType`, because the server ignores
+    the nation at login.
+  - AMERIKA and INDIVIDUALISIEREN show the notice "Diese Funktion folgt in
+    einer späteren Version." FreeCol's America maps would look about 3.6×
+    too tall in the rectangular view; the faithful route is converting
+    AMER2.MP.
+  - SPIEL LADEN opens the load box (`ClassicSaveGames`). It lists manual saves,
+    then autosaves, each newest first, with no "(EMPTY)" slots. Each row first
+    shows the file name and date. A daemon thread then replaces it with the
+    original-style label "Entdecker Dago der Holl., Herbst 1729", read by
+    streaming `savegame.xml` up to the owner's `<player>` (about 30 ms per
+    save). The thread stops as soon as the box closes or reopens. Enter or a
+    click loads; Esc or a right click goes back. The wheel moves one row per
+    notch (precise touchpad deltas are summed).
+  - RUHMESHALLE → `showHighScoresPanel(null, HighScore.loadHighScores())`. It
+    runs on the client side and works before any game.
+  - NEUE WELT and loading catch any `RuntimeException`, show it and return to
+    the title; otherwise the BUSY box (which ignores all input) would stay up
+    forever.
+  - Keys: Up/Down (and keypad), Home/End, Enter. PgUp/PgDn page in the load
+    box and jump to the first/last item on the title. Esc does nothing on the
+    title, as in the original. Hover moves the bar.
+- **Lifecycle overrides:**
+  - `showMainPanel` (`teardownInGame` + live title).
+  - `showMainTitle` (also plays the intro music).
+  - `closeMainPanel` (→ PASSIVE).
+  - `removeInGameComponents` and `prepareShowingMainMenu` (in-game new and
+    load).
+  - `showOpeningVideo` runs its callback. The base no-op hung any start
+    without `--no-intro`.
+  - `showNewPanel` → title.
+  - `showLoadingSavegameDialog` returns a single-player info. A null return
+    silently aborted some loads.
+  - `teardownInGame` closes the sub-windows, but keeps an open high-score
+    window. It stops the map's edge-scroll timer (`ClassicMapViewer.dispose`),
+    removes the menu bar and nulls `mapViewer`/`infoPanel`, so `reconnectGUI`
+    rebuilds the HUD.
+- **Side fix:** `FreeColServer` writes the configuration (user paths) as an XML
+  comment. A path containing `--` (every sandbox scratchpad path does) made the
+  save unreadable, so a space now follows every dash that another dash
+  follows (`--` becomes `- -`, `---` becomes `- - -`), and a trailing `-` gets
+  a space too (a comment must not end in `-`). Older such saves stay
+  unreadable: the load box shows their file-name label, and loading them shows
+  the engine error.
+- **Open / not yet:**
+  - The in-game "Öffnen" still gets `null` from the un-overridden
+    `showLoadDialog`.
+  - The SPIEL dropdown is not wired.
+  - Notice height for multi-line prompts is inferred (`8P+16`), not captured.
+  - The title-screen load box uses the TITLE theme by inference; no capture of
+    it exists.
+  - RUHMESHALLE still opens the generic report window: a separate, decorated
+    OS window (`showReport` → `new JFrame`) whose `ClassicReportHighScoresPanel`
+    draws with Swing fonts. The original shows the Hall of Fame full-screen in
+    its bitmap font; the follow-up is another mode of the title canvas using
+    `ClassicFont.TINY` and `ClassicMenuBox`.
+  - The window is decorated and titled "FreeCol — Classic UI (experimental)"
+    (the live-test harness finds it by that title); a borderless full-screen
+    option would make ×5 reliable on 1080-px screens.
+  - Only the title panel draws the original arrow; the in-game HUD still
+    shows the system cursor.
 
 ## Seam facts (for the remaining/next work)
 

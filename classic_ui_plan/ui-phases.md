@@ -204,6 +204,7 @@ in-game screens — the auto-launch keeps the game reachable.
 ## Explicitly out of scope (deliberate)
 
 The intro/new-game **cinematics** and closing sequence. `--no-intro` skips them; only the static
-`OPENING.PIK` title renders. The animated frames (`LEVN0001–0010`, `CLOS-BKG`/`CCBKGD`) are extracted
+title picture `OPENMENU.PIK` renders, with the original main menu over it (`ClassicMainMenuPanel`,
+see the classic README; `OPENING.PIK` is a 960px sea chart, not the title). The animated frames (`LEVN0001–0010`, `CLOS-BKG`/`CCBKGD`) are extracted
 but nothing plays them — revisit only if the expert deems the original intro essential (a fresh scope
 decision, akin to A6 audio).

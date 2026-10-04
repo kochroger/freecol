@@ -890,7 +890,16 @@ public final class FreeColServer {
                     FreeColXMLWriter.WriteScope.toSave(), false)) {
                 xw.writeStartDocument("UTF-8", "1.0");
 
-                xw.writeComment(FreeCol.getConfiguration().toString());
+                // XML 1.0 forbids "--" inside comments and a comment ending
+                // in "-" (it would read "--->"), and a user directory path can
+                // contain either -- the save would not load again.  A space
+                // goes after every dash that another dash follows (a plain
+                // replace("--", "- -") turns "---" into "- --"), and after a
+                // trailing dash.
+                String comment = FreeCol.getConfiguration().toString()
+                    .replaceAll("-(?=-)", "- ");
+                if (comment.endsWith("-")) comment += " ";
+                xw.writeComment(comment);
                 xw.writeCharacters("\n");
 
                 xw.writeStartElement(SAVED_GAME_TAG);
