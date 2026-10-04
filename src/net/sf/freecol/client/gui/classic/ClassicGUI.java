@@ -297,8 +297,20 @@ public class ClassicGUI extends GUI {
             } else if (tile != null) {
                 this.mapViewer.changeToTerrain(tile);
             }
-            final Tile focusTile = (tile != null) ? tile
-                : (active != null) ? active.getTile() : null;
+            // Prefer an active unit for the initial focus: the original
+            // always opens looking at the piece that is up. Checked against
+            // both the passed-in unit AND the viewer's current active unit,
+            // because the controller's own updateActiveUnit → changeView
+            // races this reconnect at startup — whichever runs last must not
+            // leave the view parked on the saved (often at-sea) tile while
+            // the player hunts for their unit.
+            final Unit viewerActive = this.mapViewer.getActiveUnit();
+            final Tile focusTile =
+                (active != null && active.getTile() != null)
+                    ? active.getTile()
+                : (viewerActive != null && viewerActive.getTile() != null)
+                    ? viewerActive.getTile()
+                : tile;
             if (focusTile != null) {
                 this.mapViewer.setFocus(focusTile);
             }
@@ -461,6 +473,34 @@ public class ClassicGUI extends GUI {
         if (this.mapViewer != null) this.mapViewer.changeToEndTurn();
         repaintInfo();
         updateActions();
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The base seam no-ops, which made every move an abrupt teleport; the
+     * classic viewer slides the sprite tile-to-tile like the original game.
+     */
+    @Override
+    public void animateUnitMove(Unit unit, Tile srcTile, Tile dstTile) {
+        if (this.mapViewer != null) {
+            this.mapViewer.animateMove(unit, srcTile, dstTile);
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The controller calls this after every model change; {@code SwingGUI}
+     * repaints its menu bar through the {@code Canvas}, which the classic UI
+     * does not have — without this override the reused menu bar's golden
+     * gold/tax/year status line kept its start-of-session values.
+     */
+    @Override
+    public void updateMenuBar() {
+        if (this.frame != null && this.frame.getJMenuBar() != null) {
+            this.frame.getJMenuBar().repaint();
+        }
     }
 
     /** {@inheritDoc} */

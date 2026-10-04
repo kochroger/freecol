@@ -40,6 +40,7 @@ import javax.swing.ActionMap;
 import javax.swing.InputMap;
 import javax.swing.JPanel;
 import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
 import net.sf.freecol.client.FreeColClient;
@@ -52,6 +53,7 @@ import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Settlement;
 import net.sf.freecol.common.model.Tile;
+import net.sf.freecol.common.model.TileType;
 import net.sf.freecol.common.model.Unit;
 
 
@@ -72,7 +74,8 @@ import net.sf.freecol.common.model.Unit;
  * {@code image.tile.<type>.center} keys by the {@code classic_original} pack
  * (see {@code tools/classic_assets/aliases.properties}) — so the rectangular
  * grid fills cleanly with no diamond-shaped gaps. The native 16&times;16 tiles
- * are fetched at source size and up-scaled by {@link #CLASSIC_SCALE} with
+ * are fetched at source size and up-scaled by the adaptive integer factor
+ * {@code scale()} (targeting the original's ~15 visible tile columns) with
  * nearest-neighbour interpolation to keep the chunky classic pixels crisp. When
  * the pack is absent the same keys fall back to FreeCol's own (isometric) art,
  * shrunk into the square cells. See CLASSIC_UI_PLAN.md ("Phase 1").
@@ -86,12 +89,16 @@ final class ClassicMapViewer extends JPanel {
     /** Native size (px) of an original {@code TERRAIN.SS} tile sprite. */
     private static final int TILE_SRC = 16;
 
-    /** Integer up-scale from the native 16&times;16 tile to on-screen pixels. */
-    private static final int CLASSIC_SCALE = 3;
+    /**
+     * Tile columns visible in the original game's map viewport (240px map
+     * area / 16px tiles).  The adaptive {@link #scale()} targets this count,
+     * so the view reads as zoomed-in as the 1994 original regardless of
+     * window size.
+     */
+    private static final int CLASSIC_VIEW_COLS = 15;
 
-    /** On-screen tile cell size (square, like the original game). */
-    private static final int TILE_W = TILE_SRC * CLASSIC_SCALE;  // 48
-    private static final int TILE_H = TILE_SRC * CLASSIC_SCALE;  // 48
+    /** Minimum integer up-scale from the native 16&times;16 tile. */
+    private static final int MIN_SCALE = 3;
 
     /** Native tile-sprite size requested from {@link ImageLibrary}. */
     private static final Dimension SRC_SIZE = new Dimension(TILE_SRC, TILE_SRC);
@@ -163,15 +170,16 @@ final class ClassicMapViewer extends JPanel {
      */
     private static final double UNIT_CELL_FRACTION = 0.9;
 
-    /**
-     * Distance (px) from a window edge within which the mouse triggers edge
-     * scrolling.  Roughly a tile wide, so the hot zone is easy to hit without
-     * being triggered by ordinary map clicks.
-     */
-    private static final int EDGE_SCROLL_MARGIN = TILE_W;
-
     /** Interval (ms) between successive edge-scroll steps while at an edge. */
     private static final int EDGE_SCROLL_INTERVAL_MS = 110;
+
+    /**
+     * Frames painted for a one-tile unit slide (see {@link #animateMove}) and
+     * the delay between them: ~120ms per tile, matching the original's brisk
+     * but visibly fluid step.
+     */
+    private static final int ANIM_STEPS = 6;
+    private static final int ANIM_STEP_MS = 20;
 
     private final FreeColClient freeColClient;
 
@@ -194,6 +202,16 @@ final class ClassicMapViewer extends JPanel {
     private Tile focus;
     private Tile selectedTile;
     private Unit activeUnit;
+
+    // In-progress unit-slide animation (see animateMove): the unit whose
+    // sprite is being interpolated between two tiles, or null when idle.
+    private Unit animUnit;
+    private Tile animFrom;
+    private Tile animTo;
+    private float animFraction;
+
+    /** Cached spec lookup for plain ocean (unexplored-area art), lazy. */
+    private TileType oceanType;
 
     /**
      * Repeating timer that drives edge scrolling; it pans the focus by
@@ -486,8 +504,12 @@ final class ClassicMapViewer extends JPanel {
             if (d != null) {
                 final Unit u = this.activeUnit;
                 this.freeColClient.getInGameController().moveUnit(u, d);
-                // Focus follows the (possibly moved) unit.
-                if (u.getTile() != null) setFocus(u.getTile());
+                // Focus follows the (possibly moved) unit — but only jumps
+                // when it nears the view edge (view-follows-the-action).
+                if (u.getTile() != null) {
+                    ensureTileVisible(u.getTile());
+                    repaint();
+                }
             }
             return;
         }
@@ -564,12 +586,12 @@ final class ClassicMapViewer extends JPanel {
 
     /** Half the tile columns currently visible in the main view (viewport box). */
     int getViewHalfCols() {
-        return Math.max(0, getWidth() / TILE_W / 2);
+        return Math.max(0, getWidth() / tileW() / 2);
     }
 
     /** Half the tile rows currently visible in the main view (viewport box). */
     int getViewHalfRows() {
-        return Math.max(0, getHeight() / TILE_H / 2);
+        return Math.max(0, getHeight() / tileH() / 2);
     }
 
     /** Recentre the main view on the given map tile (clamped to the map). */
@@ -591,15 +613,80 @@ final class ClassicMapViewer extends JPanel {
         repaint();
     }
 
-    /** MOVE_UNITS mode: an active unit is selected (centre on it). */
+    /** MOVE_UNITS mode: an active unit is selected (make sure it is visible). */
     void changeToMoveUnits(Unit unit) {
         this.viewMode = GUI.ViewMode.MOVE_UNITS;
         this.activeUnit = unit;
         if (unit != null && unit.getTile() != null) {
             this.selectedTile = unit.getTile();
-            this.focus = unit.getTile();
+            ensureTileVisible(unit.getTile());
         }
         repaint();
+    }
+
+    /**
+     * Recentre the focus on {@code tile} unless it already sits comfortably
+     * inside the visible span (more than one cell from every edge) — the
+     * original's view-follows-the-action rule: the player never scrolls to
+     * find the unit that is up, but the view also does not jump when the
+     * action is already well on screen.
+     */
+    private void ensureTileVisible(Tile tile) {
+        final Tile f = getFocus();
+        if (tile == null || f == null) return;
+        final int hc = Math.max(0, getViewHalfCols() - 2);
+        final int hr = Math.max(0, getViewHalfRows() - 2);
+        if (Math.abs(tile.getX() - f.getX()) > hc
+            || Math.abs(tile.getY() - f.getY()) > hr) {
+            this.focus = tile;
+        }
+    }
+
+    /**
+     * Slide {@code unit}'s sprite from {@code srcTile} to {@code dstTile} —
+     * the original's fluid per-tile movement, replacing the teleport the
+     * no-op base {@code GUI.animateUnitMove} seam produced.
+     *
+     * <p>The controller delivers the animation hook on the EDT (via
+     * {@code invokeLater} in {@code InGameController.animateMoveHandler}), so
+     * the frames are pushed with {@code paintImmediately} — the same
+     * blocking-EDT approach FreeCol's own {@code UnitMoveAnimation} uses —
+     * with a plain {@code repaint()} fallback should it ever be called from
+     * another thread.  The model has already moved when this runs; painting
+     * suppresses the unit at its (new) tile and draws the interpolated sprite
+     * instead (see {@link #paintTile} / {@link #paintAnimatedUnit}).
+     */
+    void animateMove(Unit unit, Tile srcTile, Tile dstTile) {
+        if (unit == null || srcTile == null || dstTile == null
+            || !isShowing()) return;
+        // Fog: only animate moves the player can actually see.
+        if (!srcTile.isExplored() && !dstTile.isExplored()) return;
+        // The original scrolls the view along with the action.
+        ensureTileVisible(dstTile);
+        this.animUnit = unit;
+        this.animFrom = srcTile;
+        this.animTo = dstTile;
+        try {
+            for (int i = 1; i <= ANIM_STEPS; i++) {
+                this.animFraction = (float) i / ANIM_STEPS;
+                if (SwingUtilities.isEventDispatchThread()) {
+                    paintImmediately(0, 0, getWidth(), getHeight());
+                } else {
+                    repaint();
+                }
+                try {
+                    Thread.sleep(ANIM_STEP_MS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        } finally {
+            this.animUnit = null;
+            this.animFrom = null;
+            this.animTo = null;
+            repaint();
+        }
     }
 
     /** END_TURN mode: clear active unit and selected tile. */
@@ -642,14 +729,37 @@ final class ClassicMapViewer extends JPanel {
             : map.getTile(map.getWidth() / 2, map.getHeight() / 2);
     }
 
+    /**
+     * Integer up-scale from the native 16&times;16 tile to on-screen pixels,
+     * chosen so roughly {@link #CLASSIC_VIEW_COLS} tile columns fit the
+     * current viewer width — matching how much map the original's
+     * 320&times;200 screen showed — and never below {@link #MIN_SCALE}.
+     */
+    private int scale() {
+        final int w = getWidth();
+        if (w <= 0) return MIN_SCALE;
+        return Math.max(MIN_SCALE,
+            Math.round((float) w / (CLASSIC_VIEW_COLS * TILE_SRC)));
+    }
+
+    /** On-screen tile cell width (square, like the original game). */
+    private int tileW() {
+        return TILE_SRC * scale();
+    }
+
+    /** On-screen tile cell height (square, like the original game). */
+    private int tileH() {
+        return TILE_SRC * scale();
+    }
+
     /** Screen x of the left edge of the cell for map column {@code x}. */
     private int screenX(int x, int focusX) {
-        return getWidth() / 2 + (x - focusX) * TILE_W - TILE_W / 2;
+        return getWidth() / 2 + (x - focusX) * tileW() - tileW() / 2;
     }
 
     /** Screen y of the top edge of the cell for map row {@code y}. */
     private int screenY(int y, int focusY) {
-        return getHeight() / 2 + (y - focusY) * TILE_H - TILE_H / 2;
+        return getHeight() / 2 + (y - focusY) * tileH() - tileH() / 2;
     }
 
     /**
@@ -680,12 +790,15 @@ final class ClassicMapViewer extends JPanel {
      * edge hot zone.
      */
     private void updateEdgeScroll(Point p) {
+        // Edge-scroll hot zone: roughly a tile wide, so it is easy to hit
+        // without being triggered by ordinary map clicks.
+        final int margin = tileW();
         int dx = 0;
         int dy = 0;
-        if (p.x < EDGE_SCROLL_MARGIN) dx = -1;
-        else if (p.x >= getWidth() - EDGE_SCROLL_MARGIN) dx = 1;
-        if (p.y < EDGE_SCROLL_MARGIN) dy = -1;
-        else if (p.y >= getHeight() - EDGE_SCROLL_MARGIN) dy = 1;
+        if (p.x < margin) dx = -1;
+        else if (p.x >= getWidth() - margin) dx = 1;
+        if (p.y < margin) dy = -1;
+        else if (p.y >= getHeight() - margin) dy = 1;
         this.edgeDX = dx;
         this.edgeDY = dy;
         if (dx == 0 && dy == 0) {
@@ -708,9 +821,9 @@ final class ClassicMapViewer extends JPanel {
         final Tile f = getFocus();
         if (map == null || f == null) return null;
         final int x = f.getX()
-            + Math.floorDiv(px - (getWidth() / 2 - TILE_W / 2), TILE_W);
+            + Math.floorDiv(px - (getWidth() / 2 - tileW() / 2), tileW());
         final int y = f.getY()
-            + Math.floorDiv(py - (getHeight() / 2 - TILE_H / 2), TILE_H);
+            + Math.floorDiv(py - (getHeight() / 2 - tileH() / 2), tileH());
         return map.getTile(x, y);
     }
 
@@ -770,19 +883,44 @@ final class ClassicMapViewer extends JPanel {
 
         final int focusX = f.getX();
         final int focusY = f.getY();
-        final int cols = getWidth() / TILE_W + 2;
-        final int rows = getHeight() / TILE_H + 2;
+        final int cols = getWidth() / tileW() + 2;
+        final int rows = getHeight() / tileH() + 2;
 
         for (int dy = -rows; dy <= rows; dy++) {
             for (int dx = -cols; dx <= cols; dx++) {
-                final Tile tile = map.getTile(focusX + dx, focusY + dy);
-                if (tile == null) continue;
+                final int tx = focusX + dx;
+                final int ty = focusY + dy;
+                final Tile tile = map.getTile(tx, ty);
+                if (tile == null) {
+                    // Beyond the map edge: endless open sea, as the original
+                    // reads — never a black band against the last column.
+                    paintOpenSea(g, tx, ty, screenX(tx, focusX),
+                                 screenY(ty, focusY));
+                    continue;
+                }
                 paintTile(g, map, tile, screenX(tile.getX(), focusX),
                           screenY(tile.getY(), focusY));
             }
         }
 
+        paintAnimatedUnit(g, focusX, focusY);
         paintCursor(g, focusX, focusY);
+    }
+
+    /** Paint the sliding sprite of an in-progress move (see {@link #animateMove}). */
+    private void paintAnimatedUnit(Graphics2D g, int focusX, int focusY) {
+        final Unit u = this.animUnit;
+        final Tile from = this.animFrom;
+        final Tile to = this.animTo;
+        if (u == null || from == null || to == null) return;
+        final float t = this.animFraction;
+        final int sx = Math.round(
+            screenX(from.getX(), focusX) * (1f - t)
+            + screenX(to.getX(), focusX) * t);
+        final int sy = Math.round(
+            screenY(from.getY(), focusY) * (1f - t)
+            + screenY(to.getY(), focusY) * t);
+        drawCentered(g, this.lib.getScaledUnitImage(u), sx, sy);
     }
 
     /**
@@ -792,7 +930,12 @@ final class ClassicMapViewer extends JPanel {
      */
     private void paintTile(Graphics2D g, Map map, Tile tile, int sx, int sy) {
         if (!tile.isExplored()) {
-            // Unexplored: leave the black background (classic "fog").
+            // The original never shows black fog on the main map: unexplored
+            // area reads as plain open ocean (reference: the expert's
+            // opening_032 capture — the whole screen is sea around the start
+            // ship, with no black anywhere). The minimap keeps black for
+            // unexplored, as the original's minimap does.
+            paintOpenSea(g, tile.getX(), tile.getY(), sx, sy);
             return;
         }
         // Fetch the tile at its native 16x16 size and let the (nearest-neighbour)
@@ -803,11 +946,11 @@ final class ClassicMapViewer extends JPanel {
             final BufferedImage blended = tile.isLand()
                 ? blendLandBorders(map, tile, terrain)
                 : blendWaterBorders(map, tile, terrain);
-            g.drawImage(blended, sx, sy, TILE_W, TILE_H, null);
+            g.drawImage(blended, sx, sy, tileW(), tileH(), null);
         }
 
         // Composite the physical-feature overlays on top of the base terrain.
-        this.tileArt.paintOverlays(g, map, tile, sx, sy, TILE_W, TILE_H);
+        this.tileArt.paintOverlays(g, map, tile, sx, sy, tileW(), tileH());
 
         final Settlement settlement = tile.getSettlement();
         if (settlement != null) {
@@ -815,10 +958,36 @@ final class ClassicMapViewer extends JPanel {
                     sx, sy);
         } else {
             final Unit unit = tile.getFirstUnit();
-            if (unit != null) {
+            // A unit mid-slide is painted by paintAnimatedUnit instead of at
+            // its (already-updated) model tile.
+            if (unit != null && unit != this.animUnit) {
                 drawCentered(g, this.lib.getScaledUnitImage(unit), sx, sy);
             }
         }
+    }
+
+    /**
+     * Paint the endless-ocean filler used for unexplored tiles and for cells
+     * beyond the map edge.  The coordinates may lie off-map; they only seed
+     * the per-tile texture variation ({@code floorMod} keeps them positive).
+     */
+    private void paintOpenSea(Graphics2D g, int x, int y, int sx, int sy) {
+        final TileType ocean = oceanType();
+        if (ocean == null) return;
+        final BufferedImage sea = this.lib.getTerrainImage(
+            ocean, Math.floorMod(x, 1000), Math.floorMod(y, 1000), SRC_SIZE);
+        if (sea != null) g.drawImage(sea, sx, sy, tileW(), tileH(), null);
+    }
+
+    /** The spec's plain ocean type, used to paint unexplored area (lazy). */
+    private TileType oceanType() {
+        if (this.oceanType == null
+            && this.freeColClient.getGame() != null
+            && this.freeColClient.getGame().getSpecification() != null) {
+            this.oceanType = this.freeColClient.getGame().getSpecification()
+                .getTileType("model.tile.ocean");
+        }
+        return this.oceanType;
     }
 
     /**
@@ -845,14 +1014,20 @@ final class ClassicMapViewer extends JPanel {
             final int nx = tile.getX() + edge[0];
             final int ny = tile.getY() + edge[1];
             final Tile neighbour = map.getTile(nx, ny);
-            if (neighbour == null || neighbour.getType() == tile.getType()) {
-                continue;
-            }
+            if (neighbour == null) continue;
+            // An unexplored neighbour has no usable type/art of its own, but
+            // it is *painted* as open sea (see paintTile) — so blend toward
+            // ocean, not toward the black its null type would sample (which
+            // drew black fringes along coasts facing unexplored water).
+            final boolean nExplored = neighbour.isExplored();
+            final TileType nType = nExplored ? neighbour.getType()
+                : oceanType();
+            if (nType == null || nType == tile.getType()) continue;
             final BufferedImage neighbourImg =
-                this.lib.getTerrainImage(neighbour.getType(), nx, ny, SRC_SIZE);
+                this.lib.getTerrainImage(nType, nx, ny, SRC_SIZE);
             if (neighbourImg == null) continue;
             if (blended == null) blended = copyImage(terrain);
-            if (neighbour.isLand()) {
+            if (nExplored && neighbour.isLand()) {
                 ditherEdge(blended, neighbourImg, tile.getX(), tile.getY(), edge[0], edge[1]);
             } else {
                 blendCoastEdge(blended, neighbourImg, tile.getX(), tile.getY(), edge[0], edge[1]);
@@ -1084,14 +1259,16 @@ final class ClassicMapViewer extends JPanel {
         if (img == null) return;
         int w = img.getWidth();
         int h = img.getHeight();
-        final double s = (w <= TILE_W && h <= TILE_H)
-            ? Math.min(UNIT_CELL_FRACTION * TILE_W / w,
-                       UNIT_CELL_FRACTION * TILE_H / h)   // up-scale classic art
-            : Math.min((double) TILE_W / w, (double) TILE_H / h); // shrink to fit
+        final int tw = tileW();
+        final int th = tileH();
+        final double s = (w <= tw && h <= th)
+            ? Math.min(UNIT_CELL_FRACTION * tw / w,
+                       UNIT_CELL_FRACTION * th / h)   // up-scale classic art
+            : Math.min((double) tw / w, (double) th / h); // shrink to fit
         w = Math.max(1, (int) Math.round(w * s));
         h = Math.max(1, (int) Math.round(h * s));
-        final int x = sx + (TILE_W - w) / 2;
-        final int y = sy + (TILE_H - h) / 2;
+        final int x = sx + (tw - w) / 2;
+        final int y = sy + (th - h) / 2;
         g.drawImage(img, x, y, w, h, null);
     }
 
@@ -1106,7 +1283,7 @@ final class ClassicMapViewer extends JPanel {
         final Stroke old = g.getStroke();
         g.setColor(Color.WHITE);
         g.setStroke(new BasicStroke(2f));
-        g.drawRect(sx + 1, sy + 1, TILE_W - 3, TILE_H - 3);
+        g.drawRect(sx + 1, sy + 1, tileW() - 3, tileH() - 3);
         g.setStroke(old);
     }
 
