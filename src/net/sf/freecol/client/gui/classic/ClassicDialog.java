@@ -54,7 +54,9 @@ import net.sf.freecol.common.i18n.Messages;
  * <em>Colonization</em>'s wood-framed message and question boxes.
  *
  * <p>The classic UI has no {@code Canvas}, so each popup is hosted in a modal
- * {@link JDialog} of its own.  As with {@link ClassicReportPanel}, everything is
+ * {@link JDialog} of its own -- undecorated while the game runs in
+ * borderless full screen, decorated in a window
+ * ({@code ClassicGUI.prepareChildWindow}).  As with {@link ClassicReportPanel}, everything is
  * painted into a <b>virtual pixel canvas</b> up-scaled by an integer factor,
  * nearest-neighbour, so layout constants read straight off the original's
  * screenshots and the classic pixels stay crisp: {@link ClassicWood} grain under
@@ -228,8 +230,10 @@ final class ClassicDialog extends JPanel {
         d.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         d.setContentPane(p);
         d.setResizable(false);
-        d.pack();
-        d.setLocationRelativeTo(owner);
+        // Undecorated and centred over the owner in full screen (the popup
+        // paints its own wood frame, so OS chrome would only double it);
+        // decorated as before in a window.  See ClassicGUI.prepareChildWindow.
+        ClassicGUI.prepareChildWindow(d, owner, false);
         SwingUtilities.invokeLater(p::requestFocusInWindow);
         d.setVisible(true);   // blocks until disposed
         return p.chosen;

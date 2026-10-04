@@ -37,9 +37,9 @@ import java.util.List;
 import javax.swing.AbstractAction;
 import javax.swing.ActionMap;
 import javax.swing.InputMap;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 
 import net.sf.freecol.client.ClientOptions;
 import net.sf.freecol.client.FreeColClient;
@@ -491,11 +491,15 @@ final class ClassicEuropePanel extends JPanel {
      * Show a plain Swing selection list and return the chosen index, or -1.  The
      * classic wood-framed dialog is Phase 3 (shared with the colony-founding
      * seams); this is the stopgap that puts the real choice in front of the
-     * player meanwhile.
+     * player meanwhile.  It goes through {@code ClassicGUI.chooseFromList},
+     * not {@code JOptionPane.showInputDialog}, so that in full screen the list
+     * is undecorated like every other classic window instead of a Windows
+     * dialog with a title bar over the borderless Europe screen.
      */
     private int choose(String title, String prompt, String[] options) {
-        final Object sel = JOptionPane.showInputDialog(this, prompt, title,
-            JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
+        final Object sel = ClassicGUI.chooseFromList(
+            SwingUtilities.getWindowAncestor(this), title, prompt, null,
+            options);
         if (sel == null) return -1;
         for (int i = 0; i < options.length; i++) {
             if (options[i].equals(sel)) return i;

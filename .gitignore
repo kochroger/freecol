@@ -10,6 +10,9 @@
 # Classic UI: locally-generated original-Colonization asset pack (copyrighted
 # art extracted from the user's OWN install -- never commit) and its work dir.
 /data/mods/classic_original/
+# Classic UI: the original soundtrack converted to WAV from the user's OWN
+# Steam copy by tools/classic_assets/convert-soundtrack.ps1 (copyrighted -- never commit).
+/data/mods/classic_music/
 /build/classic-assets/
 # Classic UI: native DOSBox captures of the original game, the pixel
 # references for the classic screens (copyrighted -- never commit).

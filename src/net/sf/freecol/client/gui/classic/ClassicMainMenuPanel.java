@@ -73,9 +73,13 @@ import net.sf.freecol.common.resources.ResourceManager;
  *
  * <p>Modes: {@link Mode#PASSIVE} (just the picture: the backdrop while
  * {@code --fast} loads a game, before {@code showMainPanel} makes the menu
- * live), {@link Mode#TITLE}, {@link Mode#LOAD}, {@link Mode#NOTICE} and
- * {@link Mode#BUSY}.  In PASSIVE and BUSY all input is ignored -- that is the
- * double-start guard, as the EDT is free between login and the in-game view.
+ * live), {@link Mode#TITLE}, {@link Mode#LOAD}, {@link Mode#NOTICE},
+ * {@link Mode#BUSY} and {@link Mode#QUIT} (the "Colonization beenden?" box
+ * that Escape opens on the title -- in borderless full screen there is no
+ * window close button, see {@code ClassicGUI.applyFrameMode} -- and that
+ * Alt+F4 opens too, see {@link #offerQuit}).  In PASSIVE
+ * and BUSY all input is ignored -- that is the double-start guard, as the
+ * EDT is free between login and the in-game view.
  *
  * <p>The pointer is the original's own arrow ({@code CURSOR.SS.000}), drawn
  * into the canvas at the canvas scale -- see {@link #paintCursor}.
@@ -92,10 +96,15 @@ final class ClassicMainMenuPanel extends JPanel {
         void loadGame(File file);
         /** "Ruhmeshalle besuchen". */
         void hallOfFame();
+        /**
+         * "Ja" in the quit box ({@link Mode#QUIT}): leave the application
+         * through FreeCol's normal quit path.
+         */
+        void quit();
     }
 
     /** What the canvas currently shows. */
-    enum Mode { PASSIVE, TITLE, LOAD, NOTICE, BUSY }
+    enum Mode { PASSIVE, TITLE, LOAD, NOTICE, BUSY, QUIT }
 
     /** The images and font the static painters use; any may be null. */
     static final class MenuAssets {
@@ -165,13 +174,19 @@ final class ClassicMainMenuPanel extends JPanel {
     private static final int CURSOR_KEY_COLOUR = 0xFF5555FF;
 
     /**
-     * The menu's title line.  GAME.TXT:42 has
-     * {@code {COLONIZATION} Version %STRING0 -- %STRING1}; VICEROY.EXE fills in
-     * "2.26" and "19-Sept-94" (it contains no "1.26", and the capture's
-     * pixels next to the cursor fit '2', not '1').  {@code {..}} marks the
-     * gold word.
+     * The menu's title line.  {@code {..}} marks the gold word; the rest is
+     * drawn in the line's green.
+     *
+     * <p>GAME.TXT:42 has {@code {COLONIZATION} Version %STRING0 -- %STRING1},
+     * which VICEROY.EXE fills with "2.26" and "19-Sept-94" (it contains no
+     * "1.26", and the capture's pixels next to the cursor fit '2', not '1').
+     * <b>Deliberately not reproduced:</b> the owner asked for this line to
+     * read "COLONIZATION Version 2026" instead -- this recreation's own
+     * version label -- so the original's version and date are dropped on
+     * purpose.  Same font, same colours, same position; only the text
+     * differs from {@code opening_033}.
      */
-    static final String TITLE_LINE = "{COLONIZATION} Version 2.26 -- 19-Sept-94";
+    static final String TITLE_LINE = "{COLONIZATION} Version 2026";
 
     /** GAME.TXT:38-41 {@code @width=160 @y=91}: the box (77,91,166,64). */
     static final int TITLE_INNER_WIDTH = 160;
@@ -205,6 +220,18 @@ final class ClassicMainMenuPanel extends JPanel {
 
     /** Ground colour without the title picture. */
     private static final Color FALLBACK_BACKGROUND = new Color(0x1C140C);
+
+    /** Quit box rows: "Ja" first, as in GAME.TXT {@code @DOS}. */
+    static final int QUIT_YES = 0;
+    static final int QUIT_NO = 1;
+
+    /**
+     * Narrowest quit-box interior.  GAME.TXT's {@code @DOS} box has no
+     * {@code @width}, so the box is sized to its prompt (see
+     * {@link #quitBounds}); this floor keeps a short translation from
+     * producing a sliver.
+     */
+    private static final int QUIT_MIN_INNER_WIDTH = 80;
 
 
     // Static painting (no FreeColClient, no Messages)
@@ -262,6 +289,41 @@ final class ClassicMainMenuPanel extends JPanel {
             ClassicMenuBox.dialogBounds(DIALOG_INNER_WIDTH, lines.size(), 0, -1),
             t, a.tileFor(t), a.font, lines, false,
             Collections.<String>emptyList(), -1);
+    }
+
+    /**
+     * The bounds of the quit box: one prompt line, two rows, centred.  The
+     * interior is the prompt's width plus the text margins (prompt at X+5,
+     * so 5 px either side), never narrower than
+     * {@link #QUIT_MIN_INNER_WIDTH}.
+     */
+    static Rectangle quitBounds(MenuAssets a, String prompt) {
+        final int inner = Math.max(QUIT_MIN_INNER_WIDTH,
+            ClassicMenuBox.textWidth(a.font, prompt, false) + 10);
+        return ClassicMenuBox.dialogBounds(inner, 1, 2, -1);
+    }
+
+    /**
+     * The quit box over the bare title picture, in the title's style.
+     *
+     * <p>Modelled on the original's own exit question, GAME.TXT {@code @DOS}
+     * ("Abbrechen zu DOS?" / Ja / Nein, {@code @default=2}): a DIALOG box
+     * with one prompt line and the two rows.  The prompt text is the
+     * owner's ("Colonization beenden?") since there is no DOS to return
+     * to.  Drawn like the load box -- picture plus box, without the title
+     * menu, which the centred box would otherwise half cover.  The prompt is
+     * drawn plain (our own text, no markup).
+     *
+     * @param prompt The question.
+     * @param rows The two answers, "Ja" first.
+     * @param selected The barred row.
+     */
+    static void paintQuitBox(Graphics2D g, MenuAssets a, String prompt,
+                             List<String> rows, int selected) {
+        paintBackground(g, a);
+        ClassicMenuBox.paintDialog(g, quitBounds(a, prompt),
+            ClassicMenuBox.TITLE, a.openTile, a.font,
+            Collections.singletonList(prompt), false, rows, selected);
     }
 
     /**
@@ -389,6 +451,9 @@ final class ClassicMainMenuPanel extends JPanel {
     private final AtomicInteger loadGeneration = new AtomicInteger();
 
     private List<String> noticeLines = Collections.emptyList();
+
+    /** The barred row of the quit box ({@link #QUIT_YES} / {@link #QUIT_NO}). */
+    private int quitSel = QUIT_NO;
 
     /** The last paint's canvas placement, for mapping the mouse back. */
     private int originX = 0, originY = 0, scale = 1;
@@ -540,6 +605,58 @@ final class ClassicMainMenuPanel extends JPanel {
         repaint();
     }
 
+    /**
+     * Open the quit box with "Nein" barred -- the original's {@code @DOS}
+     * has {@code @default=2}, so an Escape followed by a reflexive Enter
+     * never ends the session by accident.
+     */
+    private void openQuitBox() {
+        this.quitSel = QUIT_NO;
+        setMode(Mode.QUIT);
+        repaint();
+    }
+
+    /**
+     * The window is being closed (Alt+F4, see
+     * {@code ClassicGUI.closeRequested}): ask "Colonization beenden?" the
+     * same way Escape does, instead of ending the program on one key.
+     *
+     * @return True if the live menu took the request (the quit box is now,
+     *     or already was, open); false in {@code PASSIVE} and {@code BUSY},
+     *     where nothing is on screen to ask with and the caller quits.
+     */
+    boolean offerQuit() {
+        switch (this.mode) {
+        case TITLE: case LOAD: case NOTICE:
+            openQuitBox();
+            return true;
+        case QUIT:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    private String quitPrompt() {
+        return Messages.message("classic.mainMenu.quitPrompt");
+    }
+
+    private List<String> quitRows() {
+        final List<String> rows = new ArrayList<>(2);
+        rows.add(Messages.message("classic.mainMenu.quitYes"));
+        rows.add(Messages.message("classic.mainMenu.quitNo"));
+        return rows;
+    }
+
+    /** Answer the quit box: "Ja" quits, anything else returns to the title. */
+    private void answerQuit(int row) {
+        if (row == QUIT_YES) {
+            this.actions.quit();
+        } else {
+            backToTitle();
+        }
+    }
+
     private MenuAssets assets() {
         if (this.assets == null) this.assets = MenuAssets.fromResources();
         return this.assets;
@@ -581,6 +698,9 @@ final class ClassicMainMenuPanel extends JPanel {
                 paintBackground(g, a);
                 paintNotice(g, a, ClassicMenuBox.TITLE, this.noticeLines);
                 break;
+            case QUIT:
+                paintQuitBox(g, a, quitPrompt(), quitRows(), this.quitSel);
+                break;
             case PASSIVE: default:
                 paintBackground(g, a);
                 break;
@@ -611,7 +731,7 @@ final class ClassicMainMenuPanel extends JPanel {
     private boolean drawsPointer() {
         return this.pointerX >= 0 && this.pointerY >= 0
             && (this.mode == Mode.TITLE || this.mode == Mode.LOAD
-                || this.mode == Mode.NOTICE)
+                || this.mode == Mode.NOTICE || this.mode == Mode.QUIT)
             && assets().cursor != null && blankCursor() != null;
     }
 
@@ -720,6 +840,12 @@ final class ClassicMainMenuPanel extends JPanel {
             }
         } else if (this.mode == Mode.LOAD) {
             setLoadSel(clamp((long) this.loadSel + delta, 0, this.saves.size() - 1));
+        } else if (this.mode == Mode.QUIT) {
+            final int n = clamp((long) this.quitSel + delta, QUIT_YES, QUIT_NO);
+            if (n != this.quitSel) {
+                this.quitSel = n;
+                repaint();
+            }
         }
     }
 
@@ -751,6 +877,7 @@ final class ClassicMainMenuPanel extends JPanel {
         case TITLE: activate(this.selected); break;
         case LOAD: loadSelected(); break;
         case NOTICE: dismissNotice(); break;
+        case QUIT: answerQuit(this.quitSel); break;
         default: break;
         }
     }
@@ -759,9 +886,23 @@ final class ClassicMainMenuPanel extends JPanel {
         if (this.mode == Mode.NOTICE) dismissNotice();
     }
 
-    /** ESC: nothing on the title (as in the original), back elsewhere. */
+    /**
+     * ESC: on the title, open the quit box; in the quit box, "Nein"; back
+     * elsewhere.
+     *
+     * <p>The original ignores Escape on its title menu, but it runs in a DOS
+     * box that the player can always close.  Here the window is borderless
+     * full screen (no close button), and the owner asked for an obvious way
+     * out, so Escape asks "Colonization beenden?" first -- the same question
+     * the original asks on its own exit ({@code @DOS}).  Escape again (or
+     * "Nein") goes back, so nothing ends by a stray key.
+     */
     private void escape() {
-        if (this.mode == Mode.LOAD) {
+        if (this.mode == Mode.TITLE) {
+            openQuitBox();
+        } else if (this.mode == Mode.QUIT) {
+            answerQuit(QUIT_NO);
+        } else if (this.mode == Mode.LOAD) {
             backToTitle();
         } else if (this.mode == Mode.NOTICE) {
             dismissNotice();
@@ -818,6 +959,15 @@ final class ClassicMainMenuPanel extends JPanel {
         return -1;
     }
 
+    /** The quit-box row under a virtual point, or -1. */
+    private int quitRowAt(int x, int y) {
+        final Rectangle b = quitBounds(assets(), quitPrompt());
+        for (int i = QUIT_YES; i <= QUIT_NO; i++) {
+            if (ClassicMenuBox.rowHitRect(b, 1, i).contains(x, y)) return i;
+        }
+        return -1;
+    }
+
     /** The save index under a virtual point, or -1. */
     private int loadRowAt(int x, int y) {
         final int n = Math.min(LOAD_VISIBLE_ROWS, this.saves.size() - this.loadTop);
@@ -841,6 +991,12 @@ final class ClassicMainMenuPanel extends JPanel {
         } else if (this.mode == Mode.LOAD) {
             final int i = loadRowAt(x, y);
             if (i >= 0) setLoadSel(i);
+        } else if (this.mode == Mode.QUIT) {
+            final int i = quitRowAt(x, y);
+            if (i >= 0 && i != this.quitSel) {
+                this.quitSel = i;
+                repaint();
+            }
         }
     }
 
@@ -870,6 +1026,19 @@ final class ClassicMainMenuPanel extends JPanel {
             break;
         case NOTICE:
             dismissNotice();
+            break;
+        case QUIT:
+            // Like the load box: a right click is "back" (= Nein), a left
+            // click answers with the row under the arrow; elsewhere nothing.
+            if (e.getButton() == MouseEvent.BUTTON3) {
+                answerQuit(QUIT_NO);
+            } else if (e.getButton() == MouseEvent.BUTTON1) {
+                final int i = quitRowAt(x, y);
+                if (i >= 0) {
+                    this.quitSel = i;
+                    answerQuit(i);
+                }
+            }
             break;
         default:
             break;      // PASSIVE, BUSY: ignored

@@ -22,8 +22,19 @@ package net.sf.freecol.client.gui.classic;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.Frame;
+import java.awt.GraphicsConfiguration;
+import java.awt.Insets;
+import java.awt.KeyEventDispatcher;
+import java.awt.KeyboardFocusManager;
+import java.awt.Rectangle;
+import java.awt.Toolkit;
+import java.awt.Window;
+import java.awt.event.KeyEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -36,10 +47,13 @@ import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 import javax.swing.BorderFactory;
+import javax.swing.Icon;
 import javax.swing.ImageIcon;
+import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JMenu;
 import javax.swing.JOptionPane;
+import javax.swing.MenuSelectionManager;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.KeyStroke;
@@ -50,6 +64,7 @@ import javax.swing.WindowConstants;
 import net.sf.freecol.FreeCol;
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.control.PreGameController;
+import net.sf.freecol.client.control.SoundController;
 import net.sf.freecol.client.gui.ChoiceItem;
 import net.sf.freecol.client.gui.action.ActionManager;
 import net.sf.freecol.client.gui.action.FreeColAction;
@@ -101,8 +116,38 @@ public class ClassicGUI extends GUI {
 
     private static final Logger logger = Logger.getLogger(ClassicGUI.class.getName());
 
+    /**
+     * The main window's title.  Unchanged on purpose: in full screen it is
+     * never seen (only in the taskbar / Alt+Tab), and the live-test harness
+     * finds the window by it (README "Testing live").
+     */
+    private static final String FRAME_TITLE = "FreeCol — Classic UI (experimental)";
+
     /** The main application window. */
     private JFrame frame;
+
+    /**
+     * Whether {@link #frame} is in borderless full screen (EDT only); see
+     * {@link #applyFrameMode}.  Sub-windows read the mode off the frame's
+     * decoration instead ({@link #isBorderless}).
+     */
+    private boolean fullScreen;
+
+    /** The explicit {@code --windowsize}, or null when none was given. */
+    private Dimension explicitWindowSize;
+
+    /**
+     * The decorated window's normal bounds when the player last left it for
+     * full screen, or null before that; and whether it was maximised.
+     */
+    private Rectangle windowedBounds;
+    private int windowedState = Frame.NORMAL;
+
+    /** The Alt+Enter / Alt+F4 dispatcher, once installed. */
+    private KeyEventDispatcher frameKeys;
+
+    /** Whether {@link #closeRequested} is asking "really quit?" right now. */
+    private boolean closeAsked = false;
 
     /** The colony screen's window, while one is open (see {@link #showColonyPanel}). */
     private JFrame colonyFrame;
@@ -198,6 +243,12 @@ public class ClassicGUI extends GUI {
      * {@link #showMainPanel} makes the menu live, so the {@code --fast} path
      * (which goes straight to a game and never calls it) is unchanged -- it
      * merely loads over the clean title picture instead of a placeholder.
+     *
+     * <p>Without an explicit {@code --windowsize} the window opens in
+     * <b>borderless full screen</b>, like the original running full screen
+     * in DOSBox (see {@link #applyFrameMode}); with one, it opens as the
+     * decorated window of that size it always was.  Either way Alt+Enter
+     * toggles between the two ({@link #toggleFullScreen}).
      */
     @Override
     public void startGUI(final Dimension desiredWindowSize) {
@@ -205,29 +256,559 @@ public class ClassicGUI extends GUI {
         // FreeCol passes Dimension(-1,-1) (WINDOWSIZE_FALLBACK) when no explicit
         // --windowsize is given, meaning "use the full screen".  A plain
         // null-check treats that sentinel as a real size and yields a 1x1 window,
-        // so only honour a size with positive dimensions; otherwise maximize
-        // (mirrors FreeColFrame's handling of invalid/absent bounds).
+        // so only honour a size with positive dimensions; otherwise go
+        // borderless full screen.
         final boolean explicitSize = desiredWindowSize != null
             && desiredWindowSize.width > 0 && desiredWindowSize.height > 0;
-        final Dimension size = explicitSize
-            ? desiredWindowSize : new Dimension(1024, 768);
+        this.explicitWindowSize = explicitSize
+            ? new Dimension(desiredWindowSize) : null;
         SwingUtilities.invokeLater(() -> {
-            this.frame = new JFrame("FreeCol — Classic UI (experimental)");
-            this.frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+            this.frame = new JFrame(FRAME_TITLE);
+            // Never exit on a bare close: Alt+F4 (FrameKeys synthesises it
+            // for the borderless window), the decorated window's X and a
+            // WM_CLOSE all arrive as WINDOW_CLOSING and go through
+            // closeRequested, which asks first -- see there.
+            this.frame.setDefaultCloseOperation(
+                WindowConstants.DO_NOTHING_ON_CLOSE);
+            this.frame.addWindowListener(new WindowAdapter() {
+                @Override
+                public void windowClosing(WindowEvent e) {
+                    closeRequested();
+                }
+            });
+            // Black is the letterbox colour of every 320x200 canvas; making
+            // the frame black too means a toggle or resize never flashes the
+            // default grey around them.
+            this.frame.setBackground(Color.BLACK);
+            this.frame.getRootPane().setBackground(Color.BLACK);
             // The original title picture (OPENMENU.PIK, 1:1 in a letterboxed
             // 320x200 canvas), passive until showMainPanel; without the pack a
             // dark ground.  reconnectGUI replaces it with the in-game view.
             mainMenu().showPassive();
             this.frame.setContentPane(this.mainMenuPanel);
-            this.frame.setSize(size);
-            this.frame.setLocationByPlatform(true);
-            if (!explicitSize) {
-                this.frame.setExtendedState(Frame.MAXIMIZED_BOTH);
+            installFrameKeys();
+            if (explicitSize) {
+                // Today's decorated window, unchanged.
+                this.fullScreen = false;
+                this.frame.setSize(this.explicitWindowSize);
+                this.frame.setLocationByPlatform(true);
+                this.frame.setVisible(true);
+            } else {
+                applyFrameMode(true);
+                // Windows hides the taskbar only behind the FOREGROUND window
+                // that covers its monitor.  The frame appears after the long
+                // pack load, so ask for the foreground explicitly instead of
+                // relying on the OS to hand it over.  The black start-up
+                // screen (FreeCol.createSplashScreen) has kept this process in
+                // front since the double click, which is what lets the
+                // request succeed; it is disposed only after this runs
+                // (FreeColClient, the splash hand-over after startGUI).
+                this.frame.toFront();
+                this.frame.requestFocus();
             }
-            this.frame.setVisible(true);
-            logger.info("ClassicGUI window shown.");
+            logger.info("ClassicGUI window shown ("
+                + (this.fullScreen ? "borderless full screen" : "windowed")
+                + ", " + this.frame.getBounds() + ").");
         });
         logger.info("ClassicGUI started.");
+    }
+
+
+    // Full screen (borderless) and Alt+Enter
+
+    /**
+     * Switch the main window between <b>borderless full screen</b>
+     * ({@code full}) and a normal decorated window.  EDT only.
+     *
+     * <p><b>Borderless, not exclusive.</b>  Full screen here is an
+     * undecorated {@code JFrame} whose bounds are the <em>whole</em> bounds of
+     * the monitor it is on ({@code GraphicsConfiguration.getBounds()}, so it
+     * covers the taskbar too; Windows hides the taskbar behind a focused
+     * window that covers its monitor), not
+     * {@code GraphicsDevice.setFullScreenWindow}.  Exclusive mode is the
+     * wrong tool for this UI: the classic screens are separate top-level
+     * windows (colony, Europe, reports) and modal dialogs, and on Windows an
+     * exclusive full-screen window minimises or flickers out of its mode as
+     * soon as another top-level window takes focus, Alt+Tab behaves badly,
+     * and a modal dialog can end up hidden behind it.  A borderless window is
+     * an ordinary window to the OS, so all of those keep working, and on the
+     * owner's 16:10 1920x1200 monitor the 320x200 canvases still scale by a
+     * whole x6 with no black bars at all (they size themselves from the
+     * content pane, which now is the full monitor).  Exclusive mode would
+     * not even change the resolution usefully: the canvases are drawn at an
+     * integer scale already.
+     *
+     * <p><b>Why dispose.</b>  {@code Frame.setUndecorated} may only be called
+     * while the frame is not displayable, so a switch disposes the frame
+     * (destroying only the native window), flips the decoration, and shows
+     * it again.  The Swing component tree survives a dispose intact -- the
+     * content pane, the {@code JMenuBar}, and every component's key bindings
+     * (they live in the components' {@code InputMap}s, not in the native
+     * window) -- and the frame object stays the same, so every reference to
+     * {@code this.frame} (dialog owners, {@code setContentPane} in
+     * {@link #reconnectGUI}) stays valid.  Only keyboard focus is lost, which
+     * {@link #toggleFullScreen} restores.  {@code dispose} does not post
+     * {@code WINDOW_CLOSING}, so {@link #closeRequested} is not triggered.
+     *
+     * <p>The decorated window gets back the bounds (and maximised state) it
+     * had when the player last left it; the first time it is the largest
+     * whole multiple of 320x200 that fits the monitor's work area (x5 =
+     * 1600x1000 on the owner's screen), centred, or the explicit
+     * {@code --windowsize}.
+     *
+     * @param full True for borderless full screen, false for a window.
+     */
+    private void applyFrameMode(boolean full) {
+        final JFrame f = this.frame;
+        if (f == null) return;
+        // The monitor the frame is on now (the default screen before the
+        // first show), so the switch stays on the same monitor.
+        final GraphicsConfiguration gc = f.getGraphicsConfiguration();
+        if (f.isDisplayable()) {
+            if (!this.fullScreen) {
+                // Remember the window to come back to.  While maximised,
+                // getBounds() is the maximised size: keep the earlier normal
+                // bounds and just remember the state.
+                this.windowedState = f.getExtendedState() & Frame.MAXIMIZED_BOTH;
+                if (this.windowedState == Frame.NORMAL) {
+                    this.windowedBounds = f.getBounds();
+                }
+            }
+            f.dispose();
+        }
+        this.fullScreen = full;
+        f.setUndecorated(full);
+        // A maximised frame is clipped to the work area by Windows (the
+        // taskbar stays visible): full screen must start from NORMAL.
+        f.setExtendedState(Frame.NORMAL);
+        if (full) {
+            f.setBounds(gc.getBounds());
+        } else {
+            // Create the native peer without showing it, so getInsets()
+            // knows the title bar and border sizes before we size the frame.
+            f.addNotify();
+            f.setBounds((this.windowedBounds != null) ? this.windowedBounds
+                : defaultWindowedBounds(gc, f.getInsets()));
+        }
+        f.setVisible(true);
+        if (!full && this.windowedState != Frame.NORMAL) {
+            f.setExtendedState(this.windowedState);
+        }
+    }
+
+    /**
+     * The decorated window's first bounds: the explicit {@code --windowsize}
+     * if there was one, else the largest whole multiple of the 320x200
+     * canvas (plus the frame's insets) that fits the monitor's work area --
+     * so even windowed the canvas has no letterbox on the title screen --
+     * centred in that work area.
+     */
+    private Rectangle defaultWindowedBounds(GraphicsConfiguration gc,
+                                            Insets in) {
+        final Rectangle screen = gc.getBounds();
+        final Insets taskbar = Toolkit.getDefaultToolkit().getScreenInsets(gc);
+        final Rectangle work = new Rectangle(screen.x + taskbar.left,
+            screen.y + taskbar.top,
+            screen.width - taskbar.left - taskbar.right,
+            screen.height - taskbar.top - taskbar.bottom);
+        final int w, h;
+        if (this.explicitWindowSize != null) {
+            w = this.explicitWindowSize.width;
+            h = this.explicitWindowSize.height;
+        } else {
+            final int availW = work.width - in.left - in.right;
+            final int availH = work.height - in.top - in.bottom;
+            final int s = Math.max(1, Math.min(availW / ClassicMainMenuPanel.VW,
+                                               availH / ClassicMainMenuPanel.VH));
+            w = ClassicMainMenuPanel.VW * s + in.left + in.right;
+            h = ClassicMainMenuPanel.VH * s + in.top + in.bottom;
+        }
+        return new Rectangle(work.x + Math.max(0, (work.width - w) / 2),
+                             work.y + Math.max(0, (work.height - h) / 2), w, h);
+    }
+
+    /**
+     * Alt+Enter: switch between borderless full screen and a decorated
+     * window, as in DOSBox.  EDT only.
+     *
+     * <p>The main window switches first ({@link #applyFrameMode}); then every
+     * classic sub-window that is still open is re-framed for the new mode
+     * through the same {@link #prepareChildWindow} that framed it, in the
+     * order they stack (the build queue sits over its colony screen); finally
+     * the window that was active comes back to the front and keyboard focus
+     * returns to the component that had it (the map, the title menu, a
+     * colony screen ...), because a dispose drops the focus.  A sub-window
+     * that the player closed through its own close box is disposed but
+     * still referenced; {@code isDisplayable()} tells it apart, and it is
+     * left alone rather than brought back to life.
+     *
+     * <p><b>Refused while a modal dialog is up.</b>  Disposing a window
+     * disposes the windows it owns, and every {@link ClassicDialog} (and the
+     * choice list of {@link #modalChoiceDialog}) is owned by the main frame
+     * or a classic screen ({@link #dialogOwner}): a switch then would
+     * silently dismiss the question as if Escape had been pressed.  The menu bar's open dropdown is closed first for the
+     * same reason (its heavyweight popup is an owned window too).
+     */
+    void toggleFullScreen() {
+        if (this.frame == null) return;
+        if (modalDialogShowing()) {
+            logger.info("ClassicGUI: Alt+Enter ignored while a dialog is open.");
+            return;
+        }
+        MenuSelectionManager.defaultManager().clearSelectedPath();
+        final Window active = KeyboardFocusManager
+            .getCurrentKeyboardFocusManager().getActiveWindow();
+        final Component focus = (active == null) ? null
+            : active.getMostRecentFocusOwner();
+        applyFrameMode(!this.fullScreen);
+        reframeChild(this.colonyFrame, this.frame);
+        reframeChild(this.europeFrame, this.frame);
+        reframeChild(this.reportFrame, this.frame);
+        reframeChild(this.buildQueueFrame, isOpen(this.colonyFrame)
+            ? this.colonyFrame : this.frame);
+        final Window target = (active != null && active.isShowing())
+            ? active : this.frame;
+        target.toFront();
+        final Component want = (focus != null && focus.isShowing()
+                && SwingUtilities.getWindowAncestor(focus) == target)
+            ? focus : defaultFocus(target);
+        // requestFocusInWindow on a window that is not yet focused is
+        // remembered and granted once the OS activates it (Component
+        // Javadoc), which is exactly the state right after setVisible.
+        if (want != null) {
+            want.requestFocusInWindow();
+            SwingUtilities.invokeLater(want::requestFocusInWindow);
+        }
+        logger.info("ClassicGUI: " + (this.fullScreen
+                ? "borderless full screen" : "windowed")
+            + " (" + this.frame.getBounds() + ").");
+    }
+
+    /** The natural focus owner of {@code w}: its content, or the map/menu. */
+    private Component defaultFocus(Window w) {
+        if (w == this.frame) {
+            return (this.mapViewer != null) ? this.mapViewer
+                : this.mainMenuPanel;
+        }
+        return (w instanceof JFrame) ? ((JFrame) w).getContentPane() : w;
+    }
+
+    /** Whether {@code w} is an open (not disposed) window. */
+    private static boolean isOpen(Window w) {
+        return w != null && w.isDisplayable();
+    }
+
+    /** Re-frame an open sub-window for the current mode (see toggle). */
+    private static void reframeChild(Window w, Window ref) {
+        if (!isOpen(w)) return;
+        prepareChildWindow(w, ref, true);
+        w.setVisible(true);
+    }
+
+    /** Whether any modal dialog of this application is on screen. */
+    private static boolean modalDialogShowing() {
+        for (Window w : Window.getWindows()) {
+            if (w instanceof Dialog && w.isShowing() && ((Dialog) w).isModal()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether {@code ref} belongs to a borderless (full-screen) classic
+     * window: it, or the first {@code Frame} up its owner chain, is
+     * undecorated.  The classic UI only ever undecorates its frames for full
+     * screen, so the decoration <em>is</em> the mode -- which lets
+     * {@link ClassicDialog}, which only knows its owner window, follow the
+     * mode without a reference to this GUI.
+     */
+    static boolean isBorderless(Window ref) {
+        for (Window w = ref; w != null; w = w.getOwner()) {
+            if (w instanceof Frame) return ((Frame) w).isUndecorated();
+            if (w instanceof Dialog) return ((Dialog) w).isUndecorated();
+        }
+        return false;
+    }
+
+    /**
+     * THE one place that frames a classic sub-window for the current mode;
+     * call it after the content is set and before {@code setVisible(true)}.
+     * Every window the classic UI opens goes through here -- the colony,
+     * build-queue, Europe and report screens ({@code fullScreenSized}), and
+     * every {@link ClassicDialog} popup and the choice list
+     * ({@code !fullScreenSized}) -- so "no OS window chrome anywhere while
+     * full screen" is decided once, not per screen.
+     *
+     * <ul>
+     *   <li><b>Full screen</b> ({@code ref} borderless, see
+     *       {@link #isBorderless}): the window is undecorated.  The original's
+     *       full-screen screens (all 320x200 canvases that scale themselves
+     *       to their size) cover {@code ref}'s bounds exactly, so on the
+     *       owner's monitor they too run at x6 with no black bars.  Small
+     *       popups keep their own size (they paint their own wood frame) and
+     *       are centred over {@code ref}.</li>
+     *   <li><b>Windowed:</b> today's behaviour -- decorated, packed to the
+     *       preferred size and centred over {@code ref}.</li>
+     * </ul>
+     *
+     * <p>Decoration can only change while a window is not displayable, so an
+     * already shown window (a re-frame from {@link #toggleFullScreen}) is
+     * disposed first; the caller shows it again.
+     *
+     * @param w The window to frame.
+     * @param ref The window it belongs over: the main frame, or the colony
+     *     screen for the build queue; decides the mode and the placement.
+     * @param fullScreenSized True for a full-screen original screen, false
+     *     for a popup.
+     */
+    static void prepareChildWindow(Window w, Window ref,
+                                   boolean fullScreenSized) {
+        final boolean borderless = isBorderless(ref);
+        if (w.isDisplayable()) w.dispose();
+        if (w instanceof Frame) {
+            ((Frame) w).setUndecorated(borderless);
+        } else if (w instanceof Dialog) {
+            ((Dialog) w).setUndecorated(borderless);
+        }
+        if (borderless && fullScreenSized && ref != null) {
+            w.setBounds(ref.getBounds());
+        } else {
+            w.pack();
+            w.setLocationRelativeTo(ref);
+        }
+    }
+
+    /**
+     * The owner (and centring reference) for a popup: the classic screen the
+     * player is looking at -- the colony, build-queue, Europe or report
+     * window in front -- else the main frame.  EDT only.
+     *
+     * <p>Why not always the main frame: on Windows, bringing an owned window
+     * to the top raises its owner directly beneath it.  With the main frame
+     * as owner, a notice popping up over a full-screen colony screen would
+     * pull the map above the colony screen, and when the notice closed the
+     * player would be looking at the map with the colony screen buried
+     * behind it.  Owned by the screen in front, the popup leaves the
+     * stacking alone.  (A switch to/from full screen is refused while a
+     * popup is up, so its owner is never disposed under it by
+     * {@link #toggleFullScreen}.)
+     *
+     * <p><b>Why not simply the active window.</b>  Activation changes
+     * asynchronously.  Right after one modal popup is disposed, the active
+     * window is still that dead popup (or null) until the OS re-activates
+     * the colony screen beneath it, and it is null whenever another
+     * application is in front.  Two popups in a row from one server message
+     * (end-of-turn notices, then a question) would then hand the second one
+     * to the main frame and bury the colony screen after all.  So the active
+     * window is only a hint: it and its owner chain are searched first (a
+     * dead popup's owner is still the screen it belonged to), and failing
+     * that the GUI's own state decides -- the open classic screens in their
+     * fixed stacking order (the build queue sits over its colony screen; the
+     * others are full-screen and opened from the map).  The main frame wins
+     * the owner-chain search only while windowed, where the player can put
+     * the map in front of an open screen by clicking it; in full screen an
+     * open screen always covers the map.
+     */
+    private Window dialogOwner() {
+        final Window[] screens = {
+            this.buildQueueFrame, this.colonyFrame,
+            this.europeFrame, this.reportFrame
+        };
+        for (Window w = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                 .getActiveWindow(); w != null; w = w.getOwner()) {
+            for (Window s : screens) {
+                if (w == s && s.isShowing()) return s;
+            }
+            if (w == this.frame) {
+                if (!this.fullScreen) return this.frame;
+                break;
+            }
+        }
+        for (Window s : screens) {
+            if (s != null && s.isShowing()) return s;
+        }
+        return this.frame;
+    }
+
+    /**
+     * Install the application-wide keys of the frame: Alt+Enter
+     * (full screen / window) and the Alt+F4 fallback.  Once, at start-up.
+     *
+     * <p>A {@code KeyEventDispatcher} rather than an {@code InputMap} entry,
+     * because it must work everywhere -- on the title screen, in game, and in
+     * every classic sub-window -- and must <em>win</em> against the panels'
+     * own Enter keys: the title menu and the map bind plain {@code ENTER}
+     * (select / end turn), and FreeCol's reused in-game menu has its own
+     * "alt ENTER" accelerator ({@code changeWindowedModeAction}).  The
+     * dispatcher sees the key before any component, and consumes it, so
+     * Alt+Enter does exactly one thing.  (That menu item still works when
+     * clicked: {@link #changeWindowedMode} routes it here.)
+     */
+    private void installFrameKeys() {
+        if (this.frameKeys != null) return;
+        this.frameKeys = new FrameKeys();
+        KeyboardFocusManager.getCurrentKeyboardFocusManager()
+            .addKeyEventDispatcher(this.frameKeys);
+    }
+
+    /**
+     * The dispatcher behind {@link #installFrameKeys}.
+     *
+     * <p><b>Alt+Enter</b> toggles once per press: holding the keys makes the
+     * OS auto-repeat {@code KEY_PRESSED}, which would flip the mode on every
+     * repeat, so the toggle fires only on the first press and the matching
+     * {@code KEY_TYPED}/{@code KEY_RELEASED} are swallowed too (an Enter
+     * {@code KEY_TYPED} would otherwise reach a text field or a listener as
+     * a plain Enter).  The toggle runs {@code invokeLater}, outside the key
+     * dispatch, since it disposes the very window the event is being
+     * delivered to.  Ctrl/AltGr combinations are not ours (AltGr is Ctrl+Alt
+     * on the German keyboard).
+     *
+     * <p><b>Alt+F4</b> posts {@code WINDOW_CLOSING} to the window that has
+     * focus: on the main frame that is {@link #closeRequested} (it asks
+     * before anything ends), a sub-window or popup closes as through its
+     * close box.  Windows normally sends that close itself, also to an
+     * undecorated window, but AWT hands system keys to Java first, so whether
+     * the native close still happens is up to the JDK; doing it here makes
+     * the one exit path that every borderless window has a certainty.  If the
+     * OS closes as well nothing breaks: {@code closeRequested} ignores a
+     * second request while its question is open, opening the title's quit
+     * box twice is a no-op, and disposing a closed sub-window again is a
+     * no-op.
+     */
+    private final class FrameKeys implements KeyEventDispatcher {
+
+        /**
+         * The longest gap between two auto-repeated presses: Windows' longest
+         * keyboard repeat delay is 1 s.  A press after a longer gap is a new
+         * press even if its release never arrived -- which happens, because
+         * the toggle disposes the window that would receive it.
+         */
+        private static final long REPEAT_GAP_MS = 1100L;
+
+        /** Whether the current Enter press was taken as Alt+Enter. */
+        private boolean altEnterHeld = false;
+
+        /** When the last Alt+Enter press (first or repeated) arrived. */
+        private long lastPress = 0L;
+
+        @Override
+        public boolean dispatchKeyEvent(KeyEvent e) {
+            final boolean ourMods = e.isAltDown() && !e.isControlDown()
+                && !e.isMetaDown() && !e.isAltGraphDown();
+            if (e.getKeyCode() == KeyEvent.VK_F4) {
+                if (e.getID() != KeyEvent.KEY_PRESSED || !ourMods) return false;
+                final Window w = (e.getComponent() instanceof Window)
+                    ? (Window) e.getComponent()
+                    : SwingUtilities.getWindowAncestor(e.getComponent());
+                if (w == null) return false;
+                SwingUtilities.invokeLater(() -> w.dispatchEvent(
+                    new WindowEvent(w, WindowEvent.WINDOW_CLOSING)));
+                return true;
+            }
+            final boolean enter = e.getKeyCode() == KeyEvent.VK_ENTER
+                || (e.getID() == KeyEvent.KEY_TYPED
+                    && (e.getKeyChar() == '\n' || e.getKeyChar() == '\r'));
+            if (!enter) return false;
+            switch (e.getID()) {
+            case KeyEvent.KEY_PRESSED:
+                if (!ourMods) {
+                    // A plain Enter: whatever Alt+Enter press came before is
+                    // over, even if its release was lost with a disposed
+                    // window -- otherwise this Enter's KEY_TYPED would be
+                    // swallowed below.
+                    this.altEnterHeld = false;
+                    return false;
+                }
+                final long now = e.getWhen();
+                final boolean repeat = this.altEnterHeld
+                    && now - this.lastPress < REPEAT_GAP_MS;
+                this.lastPress = now;
+                if (!repeat) {
+                    this.altEnterHeld = true;
+                    SwingUtilities.invokeLater(ClassicGUI.this::toggleFullScreen);
+                }
+                return true;
+            case KeyEvent.KEY_RELEASED:
+                // Alt may already be up when Enter is released.
+                final boolean held = this.altEnterHeld;
+                this.altEnterHeld = false;
+                return held || ourMods;
+            default:    // KEY_TYPED
+                return this.altEnterHeld || ourMods;
+            }
+        }
+    }
+
+    /**
+     * The main window was asked to close (Alt+F4, the decorated window's X,
+     * a WM_CLOSE from outside).  EDT only.
+     *
+     * <p>The frame used to be {@code EXIT_ON_CLOSE}: harmless while the only
+     * close gesture was a deliberate click on the title bar's X, but in
+     * borderless full screen Alt+F4 is the close gesture, and one slip ended
+     * the program at once -- the running game unsaved, and without
+     * {@code FreeColClient.quit} (server stop, autosave pruning,
+     * {@code quitGUI}).  Now every close goes the way FreeCol's own
+     * {@code WindowedFrameListener} goes, with a question first:
+     * <ul>
+     *   <li><b>A game (or the map editor) runs:</b>
+     *       {@code FreeColClient.askToQuit} -- the same classic "are you
+     *       sure" popup as Spiel &gt; Beenden, then logout and
+     *       {@code quit}.</li>
+     *   <li><b>The live title menu is up:</b> its own "Colonization
+     *       beenden?" box ({@link ClassicMainMenuPanel#offerQuit}), "Nein"
+     *       preselected, exactly as Escape opens it.</li>
+     *   <li><b>Otherwise</b> (the passive title backdrop while the game
+     *       loads, the busy box while a game starts): nothing is at stake
+     *       yet, so {@code quit} directly, as FreeCol does.</li>
+     * </ul>
+     * A second request while the question is open (Windows may deliver its
+     * own close besides the one FrameKeys posts) is ignored.
+     */
+    void closeRequested() {
+        if (this.closeAsked) return;
+        final FreeColClient fcc = getFreeColClient();
+        if (fcc.isInGame() || fcc.isMapEditor()) {
+            this.closeAsked = true;
+            try {
+                fcc.askToQuit();
+            } finally {
+                this.closeAsked = false;
+            }
+            return;
+        }
+        if (this.mainMenuPanel != null && this.frame != null
+            && this.frame.getContentPane() == this.mainMenuPanel
+            && this.mainMenuPanel.offerQuit()) {
+            return;
+        }
+        fcc.quit();
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * False while in borderless full screen.  The base answers a constant
+     * true (GUI.java:1068); this one tells the truth for the reused
+     * {@code changeWindowedModeAction} and anything else that asks.
+     */
+    @Override
+    public boolean isWindowed() {
+        return !this.fullScreen;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * The reused in-game menu's "full screen" item
+     * ({@code ChangeWindowedModeAction}, InGameMenuBar.java:201) lands here;
+     * the base no-ops it (GUI.java:1095).  Same toggle as Alt+Enter.
+     */
+    @Override
+    public void changeWindowedMode() {
+        invokeNowOrLater(this::toggleFullScreen);
     }
 
 
@@ -287,6 +868,16 @@ public class ClassicGUI extends GUI {
                 // work before any game; ReportHighScoresAction would ask a
                 // server that does not exist yet (InGameController.highScore).
                 showHighScoresPanel(null, HighScore.loadHighScores());
+            }
+
+            @Override
+            public void quit() {
+                // FreeCol's own quit path (FreeColClient.java:1056): stops a
+                // server if one runs, prunes old autosaves, takes the GUI
+                // down (quitGUI) and exits via FreeCol.quit(0).  This is what
+                // FreeCol's WindowedFrameListener does when no game is
+                // running; no "are you sure" again, the quit box just asked.
+                getFreeColClient().quit();
             }
         };
     }
@@ -407,6 +998,15 @@ public class ClassicGUI extends GUI {
      * {@code invokeLater}, so at startup it runs after the frame creation
      * {@link #startGUI} queued (FIFO).
      *
+     * <p>Also switches the music to the original title piece: every way to
+     * the title ends here (start-up, {@link #showMainTitle}, the in-game
+     * "Neues Spiel" via {@link #showNewPanel}, defeat/quit logouts, failed
+     * starts and loads), so the title piece is bound to the title screen
+     * itself rather than to FreeCol's {@code sound.intro.general} calls --
+     * which is also why {@code --fast}, which never shows the title, goes
+     * straight to the in-game playlist.  Idempotent: re-showing the title
+     * does not restart the piece (see {@link ClassicSoundController}).
+     *
      * @param userMsg An optional notice shown over the menu.
      * @return {@code null} (the classic UI hosts its own panels).
      */
@@ -414,6 +1014,7 @@ public class ClassicGUI extends GUI {
     public FreeColPanel showMainPanel(final String userMsg) {
         SwingUtilities.invokeLater(() -> {
             if (this.frame == null) return;
+            playTitleMusic();
             teardownInGame();
             mainMenu().showTitle(userMsg);
             if (this.frame.getContentPane() != this.mainMenuPanel) {
@@ -431,13 +1032,25 @@ public class ClassicGUI extends GUI {
      * {@inheritDoc}
      *
      * Back to the title from a running game ({@code ConnectController.mainTitle},
-     * which logs out and stops the server right after this), with the intro
-     * music as in {@code SwingGUI}.
+     * which logs out and stops the server right after this).  Unlike
+     * {@code SwingGUI} it plays no {@code sound.intro.general}:
+     * {@link #showMainPanel} switches to the original title piece.
      */
     @Override
     public void showMainTitle() {
         showMainPanel(null);
-        playSound("sound.intro.general");
+    }
+
+    /**
+     * Switch the music to the original title piece, when the classic sound
+     * controller is in charge (it always is under {@code --classic}; the
+     * check keeps a stray plain {@code SoundController} harmless).
+     */
+    private void playTitleMusic() {
+        final SoundController sc = getFreeColClient().getSoundController();
+        if (sc instanceof ClassicSoundController) {
+            ((ClassicSoundController)sc).playTitleMusic();
+        }
     }
 
     /**
@@ -903,9 +1516,9 @@ public class ClassicGUI extends GUI {
                 this.colonyFrame = f;
                 this.colonyPanel = panel;
                 f.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+                f.setBackground(Color.BLACK);
                 f.setContentPane(panel);
-                f.pack();
-                f.setLocationRelativeTo(this.frame);
+                prepareChildWindow(f, this.frame, true);
                 f.setVisible(true);
                 f.getContentPane().requestFocusInWindow();
             } catch (Exception e) {
@@ -957,9 +1570,9 @@ public class ClassicGUI extends GUI {
                             closeBuildQueuePanel();
                             repaintInfo();
                         }));
-                f.pack();
-                f.setLocationRelativeTo(this.colonyFrame != null
-                    ? this.colonyFrame : this.frame);
+                f.setBackground(Color.BLACK);
+                prepareChildWindow(f, isOpen(this.colonyFrame)
+                    ? this.colonyFrame : this.frame, true);
                 f.setVisible(true);
                 f.getContentPane().requestFocusInWindow();
             } catch (Exception e) {
@@ -1004,9 +1617,9 @@ public class ClassicGUI extends GUI {
                 this.europeFrame = f;
                 this.europePanel = panel;
                 f.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+                f.setBackground(Color.BLACK);
                 f.setContentPane(panel);
-                f.pack();
-                f.setLocationRelativeTo(this.frame);
+                prepareChildWindow(f, this.frame, true);
                 f.setVisible(true);
                 panel.requestFocusInWindow();
             } catch (Exception e) {
@@ -1260,9 +1873,9 @@ public class ClassicGUI extends GUI {
                 final JFrame f = new JFrame(Messages.message(titleKey));
                 this.reportFrame = f;
                 f.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+                f.setBackground(Color.BLACK);
                 f.setContentPane(factory.apply(this::closeReportPanel));
-                f.pack();
-                f.setLocationRelativeTo(this.frame);
+                prepareChildWindow(f, this.frame, true);
                 f.setVisible(true);
                 f.getContentPane().requestFocusInWindow();
             } catch (Exception e) {
@@ -1332,7 +1945,7 @@ public class ClassicGUI extends GUI {
                     (icon == null) ? null : icon.getImage()));
         }
         onEventThread(() -> {
-                ClassicDialog.showMessages(this.frame,
+                ClassicDialog.showMessages(dialogOwner(),
                     Messages.message(titleKey), pages);
                 return null;
             }, null);
@@ -1359,7 +1972,7 @@ public class ClassicGUI extends GUI {
         final String text = (message == null) ? "" : message;
         onEventThread(() -> {
                 try {
-                    ClassicDialog.showMessages(this.frame,
+                    ClassicDialog.showMessages(dialogOwner(),
                         Messages.message("classic.dialog.error"),
                         List.of(new ClassicDialog.Page(text, null)));
                 } finally {
@@ -1503,7 +2116,7 @@ public class ClassicGUI extends GUI {
         onEventThread(() -> {
                 int chosen = -1;
                 try {
-                    chosen = ClassicDialog.ask(this.frame, title, page, options,
+                    chosen = ClassicDialog.ask(dialogOwner(), title, page, options,
                                                options.length - 1);
                 } finally {
                     final boolean accept = (yes != null && chosen == 0);
@@ -1567,7 +2180,7 @@ public class ClassicGUI extends GUI {
         };
         final ClassicDialog.Page page = new ClassicDialog.Page(
             Messages.message(template), (icon == null) ? null : icon.getImage());
-        final int chosen = onEventThread(() -> ClassicDialog.ask(this.frame,
+        final int chosen = onEventThread(() -> ClassicDialog.ask(dialogOwner(),
                 colony(tile), page, options, (defaultOk ? 0 : 1)),
             -1);
         return (chosen < 0) ? defaultOk : (chosen == 0);
@@ -1582,6 +2195,15 @@ public class ClassicGUI extends GUI {
      * without this a laden ship could never put colonists ashore, and the colony
      * screen (which needs a founded colony) would be unreachable.  Presented as a
      * plain Swing selection list for now; Phase 3 reskins it.
+     *
+     * <p>Built by hand rather than with {@code JOptionPane.showInputDialog},
+     * whose dialog is already packed (displayable) when it is returned, so
+     * its decoration can no longer be changed: in full screen the list must
+     * be undecorated like every other classic window
+     * ({@link #prepareChildWindow}).  Behaviour is that of
+     * {@code showInputDialog}: OK (or a double click) answers the selected
+     * item; Cancel, Escape or closing answers null.  Undecorated, the pane
+     * gets the popups' wood border so it does not float frameless.
      */
     @Override
     protected <T> T modalChoiceDialog(Tile tile, StringTemplate template,
@@ -1590,13 +2212,52 @@ public class ClassicGUI extends GUI {
         if (choices == null || choices.isEmpty()) return null;
         final String text = Messages.message(template);
         final ChoiceItem<T>[] options = choices.toArray(new ChoiceItem[0]);
-        final ChoiceItem<T> chosen = onEventThread(() -> {
-            final Object sel = JOptionPane.showInputDialog(this.frame, text,
-                colony(tile), JOptionPane.QUESTION_MESSAGE, icon,
-                options, options[0]);
-            return (ChoiceItem<T>) sel;
-        }, null);
+        final ChoiceItem<T> chosen = onEventThread(() ->
+            (ChoiceItem<T>) chooseFromList(dialogOwner(), colony(tile), text,
+                                           icon, options), null);
         return (chosen == null) ? null : chosen.getObject();
+    }
+
+    /**
+     * The selection list of {@link #modalChoiceDialog}, shared with the
+     * Europe screen's recruit/train/buy lists
+     * ({@code ClassicEuropePanel.choose}) so that no copy of the plain
+     * {@code JOptionPane.showInputDialog} stopgap -- a decorated Windows
+     * dialog over the borderless screens -- is left.  EDT only; modal.
+     *
+     * @param owner The window the list belongs over (decides the mode and
+     *     the placement, see {@link #prepareChildWindow}).
+     * @param title The window title (shown only while windowed).
+     * @param message The prompt.
+     * @param icon An optional icon, or null.
+     * @param options The items; the first is preselected.
+     * @return The chosen item, or null on Cancel, Escape or close.
+     */
+    static Object chooseFromList(Window owner, String title, Object message,
+                                 Icon icon, Object[] options) {
+        final JOptionPane pane = new JOptionPane(message,
+            JOptionPane.QUESTION_MESSAGE, JOptionPane.OK_CANCEL_OPTION, icon);
+        pane.setWantsInput(true);
+        pane.setSelectionValues(options);
+        pane.setInitialSelectionValue(options[0]);
+        final JDialog d = new JDialog(owner, title,
+            Dialog.ModalityType.APPLICATION_MODAL);
+        d.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        d.setResizable(false);
+        d.setContentPane(pane);
+        if (isBorderless(owner)) {
+            pane.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(ClassicDialog.BORDER_HI, 3),
+                BorderFactory.createEmptyBorder(8, 8, 8, 8)));
+        }
+        // Any answer (OK, Cancel, Escape) sets the pane's value: close.
+        pane.addPropertyChangeListener(JOptionPane.VALUE_PROPERTY,
+            e -> d.dispose());
+        prepareChildWindow(d, owner, false);
+        SwingUtilities.invokeLater(pane::selectInitialValue);
+        d.setVisible(true);   // blocks until disposed
+        final Object sel = pane.getInputValue();
+        return (sel == JOptionPane.UNINITIALIZED_VALUE) ? null : sel;
     }
 
     /** Title for a tile-anchored dialog: the settlement there, else the game name. */
@@ -1796,9 +2457,18 @@ public class ClassicGUI extends GUI {
 
     /**
      * {@inheritDoc}
+     *
+     * Also drops the Alt+Enter dispatcher, so no key toggles a window that
+     * is being taken down.
      */
     @Override
     public void quitGUI() {
+        final KeyEventDispatcher keys = this.frameKeys;
+        this.frameKeys = null;
+        if (keys != null) {
+            KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                .removeKeyEventDispatcher(keys);
+        }
         final JFrame f = this.frame;
         if (f != null) {
             SwingUtilities.invokeLater(f::dispose);

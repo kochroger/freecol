@@ -19,6 +19,7 @@
 
 package net.sf.freecol.client.gui;
 
+import java.awt.Color;
 import java.awt.DisplayMode;
 import java.awt.GraphicsDevice;
 import java.awt.Point;
@@ -58,5 +59,33 @@ public final class SplashScreen extends JFrame {
         int x = start.x + dm.getWidth()/2 - this.getWidth() / 2;
         int y = start.y + dm.getHeight()/2 - this.getHeight() / 2;
         this.setLocation(x, y);
+    }
+
+    /**
+     * A plain black, undecorated window covering the whole monitor.
+     *
+     * @param gd The {@code GraphicsDevice} to cover.
+     */
+    private SplashScreen(GraphicsDevice gd) {
+        super(gd.getDefaultConfiguration());
+        setUndecorated(true);
+        setBackground(Color.BLACK);
+        getContentPane().setBackground(Color.BLACK);
+        setBounds(gd.getDefaultConfiguration().getBounds());
+    }
+
+    /**
+     * The classic UI's start-up screen: black, borderless, the whole
+     * monitor -- what the original shows while DOSBox starts it, instead of
+     * FreeCol's branded splash picture in a box on the desktop.  It also
+     * keeps the process in the foreground during the long load, so the
+     * borderless main window that replaces it is allowed to take the
+     * foreground (and Windows hides the taskbar behind it).
+     *
+     * @param gd The {@code GraphicsDevice} to cover.
+     * @return The (not yet visible) black screen.
+     */
+    public static SplashScreen blackFullScreen(GraphicsDevice gd) {
+        return new SplashScreen(gd);
     }
 }

@@ -189,6 +189,45 @@ public class ClassicFontTest extends TestCase {
         assertEquals(1, ClassicMainMenuPanel.wrapNotice(none, "kurz").size());
     }
 
+    /**
+     * The title line is the owner's "COLONIZATION Version 2026" (gold word
+     * marked), and the Escape quit box ("Colonization beenden?" / Ja / Nein)
+     * is a centred one-prompt, two-row DIALOG box that stays on the canvas,
+     * grows with its prompt, and paints its "Nein" bar without the pack.
+     */
+    public void testTitleLineAndQuitBox() {
+        assertEquals("{COLONIZATION} Version 2026", ClassicMainMenuPanel.TITLE_LINE);
+
+        ClassicMainMenuPanel.MenuAssets withFont
+            = new ClassicMainMenuPanel.MenuAssets(null, null, null, font());
+        Rectangle small = ClassicMainMenuPanel.quitBounds(withFont, "A");
+        // Floor of 80 inner + 6 frame, 8*(1+2)+16 high, centred.
+        assertEquals(new Rectangle(117, 80, 86, 40), small);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 40; i++) sb.append('A');   // 120 px
+        Rectangle wide = ClassicMainMenuPanel.quitBounds(withFont, sb.toString());
+        assertEquals(120 + 10 + 6, wide.width);
+        assertEquals((ClassicMenuBox.VW - wide.width) / 2, wide.x);
+
+        ClassicMainMenuPanel.MenuAssets none
+            = new ClassicMainMenuPanel.MenuAssets(null, null, null, null);
+        Rectangle b = ClassicMainMenuPanel.quitBounds(none, "Colonization beenden?");
+        assertTrue(b.x >= 0 && b.x + b.width <= ClassicMenuBox.VW);
+        assertTrue(b.y >= 0 && b.y + b.height <= ClassicMenuBox.VH);
+        BufferedImage img = new BufferedImage(ClassicMenuBox.VW, ClassicMenuBox.VH,
+                                              BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        ClassicMainMenuPanel.paintQuitBox(g, none, "Colonization beenden?",
+            List.of("Ja", "Nein"), ClassicMainMenuPanel.QUIT_NO);
+        g.dispose();
+        // The bar sits behind row 1 ("Nein"), in the theme's dark colour,
+        // and row 0 has none: compare the bars' right ends (no text there).
+        Rectangle bar = ClassicMenuBox.barRect(b, 1, ClassicMainMenuPanel.QUIT_NO);
+        Rectangle noBar = ClassicMenuBox.barRect(b, 1, ClassicMainMenuPanel.QUIT_YES);
+        int px = bar.x + bar.width - 2;
+        assertTrue(img.getRGB(px, bar.y + 3) != img.getRGB(px, noBar.y + 3));
+    }
+
     /** The cursor's two key-colour corner pixels are cleared, nothing else. */
     public void testCursorSprite() {
         BufferedImage raw = new BufferedImage(17, 17, BufferedImage.TYPE_INT_ARGB);
@@ -202,5 +241,26 @@ public class ClassicFontTest extends TestCase {
         assertEquals(0xFF000000, c.getRGB(1, 0));
         assertEquals(0xFFAAAAAA, c.getRGB(1, 1));
         assertNull(ClassicMainMenuPanel.cursorSprite(null));
+    }
+
+    /**
+     * Alt+F4 / window close on the title ({@code ClassicGUI.closeRequested}):
+     * the live menu opens the quit box instead of quitting, idempotently;
+     * the passive backdrop declines (the caller then quits directly).
+     */
+    public void testOfferQuitOnClose() {
+        final int[] quits = { 0 };
+        final ClassicMainMenuPanel p = new ClassicMainMenuPanel(
+            new ClassicMainMenuPanel.Actions() {
+                @Override public void newWorld() {}
+                @Override public void loadGame(java.io.File file) {}
+                @Override public void hallOfFame() {}
+                @Override public void quit() { quits[0]++; }
+            });
+        assertFalse(p.offerQuit());          // PASSIVE: nothing to ask with
+        p.showTitle(null);
+        assertTrue(p.offerQuit());           // TITLE -> quit box
+        assertTrue(p.offerQuit());           // already open: still taken
+        assertEquals(0, quits[0]);           // never quits by itself
     }
 }

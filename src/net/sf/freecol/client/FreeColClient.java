@@ -43,6 +43,7 @@ import net.sf.freecol.client.gui.GUI;
 import net.sf.freecol.client.gui.SplashScreen;
 import net.sf.freecol.client.gui.SwingGUI;
 import net.sf.freecol.client.gui.classic.ClassicGUI;
+import net.sf.freecol.client.gui.classic.ClassicSoundController;
 import net.sf.freecol.client.gui.action.ActionManager;
 import net.sf.freecol.client.networking.UserServerAPI;
 import net.sf.freecol.common.debug.FreeColDebugger;
@@ -232,10 +233,11 @@ public final class FreeColClient {
 
         // Reset the mod resources as a result of the client option update.
         // Under the classic UI, additionally overlay the original-Colonization
-        // art pack (if the user has generated it) so it wins over fallback art.
+        // art pack and the original-soundtrack pack (if the user has generated
+        // them) so they win over FreeCol's fallback resources.
         List<FreeColModFile> activeMods = this.clientOptions.getActiveMods();
         if (FreeCol.getClassic()) {
-            activeMods = withClassicOriginalPack(activeMods);
+            activeMods = withClassicPacks(activeMods);
         }
         ResourceManager.setMods(activeMods);
         
@@ -261,8 +263,12 @@ public final class FreeColClient {
             }
         }
         
-        // Initialize Sound (depends on client options)
-        this.soundController = new SoundController(this, sound);
+        // Initialize Sound (depends on client options).  The classic UI plays
+        // only the original soundtrack, never FreeCol's music (see
+        // ClassicSoundController for why this cannot live in the GUI).
+        this.soundController = (FreeCol.getClassic())
+            ? new ClassicSoundController(this, sound)
+            : new SoundController(this, sound);
         
         overrideDefaultUncaughtExceptionHandler();
         
@@ -285,12 +291,25 @@ public final class FreeColClient {
              * completed.
              */
             SwingUtilities.invokeLater(() -> {
-                if (splashScreen != null) {
+                // The classic UI's start-up screen is a black full-screen
+                // window (FreeCol.createClassicSplashScreen): take it down
+                // only after the main window is up, so the desktop never
+                // shows in between.  ClassicGUI.startGUI builds and shows its
+                // frame in an invokeLater, so a dispose queued after it runs
+                // after the frame is visible.
+                final boolean handOver = FreeCol.getClassic();
+                if (splashScreen != null && !handOver) {
                     splashScreen.setVisible(false);
                     splashScreen.dispose();
                 }
                 // Start the GUI (headless-safe)
                 gui.startGUI(windowSize);
+                if (splashScreen != null && handOver) {
+                    SwingUtilities.invokeLater(() -> {
+                        splashScreen.setVisible(false);
+                        splashScreen.dispose();
+                    });
+                }
         
                 // Update the actions with the running GUI, resources may have changed.
                 if (this.actionManager != null) updateActions();
@@ -357,36 +376,57 @@ public final class FreeColClient {
     private static final String CLASSIC_ORIGINAL_MOD_ID = "classic_original";
 
     /**
-     * Overlay the classic-original art pack on the active mods, if present.
+     * The git-ignored classic packs, in overlay order (later wins).  The
+     * soundtrack is its own pack, not part of classic_original, because
+     * {@code ant classic-assets} deletes and regenerates classic_original
+     * from scratch (ClassicAssetConverter.java:94).
+     */
+    private static final String[] CLASSIC_PACK_IDS = {
+        CLASSIC_ORIGINAL_MOD_ID, ClassicSoundController.PACK_ID
+    };
+
+    /**
+     * Overlay the classic packs on the active mods, where present.
      *
-     * When running the classic UI ({@code --classic}) and the user has generated
-     * the git-ignored {@code data/mods/classic_original/} pack (via
-     * {@code ant classic-assets}), load it as the highest-priority mod so its
-     * original-Colonization art overrides the FreeCol fallback art.  Absent the
-     * pack this is a no-op and the classic UI runs on FreeCol's own art (see
-     * CLASSIC_UI_PLAN.md, asset strategy A3).
+     * When running the classic UI ({@code --classic}) and the user has
+     * generated the git-ignored packs, load them as the highest-priority
+     * mods:
+     * <ul>
+     *   <li>{@code data/mods/classic_original/} (via {@code ant
+     *       classic-assets}): the original-Colonization art overrides the
+     *       FreeCol fallback art (CLASSIC_UI_PLAN.md, asset strategy A3).
+     *       Absent, the classic UI runs on FreeCol's own art.</li>
+     *   <li>{@code data/mods/classic_music/} (via
+     *       {@code tools/classic_assets/convert-soundtrack.ps1}): the
+     *       original soundtrack, played by {@link ClassicSoundController}.
+     *       Absent, the classic UI is silent (sound effects aside) -- it never
+     *       falls back to FreeCol's music.</li>
+     * </ul>
      *
      * @param mods The active mods from the client options.
-     * @return The mod list with the classic-original pack appended (last = wins
-     *     in {@link ResourceManager#prepare}), or the input list unchanged if the
-     *     pack is absent or already active.
+     * @return The mod list with each present pack appended (last = wins in
+     *     {@link ResourceManager#prepare}), skipping packs that are absent or
+     *     already active; the input list itself when nothing was added.
      */
-    private List<FreeColModFile> withClassicOriginalPack(List<FreeColModFile> mods) {
-        final FreeColModFile pack
-            = FreeColModFile.getFreeColModFile(CLASSIC_ORIGINAL_MOD_ID);
-        if (pack == null) {
-            logger.info("Classic UI: no '" + CLASSIC_ORIGINAL_MOD_ID
-                + "' art pack found; using FreeCol fallback art.");
-            return mods;
+    private List<FreeColModFile> withClassicPacks(List<FreeColModFile> mods) {
+        List<FreeColModFile> ret = mods;
+        for (String id : CLASSIC_PACK_IDS) {
+            final FreeColModFile pack = FreeColModFile.getFreeColModFile(id);
+            if (pack == null) {
+                logger.info("Classic UI: no '" + id + "' pack found; "
+                    + (CLASSIC_ORIGINAL_MOD_ID.equals(id)
+                        ? "using FreeCol fallback art."
+                        : "classic music silent."));
+                continue;
+            }
+            if (ret.stream().anyMatch(m -> id.equals(m.getId()))) {
+                continue; // already active via the user's mod options
+            }
+            if (ret == mods) ret = new ArrayList<>(mods);
+            ret.add(pack); // appended last -> overrides earlier mappings
+            logger.info("Classic UI: overlaying '" + id + "' pack ("
+                + ret.size() + " active mods).");
         }
-        if (mods.stream().anyMatch(m ->
-                CLASSIC_ORIGINAL_MOD_ID.equals(m.getId()))) {
-            return mods; // already active via the user's mod options
-        }
-        final List<FreeColModFile> ret = new ArrayList<>(mods);
-        ret.add(pack); // appended last -> overrides earlier mappings
-        logger.info("Classic UI: overlaying '" + CLASSIC_ORIGINAL_MOD_ID
-            + "' original-art pack (" + ret.size() + " active mods).");
         return ret;
     }
 

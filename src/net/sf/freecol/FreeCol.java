@@ -27,6 +27,7 @@ import static net.sf.freecol.common.util.StringUtils.upCase;
 
 import java.awt.Dimension;
 import java.awt.GraphicsDevice;
+import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -242,6 +243,12 @@ public final class FreeCol {
 
     /** A stream to get the splash image from. */
     private static InputStream splashStream;
+
+    /**
+     * Whether the splash picture was chosen on the command line
+     * ({@code --splash}); the classic UI replaces only the default one.
+     */
+    private static boolean splashExplicit = false;
 
     /** The TotalConversion in play, defaults to "default". */
     private static String tc = null;
@@ -888,6 +895,7 @@ public final class FreeCol {
                 try {
                     InputStream fis = Files.newInputStream(Paths.get(splash));
                     splashStream = fis;
+                    splashExplicit = true;
                 } catch (IOException ioe) {
                     gripe(StringTemplate.template("cli.error.splash")
                         .addName("%name%", splash));
@@ -1628,6 +1636,7 @@ public final class FreeCol {
     }
 
     private static SplashScreen createSplashScreen() {
+        if (classic && !splashExplicit) return createClassicSplashScreen();
         SplashScreen splashScreen = null;
         if (splashStream != null) {
             try {
@@ -1639,6 +1648,49 @@ public final class FreeCol {
             }
         }
         return splashScreen;
+    }
+
+    /**
+     * The start-up screen of the classic UI ({@code --classic} without an
+     * explicit {@code --splash}).
+     *
+     * <p>FreeCol's default splash ({@code splash.jpg}: the FreeCol logo and
+     * "an open source Colonization game") sat in a box on the Windows desktop
+     * for the whole ~15 s pack load before the borderless full-screen title
+     * appeared, which breaks both "clean full screen like DOSBox" and "you do
+     * not notice you are in FreeCol".  Instead:
+     * <ul>
+     *   <li>full screen (no positive {@code --windowsize}, the same test as
+     *       {@code ClassicGUI.startGUI}): a black borderless window over the
+     *       whole default monitor -- the monitor the main window opens on --
+     *       which {@code FreeColClient} disposes only <em>after</em> the main
+     *       window is up, so the screen goes black at once and stays black
+     *       until the title picture replaces it;</li>
+     *   <li>{@code --no-splash}, or an explicit window size (a developer
+     *       run): nothing.</li>
+     * </ul>
+     * The default picture stream opened at start-up is closed unused.
+     *
+     * @return The black screen, already visible, or null.
+     */
+    private static SplashScreen createClassicSplashScreen() {
+        if (splashStream == null) return null;      // --no-splash
+        try {
+            splashStream.close();
+        } catch (IOException ioe) {} // Unused, nothing to lose
+        splashStream = null;
+        if (windowSize != null && windowSize.width > 0
+            && windowSize.height > 0) return null;
+        try {
+            final SplashScreen black = SplashScreen.blackFullScreen(
+                GraphicsEnvironment.getLocalGraphicsEnvironment()
+                    .getDefaultScreenDevice());
+            black.setVisible(true);
+            return black;
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Classic start-up screen failure", e);
+            return null;
+        }
     }
 
     /**

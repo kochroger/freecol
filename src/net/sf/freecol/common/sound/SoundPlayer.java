@@ -79,6 +79,25 @@ public final class SoundPlayer {
          */
         private volatile boolean playDone = true;
 
+        /**
+         * Counts the calls to {@link #stopPlaying}.  Incremented under the
+         * playList lock; volatile so the playing loop sees it at once.
+         *
+         * Why: {@code playDone} alone loses a stop that arrives after a
+         * file was dequeued but before {@link #playSound} cleared the flag
+         * (it does so only after opening the line), and that file then
+         * plays to its end.  For a short effect this is harmless, but a
+         * music track runs for minutes -- the Classic UI's "back to the
+         * title piece" switch can land in exactly that window.
+         */
+        private volatile int stopCount = 0;
+
+        /**
+         * The {@link #stopCount} seen when the file being played was
+         * dequeued.  Only touched by this thread.
+         */
+        private int playingStopCount = 0;
+
 
         /**
          * Create a new sound player thread.
@@ -93,6 +112,7 @@ public final class SoundPlayer {
         public void stopPlaying() {
             this.playDone = true;
             synchronized (this.playList) {
+                this.stopCount++;
                 this.playList.clear();
             }
         }
@@ -115,6 +135,9 @@ public final class SoundPlayer {
          */
         private File remove() {
             synchronized (this.playList) {
+                // Tie the file to the current stop generation, atomically
+                // with the dequeue (see stopCount).
+                this.playingStopCount = this.stopCount;
                 return (this.playList.isEmpty()) ? null
                     : this.playList.remove(0);
             }
@@ -147,7 +170,9 @@ public final class SoundPlayer {
                 try {
                     this.playDone = false;
                     int rd;
-                    while (!this.playDone && (rd = in.read(data)) > 0) {
+                    while (!this.playDone
+                        && this.playingStopCount == this.stopCount
+                        && (rd = in.read(data)) > 0) {
                         line.write(data, 0, rd);
                     }
                     ret = true;
@@ -211,7 +236,11 @@ public final class SoundPlayer {
     /** The subthread that actually writes sound data to the mixer. */
     private final SoundPlayerThread soundPlayerThread;
     
-    private List<File> defaultPlayList = new ArrayList<>();
+    /**
+     * Played (shuffled) whenever the queue runs empty.  Volatile because
+     * it is replaced on the EDT and read by the player thread.
+     */
+    private volatile List<File> defaultPlayList = new ArrayList<>();
     
     private PercentageOption volumeOption;
 

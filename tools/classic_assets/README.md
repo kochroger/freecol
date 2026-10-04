@@ -95,6 +95,47 @@ The terrain block in `aliases.properties` is the worked example: all base land,
 forest (rendered as their base terrain until per-tile tree overlays exist), and
 water/arctic/hills/mountains tile types are mapped there.
 
+## Original soundtrack (music)
+
+The Steam release ships the original soundtrack as 26 MP3s under
+`Bonus Content\Soundtrack\`. FreeCol can only play OGG Vorbis (bundled
+jorbis) and what `javax.sound` reads natively (PCM WAV/AIFF/AU) — there is no
+MP3 decoder in `jars/`, and none is added. `convert-soundtrack.ps1` therefore
+uses the MP3 decoder that is already part of Windows (Media Foundation, via the
+WinRT `MediaTranscoder` API) to write plain PCM WAV. No download, no install.
+
+```
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\classic_assets\convert-soundtrack.ps1
+```
+
+- Run it with **Windows PowerShell 5.1** (`powershell.exe`), not `pwsh` 7, which
+  cannot load WinRT types.
+- `-Source` defaults to
+  `C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Colonization\Bonus Content\Soundtrack`;
+  `-Target` defaults to `data\mods\classic_music\resources\music\` in this
+  repository. `-Force` re-converts everything.
+- Output: `track01.wav` … `track26.wav` (`trackNN` = Steam "Track N"), PCM
+  signed 16-bit little-endian, 44100 Hz, stereo, ~328 MB / 32:30 in total.
+  Durations match the MP3s to the second.
+- Idempotent: tracks whose WAV is newer than the MP3 are skipped; each file is
+  written as `*.wav.part` and renamed only after success, so an aborted run
+  never leaves a truncated WAV behind. The script ends with a format/duration
+  summary and exits non-zero if any track failed.
+- `data/mods/classic_music/` is **git-ignored** (copyrighted music). It is a
+  separate folder from `classic_original/` because `ant classic-assets`
+  regenerates that one from scratch.
+- The script also writes the pack descriptor two levels above `-Target`
+  (the pack root, so `-Target` must end in `resources\music`): `mod.xml`
+  (`<mod id="classic_music"/>`) and `resources.properties`, **each only if
+  missing**. The latter holds the one line that picks the title piece,
+  `sound.classic.music.title=resources/music/track01.wav`, and
+  `sound.classic.music.tracks=resources/music`. Re-running the converter
+  therefore keeps a hand-edited title line; `-TitleTrack N` rewrites just that
+  line on purpose (e.g. `-TitleTrack 5` → `track05.wav`). The script ends by
+  printing the current title line. How the game plays the pack:
+  `src/net/sf/freecol/client/gui/classic/README.md`, "Music (original
+  soundtrack)".
+
 ## Runtime (in-game) extraction — future
 
 Because the decoder is plain Java with no external dependencies, the same

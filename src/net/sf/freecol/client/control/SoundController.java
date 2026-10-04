@@ -88,6 +88,17 @@ public class SoundController {
     }
 
     /**
+     * Get the music player, for subclasses that drive music themselves
+     * (the Classic UI's ClassicSoundController plays the original
+     * soundtrack and must never reach {@link #playMusic}'s FreeCol keys).
+     *
+     * @return The music {@code SoundPlayer}, or null if sound is disabled.
+     */
+    protected final SoundPlayer getMusicPlayer() {
+        return this.musicPlayer;
+    }
+
+    /**
      * Play as a sound effect.
      *
      * @param sound The sound resource to play, or if null stop playing.

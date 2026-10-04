@@ -1532,9 +1532,12 @@ differing pixels.
     `(62,48,196,104)`.
   - Two themes: `TITLE` and `GAME` (the colours measured from 054/055).
     `paintDropdown` (the SPIEL menu, 053) is ready but not wired yet.
-- **Title line:** `{COLONIZATION} Version 2.26 -- 19-Sept-94`. The version is
-  **2.26**, not 1.26: VICEROY.EXE holds only 2.26, and the capture's pixels
-  beside the cursor fit '2'. `{..}` marks the gold word.
+- **Title line:** `{COLONIZATION} Version 2026` -- the owner's wording
+  (2026-10-04), deliberately not the original's. The original reads
+  `{COLONIZATION} Version 2.26 -- 19-Sept-94` (GAME.TXT:42, filled in by
+  VICEROY.EXE, which holds only 2.26; the capture's pixels beside the cursor
+  fit '2'). Same font, colours and place: `{..}` marks the gold word, the
+  rest is the line's green.
 - **Fonts** (`ClassicFont`):
   - The original `.FF` bitmap fonts are converted by `ant classic-assets`
     (`FfDecoder`). Each becomes a 2-bit palette atlas `ff/NAME.FF.png` plus a
@@ -1581,11 +1584,13 @@ differing pixels.
     the title; otherwise the BUSY box (which ignores all input) would stay up
     forever.
   - Keys: Up/Down (and keypad), Home/End, Enter. PgUp/PgDn page in the load
-    box and jump to the first/last item on the title. Esc does nothing on the
-    title, as in the original. Hover moves the bar.
+    box and jump to the first/last item on the title. Hover moves the bar.
+    Esc on the title opens the quit box (see "Full screen, Alt+Enter and
+    exit" below); the original ignores it there.
 - **Lifecycle overrides:**
-  - `showMainPanel` (`teardownInGame` + live title).
-  - `showMainTitle` (also plays the intro music).
+  - `showMainPanel` (`teardownInGame` + live title + switch to the original
+    title piece; see "Music (original soundtrack)" below).
+  - `showMainTitle` (→ `showMainPanel`; no FreeCol intro music).
   - `closeMainPanel` (→ PASSIVE).
   - `removeInGameComponents` and `prepareShowingMainMenu` (in-game new and
     load).
@@ -1617,11 +1622,238 @@ differing pixels.
     draws with Swing fonts. The original shows the Hall of Fame full-screen in
     its bitmap font; the follow-up is another mode of the title canvas using
     `ClassicFont.TINY` and `ClassicMenuBox`.
-  - The window is decorated and titled "FreeCol — Classic UI (experimental)"
-    (the live-test harness finds it by that title); a borderless full-screen
-    option would make ×5 reliable on 1080-px screens.
+  - The window is still titled "FreeCol — Classic UI (experimental)" (the
+    live-test harness finds it by that title); it only shows in the taskbar
+    and Alt+Tab now that the window is borderless full screen.
   - Only the title panel draws the original arrow; the in-game HUD still
     shows the system cursor.
+
+## Music (original soundtrack) (`ClassicSoundController`)
+
+The owner wants the original 1994 music and no FreeCol music at all; the
+title piece must carry on into the game instead of being cut off at game
+start. Sound *effects* stay FreeCol's for now. (2026-10-04)
+
+- **The pack.** `data/mods/classic_music/` (mod id `classic_music`),
+  git-ignored (`.gitignore:15`; copyrighted):
+  ```
+  mod.xml                     <mod id="classic_music"/>
+  resources.properties        the title line + the tracks directory
+  resources/music/track01.wav … track26.wav
+  ```
+  `trackNN.wav` = Steam "Sid Meier's Colonization Soundtrack - Track N.mp3",
+  converted to plain 16-bit PCM WAV, 44.1 kHz stereo (≈328 MB, 32:30). MP3
+  cannot be used directly: neither the JDK nor `jars/` has an MP3 decoder
+  (`SoundPlayer.getAudioInputStream` knows OGG via jorbis and what
+  `javax.sound` reads). The names must be lowercase `.wav`, because a
+  directory resource only accepts `.ogg`/`.wav` (case-sensitive,
+  AudioResource.java:61), and **one** undecodable file there drops the whole
+  directory resource (AudioResource.java:62-66). It is a separate pack, not
+  part of `classic_original/`, because `ant classic-assets` deletes and
+  regenerates that one (ClassicAssetConverter.java:94).
+- **Creating / re-creating it** (Windows PowerShell 5.1, nothing downloaded):
+  ```
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\classic_assets\convert-soundtrack.ps1
+  ```
+  The script converts the MP3s with Windows' own Media Foundation decoder
+  (skipping up-to-date WAVs) and writes `mod.xml` and `resources.properties`
+  only if they are missing, so a re-run never undoes the owner's title choice.
+  Details: `tools/classic_assets/README.md`.
+- **Choosing the title piece — the ONE line.** In
+  `data/mods/classic_music/resources.properties`:
+  ```
+  sound.classic.music.title=resources/music/track01.wav
+  ```
+  Change the number (two digits, Steam "Track N"), save, restart the game.
+  Or let the script write it:
+  `convert-soundtrack.ps1 -TitleTrack 5`. Default: Track 1 (the original's
+  title theme is not identified yet; the owner picks it by ear). The other
+  key, `sound.classic.music.tracks=resources/music`, names the directory of
+  all tracks; the in-game list is "all tracks minus the title piece". A title
+  line naming a missing file falls back to the first track.
+- **Loading.** `FreeColClient.withClassicPacks` (FreeColClient.java:398)
+  overlays every present pack of `CLASSIC_PACK_IDS` (:371, `classic_original`
+  then `classic_music`) last in the mod list under `--classic`, before the
+  sound controller is created (:268-271). Absent, it logs "no 'classic_music'
+  pack found; classic music silent." Mapping the pack opens the 27 WAV headers
+  once at start-up (≈30 ms); playback streams from disk in 16 KB chunks, so the
+  size costs no heap.
+- **Why a `SoundController` subclass, not a `GUI.playSound` override.** The GUI
+  is not a complete choke point: `PreGameController.startGameInternal`
+  (PreGameController.java:294-300) and `MapEditorController` (:179-183) set
+  FreeCol's default playlist directly on the `SoundController`, and
+  `GUI.playSound` (GUI.java:1019-1025) sends a key to the music player only if
+  its resource says `.type=music` — the 19thCenturyNations intros have no type
+  and would play as "effects". `ClassicSoundController` (instantiated at
+  FreeColClient.java:268-271 under `--classic`) overrides the only two music
+  entry points, `playMusic` and `setDefaultPlaylist`, and never calls their
+  `super`; `playSound` diverts the music family by key prefix (`sound.intro.`,
+  `sound.anthem.`, `sound.event.meet.`, `sound.music.`,
+  `sound.event.fountainOfYouth`). FreeCol music is unreachable by
+  construction; effects (and `playSound(null)` = stop the effect) are
+  untouched.
+- **Behaviour** (a small state machine, `Jukebox`: SILENT / TITLE / GAME,
+  driven purely through the player's default playlist, which
+  `SoundPlayer.run` loops shuffled whenever its queue is empty):
+  - *Title screen* — `ClassicGUI.showMainPanel` → `playTitleMusic()`: the list
+    becomes the title piece alone, then `stop()`; the piece starts at once and
+    loops while the menu is up. Every way to the title ends in `showMainPanel`
+    (start-up, back to the title, in-game "Neues Spiel", defeat/quit, failed
+    starts and loads), and re-showing the title does not restart the piece.
+  - *Game start* (new game, load from the title, in-game load) — FreeCol's
+    nation intro `sound.intro.<nation>` (PreGameController.java:295) is read
+    as "a game has started": the list becomes the 25 other tracks **without**
+    a stop, so the title piece plays to its natural end and then the in-game
+    tracks cycle (shuffled, refilled forever). An in-game load keeps the
+    current track. FreeCol's `setDefaultPlaylist` right after is ignored.
+  - *Back to the title* — the in-game track is cut, the title piece starts.
+  - *`--fast` / a save on the command line* — the title screen never shows
+    (FreeCol's `sound.intro.general` is ignored), so the in-game list starts
+    directly.
+  - *Anthems, first contact, fountain of youth, map editor, the options
+    dialog's test sound, `playMusic(null)`* — ignored; the soundtrack runs on.
+  - *No pack, broken pack, or sound disabled* — silence, never FreeCol music.
+- **Core changes (minimal, all behaviour-preserving for FreeCol):**
+  `SoundController.getMusicPlayer()` (protected, SoundController.java:97);
+  `SoundPlayer.defaultPlayList` is now `volatile` (SoundPlayer.java:243;
+  written on the EDT, read by the player thread); and a stop generation
+  counter (`stopCount`, SoundPlayer.java:93/115/140/174) closes a lost-stop
+  race: `playDone` was cleared only after a dequeued file's line was open, so
+  a `stop()` landing in between was lost and that file played to its end —
+  for "back to the title" that would be a whole in-game track.
+- **Tests.** `ClassicSoundControllerTest` (no audio device needed): music-key
+  routing, title/in-game selection, and the title → game → title transitions
+  against a recording player.
+- **Open / not yet:**
+  - Which Steam track is the original's title theme (default Track 1).
+    **To confirm with the owner by ear:** before this change the piece
+    heard "ganz zu Beginn" (the one he asked to keep running) was FreeCol's
+    own `data/base/resources/sound/intro.ogg` (`sound.intro.general`,
+    data/base/resources.properties:267-268) — the classic UI had no music of
+    its own then. If he means that piece, it is a FreeCol composition, which
+    conflicts with "keine FreeCol-Musik"; he decides. The Steam files are
+    album tracks 2..27 of 27 (ID3), so album track 1 is not among them.
+  - The in-game order is shuffled on every refill (SoundPlayer.java:211), so a
+    track can repeat across a cycle boundary; whether the original plays
+    specific pieces per situation (Europe, war, …) is not modelled.
+  - The title piece loops on the title screen; if the original plays it
+    once, `Jukebox.title` should queue it once instead.
+  - The classic UI has no options dialog, so the music volume stays
+    FreeCol's `MUSIC_VOLUME` (default 100); use the Windows volume mixer.
+
+## Full screen, Alt+Enter and exit (`ClassicGUI`)
+
+The owner wants the game to look like the original running full screen in
+DOSBox: no window chrome anywhere. (2026-10-04)
+
+- **Default = borderless full screen.** Without an explicit `--windowsize`,
+  `startGUI` shows the main `JFrame` undecorated with bounds = the *whole*
+  monitor (`GraphicsConfiguration.getBounds()`, taskbar included) —
+  `applyFrameMode(true)`. On the owner's 1920×1200 (16:10, 100 % scaling)
+  monitor the 320×200 title canvas fills the screen at exactly ×6, no black
+  bars: the panels take their whole scale from the content pane's size, and
+  undecorated that is the full monitor (no insets, no menu bar on the
+  title). In game the menu bar keeps its strip at the top as before.
+- **Not exclusive full screen** (`GraphicsDevice.setFullScreenWindow`): the
+  classic screens are separate top-level windows plus modal popups, and on
+  Windows an exclusive window minimises or flickers as soon as another window
+  takes focus, Alt+Tab misbehaves and a modal dialog can hide behind it. A
+  borderless window is an ordinary window to the OS. Black stays the
+  letterbox colour (the frame and its root pane are black too, so a switch
+  never flashes grey).
+- **With `--windowsize WxH`** the window opens decorated at that size, as
+  before.
+- **Start-up screen = black, not FreeCol's splash.** Under `--classic`
+  without an explicit `--splash`, FreeCol's `splash.jpg` (FreeCol logo, "an
+  open source Colonization game", in a box on the desktop for the whole
+  ~15 s pack load) is replaced by a black borderless window over the whole
+  default monitor (`FreeCol.createClassicSplashScreen`,
+  `SplashScreen.blackFullScreen`). `FreeColClient` disposes it only *after*
+  `startGUI` has shown the main window (a dispose queued behind `startGUI`'s
+  own `invokeLater`), so the screen goes black at the double click and stays
+  black until the title picture replaces it — the desktop never shows in
+  between. It also keeps the process in the foreground during the load, so
+  the main window may take the foreground (`toFront` + `requestFocus` right
+  after the first show), which is what makes Windows hide the taskbar behind
+  it. `--no-splash` or a positive `--windowsize`: no start-up screen at all.
+- **Alt+Enter** toggles borderless full screen ⇄ a decorated window, as in
+  DOSBox — on the title, in game and in every classic sub-window. It is a
+  `KeyEventDispatcher` (`FrameKeys`), so it wins over the panels' own Enter
+  keys and over FreeCol's "alt ENTER" accelerator of the reused menu item
+  (`changeWindowedModeAction`); that menu item, when clicked, toggles too
+  (`changeWindowedMode`/`isWindowed` are overridden). One toggle per press:
+  auto-repeat and the matching typed/released Enter are swallowed (a press
+  more than 1.1 s after the last one counts as new, because the release can
+  be lost while the window is re-created).
+  - The window: the bounds (and maximised state) the player last left it
+    with; the first time the largest whole multiple of 320×200 that fits the
+    work area (×5 = 1600×1000 content here), centred.
+  - How: `setUndecorated` only works on a non-displayable frame, so the frame
+    is `dispose()`d and shown again. The component tree (content pane, menu
+    bar, key bindings — re-registered by `addNotify`) and the frame object
+    survive; focus goes back to the component that had it.
+  - Open sub-windows (colony, build queue, Europe, report) are re-framed for
+    the new mode; ones the player closed via their own close box are left
+    alone (`isDisplayable()`).
+  - Ignored (logged) while a modal popup is up: disposing a window disposes
+    its owned windows, which would silently dismiss the question.
+- **No chrome anywhere** — one helper, `ClassicGUI.prepareChildWindow(window,
+  ref, fullScreenSized)`, frames every window the classic UI opens; the mode
+  is read off `ref`'s decoration (`isBorderless`), so `ClassicDialog` needs no
+  GUI reference.
+  - Full screen: the 320×200 screens (colony, build queue, Europe, all
+    reports incl. high scores) are undecorated and cover `ref`'s bounds
+    exactly (×6 here). Popups are undecorated and centred: `ClassicDialog`,
+    and the `modalChoiceDialog` list, now built by hand (with a wood line
+    border) because `JOptionPane.showInputDialog` returns an
+    already-displayable dialog whose decoration can no longer change. The
+    Europe screen's recruit/train/buy lists use the same list
+    (`ClassicGUI.chooseFromList`, called from `ClassicEuropePanel.choose`).
+  - Windowed: today's behaviour (decorated, packed, centred).
+  - Popups are owned by the classic screen in front (`dialogOwner`), not
+    always the main frame: on Windows raising an owned window raises its
+    owner beneath it, which would bury a full-screen colony screen under
+    the map. The active window is only a hint (searched with its owner
+    chain — a just-disposed popup still names its screen); activation is
+    asynchronous and null while another app is in front, so the GUI's own
+    state decides otherwise: the open screens in the fixed order build
+    queue, colony, Europe, report; the main frame only when none is open
+    (or, windowed, when the map itself is the active window).
+- **Exits without a title bar:**
+  - **Alt+F4** (and the windowed X, and any `WM_CLOSE`) → `WINDOW_CLOSING`
+    → `ClassicGUI.closeRequested`; the main frame is `DO_NOTHING_ON_CLOSE`
+    (it was `EXIT_ON_CLOSE`, which in borderless full screen made one Alt+F4
+    slip end the game unsaved and skip `FreeColClient.quit`). Like FreeCol's
+    own `WindowedFrameListener`, it asks first: in game (or map editor)
+    `askToQuit` — the same classic popup as Spiel → Beenden; on the live
+    title menu the "Colonization beenden?" box (`offerQuit`, Nein barred),
+    as Esc opens it; on the passive backdrop or the busy box (nothing at
+    stake yet) `FreeColClient.quit()` directly. `FrameKeys` posts the
+    `WINDOW_CLOSING` itself, since AWT hands system keys to Java first; a
+    second, native close while the question is open is ignored. In a
+    sub-window or popup Alt+F4 closes just that one.
+  - **In game:** Spiel → Beenden (FreeCol's `QuitAction` → `askToQuit` →
+    classic confirm popup → `FreeColClient.quit`).
+  - **On the title: Esc** opens the quit box "Colonization beenden?" / Ja /
+    Nein (`Mode.QUIT`, `paintQuitBox`), drawn with `ClassicMenuBox` in the
+    title style and modelled on the original's own exit question (GAME.TXT
+    `@DOS`: "Abbrechen zu DOS?" Ja/Nein, `@default=2`, so **Nein** is barred
+    first). Up/Down, Enter, hover and click; Esc again or a right click =
+    Nein. Ja → `FreeColClient.quit()` — FreeCol's normal quit path (stop
+    server, prune autosaves, `quitGUI`, `FreeCol.quit(0)`), the one FreeCol's
+    own window listener uses when no game runs. The box is sized to its
+    prompt (interior at least 80 px; `@DOS` has no `@width`), centred, over
+    the bare title picture like the load box.
+- **Open / not yet:**
+  - HiDPI: the canvases pick their whole scale in *logical* pixels, so at a
+    Windows scaling other than 100 % (e.g. 125 % on 1920×1200 → 1536×960
+    logical → ×4 = 1280×800) black bars return. The owner's monitor runs at
+    100 %; scaling in device pixels would fix it for others.
+  - Each full-screen sub-window is its own top-level window with its own
+    taskbar button (a `JFrame` cannot have an owner); Alt+Tab lists them.
+  - The reused menu item's check mark does not follow the mode
+    (`SelectableOptionAction` reads a client option this action does not
+    have).
 
 ## Seam facts (for the remaining/next work)
 
@@ -1652,7 +1884,11 @@ frontmost with a minimize(6)→restore(9)→`SetForegroundWindow` bounce (a plai
 `SendKeys`/`SetCursorPos`/`mouse_event` only while frontmost; screenshot via
 `CopyFromScreen` over `GetWindowRect`. Note `$pid` is a read-only automatic
 variable — use another name. **Kill the game process as soon as verification is
-done** (the window stealing foreground interrupts parallel work).
+done** (the window stealing foreground interrupts parallel work). A `WM_CLOSE`
+no longer exits the classic UI: it asks first (see "Exits without a title
+bar"). Under `--classic` the first top-level window is the untitled black
+start-up screen, so during the load `MainWindowHandle` can be that window;
+wait for the handle whose title is the main window's before bouncing it.
 
 Hard-won details, each of which silently wastes a run:
 
