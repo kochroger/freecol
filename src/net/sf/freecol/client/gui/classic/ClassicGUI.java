@@ -86,6 +86,7 @@ import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.StringTemplate;
 import net.sf.freecol.common.model.Tile;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.option.MapGeneratorOptions;
 import net.sf.freecol.common.resources.ImageCache;
@@ -983,7 +984,11 @@ public class ClassicGUI extends GUI {
                     showMainPanel(Messages.message("classic.mainMenu.startFailed"));
                     return;
                 }
-                // Square topology: map size and land shares of the original.
+                // A new game is played on the original's square map, with
+                // its map size and land shares, unless -Dfreecol.topology
+                // says otherwise.  The server's new map takes the topology
+                // in use, so set it before the server starts.
+                Topology.setCurrent(Topology.forNewGame(Topology.SQUARE));
                 MapGeneratorOptions.applyTopologyDefaults(
                     spec.getMapGeneratorOptions());
                 if (setup.playerName != null) {

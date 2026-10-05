@@ -26,6 +26,7 @@ import java.util.Random;
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Tile;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.server.model.ServerGame;
 
 
@@ -75,6 +76,8 @@ public class NewEmptyMapAction extends MapboardAction {
         fcc.getFreeColServer().setGame(game);
         fcc.setGame(game);
         
+        // The map editor draws isometric maps only.
+        Topology.setCurrent(Topology.forNewGame(Topology.ISOMETRIC));
         final Map map = fcc.getFreeColServer().generateEmptyMap(size.width, size.height);
         final Tile tile = map.getTile(size.width/2, size.height/2);
         getGUI().removeInGameComponents();

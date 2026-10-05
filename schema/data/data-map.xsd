@@ -39,8 +39,17 @@
       <xs:attribute name="layer" type="MapLayerType" use="required"/>
       <xs:attribute name="minimumLatitude" type="xs:int" use="optional" />
       <xs:attribute name="maximumLatitude" type="xs:int" use="optional" />
+      <!-- Absent in maps saved before the topology was stored: isometric. -->
+      <xs:attribute name="topology" type="MapTopologyType" use="optional"/>
      </xs:complexType>
   </xs:element>
+
+  <xs:simpleType name="MapTopologyType">
+    <xs:restriction base="xs:token">
+      <xs:enumeration value="isometric"/>
+      <xs:enumeration value="square"/>
+    </xs:restriction>
+  </xs:simpleType>
 
   <xs:simpleType name="MapLayerType">
     <xs:restriction base="xs:token">

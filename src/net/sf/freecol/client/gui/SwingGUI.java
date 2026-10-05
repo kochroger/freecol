@@ -116,6 +116,7 @@ import net.sf.freecol.common.model.Settlement;
 import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.StringTemplate;
 import net.sf.freecol.common.model.Tile;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.TradeRoute;
 import net.sf.freecol.common.model.TypeCountMap;
 import net.sf.freecol.common.model.Unit;
@@ -701,7 +702,24 @@ public class SwingGUI extends GUI {
             changeMapScale(fixedImageLibrary.getScaleFactor());
         }
     }
-   
+
+    /**
+     * Warn if the map in play is not isometric.  The map viewer, the
+     * minimap and the colony panel draw isometric maps only, so a square
+     * map (a game of the Classic UI) is shown distorted.
+     */
+    private void warnIfNotIsometric() {
+        final Game game = getGame();
+        final net.sf.freecol.common.model.Map map
+            = (game == null) ? null : game.getMap();
+        if (map != null && map.getTopology() != Topology.ISOMETRIC) {
+            logger.warning("This map uses the " + map.getTopology()
+                + " topology, but FreeCol's standard GUI can only draw"
+                + " isometric maps, so it will look wrong.  Play it with"
+                + " the Classic UI (--classic) instead.");
+        }
+    }
+
 
     // Implement GUI
 
@@ -812,6 +830,7 @@ public class SwingGUI extends GUI {
      */
     @Override
     public void reconnectGUI(Unit active, Tile tile) {
+        warnIfNotIsometric();
         this.canvas.requestFocusInWindow();
         this.canvas.initializeInGame();
         closeMenus();
@@ -920,6 +939,7 @@ public class SwingGUI extends GUI {
      */
     @Override
     public void startMapEditorGUI() {
+        warnIfNotIsometric();
         resetMapZoom(); // Reset zoom to the default
         mapViewer.getMapViewerState().setActiveUnit(null);
         this.canvas.startMapEditorGUI();

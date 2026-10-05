@@ -64,6 +64,7 @@ import net.sf.freecol.common.model.NationType;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.Tile;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.common.option.GameOptions;
@@ -122,9 +123,17 @@ public class SimpleMapGenerator implements MapGenerator {
      */
     @Override
     public Map generateMap(Game game, Map importMap, boolean generateEuropeanPlayerUnits, LogBuilder lb) {
-        // The land map is grown before the Map exists, so it relies on
-        // the JVM wide Topology.current().  FIXME: a topology stored
-        // with the map generator options would have to be applied here.
+        // The land map is grown before the Map exists, under the JVM
+        // wide Topology.current(), and the new Map takes that topology.
+        // A new game sets it beforehand.  An imported map was read
+        // under its own topology, and stays authoritative.
+        if (importMap != null
+            && importMap.getTopology() != Topology.current()) {
+            logger.warning("Import map " + importMap.getId() + " is "
+                + importMap.getTopology() + " but " + Topology.current()
+                + " is in use, switching to the import's.");
+            Topology.setCurrent(importMap.getTopology());
+        }
         final LandMap landMap = (importMap != null)
             ? new LandMap(importMap, this.cache)
             : new LandMap(game.getMapGeneratorOptions(), this.cache);

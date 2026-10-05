@@ -83,6 +83,7 @@ import net.sf.freecol.common.model.Constants.IntegrityType;
 import net.sf.freecol.common.model.NationOptions.Advantages;
 import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.StringTemplate;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.option.MapGeneratorOptions;
 import net.sf.freecol.common.option.OptionGroup;
 import net.sf.freecol.common.util.LogBuilder;
@@ -1006,7 +1007,10 @@ public final class FreeCol {
     /**
      * Get the specification from the currently selected rules.
      * Used for new games only (fast, debug and stand-alone server
-     * starts), so the map options are adjusted to the map topology.
+     * starts), so it also sets the map topology of the new game and
+     * adjusts the map options to it: the Classic UI plays the
+     * original's square map, FreeCol's standard GUI the isometric one
+     * it can draw, unless {@code -Dfreecol.topology} says otherwise.
      *
      * @return A {@code Specification}, quits on error.
      */
@@ -1017,6 +1021,8 @@ public final class FreeCol {
             fatal(StringTemplate.template("cli.error.badTC")
                 .addName("%tc%", getRules()));
         }
+        Topology.setCurrent(Topology.forNewGame((classic) ? Topology.SQUARE
+                                                : Topology.ISOMETRIC));
         MapGeneratorOptions.applyTopologyDefaults(spec.getMapGeneratorOptions());
         return spec;
     }

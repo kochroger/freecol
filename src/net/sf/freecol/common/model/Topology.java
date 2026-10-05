@@ -38,17 +38,37 @@ import static net.sf.freecol.common.util.CollectionUtils.*;
  * in "king moves", so the game rules do not change, only the mapping
  * from map coordinates to neighbours.
  *
- * The topology is a JVM wide setting, initialized from the system
- * property {@value #PROPERTY} ("square" selects SQUARE, anything else
- * ISOMETRIC).  It has to be in place before a map is generated or
- * read, because the land generator ({@link LandMap}) runs before any
- * {@code Map} exists, and the client builds its own copy of the game.
+ * Each {@link Map} stores its topology ({@link Map#getTopology}), and
+ * saved games and maps carry it as the map's "topology" attribute.  A
+ * map without the attribute (an old save, a bundled .fsm map) is
+ * isometric.
  *
- * FIXME: the topology is not yet stored with the map or the saved
- * game.  Until it is, a game must be loaded under the topology it was
- * created with.  Under the wrong one
- * {@link TileImprovement#checkIntegrity} silently removes every river
- * connection that does not match a neighbour.
+ * The code that steps between tiles, though, does not see a map:
+ * {@link Direction#step}, {@code Map.Position}, the land generator
+ * ({@link LandMap}, which runs before any {@code Map} exists) and the
+ * flood fills.  So the topology in use is also a JVM wide setting,
+ * {@link #current}, kept equal to the topology of the map in play:
+ * <ul>
+ *   <li>Reading a map sets it from the map, before any tile is read,
+ *       so a save is always interpreted the way it was made.  This
+ *       covers loading a game on the server, the client's copy of the
+ *       game, the map editor and imported maps.</li>
+ *   <li>A new map is stamped with the topology in use, so the code
+ *       that starts a new game sets it before the map is generated:
+ *       {@link #SQUARE} for the Classic UI, {@link #ISOMETRIC} for
+ *       FreeCol's standard GUI and the map editor, which can only draw
+ *       isometric maps.</li>
+ *   <li>{@link Map#checkIntegrity} checks that the two agree.  Under
+ *       the wrong topology {@link TileImprovement#checkIntegrity} would
+ *       remove every river connection that does not match a
+ *       neighbour, so a mismatch is logged as severe and, when fixing,
+ *       resolved in favour of the map.</li>
+ * </ul>
+ *
+ * The system property {@value #PROPERTY} ("square" or "isometric")
+ * overrides the topology of new games, for developers and tests, and
+ * is the topology a JVM starts with.  It never overrides the topology
+ * stored in a map.
  */
 public enum Topology {
 
@@ -190,7 +210,10 @@ public enum Topology {
 
     private static final Logger logger = Logger.getLogger(Topology.class.getName());
 
-    /** The system property that selects the topology. */
+    /**
+     * The system property that overrides the topology of new games
+     * ("square" or "isometric").
+     */
     public static final String PROPERTY = "freecol.topology";
 
     /** Square step increments, indexed by {@code Direction.ordinal()}. */
@@ -207,9 +230,12 @@ public enum Topology {
         = makeUnmodifiableList(Direction.NE, Direction.SE,
                                Direction.SW, Direction.NW);
 
-    /** The topology in use. */
-    private static volatile Topology current
+    /** The topology the {@value #PROPERTY} property asks for, or null. */
+    private static final Topology OVERRIDE
         = fromProperty(System.getProperty(PROPERTY));
+
+    /** The topology in use, that of the map in play. */
+    private static volatile Topology current = getDefault();
 
 
     /**
@@ -222,27 +248,63 @@ public enum Topology {
     }
 
     /**
-     * Set the topology in use.  Public for the test suite, which must
-     * restore the previous value when done.
+     * Set the topology in use.  Called when a map is read, before a new
+     * map is generated, and by tests, which must restore the previous
+     * value when done.
      *
      * @param topology The new {@code Topology}.
      */
     public static void setCurrent(Topology topology) {
+        if (topology == null) {
+            throw new IllegalArgumentException("Null topology");
+        }
+        final Topology old = current;
         current = topology;
+        if (old != topology) {
+            logger.info("Map topology now " + topology + " (was " + old
+                + ").");
+        }
+    }
+
+    /**
+     * Get the topology a JVM starts with: the one the {@value #PROPERTY}
+     * property asks for, else {@link #ISOMETRIC}.
+     *
+     * @return The default {@code Topology}.
+     */
+    public static Topology getDefault() {
+        return (OVERRIDE != null) ? OVERRIDE : ISOMETRIC;
+    }
+
+    /**
+     * Get the topology to give a new game.  The {@value #PROPERTY}
+     * property overrides the topology the caller prefers.
+     *
+     * @param preferred The {@code Topology} the caller would use.
+     * @return The {@code Topology} for the new game.
+     */
+    public static Topology forNewGame(Topology preferred) {
+        return (OVERRIDE != null) ? OVERRIDE : preferred;
     }
 
     /**
      * Get the topology named by a property value.
      *
      * @param value The value of the {@value #PROPERTY} property.
-     * @return SQUARE for "square", otherwise ISOMETRIC.
+     * @return The {@code Topology} named, or null if none is.
      */
     private static Topology fromProperty(String value) {
-        if (value != null && "square".equalsIgnoreCase(value.trim())) {
-            logger.info("Using the square map topology.");
-            return SQUARE;
+        if (value == null || value.trim().isEmpty()) return null;
+        for (Topology t : values()) {
+            if (t.name().equalsIgnoreCase(value.trim())) {
+                logger.info("Property " + PROPERTY + ": new games use the "
+                    + t + " map topology.");
+                return t;
+            }
         }
-        return ISOMETRIC;
+        logger.warning("Property " + PROPERTY + " ignored, not a topology: "
+            + value);
+        return null;
     }
 
     /**

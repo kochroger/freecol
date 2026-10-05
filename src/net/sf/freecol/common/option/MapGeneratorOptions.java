@@ -153,17 +153,16 @@ public class MapGeneratorOptions {
 
     /**
      * Adjust the map generator options of a new game to the current
-     * {@link Topology}.  Does nothing on the isometric map.
+     * {@link Topology}, which the caller sets for the new game first.
+     * Does nothing on the isometric map.
      *
      * On the square map the options approximate the map of the
      * original game: 58x72 tiles, sparse land (the original's random
      * maps are mostly ocean), about three quarters of the land
      * forested, and sea lanes on both sides.  The specification
      * defaults are left alone, as the "freecol" rules and the test
-     * suite inherit them.
-     *
-     * FIXME: square topology spike.  These values belong in a ruleset
-     * or mod, together with a stored topology option.
+     * suite inherit them.  The values could move into a ruleset or
+     * mod of their own once the Classic UI has one.
      *
      * @param mgo The map generator {@code OptionGroup} to adjust.
      */

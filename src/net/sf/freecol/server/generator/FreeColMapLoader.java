@@ -75,6 +75,9 @@ public class FreeColMapLoader implements MapLoader {
         java.util.Map<String, ServerRegion> regions = new HashMap<>();
 
         Map map = new Map(game, width, height);
+        // The copy keeps the layout of the map it copies (reading that
+        // map also put its topology in use).
+        map.setTopology(importMap.getTopology());
         if (highestLayer == Layer.LAND) {
             // import only the land / water distinction
             map.populateTiles((x, y) -> {

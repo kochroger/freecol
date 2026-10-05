@@ -70,8 +70,10 @@ import net.sf.freecol.common.util.LogBuilder;
  * A rectangular isometric map.  The map is represented as a
  * two-dimensional array of tiles.  Off-map destinations, such as
  * {@link Europe}, can be reached via the {@link HighSeas}.
- * The current {@link Topology} decides which tiles are neighbours,
- * so the same class also serves a square map.
+ * The map's {@link Topology}, which is saved with it, decides which
+ * tiles are neighbours, so the same class also serves a square map.
+ * The code that steps between tiles uses {@link Topology#current},
+ * which reading a map sets to the map's topology.
  *
  * In theory, a {@link Game} might contain several Map instances
  * connected by the HighSeas.
@@ -268,6 +270,13 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
 
     /** The highest map layer included. */
     private Layer layer;
+
+    /**
+     * The layout of the tiles.  A new map takes the topology in use, a
+     * map read from a stream the one stored with it (isometric if none
+     * is, as in old saves and the bundled maps).
+     */
+    private Topology topology = Topology.current();
 
     /**
      * The latitude of the northern edge of the map. A negative value
@@ -514,6 +523,28 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
      */
     public final void setLayer(final Layer newLayer) {
         this.layer = newLayer;
+    }
+
+    /**
+     * Get the topology, the layout of the tiles of this map.
+     *
+     * @return The {@code Topology} of this map.
+     */
+    public final Topology getTopology() {
+        return this.topology;
+    }
+
+    /**
+     * Set the topology.  For maps built from another map, which keep
+     * its layout.  It does not change {@link Topology#current}.
+     *
+     * @param topology The new {@code Topology}.
+     */
+    public final void setTopology(final Topology topology) {
+        if (topology == null) {
+            throw new IllegalArgumentException("Null topology: " + getId());
+        }
+        this.topology = topology;
     }
 
     /**
@@ -2541,6 +2572,7 @@ ok:     while (!openMap.isEmpty()) {
         // Note: can not use Tile.copyIn as that sets x,y
         final Game game = getGame();
         Map ret = new Map(game, width, height);
+        ret.setTopology(getTopology());
         final int oldWidth = getWidth();
         final int oldHeight = getHeight();
         ret.populateTiles((x, y) -> {
@@ -2723,10 +2755,33 @@ ok:     while (!openMap.isEmpty()) {
 
     /**
      * {@inheritDoc}
+     *
+     * The tiles are checked under the topology in use, which must be
+     * this map's.  Under another one
+     * {@link TileImprovement#checkIntegrity} would remove the river
+     * connections that do not match a neighbour there, most of them.
+     * A mismatch means that some code failed to set the topology, so it
+     * is logged as severe.  When fixing, the map wins and its topology
+     * is put in use; otherwise the tiles are left unchecked and the map
+     * fails.
      */
     @Override
     public IntegrityType checkIntegrity(boolean fix, LogBuilder lb) {
         IntegrityType result = super.checkIntegrity(fix, lb);
+        final Topology inUse = Topology.current();
+        if (this.topology != inUse) {
+            final String msg = "Map " + getId() + " has the " + this.topology
+                + " topology, but " + inUse + " is in use";
+            if (!fix) {
+                logger.severe(msg + ", tiles not checked.");
+                lb.add("\n  ", msg, ", tiles not checked.");
+                return result.fail();
+            }
+            logger.severe(msg + ", switching to " + this.topology + ".");
+            lb.add("\n  ", msg, ", switched to ", this.topology, ".");
+            Topology.setCurrent(this.topology);
+            result = result.fix();
+        }
         final int hgt = getHeight(), wid = getWidth();
         for (int y = 0; y < hgt; y++) {
             for (int x = 0; x < wid; x++) {
@@ -2750,6 +2805,9 @@ ok:     while (!openMap.isEmpty()) {
         final Game game = getGame();
         String err = updateTiles(o.getWidth(), o.getHeight());
         if (err != null) throw new RuntimeException("copyIn failure, " + err);
+        // The other map was read from a stream, which put its topology
+        // in use already.
+        this.topology = o.getTopology();
         // Allow creating new regions in first map update
         clearRegions();
         for (Region r : o.getRegions()) addRegion(game.update(r, true));
@@ -2771,6 +2829,7 @@ ok:     while (!openMap.isEmpty()) {
     private static final String LAYER_TAG = "layer";
     private static final String MAXIMUM_LATITUDE_TAG = "maximumLatitude";
     private static final String MINIMUM_LATITUDE_TAG = "minimumLatitude";
+    private static final String TOPOLOGY_TAG = "topology";
     private static final String WIDTH_TAG = "width";
 
 
@@ -2780,6 +2839,8 @@ ok:     while (!openMap.isEmpty()) {
     @Override
     protected void writeAttributes(FreeColXMLWriter xw) throws XMLStreamException {
         super.writeAttributes(xw);
+
+        xw.writeAttribute(TOPOLOGY_TAG, topology);
 
         xw.writeAttribute(WIDTH_TAG, getWidth());
 
@@ -2815,6 +2876,13 @@ ok:     while (!openMap.isEmpty()) {
     @Override
     protected void readAttributes(FreeColXMLReader xr) throws XMLStreamException {
         super.readAttributes(xr);
+
+        // First of all, before any tile is read or checked: a map is
+        // interpreted under its own topology, whatever was in use.
+        // Maps written before the topology was stored are isometric.
+        setTopology(xr.getAttribute(TOPOLOGY_TAG, Topology.class,
+                                    Topology.ISOMETRIC));
+        Topology.setCurrent(this.topology);
 
         String err = updateTiles(xr.getAttribute(WIDTH_TAG, -1), xr.getAttribute(HEIGHT_TAG, -1));
         if (err != null) throw new XMLStreamException("Map.readAttributes failure, " + err);

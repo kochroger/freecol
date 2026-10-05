@@ -103,6 +103,17 @@ mirroring the original game. It owns the view state
 `ClassicGUI` so clicks/keys route through the `GUI`/controller path exactly as
 `SwingGUI.clickAt`/`MoveAction` do.
 
+**Map topology: square by default.** New games started from the Classic UI (the
+title-screen chain, or `--fast` without a save) are played on the original's
+square map, 58×72 (`Topology.SQUARE`, with the map options of
+`MapGeneratorOptions.applyTopologyDefaults`). The map stores its topology and the
+save carries it as the map's `topology` attribute, so a square game reloads
+square without any switch. A map without the attribute (every older save, the
+bundled `.fsm` maps) loads as isometric, as before; the isometric caveat below
+applies to those. `-Dfreecol.topology=isometric|square` overrides the topology
+of new games, for developers. FreeCol's standard GUI keeps starting isometric
+games and logs a warning when it loads a square one, which it cannot draw.
+
 **Projection** (square 48px cells = native 16px × `CLASSIC_SCALE` 3):
 ```
 screenX = width/2  + (tileX - focusX) * TILE_W - TILE_W/2
@@ -176,14 +187,17 @@ minimap box.
   selected-tile cursor to `getNeighbourOrNull(dir)`; nothing selected (END_TURN)
   → raw-grid free pan so the map stays navigable. After a unit move the focus
   follows the unit.
-- **⚠️ Isometric-vs-rectangular caveat (resolved).** Model `Direction` is
-  isometric (`Direction.N` steps two raw rows), but this viewer draws a raw grid.
+- **⚠️ Isometric-vs-rectangular caveat (resolved; isometric maps only).** On an
+  isometric map, model `Direction` is isometric (`Direction.N` steps two raw
+  rows), but this viewer draws a raw grid.
   The four orthogonal keys therefore resolve — parity-aware, via
   `Map.getDirection` — to the `Direction` whose *raw* step lands on the visually
   adjacent cell (e.g. straight-up is `NE` on even rows, `NW` on odd), so
   on-screen movement matches the key. The four diagonal keys map to the
   isometric corner directions, whose raw offset shifts with row parity — an
-  inherent flattening artefact, documented on `intentToDirection`.
+  inherent flattening artefact, documented on `intentToDirection`. On a square
+  map the same `Map.getDirection` lookup gives `N`/`E`/`S`/`W` and the true
+  diagonals, so there is no artefact.
 - **Turn controls (classic-*Colonization* key scheme).** Because there is no menu
   bar / `Canvas` to install FreeCol's own accelerators, the viewer binds the
   turn-control keys directly (`WHEN_IN_FOCUSED_WINDOW`, like the movement keys),

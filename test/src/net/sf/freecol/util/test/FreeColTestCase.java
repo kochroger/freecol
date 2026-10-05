@@ -50,6 +50,7 @@ import net.sf.freecol.common.model.Region;
 import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileType;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitChangeType;
 import net.sf.freecol.common.model.UnitType;
@@ -98,6 +99,9 @@ public class FreeColTestCase extends TestCase {
     protected void tearDown() throws Exception {
         // If a game has been created destroy it.
         game = null;
+        // Reading a map (a save, an imported .fsm) puts its topology in
+        // use, JVM wide.  Do not let that leak into the next test.
+        Topology.setCurrent(Topology.getDefault());
     }
 
     /**

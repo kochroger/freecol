@@ -629,8 +629,8 @@ public class TileImprovement extends TileItem {
             // the neighbouring tile having a corresponding connection or
             // a water tile.
             // These could at least be added using the map editor.
-            // Note: a game read under the wrong Topology loses most of
-            // its river connections here, see Topology.
+            // Under the wrong Topology most river connections would go
+            // here; Map.checkIntegrity puts the map's own in use first.
             String conns = style.getString();
             int i = 0;
             for (Direction d : Topology.current().edgeDirections()) {

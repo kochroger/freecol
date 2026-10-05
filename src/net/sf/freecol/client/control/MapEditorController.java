@@ -50,6 +50,7 @@ import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.StringTemplate;
 import net.sf.freecol.common.model.Tile;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.option.MapGeneratorOptions;
 import net.sf.freecol.common.resources.AudioResource;
 import net.sf.freecol.common.resources.ResourceManager;
@@ -291,6 +292,8 @@ public final class MapEditorController extends FreeColClientHolder {
                 getFreeColClient().setGame(serverGame);
                 
                 serverGame.setMapGeneratorOptions(mgo);
+                // The map editor draws isometric maps only.
+                Topology.setCurrent(Topology.forNewGame(Topology.ISOMETRIC));
                 freeColServer.generateMap(false);
                 requireNativeNations(serverGame);
                 

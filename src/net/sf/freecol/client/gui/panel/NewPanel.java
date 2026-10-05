@@ -53,6 +53,7 @@ import net.sf.freecol.common.metaserver.ServerInfo;
 import net.sf.freecol.common.model.NationOptions.Advantages;
 import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.StringTemplate;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.option.OptionGroup;
 
 
@@ -575,6 +576,14 @@ public final class NewPanel extends FreeColPanel implements ItemListener {
     
                 NewPanelAction action = Enum.valueOf(NewPanelAction.class,
                     buttonGroup.getSelection().getActionCommand());
+                // A new game gets the isometric map, the only one this
+                // GUI can draw (unless -Dfreecol.topology says otherwise),
+                // even after a square game was loaded.  A joined game
+                // takes the topology of the server's map.
+                if (action == NewPanelAction.SINGLE
+                    || action == NewPanelAction.START) {
+                    Topology.setCurrent(Topology.forNewGame(Topology.ISOMETRIC));
+                }
                 switch (action) {
                 case SINGLE:
                     this.specification.prepare(getSelectedAdvantages(),
