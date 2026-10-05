@@ -41,6 +41,31 @@ public class MovementTest extends FreeColTestCase {
     private static final UnitType braveType = spec().getUnitType("model.unit.brave");
     private static final UnitType colonistType = spec().getUnitType("model.unit.freeColonist");
 
+    /** The topology in use before the test. */
+    private Topology savedTopology;
+
+
+    /**
+     * testMoveAlongRiver has isometric directions written in (its river
+     * style "0101" means SE+NW), so it runs under the isometric topology
+     * whatever is in use; {@code SquareMapTest} has the square version.
+     * The other tests run under either.
+     */
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+        this.savedTopology = Topology.current();
+        if ("testMoveAlongRiver".equals(getName())) {
+            Topology.setCurrent(Topology.ISOMETRIC);
+        }
+    }
+
+    @Override
+    protected void tearDown() throws Exception {
+        Topology.setCurrent(this.savedTopology);
+        super.tearDown();
+    }
+
     public void testMoveFromPlainsToPlains() throws Exception {
         Game game = getStandardGame();
         Map map = getTestMap(plains);

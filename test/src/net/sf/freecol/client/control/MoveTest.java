@@ -27,6 +27,7 @@ import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileType;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.server.ServerTestHelper;
@@ -43,9 +44,26 @@ public class MoveTest extends FreeColTestCase {
         = spec().getUnitType("model.unit.hardyPioneer");
 
 
+    /** The topology in use before the test. */
+    private Topology savedTopology;
+
+
+    /**
+     * The test coordinates are isometric ((5,7) is NE of (5,8)), so run
+     * under the isometric topology whatever is in use.  The square
+     * version is in {@code SquareMapTest}.
+     */
+    @Override
+    public void setUp() throws Exception {
+        super.setUp();
+        this.savedTopology = Topology.current();
+        Topology.setCurrent(Topology.ISOMETRIC);
+    }
+
     @Override
     public void tearDown() throws Exception {
         ServerTestHelper.stopServerGame();
+        Topology.setCurrent(this.savedTopology);
         super.tearDown();
     }
 

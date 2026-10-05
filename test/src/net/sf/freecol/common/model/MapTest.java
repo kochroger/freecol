@@ -49,6 +49,35 @@ public class MapTest extends FreeColTestCase {
     private final UnitType galleonType = spec().getUnitType("model.unit.galleon");
     private final UnitType pioneerType = spec().getUnitType("model.unit.hardyPioneer");
 
+    /**
+     * The tests with isometric coordinates written in (2-row north
+     * steps, the isometric ring order).  They run under the isometric
+     * topology whatever is in use; {@code SquareMapTest} has their
+     * square versions.  The other tests run under either.
+     */
+    private static final java.util.Set<String> ISOMETRIC_TESTS
+        = java.util.Set.of("testGetSurroundingTiles", "testCircleIterator",
+                           "testShortestPathObstructed");
+
+    /** The topology in use before the test. */
+    private Topology savedTopology;
+
+
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+        this.savedTopology = Topology.current();
+        if (ISOMETRIC_TESTS.contains(getName())) {
+            Topology.setCurrent(Topology.ISOMETRIC);
+        }
+    }
+
+    @Override
+    protected void tearDown() throws Exception {
+        Topology.setCurrent(this.savedTopology);
+        super.tearDown();
+    }
+
 
     private Map getSingleLandPathMap(Game game) {
         MapBuilder builder = new MapBuilder(game);

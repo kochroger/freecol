@@ -19,12 +19,17 @@
 
 package net.sf.freecol.common.model;
 
+import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
+import net.sf.freecol.common.io.FreeColXMLReader;
+import net.sf.freecol.common.model.Constants.IntegrityType;
+import net.sf.freecol.common.util.LogBuilder;
 import net.sf.freecol.util.test.FreeColTestCase;
 
 
@@ -220,5 +225,121 @@ public class TopologyTest extends FreeColTestCase {
         assertEquals(map.getTile(10, 8), ring2.get(1));
         assertEquals(map.getTile(12, 8), ring2.get(3));
         assertEquals(map.getTile(8, 8), ring2.get(15));
+    }
+
+
+    // The stored topology
+
+    /**
+     * Give a square map a river that crosses the E/W edge between
+     * (10,10) and (11,10).  Under the isometric topology neither end
+     * matches a neighbour: index 1 is SE there, index 3 NW.
+     *
+     * @param map The square {@code Map}.
+     */
+    private void addSquareRiver(Map map) {
+        final TileType plains = spec().getTileType("model.tile.plains");
+        final Tile west = map.getTile(10, 10), east = map.getTile(11, 10);
+        assertEquals(east, west.getNeighbourOrNull(Direction.E));
+        west.setType(plains);
+        east.setType(plains);
+        west.addRiver(1, "0100");
+        east.addRiver(1, "0001");
+    }
+
+    private static String riverStyle(Map map, int x, int y) {
+        final TileImprovement river = map.getTile(x, y).getRiver();
+        return (river == null) ? null : river.getStyle().getString();
+    }
+
+    /** A new map takes the topology in use. */
+    public void testNewMapTakesTopologyInUse() {
+        for (Topology t : Topology.values()) {
+            assertEquals(t, makeMap(t).getTopology());
+        }
+    }
+
+    /**
+     * The system property overrides the topology of new games only;
+     * without it a new game gets what the caller asks for.
+     */
+    public void testNewGameTopology() {
+        final String property = System.getProperty(Topology.PROPERTY);
+        if (property == null || property.trim().isEmpty()) {
+            assertEquals(Topology.ISOMETRIC, Topology.getDefault());
+            for (Topology t : Topology.values()) {
+                assertEquals(t, Topology.forNewGame(t));
+            }
+        } else {
+            for (Topology t : Topology.values()) {
+                assertEquals(Topology.getDefault(), Topology.forNewGame(t));
+            }
+        }
+    }
+
+    /**
+     * The map XML carries the topology.  Reading it puts that topology
+     * in use whatever was in use before, so the rivers keep their
+     * meaning; a map without the attribute (an old save) is isometric.
+     */
+    public void testXmlKeepsTopology() throws Exception {
+        for (Topology t : Topology.values()) {
+            final Map map = makeMap(t);
+            if (t == Topology.SQUARE) addSquareRiver(map);
+            final String xml = map.serialize();
+            assertTrue(t + " attribute", xml.contains(" topology=\""
+                    + t.name().toLowerCase(Locale.US) + "\""));
+            for (Topology other : Topology.values()) {
+                Topology.setCurrent(other);
+                final Map copy = map.copy(map.getGame());
+                assertEquals(t, copy.getTopology());
+                assertEquals(t, Topology.current());
+                assertEquals(riverStyle(map, 10, 10), riverStyle(copy, 10, 10));
+                assertEquals(riverStyle(map, 11, 10), riverStyle(copy, 11, 10));
+            }
+        }
+
+        final Map map = makeMap(Topology.SQUARE);
+        final String old = map.serialize().replace(" topology=\"square\"", "");
+        assertFalse(old.contains("topology="));
+        final Map read;
+        try (FreeColXMLReader xr
+             = new FreeColXMLReader(new StringReader(old))) {
+            read = xr.copy(map.getGame(), Map.class);
+        }
+        assertEquals(Topology.ISOMETRIC, read.getTopology());
+        assertEquals(Topology.ISOMETRIC, Topology.current());
+    }
+
+    /** A scaled map keeps the layout of its source. */
+    public void testScaleKeepsTopology() {
+        final Map map = makeMap(Topology.SQUARE);
+        Topology.setCurrent(Topology.ISOMETRIC);
+        assertEquals(Topology.SQUARE, map.scale(29, 36).getTopology());
+    }
+
+    /**
+     * A map checked under the wrong topology keeps its rivers.  Without
+     * fixing, the check fails and leaves the tiles alone; with fixing,
+     * it puts the map's topology in use before checking the tiles.
+     */
+    public void testIntegrityUnderWrongTopology() {
+        final Map map = makeMap(Topology.SQUARE);
+        addSquareRiver(map);
+        assertEquals(IntegrityType.INTEGRITY_GOOD,
+            map.checkIntegrity(false, new LogBuilder(0)));
+
+        Topology.setCurrent(Topology.ISOMETRIC);
+        assertEquals(IntegrityType.INTEGRITY_FAIL,
+            map.checkIntegrity(false, new LogBuilder(0)));
+        assertEquals(Topology.ISOMETRIC, Topology.current());
+
+        assertEquals(IntegrityType.INTEGRITY_FIXED,
+            map.checkIntegrity(true, new LogBuilder(0)));
+        assertEquals(Topology.SQUARE, Topology.current());
+        assertEquals("0100", riverStyle(map, 10, 10));
+        assertEquals("0001", riverStyle(map, 11, 10));
+        assertEquals(IntegrityType.INTEGRITY_GOOD,
+            map.checkIntegrity(true, new LogBuilder(0)));
     }
 }

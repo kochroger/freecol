@@ -31,6 +31,7 @@ import net.sf.freecol.FreeCol;
 import net.sf.freecol.common.FreeColException;
 import net.sf.freecol.common.io.FreeColDirectories;
 import net.sf.freecol.common.io.FreeColRules;
+import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.FreeColObject;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.IndianSettlement;
@@ -41,6 +42,7 @@ import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Region;
 import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.Tile;
+import net.sf.freecol.common.model.TileImprovement;
 import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Turn;
 import net.sf.freecol.common.option.MapGeneratorOptions;
@@ -184,20 +186,47 @@ public class MapGeneratorTest extends FreeColTestCase {
 
     /**
      * Make sure we can import all distributed maps.
+     *
+     * The bundled maps predate the stored topology, so they are
+     * isometric: whatever topology is in use (the square one in a
+     * Classic UI session or under -Dfreecol.topology=square), reading
+     * one puts the isometric topology in use, and the game made from it
+     * is isometric too.  Their river connections must then match their
+     * neighbours (under the square topology only about 30% would).
      */
     public void testImportMap() {
         MapGenerator gen = new SimpleMapGenerator(new Random(1));
         Map importMap = null;
+        long connections = 0, matching = 0;
         for (File importFile : FreeColDirectories.getMapFileList()) {
             Game game = getStandardGame();
             Specification spec = game.getSpecification();
             spec.setFile(MapGeneratorOptions.IMPORT_FILE, importFile);
             System.gc(); // Try to clean up before reading a big map
+            final Topology before = Topology.current();
             try {
                 importMap = FreeColServer.readMap(importFile, spec);
             } catch (FreeColException|IOException|XMLStreamException ex) {
                 fail("Map read of " + importFile.getName() + " failed: "
                     + ex.toString());
+            }
+            assertEquals(importFile.getName(), Topology.ISOMETRIC,
+                         importMap.getTopology());
+            assertEquals(importFile.getName(), Topology.ISOMETRIC,
+                         Topology.current());
+            for (Tile tile : importMap) {
+                TileImprovement river = tile.getRiver();
+                if (river == null) continue;
+                for (Direction d : Topology.current().edgeDirections()) {
+                    if (!river.isConnectedTo(d)) continue;
+                    connections++;
+                    Tile t = tile.getNeighbourOrNull(d);
+                    if (t != null && (!t.isLand()
+                            || (t.getRiver() != null && t.getRiver()
+                                .isConnectedTo(d.getReverseDirection())))) {
+                        matching++;
+                    }
+                }
             }
             try {
                 assertNotNull(gen.generateMap(game, importMap, true,
@@ -206,9 +235,14 @@ public class MapGeneratorTest extends FreeColTestCase {
                 fail("Map generate of " + importFile.getName() + " failed: "
                     + ex.toString());
             }
+            assertEquals(importFile.getName(), Topology.ISOMETRIC,
+                         game.getMap().getTopology());
             // Clear import file option from a standard spec!
             spec.setFile(MapGeneratorOptions.IMPORT_FILE, null);
+            Topology.setCurrent(before);
         }
+        assertTrue("river connections " + matching + "/" + connections,
+                   connections > 0 && matching * 100 >= connections * 99);
     }
 
     /**
