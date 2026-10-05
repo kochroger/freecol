@@ -91,6 +91,15 @@ import net.sf.freecol.FreeCol;
  * ready ({@code ClassicGUI.showMainPanel}).  "Ja" in the quit box ends the
  * program at once ({@code FreeCol.quit}): there is nothing to save yet.
  *
+ * <p><b>Intro and music.</b>  On a normal launch the window opens on the
+ * intro (Vorspann, {@code ClassicMainMenuPanel} mode INTRO): a black first
+ * picture, then the own emblem, the original's chart credits and title
+ * build-up, drawn by a {@link ClassicIntroPlayer} thread because the EDT is
+ * blocked by the client constructor right now; it ends on the live title.
+ * The title piece ({@link ClassicEarlyMusic}) starts with that first
+ * picture.  Typed-ahead input still works as described above, except that
+ * its first fresh key or click is spent skipping the intro.
+ *
  * <p>Without the pack (or if anything here fails) {@link #show} returns
  * false and the old start-up runs unchanged: the black screen, and the
  * window when the client is ready.
@@ -212,7 +221,43 @@ public final class ClassicStartupScreen {
      *     then nothing is shown and the old start-up runs.
      */
     public static boolean show(Dimension windowSize, boolean menu) {
+        return show(windowSize, menu, false);
+    }
+
+    /**
+     * Whether a normal launch shows the intro (Vorspann) before the title:
+     * see {@link ClassicIntro#enabled}.
+     *
+     * @return False only with {@code -Dfreecol.classic.intro=false}.
+     */
+    public static boolean introEnabled() {
+        return ClassicIntro.enabled();
+    }
+
+    /**
+     * Open the main window now, with the intro or the title.  EDT only,
+     * once, before the client is constructed
+     * (FreeCol.createClassicSplashScreen).
+     *
+     * <p>With {@code intro} the first picture is black and the intro
+     * thread starts right after it is on screen ({@link ClassicIntroPlayer});
+     * the title items are prepared at once, because the intro ends on the
+     * title.  With {@code menu}, the early title music
+     * ({@link ClassicEarlyMusic#go}) starts together with that first
+     * picture, intro or not -- the owner wants the music from the first
+     * second, not from client attach ~4 s later.
+     *
+     * @param windowSize The {@code --windowsize}, or null / (-1,-1) for
+     *     borderless full screen.
+     * @param menu True for the live title menu; false for the passive
+     *     picture.
+     * @param intro True to show the intro first (only with {@code menu}).
+     * @return True if the window is up; false if there is no pack or
+     *     anything failed.
+     */
+    public static boolean show(Dimension windowSize, boolean menu, boolean intro) {
         if (!SwingUtilities.isEventDispatchThread() || frame != null) return false;
+        final boolean withIntro = menu && intro;
         ClassicFrame f = null;
         try {
             final ClassicMainMenuPanel.MenuAssets a
@@ -227,7 +272,10 @@ public final class ClassicStartupScreen {
             final DeferringActions da = new DeferringActions();
             final ClassicMainMenuPanel p = new ClassicMainMenuPanel(da);
             p.useAssets(a);
-            if (menu) {
+            if (withIntro) {
+                p.prepareTitleItems();
+                p.enterIntro();
+            } else if (menu) {
                 p.showTitle(null);
             } else {
                 p.showPassive();
@@ -248,13 +296,18 @@ public final class ClassicStartupScreen {
             // this task and blocks the EDT for ~3 s; a normal repaint would
             // wait for it, and the window would stay black.
             f.frame.validate();
+            final long t0 = System.nanoTime();
             p.paintImmediately(0, 0, p.getWidth(), p.getHeight());
             Toolkit.getDefaultToolkit().sync();
             frame = f;
             panel = p;
             actions = da;
             closeListener = wl;
-            logger.info("Classic start-up: title shown after " + sinceLaunchMs()
+            // The music and the intro start with this first picture.
+            if (menu) ClassicEarlyMusic.go();
+            if (withIntro) p.startIntro(t0);
+            logger.info("Classic start-up: " + (withIntro ? "intro" : "title")
+                + " shown after " + sinceLaunchMs()
                 + " ms (" + (menu ? "live menu" : "passive picture") + ", "
                 + (f.isFullScreen() ? "borderless full screen" : "windowed")
                 + ", " + f.frame.getBounds() + ").");

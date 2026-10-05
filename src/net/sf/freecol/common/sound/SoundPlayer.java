@@ -216,11 +216,16 @@ public final class SoundPlayer {
                     }
                 }
                 if (sound != null) {
+                    boolean ok = false;
                     try {
-                        playSound(sound);
+                        ok = playSound(sound);
                     } catch (IOException e) {
                         logger.log(Level.WARNING, "Failure playing audio.", e);
                     }
+                    // A failure returns at once (no line, unreadable file);
+                    // with a non-empty default playlist the loop would then
+                    // refill and fail again at full speed, flooding the log.
+                    if (!ok) delay(WAIT_TIMEOUT, null);
                 }
             }
         }

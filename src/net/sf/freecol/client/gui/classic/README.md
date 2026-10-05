@@ -1662,6 +1662,162 @@ generates none, which is why the first attempt saw nothing.
 > are read off the original's screenshots by eye, not measured from the art —
 > a considered guess, like the Colony Advisor's paging keys.
 
+## Opening (Vorspann) (`ClassicEmblem`, `ClassicIntro`, `ClassicIntroTimeline`, `ClassicIntroPlayer`, `ClassicOpeningScript`)
+
+The owner asked for a Vorspann before the first page, "Levi's Colonization
+2026, animated like MPS Labs", with the music starting together with it.
+(2026-10-05)
+
+**What a normal launch shows** (`ClassicIntroTimeline`; ms after the first
+picture; ≈2:08 in all):
+
+| ms | Phase | What | Source |
+|---|---|---|---|
+| 0-300 | BLACK | lead-in; covers the audio start (≤ ~150 ms), so first note and first movement coincide | own |
+| 300-10,300 | EMBLEM | own emblem "Levi's / COLONIZATION" spinning, subtitle "Levi's Colonization 2026" grows out from under it | own art in the MPS-LABS style |
+| 10,300-10,800 | FADE | 8-step palette fade | own (the original's exit is not captured) |
+| 10,800-11,100 | BLACK | | own |
+| 11,100-~128,300 | CHART | the original's sea-chart credits and title build-up, chart frames 0..890 at 7.603 fps, frozen from frame 769 | faithful, 0 px vs captures |
+| from ~128,300 | DONE | cut to the live title menu | faithful (165 → 166) |
+
+Any fresh key or a left/right click skips straight to the title menu; the
+skipping key is used up (its auto-repeat and typed character are swallowed
+until release, so a held Enter cannot also open NEUE WELT, and the rest of a
+skipping double click is inert). Alt/Ctrl/Meta chords and bare modifiers do
+not skip (Alt+Enter, Alt+F4 keep their meaning); closing the window opens the
+quit box ("Nein" → the title). No arrow is shown (capture 084 has none).
+Only on a normal launch: not with `--fast`, a save argument, a debug start,
+`--no-splash` or headless. **`--no-intro` is deliberately not honoured**: it
+means "skip FreeCol's intro video", which the Classic UI never shows, and
+the owner's desktop shortcut passes it. Developers switch the Vorspann off
+with `--fast` or `-Dfreecol.classic.intro=false` (`ClassicIntro.enabled`).
+
+- **Emblem (`ClassicEmblem`, own art, tracked source).** No MicroProse
+  sprite, name or palette is used; only the style measured on the native
+  captures `screenshots/intro-original/opening_084..103` (the original logo
+  is the pre-rendered MPSLOGO.SS, 16 frames per quarter turn, at (86,22);
+  its subtitle MPSNAME.SS, 29 stages) is reproduced:
+  - a square prism, the same face on all 4 sides, turning 5.625° per frame
+    at 10.12 frames/s (98.8 ms; fit over 084..103, ±0.07 s), front face
+    away to the LEFT; the picture repeats after 16 frames
+    (`PHASES`), so the 16 prism pictures are built once (≈30 ms);
+  - see-through letters, so the back faces show MIRRORED, lower and
+    narrower — the automatic result of the perspective: camera distance
+    7.7 × half face width (the original back band is 0.77× as wide), eye
+    line 91 px below the band (it sits ~20 px lower), face-on texture row 0
+    at y = 25, axis x = 159.5; per screen column the face's texture column
+    is found by inverting the plane's perspective, nearest neighbour;
+  - face texture 120×88: "Levi's" in Serif bold italic stretched to a 64-px
+    'L' and 116 px width, rasterised at 4× without anti-aliasing and reduced
+    by 4×4 majority (crisp, deterministic per JDK); a 16-step cyan → royal
+    blue ramp (own values echoing capture 091's rows) with a seeded brushed
+    streak, a 1-px #000848 outline; then gold #FBFB45 / #BEBE3C lines and
+    "COLONIZATION" in own 7×9 block capitals (white #FBFBFB);
+  - brightness 0.22 + 0.78·|cos φ|, the back faces' script ×0.45 more (the
+    back band stays bright, as in the original); a fixed 60-colour palette,
+    no anti-aliasing on the prism, an opaque black box (82..237, 22..140);
+  - the subtitle (Serif bold, cap ≈16 px, rendered once at 300×25 at 4× with
+    AA, quantised to 4 greys) is drawn BEFORE the box and stretched
+    horizontally only, with the two laws measured on MPSNAME: width
+    24 + 276·S(k/28), bottom 115 + 55·S(min(k,18)/18), S = smoothstep,
+    k = 0..28 from emblem frame 11 (as the original's started 11 logo frames
+    in); stages 0..8 lie wholly under the box, so it grows out from under
+    the emblem; final at x 10..309, y 146..170.
+  - Readability was checked at 1× in all 16 phases (preview harness A). The
+    glyph pixels depend on the JDK's Serif font; the tests check invariants
+    only.
+- **Chart credits and title build-up (`ClassicIntro.paintChart`, faithful).**
+  Every rule is verified to **0 differing pixels** against
+  `intro-original/opening_104..165` (59 single frames; 123, 134, 141 are
+  DOSBox mid-redraw captures and equal two consecutive frames row for row,
+  also 0 px):
+  1. OPENBORD.PIK (frame with the black window at rows 24..155);
+  2. OPENING.PIK (960×132) in rows 24..155 at x offset `max(0, 640 - f)`
+     (pan 1 px per frame from Europe to America; still from f = 640);
+  3. the ship OPENSHIP.SS.(f mod 8) at `(PATH[f-1].x - 11 - offset,
+     PATH[f-1].y - 12)` while f < 701 (the 701 PATH.DAT points);
+  4. OPENING.TXT `@OPENING` entries in table order: index `f - start`;
+     repeats 0 = play once and hold the last frame; R > 0 = R+1 plays, then
+     gone; a later started entry of the same series supersedes (wind 1 at
+     78 and 97); top-left = the SS anchor top-left + (baseX − offset, 0);
+     the SUN's index is FITTED, `floorMod(floorDiv(f − 110, 21), 7)` (exact
+     on f 143..201, unverified outside, ≤ 12 px);
+  5. ship and animations clipped to rows 24..155;
+  6. credits: the first `@CREDITS` row with start ≤ f ≤ end (inclusive) draws
+     OPENCRD{series+1}.SS.{sprite−1} centred at (160 − w/2, 183 − h/2),
+     cuts in and out, one at a time (first the MicroProse banner, f 25..50,
+     then role banners and name scrolls every 16 frames to f 625).
+  The credits are SPRITES with the names baked in; nothing is transcribed.
+  OPENING.TXT and PATH.DAT are copied byte for byte into the git-ignored
+  pack by `ant classic-assets` (`ClassicAssetConverter.TEXT_FILES`) and
+  parsed by `ClassicOpeningScript` (series 0..9 = OPENWND1, OPENSUN,
+  OPENMON1, OPENWND2, OPENMON2, OPENMON3, OPENFISH, OPENGUY, OPENLOGO,
+  OPENBONK; −1 = END 891; `0,0,0,0` ends the table).
+  Clock: 131.52 ms per chart frame (7.603 fps, fit over 52 captures, ±0.1 s);
+  the beached ship from 701, the man with the flag from 720, the
+  "Sid Meier's COLONIZATION" logo (OPENLOGO) at 767 as a cut, and the picture
+  FROZEN at 769 (captures 156..165 are identical and need the freeze:
+  OPENGUY.049 = 769 − 720). At END (891) it cuts to OPENMENU + menu, which is
+  a separate picture (165 → 166: the man and flag vanish, the ship moves,
+  ~2.3k sea pixels change), so the cut is faithful; the DONE frame equals
+  166 at 0 px with the original version line and arrow (the production line
+  reads "Version 2026", see the title section).
+- **Why a render thread (`ClassicIntroPlayer`) and not a Swing Timer.**
+  The intro starts in the early window, and `FreeCol.startClient` queues the
+  ~3 s `FreeColClient` constructor on the EDT right behind it. A timer would
+  freeze the first 3 s — exactly when the emblem should start with the
+  music. A daemon thread "Classic intro" samples the timeline by
+  `System.nanoTime()` (stalls drop frames, never stretch the show), renders
+  each NEW picture into a fresh image (published through a volatile field;
+  never written again, so no tearing), blits it with `getGraphics` at the
+  panel's whole-number scale and letterbox
+  (`ClassicMainMenuPanel.canvasPlacement`) under a lock that `stop()` takes
+  (so nothing lands after a stop), skips the blit while the panel is not
+  showing (Alt+Enter re-creates the window), redraws every 250 ms to repair
+  exposes and also asks for a normal repaint (`paintComponent` in INTRO
+  draws only that latest picture). The chart's ~250 sprites load on a
+  second daemon thread during the emblem; missing or late (not ready at the
+  fade) → the fade leads straight to the title. At DONE it posts
+  `finishIntro(false)` and keeps the title picture up until the EDT runs it.
+  Three render failures in a row end the intro on the title.
+- **Glue (`ClassicMainMenuPanel` mode INTRO).** The intro is a mode of the
+  same panel the early window builds and `ClassicGUI` adopts, so adoption,
+  focus, `DeferringActions`, typed-ahead input, `--fast`, save arguments and
+  `--windowsize` work unchanged. INTRO counts as `isLive()`, so the
+  start-up's `showMainPanel` (~4 s) keeps it; the menu key bindings do
+  nothing in INTRO; the pointer is hidden unconditionally (the EDT is
+  blocked, so no mouse event could tell where it is); `offerQuit` stops it
+  and opens the quit box; any mode change away from INTRO stops the thread.
+  Typed-ahead input spends its first fresh key or click on the skip.
+- **Log lines:** `Classic start-up: intro shown after N ms`,
+  `Classic intro: started after N ms since launch`,
+  `Classic intro: chart assets ready after N ms` (or `... opening material
+  missing (...); emblem then title` / `... not ready after N ms`),
+  `Classic intro: finished after N ms` / `skipped after N ms`.
+- **Harness** (scratch, never tracked: `IntroPreview`): A emblem sheet,
+  palette and geometry invariants, a side-by-side with captures 084..091
+  (style only); B chart 104..165 (`CHART: 59/59 exact, 3/3 splices exact;
+  clock 62/62`); C DONE vs 166 (0 px with the original line and arrow) and
+  the frozen composite vs 165 (0 px); D contact sheets of the whole show
+  every 2 s and of each credit.
+- **Tests:** `ClassicOpeningScriptTest` (synthetic files: sections,
+  comments, END, terminator, 1-based sprites, malformed input),
+  `ClassicIntroTimelineTest` (lead-in, emblem frames at 98.8 ms, subtitle
+  from frame 11, fade levels, f = 640 at ≈95.3 s, logo 767, freeze 769, END
+  at ≈128.3 s, monotonic, skip, no chart), `ClassicEmblemTest` (period 16,
+  symmetric silhouette at 45°, mirrored back face, palette, nothing outside
+  box and subtitle, subtitle laws, early stages hidden, band face-on at rows
+  96..110), `ClassicIntroTest` (synthetic chart and sprites: pan, ship path,
+  hold / vanish / supersede, clipping, inclusive centred credits, sun).
+- **Unverified, implemented as documented choices:** the emblem's length
+  and exit (the original logo ran ≥ 9 s, its end and any fade fell in a
+  capture gap), the cut from black to chart frame 0, the title logo's cut at
+  767, the sun outside f 143..201, the exact END after the freeze (±0.4 s).
+  `OPENING.EXE -f` (frame numbers) in DOSBox, run by the owner, would settle
+  them. Whether to keep the first credit, the MicroProse banner, is the
+  owner's call (faithful default: kept; dropping it is a one-line filter of
+  `ClassicOpeningScript.credits`).
+
 ## Title screen & main menu (`ClassicMainMenuPanel`, `ClassicMenuBox`, `ClassicFont`)
 
 Reference: `screenshots/start-sequence/opening_033.png` (native 320×200). The
@@ -1784,7 +1940,10 @@ differing pixels.
   - `removeInGameComponents` and `prepareShowingMainMenu` (in-game new and
     load).
   - `showOpeningVideo` runs its callback. The base no-op hung any start
-    without `--no-intro`.
+    without `--no-intro`. The Classic intro itself runs earlier, in the
+    early window (mode INTRO, see "Opening (Vorspann)" above); it ends on
+    this title with the first item barred, by a cut, and the key or click
+    that skips it is consumed (never also acts on the title).
   - `showNewPanel` → title.
   - `showLoadingSavegameDialog` returns a single-player info. A null return
     silently aborted some loads.
@@ -2019,7 +2178,10 @@ After the audience the original shows the expedition leaving the home port:
 night, dawn, day, the ship leaves the pier and sails to the horizon, one
 caption at a time. References: Dutch `start-sequence-dutch/opening_069..082`
 (from Amsterdam), English `start-sequence/opening_040..048` (from London);
-`INDEX.md` in both folders lists each frame.
+`INDEX.md` in both folders lists each frame. Timing reference: the timed
+Dutch run `departure-dutch-timed/opening_167..340` (Enter on the audience
+immediately before 167, one capture every ~0.53 s, stamps in its
+`INDEX.md`; two gaps of ~24 s).
 
 - **What it is (measured).** A slideshow of ten full-screen pictures
   `LEVN0001.PIK`..`LEVN0010.PIK` (already in the pack:
@@ -2053,40 +2215,78 @@ caption at a time. References: Dutch `start-sequence-dutch/opening_069..082`
   GAME.TXT and the audience (which matched with the plain name) have no such
   space. France and Spain have no captures and get no prefix (unverified).
 - **Transitions: random pixel dissolve, fixed order (measured), generator
-  unknown.** The two captures caught mid-way, English 042 (2→3, 78.0 %
-  new) and Dutch 077 (5→6, 72.6 % new), contain only old-frame and new-frame
-  pixels; the dissolve covers the whole screen, caption included, so old and
-  new captions overlap. The order is the same in both runs (every pixel new
-  in 077 is new in 042, 6,047/6,047) and shows no spatial structure, but
-  Galois LFSRs and the MS C `rand()` were rejected as its generator.
+  unknown.** All twelve captures caught mid-way — English 042 (2→3, 78.0 %
+  new), Dutch 077 (5→6, 72.6 %) and ten of the timed run (168/169 black→1,
+  189/190 1→2, 210 2→3, 221 5→6, 239 6→7, 256/257 7→8, 274 8→9) — contain
+  only old-frame and new-frame pixels; the dissolve covers the whole
+  screen, caption included, so old and new captions overlap and a caption
+  changes exactly with its picture. **The first dissolve starts from
+  black, not from the audience:** timed capture 167, taken right after
+  Enter, is all black, and 168/169 hold only black and LEVN0001 pixels.
+  The order is one fixed order over all 64,000 positions: the twelve
+  captures (seven transitions, three runs on two days) nest — every pixel
+  new in a capture with a smaller fraction is new in every capture with a
+  larger one, 0 exceptions in 66 pairs — and it shows no spatial
+  structure, but Galois LFSRs and the MS C `rand()` were rejected as its
+  generator.
   `ClassicDeparture.dissolveOrder` therefore reveals exactly the differing
   pixels in the order of one fixed Fisher-Yates permutation
   (`Random(0x1492)`), the same for every transition. Mid-dissolve frames
   never match the original pixel for pixel; settled frames always do.
-- **Timing (ESTIMATED, `ClassicDepartureTimeline`).** Measured are only the
-  capture stamps after the audience still, which are upper bounds (taken by
-  hand): Dutch 069 +4.6 … 082 +93.4, game 083 +104.8; English 040 +11.7 …
-  048 +95.5, game 049 +113.5. A constant step period fits neither run; the
-  fitted model is: each dissolve runs at `DISSOLVE_PX_PER_SEC` = 39,000
-  changed pixels/s (≈1.6 s for the audience and the four dawn steps,
-  0.05-0.25 s for the ship steps), then the new picture is held `HOLD_MS` =
-  8.9 s. Total ≈97.7 s. The preview harness fits both runs with **0
-  contradicting captures** (stamps as upper bounds after the previous
-  stamp; Dutch start offset 0.0-0.25 s after the audience still). Both
-  constants live in that one class; tune them after a timed DOSBox
-  recording. **The stamps do not single out this model:** an independent
-  fit with a CONSTANT dissolve duration per step (a full-screen random scan
-  over all 64,000 positions, as classic dissolves often are) also has 0
-  contradictions on all 25 stamps for any duration from 0.25 to 2.5 s with
-  a hold of 7.0-8.15 s, and 077 (caught 72.6 % through the 5→6 ship step,
-  which lasts only 0.23 s here) mildly favours visibly longer ship steps.
-  Owner check in DOSBox: if the ship steps visibly dissolve, reveal by
-  position in `ClassicDeparture`'s full-screen permutation over a fixed
-  ≈1.6 s and refit `HOLD_MS` so step 10 still settles by 093/048. Time comes from `System.nanoTime()` differences, never tick
-  counts, so a stalled EDT only skips ahead.
+- **Timing (MEASURED on the timed run, `ClassicDepartureTimeline`).**
+  Every capture 167..340 was classified against the production frames
+  (black, LEVN 1..10 with captions): settled on one frame (0 px), or
+  mid-dissolve with the fraction of changed pixels already new; times are
+  the file stamps (t = 0 at 167, good to ~0.05 s).
+  - **Black lead-in.** The audience is cut to black on the key; the
+    dissolve into picture 1 starts ≈0.56 s later.
+  - **Every dissolve takes the same 0.90 s (`DISSOLVE_MS`), whatever
+    changes.** Proof: the ship step 7→8 changes only 3,994 px, yet 256
+    and 257, 0.51 s apart, show 22 % and 88 % of them — at the old
+    estimate of 39,000 px/s it would have lasted 0.1 s. One duration for
+    all seven caught transitions fits every mid and bracketing capture
+    within 0.05 s (a size-dependent 0.70 s + 0.32 s × changed/64,000
+    would fit within 0.02 s, below what the stamps resolve; DOSBox itself
+    lagged on the full-screen steps — the captures taken during them
+    were stored ~0.17 s late — so it is not modelled). Pixels are
+    revealed evenly over the 0.90 s (`ClassicDepartureTimeline.revealed`).
+  - **Per-picture onsets, not one hold** (`ONSET_MS`, ms after the key;
+    a picture stays from its onset to the next):
+
+    | k | dissolve into | onset ms | on screen | from |
+    |---|---|---|---|---|
+    | 0 | LEVN0001 + @BUILD1 | 560 | 11.14 s | 168, 169 mid; 170 settled |
+    | 1 | LEVN0002 + @BUILD2 | 11,700 | 10.83 s | 188 old; 189, 190 mid; 191 new |
+    | 2 | LEVN0003 + @BUILD3 | 22,530 | 9.66 s | 209 old; 210 mid; 211 new |
+    | 3 | LEVN0004 + @BUILD4 | 32,190 | 9.66 s | **interpolated** (gap 25.0-48.6 s) |
+    | 4 | LEVN0005 + @BUILD5 | 41,850 | 9.66 s | **interpolated** |
+    | 5 | LEVN0006 + @BUILD6 | 51,510 | 9.40 s | 220 old; 221 mid; 222 new |
+    | 6 | LEVN0007 + @BUILD7 | 60,910 | 9.33 s | 238 old; 239 mid; 240 new |
+    | 7 | LEVN0008 + @BUILD8 | 70,240 | 9.45 s | 255 old; 256, 257 mid; 258 new |
+    | 8 | LEVN0009 + @BUILD9 | 79,690 | 9.40 s | 273 old; 274 mid; 275 new |
+    | 9 | LEVN0010 + @BUILD10 | 89,090 | 9.39 s | **extrapolated** (gap 80.6-105.5 s) |
+    | – | end (`END_MS`) | 98,480 | – | **extrapolated**: one more 9.4 s period |
+
+    Pictures 1 and 2 stay ~1.7 s and ~1.4 s longer than the ship pictures;
+    why is unknown, the table keeps it. The first game scene was up at the
+    next capture after the gap (276, +105.5 s) and stays to 340; with the
+    engine's 1-2 s start after `END_MS` ours appears at ≈100 s.
+  - **Replay check (scratch `Verify`):** the proposed clock, replayed at
+    all 174 stamps, agrees with every capture within ±50 ms (exactly at
+    the stamp with 173; at 222 it finishes 5→6 37 ms after the stamp), and
+    98 of the 99 settled captures up to 275 render with 0 px difference
+    (the 99th is that 222). The old model (39,000 px/s, 8.9 s hold, start
+    from the audience) disagreed with 16 captures.
+  - **Older hand-stamped runs:** no contradiction when their stamps are
+    read as upper bounds (English key 1.2-5.5 s after the audience
+    stamp); the Dutch 069..083 run then needs its key ≥0.5 s before its
+    audience stamp, i.e. that run reached picture 3 at least 0.5 s
+    sooner — run-to-run variation of the early pictures, not a model
+    error. Time comes from `System.nanoTime()` differences, never tick
+    counts, so a stalled EDT only skips ahead.
 - **How it runs (`ClassicMainMenuPanel`, mode `DEPARTURE`).** `handleChain`
   DONE → `startDeparture`: builds the captions from the chain's setup,
-  renders frame 0 (the audience still, without the arrow) and frames 1..10
+  uses a black frame 0 (the original cuts the audience to black) and renders frames 1..10
   offscreen, computes the ten dissolve orders (a few tens of ms in all), and
   starts a 15 ms `javax.swing.Timer`. Each tick reads the timeline and copies
   the newly revealed pixels into the shown 320×200 image (repaint only when
@@ -2095,7 +2295,7 @@ caption at a time. References: Dutch `start-sequence-dutch/opening_069..082`
   (`ClassicNewWorldScreens.Assets.levn`, `Texts.build/diffTitles/homePorts`).
   If anything is missing, `ClassicDeparture.available` logs one INFO line
   and the old `STARTING` path runs. Log lines: `Classic departure: start
-  (prepared in N ms, about 97 s)` and `Classic departure: finished after N
+  (prepared in N ms, about 98 s)` and `Classic departure: finished after N
   ms (skipped=true|false)`.
 - **Why the engine starts AFTER the departure, not in parallel — a
   deviation from this step's specification, for the owner to confirm.** The
@@ -2104,7 +2304,7 @@ caption at a time. References: Dutch `start-sequence-dutch/opening_069..082`
   `actions.newWorld` → `ClassicGUI.startNewWorldGame` runs
   `loadSpecification` and `startSinglePlayerGame` on the EDT (an
   `invokeLater`), after the show, so the EDT is still blocked for 1-2 s
-  (repaint, Alt+Enter and Alt+F4 wait) and the player waits ≈97.7 s plus
+  (repaint, Alt+Enter and Alt+F4 wait) and the player waits ≈98.5 s plus
   that start. Moving it off the EDT is not a local change:
   `startSinglePlayerGame` runs the login whose reply re-enters
   `showStartGamePanel` with nested synchronous asks on the EDT
@@ -2113,7 +2313,7 @@ caption at a time. References: Dutch `start-sequence-dutch/opening_069..082`
   `closeMainPanel` call and every failure path would need to be held until
   the show ends — too much engine threading to change without live tests.
   Instead the show ends on a still picture (LEVN0010 + `@BUILD10`, held
-  ≈8.9 s in the original), so the engine's 1-2 s start falls on that same
+  ≈8.5 s after its 0.9 s dissolve), so the engine's 1-2 s start falls on that same
   frozen frame — exactly what `STARTING` already did with the audience. Nothing of the engine exists during the show: skip, Alt+F4 and
   failures need no special care, no autosave or turn report can arrive
   mid-show, `closeMainPanel`/`reconnectGUI` need no gating, and the in-game
@@ -2151,19 +2351,28 @@ caption at a time. References: Dutch `start-sequence-dutch/opening_069..082`
   (report only) the production order's prefix disagrees with 042/077 in
   21,132/3,558 px, as expected from an unknown order; A4 (report only) the
   timing fit above plus contact sheets `timeline_dutch.png` /
-  `timeline_english.png`. Exits 1 if an EXACT check fails.
-- **Tests:** `ClassicDepartureTimelineTest` (schedule boundaries, monotonic
-  capped reveal, done at the end and not before, skip, a typical show lasts
-  97-100 s, the dissolve order is a fixed non-sequential permutation of
-  exactly the differing pixels) and `ClassicDepartureCaptionsTest`
-  (synthetic text files: the `@BUILD2/3/4/7` substitutions, Holland's
-  prefix, missing entries, `available`).
+  `timeline_english.png`. Exits 1 if an EXACT check fails. (A4 predates
+  the timed run; the timing is now checked by the scratch `TimingAnalysis`
+  / `OrderCheck` / `Verify` under the session's `scratchpad\intro\timing`:
+  classification of 167..340, prefix nesting of the twelve mid captures,
+  replay of the clock at every stamp with a contact sheet
+  `out\timed_sheet.png`.)
+- **Tests:** `ClassicDepartureTimelineTest` (constant-time reveal whatever
+  the size, the onset table's order and bounds, the black lead-in, the
+  clock against the 26 bracketing and mid-dissolve stamps of the timed run
+  within ±50 ms, schedule boundaries, monotonic capped reveal, done at the
+  end and not before, skip, bad input, the dissolve order is a fixed
+  non-sequential permutation of exactly the differing pixels) and
+  `ClassicDepartureCaptionsTest` (synthetic text files: the `@BUILD2/3/4/7`
+  substitutions, Holland's prefix, missing entries, `available`).
 - **Open items:** how the original reacts to input during the show; whether
-  the audience → picture 1 and picture 10 → first scene changes are cuts or
-  dissolves (we dissolve in and cut out); the exact dissolve order and the
-  per-step hold times (a timed recording would settle them); the source of
-  Holland's extra space and whether France/Spain have one; `@BUILD2`'s
-  `%STRING0` at other difficulty levels; the music during the departure.
+  picture 10 → first scene is a cut or a dissolve and how long picture 10
+  stays (both fell into the timed run's second capture gap; we cut, after
+  an extrapolated hold); the onsets of pictures 4, 5 and 10 (gaps; a second
+  timed run with the gaps elsewhere would settle them) and why pictures 1-2
+  stay longer; the exact dissolve order; the source of Holland's extra
+  space and whether France/Spain have one; `@BUILD2`'s `%STRING0` at other
+  difficulty levels; the music during the departure.
 
 ## First scene (MSS0 + @TUTORIAL1) (`ClassicFirstScene`, `ClassicMenuBar`, `ClassicHud`, `ClassicHudOverlay`)
 
@@ -2362,8 +2571,13 @@ start. Sound *effects* stay FreeCol's for now. (2026-10-04)
   (skipping up-to-date WAVs) and writes `mod.xml` and `resources.properties`
   only if they are missing, so a re-run never undoes the owner's title choice.
   Details: `tools/classic_assets/README.md`.
+- **Where the tracks are.** The owner's original MP3s:
+  `C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Colonization\Bonus Content\Soundtrack\`
+  ("Sid Meier's Colonization Soundtrack - Track 1..26.mp3"). The copies the
+  game plays: `data\mods\classic_music\resources\music\track01.wav ..
+  track26.wav` in the repository folder (trackNN = Steam "Track N").
 - **Choosing the title piece — the ONE line.** In
-  `data/mods/classic_music/resources.properties`:
+  `data/mods/classic_music/resources.properties` (line 10):
   ```
   sound.classic.music.title=resources/music/track01.wav
   ```
@@ -2398,9 +2612,13 @@ start. Sound *effects* stay FreeCol's for now. (2026-10-04)
 - **Behaviour** (a small state machine, `Jukebox`: SILENT / TITLE / GAME,
   driven purely through the player's default playlist, which
   `SoundPlayer.run` loops shuffled whenever its queue is empty):
+  - *First picture* (2026-10-05) — on a normal launch the title piece starts
+    with the first picture of the early window, together with the intro;
+    see "Music from the first second" below. It is then already playing
+    when the title appears, and nothing below restarts it.
   - *Title screen* — `ClassicGUI.showMainPanel` → `playTitleMusic()`: the list
     becomes the title piece alone, then `stop()`; the piece starts at once and
-    loops while the menu is up. Every way to the title ends in `showMainPanel`
+    loops while the menu is up (a no-op when the early piece was adopted). Every way to the title ends in `showMainPanel`
     (start-up, back to the title, in-game "Neues Spiel", defeat/quit, failed
     starts and loads), and re-showing the title does not restart the piece.
   - *Game start* (new game, load from the title, in-game load) — FreeCol's
@@ -2424,9 +2642,58 @@ start. Sound *effects* stay FreeCol's for now. (2026-10-04)
   race: `playDone` was cleared only after a dequeued file's line was open, so
   a `stop()` landing in between was lost and that file played to its end —
   for "back to the title" that would be a whole in-game track.
+- **Music from the first second (`ClassicEarlyMusic`, 2026-10-05).** The
+  owner wants the music "zeitgleich mit dem Zeigen des Vorspanns"; before,
+  it started at client attach (~4.4 s). Now:
+  - `FreeCol.createClassicSplashScreen` calls `ClassicEarlyMusic.prepare()`
+    on a normal launch with sound (not `--fast`, a save, a debug start,
+    `--no-sound`, `--no-splash`, headless) BEFORE the window is built. A
+    daemon thread "Classic early music" (~0.25 s, overlapping the window's
+    ~0.45 s) finds `classic_music` (`ClassicPackFiles.modDirectory`), picks
+    the title by `Soundtrack.of` (the same rule as the controller, incl. the
+    first-track fallback), peeks `model.option.musicVolume` and
+    `model.option.audioMixer` from the options file the way
+    `ClientOptions.getSpecialOptions` does (failure = 100 %, automatic;
+    volume 0 = no early start), validates silently (audio header,
+    `isLineSupported`, test open/close of a line), and only then — under the
+    hand-over lock, only if nobody cancelled — builds a `SoundPlayer` with
+    stand-in `AudioMixerOption`/`PercentageOption` (null specification).
+  - `ClassicStartupScreen.show` calls `ClassicEarlyMusic.go()` right after
+    the first picture is painted (the black fallback window calls it after
+    `setVisible`): the title becomes the player's default playlist; the
+    intro's 300 ms black lead-in covers the line start.
+  - Hand-over without a restart: `SoundController` has a protected
+    constructor taking a running music player (SoundController.java; the
+    public one passes null, plain FreeCol unchanged).
+    `ClassicSoundController`'s public constructor delegates with
+    `ClassicEarlyMusic.take()`. If the base class did not use that player
+    (`--no-sound`, unreadable mixer option) or `!canPlaySound()`, it is
+    silenced for good (empty list + stop: its thread never ends). Otherwise
+    the real `MUSIC_VOLUME`/`AUDIO_MIXER` are forwarded into the stand-ins
+    (the volume applies to the playing line at once) and kept forwarded by
+    listeners; if the piece plays and the resources resolve the same file
+    (canonical path) or nothing, `Jukebox.adoptTitle()` records TITLE with no
+    output call, so `playTitleMusic` is a no-op and game start swaps the list
+    without a stop as before; a different resolved title switches once.
+  - `take()` while the preparation still runs cancels it; its late result
+    builds nothing, and the piece starts at attach as before. Every failure
+    ends in today's behaviour (start at attach, or silence) — never FreeCol
+    music, never two pieces.
+  - Core hardening: `SoundPlayer.run` waits `WAIT_TIMEOUT` (100 ms) after a
+    failed `playSound`, instead of refilling and failing at full speed
+    (which flooded the log with WARNINGs when a line failed mid-session).
+  - Log lines: `Classic start-up: title piece started after N ms
+    (trackNN.wav, prepared in N ms)`, `Classic start-up: early music not
+    started: <reason>`, `Classic music: title piece adopted from the
+    start-up (trackNN.wav)`, `Classic music: early title piece silenced`.
 - **Tests.** `ClassicSoundControllerTest` (no audio device needed): music-key
   routing, title/in-game selection, and the title → game → title transitions
-  against a recording player.
+  against a recording player; `adoptTitle` makes no output call, `title()`
+  afterwards none either, `game()` swaps without a stop, a different
+  resolved title switches once. `ClassicEarlyMusicTest`: the hand-over state
+  machine with a fake player in every order (go before ready, take before
+  ready = cancel with nothing built, take while ready or playing, double
+  take, go without prepare, failure, null player) and the volume rules.
 - **Open / not yet:**
   - Which Steam track is the original's title theme (default Track 1).
     **To confirm with the owner by ear:** before this change the piece
@@ -2644,7 +2911,7 @@ gone, and the title is painted before the client even exists. (2026-10-05)
     `ClassicGUI.showMainPanel` after the start-up's own call to it. "Ja" in
     the quit box ends at once (`FreeCol.quit(0)`).
   - `showMainPanel` no longer resets a live menu (`ClassicMainMenuPanel.isLive`:
-    TITLE, LOAD, NOTICE, QUIT, NEW_WORLD) when it has no notice to show —
+    INTRO, TITLE, LOAD, NOTICE, QUIT, NEW_WORLD) when it has no notice to show —
     otherwise the start-up's call would undo the bar or a half-done chain.
     PASSIVE, BUSY and STARTING (a failed start or load, an ended game) are
     still reset to the title by every call except the start-up's own one
@@ -2655,21 +2922,26 @@ gone, and the title is painted before the client even exists. (2026-10-05)
   the two log lines below): the title and menu ~1-1.5 s after the double
   click; the menu reacts from ~4 s (the constructor's ~3 s, during which the
   Windows arrow shows and input is queued); the title music starts when the
-  client is attached (~3-4 s, `showMainPanel` → `playTitleMusic`). The
+  client is attached (~3-4 s, `showMainPanel` → `playTitleMusic`).
+  **Since 2026-10-05** a normal launch opens on the intro instead (black,
+  then the emblem; see "Opening (Vorspann)"), which keeps animating through
+  the blocked ~3 s (own render thread, no arrow), and the title piece starts
+  with that first picture (`ClassicEarlyMusic`, see "Music"); the title and
+  menu follow after the intro (≈2:08) or at once on a key or click. The
   new-game chain needs only pack files, so it works fully while the
   background preload still runs; its art is prefetched on a daemon thread as
   soon as the title is live.
 - **Log lines for live checks:** `Classic start-up: title shown after N ms`
-  (JVM start → painted) and `Classic start-up: client attached after N ms`;
+  (`intro shown` on a normal launch; JVM start → painted) and
+  `Classic start-up: client attached after N ms`;
   "ClassicGUI selected" now follows "overlaying 'classic_music'" within
   about a second, and "Classic UI: background preload done." comes after the
   window, not before.
 - **Open:** cold-cache timings are unmeasured (the harness cannot flush the
-  OS cache and may not launch the GUI); the title music could start before
-  the client is attached (an early `SoundPlayer` handed over to
-  `ClassicSoundController`, ~0.3 s) if the live test shows it too late; the
-  background preload still reads FreeCol's own art too (9 of its 15 s of
-  CPU), which a key filter could skip.
+  OS cache and may not launch the GUI); the background preload still reads
+  FreeCol's own art too (9 of its 15 s of CPU), which a key filter could
+  skip. DONE: the title music before client attach (`ClassicEarlyMusic`,
+  ~0.25 s preparation overlapped with the window build).
 
 ## Seam facts (for the remaining/next work)
 
@@ -2716,6 +2988,16 @@ Hard-won details, each of which silently wastes a run:
 - **`--fast` resumes the last save**, so the start state is whatever you left —
   and your test turns get autosaved back. The "starts at sea" start only happens
   on a profile with no saves.
+- **A normal launch opens on the ≈2:08 intro (Vorspann).** Press one fresh
+  key (not a modifier, not an Alt/Ctrl chord) or click once to skip to the
+  title menu; the skipping key is consumed, so send it separately from the
+  menu keys, and wait for `Classic intro: skipped after N ms` (or
+  `finished`) before driving the menu. Keys typed ahead while the client is
+  still being built spend their first key on the skip. `--fast` and
+  `-Dfreecol.classic.intro=false` (a JVM option, before `-jar`/`-cp`'s main
+  class) never show it; `--no-intro` does NOT switch it off. The title
+  piece is audible from the first picture (`title piece started after N ms`
+  then `title piece adopted from the start-up`).
 - **The window takes ~1-2 s, the menu ~4 s** since the fast start (it took
   ~30–55 s before). Without the pack it still takes a few seconds more, and a
   cold disk cache is unmeasured: keep polling `MainWindowHandle` for a minute

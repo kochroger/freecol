@@ -1273,8 +1273,13 @@ public class ClassicGUI extends GUI {
     /**
      * {@inheritDoc}
      *
-     * The original's intro is not recreated yet, so go straight on.  The base
-     * no-op (GUI.java:1141) never ran {@code callback}, so a classic start
+     * Go straight on: the Classic UI's intro (the own emblem, the original's
+     * chart credits and title build-up) already runs in the early window,
+     * {@code ClassicMainMenuPanel} mode INTRO, started by
+     * {@link ClassicStartupScreen#show} long before this call, and the
+     * start-up {@link #showMainPanel} keeps it running (INTRO counts as
+     * live).  FreeCol's intro video is never shown.  The base no-op
+     * (GUI.java:1141) never ran {@code callback}, so a classic start
      * without {@code --no-intro} or {@code --fast} never reached any menu.
      */
     @Override

@@ -54,6 +54,28 @@ public class SoundController {
      * @param sound Enable sound if true.
      */
     public SoundController(FreeColClient freeColClient, boolean sound) {
+        this(freeColClient, sound, null);
+    }
+
+    /**
+     * Prepare the sound system, taking over a music player that is already
+     * running.
+     *
+     * Why: the Classic UI starts its title piece with the very first
+     * picture, seconds before any client exists (ClassicEarlyMusic), and
+     * hands that same player over here so the piece neither restarts nor
+     * plays twice.  The running player is used only if this controller
+     * would have built a music player at all ({@code sound} and a readable
+     * mixer option); otherwise it is ignored and the caller must silence
+     * it.  Plain FreeCol always passes null.
+     *
+     * @param freeColClient The {@code FreeColClient} for the game.
+     * @param sound Enable sound if true.
+     * @param runningMusicPlayer A music player to adopt, or null to build
+     *     one.
+     */
+    protected SoundController(FreeColClient freeColClient, boolean sound,
+                              SoundPlayer runningMusicPlayer) {
         final ClientOptions opts = freeColClient.getClientOptions();
         this.soundPlayer = null;
         if (sound) {
@@ -74,7 +96,8 @@ public class SoundController {
             // mixer option to one that works.
             logger.info("Create sound player with " + amo);
             this.soundPlayer = new SoundPlayer(amo, opts.getOption(ClientOptions.SOUND_EFFECTS_VOLUME, PercentageOption.class));
-            this.musicPlayer = new SoundPlayer(amo, opts.getOption(ClientOptions.MUSIC_VOLUME, PercentageOption.class));
+            this.musicPlayer = (runningMusicPlayer != null) ? runningMusicPlayer
+                : new SoundPlayer(amo, opts.getOption(ClientOptions.MUSIC_VOLUME, PercentageOption.class));
         }
     }
 

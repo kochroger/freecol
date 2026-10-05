@@ -172,9 +172,18 @@ public final class ClassicAssetConverter {
      * scroll, the in-game panel's labels) and {@code MENU.TXT}, the in-game
      * menu bar's titles and items ({@code ClassicMenuBar}).  See
      * {@code ClassicText}.
+     *
+     * <p>{@code OPENING.TXT} and {@code PATH.DAT} drive the original
+     * opening (the sea-chart credits and the title build-up,
+     * {@code ClassicIntro} / {@code ClassicOpeningScript}): the first is the
+     * frame schedule of the credit scrolls and chart animations, the second
+     * the ship's 701 path points.  The credits themselves are the OPENCRD
+     * sprites, already converted with the other SS frames, so no name is
+     * ever transcribed anywhere; these two files only say WHEN and WHERE.
+     * Like every other copy they stay in the git-ignored pack.
      */
     static final String[] TEXT_FILES = { "GAME.TXT", "NAMES.TXT", "LABELS.TXT",
-                                         "MENU.TXT" };
+                                         "MENU.TXT", "OPENING.TXT", "PATH.DAT" };
 
     /**
      * Copy {@link #TEXT_FILES} byte for byte into {@code <pack>/text/}, under

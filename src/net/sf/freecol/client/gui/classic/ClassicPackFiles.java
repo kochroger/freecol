@@ -103,27 +103,40 @@ final class ClassicPackFiles {
      */
     static synchronized ClassicPackFiles runtime() {
         if (runtime == null) {
-            File d = null;
-            try {
-                final FreeColModFile mod = FreeColModFile.getFreeColModFile(PACK_ID);
-                if (mod != null && new File(mod.getPath()).isDirectory()) {
-                    d = new File(mod.getPath());
-                }
-            } catch (RuntimeException e) {
-                logger.log(Level.FINE, "No registered " + PACK_ID, e);
-            }
-            if (d == null) {
-                try {
-                    d = new File(FreeColDirectories.getStandardModsDirectory(), PACK_ID);
-                } catch (RuntimeException e) {
-                    logger.log(Level.FINE, "No mods directory", e);
-                }
-            }
+            final File d = modDirectory(PACK_ID);
             runtime = Optional.ofNullable((d != null
                     && new File(d, "resources.properties").isFile())
                 ? new ClassicPackFiles(d) : null);
         }
         return runtime.orElse(null);
+    }
+
+    /**
+     * Where a classic pack lives: the registered mod {@code modId} when it
+     * is a directory, else {@code <data>/mods/<modId>}.  Also used for the
+     * soundtrack pack {@code classic_music} before any client exists
+     * ({@link ClassicEarlyMusic}): {@code FreeColModFile.loadMods} runs in
+     * {@code FreeCol.main}, long before the window opens.
+     *
+     * @param modId The mod id, e.g. {@value #PACK_ID}.
+     * @return The directory (it may not exist), or null when not even the
+     *     mods directory is known.
+     */
+    static File modDirectory(String modId) {
+        try {
+            final FreeColModFile mod = FreeColModFile.getFreeColModFile(modId);
+            if (mod != null && new File(mod.getPath()).isDirectory()) {
+                return new File(mod.getPath());
+            }
+        } catch (RuntimeException e) {
+            logger.log(Level.FINE, "No registered " + modId, e);
+        }
+        try {
+            return new File(FreeColDirectories.getStandardModsDirectory(), modId);
+        } catch (RuntimeException e) {
+            logger.log(Level.FINE, "No mods directory", e);
+            return null;
+        }
     }
 
     /**
@@ -262,6 +275,49 @@ final class ClassicPackFiles {
             && new File(this.dir, "ss-anchors.properties").isFile();
     }
 
+    /**
+     * The sprite stems the original opening draws: the ship, the three
+     * credit-scroll series and the ten animation series of OPENING.TXT's
+     * {@code @OPENING} table ({@link ClassicOpeningScript#SERIES_STEMS}).
+     */
+    static final String[] OPENING_STEMS = {
+        "OPENSHIP", "OPENCRD1", "OPENCRD2", "OPENCRD3",
+        "OPENWND1", "OPENSUN", "OPENMON1", "OPENWND2", "OPENMON2",
+        "OPENMON3", "OPENFISH", "OPENGUY", "OPENLOGO", "OPENBONK"
+    };
+
+    /**
+     * Whether the pack holds the original opening's material: OPENING.TXT
+     * and PATH.DAT (copied by the converter since the intro step), the
+     * three opening pictures, frame 000 of every opening sprite series and
+     * the sprite anchors.  Cheap (file probes only, nothing is loaded).
+     * Without it the intro shows the emblem and then the title
+     * ({@link ClassicIntroPlayer}).
+     *
+     * @return True when the chart credits and title build-up can be shown.
+     */
+    boolean hasOpening() {
+        if (textFile("OPENING.TXT") == null || textFile("PATH.DAT") == null
+            || !new File(this.dir, "ss-anchors.properties").isFile()) {
+            return false;
+        }
+        for (String pik : new String[] { "OPENBORD.PIK", "OPENING.PIK",
+                                         "OPENMENU.PIK" }) {
+            if (!isFileKey(pikKey(pik))) return false;
+        }
+        for (String stem : OPENING_STEMS) {
+            if (!isFileKey(ssKey(stem + ".SS.000"))) return false;
+        }
+        return true;
+    }
+
+    /** Whether a pack key maps onto an existing file (nothing is loaded). */
+    private boolean isFileKey(String key) {
+        final String rel = this.props.get(key);
+        return rel != null && !rel.startsWith("resource:")
+            && new File(this.dir, rel).isFile();
+    }
+
 
     // Keys
 
@@ -282,8 +338,10 @@ final class ClassicPackFiles {
      * Read a {@code key=value} file: '#' lines and lines without '=' are
      * skipped; with {@code unquote}, a value in double quotes loses them (as
      * {@code StringResource} values do).  A missing file gives an empty map.
+     * Package-private: {@link ClassicEarlyMusic} reads the soundtrack pack's
+     * title line with it before the resource manager knows that pack.
      */
-    private static Map<String, String> readProperties(File f, boolean unquote) {
+    static Map<String, String> readProperties(File f, boolean unquote) {
         final Map<String, String> m = new HashMap<>();
         if (!f.isFile()) return m;
         try {

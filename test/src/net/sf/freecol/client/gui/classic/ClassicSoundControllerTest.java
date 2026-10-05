@@ -175,6 +175,50 @@ public class ClassicSoundControllerTest extends TestCase {
         assertEquals(Arrays.asList("list[track02.wav]"), r.calls);
     }
 
+    public void testAdoptTitleMakesNoCalls() {
+        // The title piece already plays (ClassicEarlyMusic): adopting it
+        // must not touch the player -- a stop would restart the piece.
+        final Soundtrack s = Soundtrack.of(null,
+            Arrays.asList(track(1), track(2), track(3)));
+        final Recorder r = new Recorder();
+        final Jukebox j = new Jukebox(r);
+        assertTrue(j.adoptTitle());
+        assertEquals(Mode.TITLE, j.getMode());
+        assertTrue(r.calls.isEmpty());
+        // A second adopt is a no-op.
+        assertFalse(j.adoptTitle());
+
+        // The title screen's playTitleMusic afterwards: still nothing.
+        assertFalse(j.title(s));
+        assertTrue(r.calls.isEmpty());
+
+        // Game start: the list is swapped without a stop, as always.
+        assertTrue(j.game(s));
+        assertEquals(Arrays.asList("list[track02.wav, track03.wav]"), r.calls);
+
+        // Adopting is only for the start-up: not after a mode was chosen.
+        assertFalse(j.adoptTitle());
+        assertEquals(Mode.GAME, j.getMode());
+    }
+
+    public void testDifferentResolvedTitleSwitchesOnce() {
+        // The start-up played track01, but the resources resolve track05
+        // (the owner edited the title line in between): the hand-over
+        // calls title() instead of adoptTitle() -- one switch, then idle.
+        final Soundtrack s = Soundtrack.of(track(5),
+            Arrays.asList(track(1), track(5)));
+        assertFalse(ClassicSoundController.sameFile(s.title, track(1)));
+        assertTrue(ClassicSoundController.sameFile(track(5),
+            new File(new File(DIR, "."), "track05.wav")));
+        final Recorder r = new Recorder();
+        final Jukebox j = new Jukebox(r);
+        assertTrue(j.title(s));
+        assertEquals(Arrays.asList("list[track05.wav]", "stop"), r.calls);
+        r.calls.clear();
+        assertFalse(j.title(s));
+        assertTrue(r.calls.isEmpty());
+    }
+
     public void testNoSoundtrackIsSilent() {
         final Soundtrack s = Soundtrack.of(null, Collections.<File>emptyList());
         final Recorder r = new Recorder();

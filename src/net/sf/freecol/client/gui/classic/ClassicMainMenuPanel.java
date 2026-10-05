@@ -79,7 +79,11 @@ import net.sf.freecol.common.resources.ResourceManager;
  * explicit images, font and state, so a headless preview harness can render
  * them without a {@code FreeColClient} and diff them against the captures.
  *
- * <p>Modes: {@link Mode#PASSIVE} (just the picture: the backdrop while
+ * <p>Modes: {@link Mode#INTRO} (the Vorspann before the title on a normal
+ * launch: the own emblem, the original's chart credits and title build-up,
+ * drawn by a {@link ClassicIntroPlayer} thread; any fresh key or click
+ * skips straight to the title and is used up by the skip),
+ * {@link Mode#PASSIVE} (just the picture: the backdrop while
  * {@code --fast} loads a game, before {@code showMainPanel} makes the menu
  * live), {@link Mode#TITLE}, {@link Mode#LOAD}, {@link Mode#NOTICE},
  * {@link Mode#BUSY}, {@link Mode#QUIT} (the "Colonization beenden?" box
@@ -136,7 +140,7 @@ final class ClassicMainMenuPanel extends JPanel {
     }
 
     /** What the canvas currently shows. */
-    enum Mode { PASSIVE, TITLE, LOAD, NOTICE, BUSY, QUIT, NEW_WORLD, DEPARTURE, STARTING }
+    enum Mode { PASSIVE, INTRO, TITLE, LOAD, NOTICE, BUSY, QUIT, NEW_WORLD, DEPARTURE, STARTING }
 
     /** The images and font the static painters use; any may be null. */
     static final class MenuAssets {
@@ -586,7 +590,7 @@ final class ClassicMainMenuPanel extends JPanel {
 
         /** The choices to start the game with when the show ends. */
         final ClassicGUI.NewWorldSetup setup;
-        /** Frame 0 (audience) .. 10 (last picture), 64,000 RGB pixels each. */
+        /** Frame 0 (black) .. 10 (last picture), 64,000 RGB pixels each. */
         final int[][] frames;
         /** The reveal order of transition k (frame k -> k+1). */
         final int[][] orders;
@@ -630,6 +634,24 @@ final class ClassicMainMenuPanel extends JPanel {
      * flash between the ship and the game.  Null otherwise.
      */
     private BufferedImage frozenFrame = null;
+
+    /** The running intro (INTRO only), else null. */
+    private ClassicIntroPlayer introPlayer = null;
+
+    /**
+     * The key that skipped the intro while it is still held, else -1: its
+     * auto-repeat and its typed character are swallowed until it is
+     * released, so a held Enter cannot also open NEUE WELT on the title the
+     * skip just showed.
+     */
+    private int introSkipKey = -1;
+
+    /**
+     * Whether the last mouse press skipped the intro: the rest of its click
+     * series (the second press of a double click) then does nothing on the
+     * title -- the chain's double-click rule (see {@link #onPress}).
+     */
+    private boolean introClickSeries = false;
 
 
     /**
@@ -689,7 +711,13 @@ final class ClassicMainMenuPanel extends JPanel {
                 @Override
                 public void keyPressed(KeyEvent e) {
                     final boolean repeat = !heldKeys.add(e.getKeyCode());
-                    if (mode == Mode.DEPARTURE) {
+                    if (e.getKeyCode() == introSkipKey) {
+                        e.consume();        // the intro's skip key, held
+                        return;
+                    }
+                    if (mode == Mode.INTRO) {
+                        onIntroKey(e, repeat);
+                    } else if (mode == Mode.DEPARTURE) {
                         onDepartureKey(e, repeat);
                     } else {
                         onChainKey(e, repeat);
@@ -699,10 +727,18 @@ final class ClassicMainMenuPanel extends JPanel {
                 @Override
                 public void keyReleased(KeyEvent e) {
                     heldKeys.remove(e.getKeyCode());
+                    if (e.getKeyCode() == introSkipKey) {
+                        introSkipKey = -1;
+                        e.consume();
+                    }
                 }
 
                 @Override
                 public void keyTyped(KeyEvent e) {
+                    if (introSkipKey >= 0 || mode == Mode.INTRO) {
+                        e.consume();
+                        return;
+                    }
                     onChainTyped(e);
                 }
             });
@@ -712,6 +748,7 @@ final class ClassicMainMenuPanel extends JPanel {
                 @Override
                 public void focusLost(FocusEvent e) {
                     heldKeys.clear();
+                    introSkipKey = -1;
                 }
             });
     }
@@ -729,6 +766,7 @@ final class ClassicMainMenuPanel extends JPanel {
         if (this.mode == Mode.LOAD && m != Mode.LOAD) {
             this.loadGeneration.incrementAndGet();
         }
+        if (m != Mode.INTRO) stopIntroPlayer();
         if (m != Mode.DEPARTURE) {
             stopDepartureTimer();
             this.departure = null;
@@ -768,10 +806,7 @@ final class ClassicMainMenuPanel extends JPanel {
      *     failed).
      */
     void showTitle(String userMsg) {
-        final List<String> list = new ArrayList<>();
-        for (String key : ITEM_KEYS) list.add(Messages.message(key));
-        this.items = list;
-        this.selected = 0;
+        prepareTitleItems();
         this.chain = null;
         this.chainData = null;
         prefetchChain();
@@ -781,6 +816,92 @@ final class ClassicMainMenuPanel extends JPanel {
         } else {
             repaint();
         }
+    }
+
+    /**
+     * Build the title items (from Messages) with the first one barred,
+     * without changing the mode: the intro's last picture is the title, so
+     * it needs them before the title is live.  EDT only.
+     */
+    void prepareTitleItems() {
+        final List<String> list = new ArrayList<>();
+        for (String key : ITEM_KEYS) list.add(Messages.message(key));
+        this.items = list;
+        this.selected = 0;
+    }
+
+
+    // The intro
+
+    /**
+     * Enter the intro, black until {@link #startIntro} (the early window,
+     * {@link ClassicStartupScreen#show}, paints this first picture at once).
+     * The pointer is hidden: the original intro shows no arrow (capture
+     * {@code intro-original/opening_084}).  EDT only.
+     */
+    void enterIntro() {
+        if (this.items.isEmpty()) prepareTitleItems();
+        this.introSkipKey = -1;
+        this.introClickSeries = false;
+        setMode(Mode.INTRO);
+        requestFocusInWindow();
+    }
+
+    /**
+     * Start drawing the intro (see {@link ClassicIntroPlayer} for why it
+     * runs on its own thread).  EDT only, in {@link Mode#INTRO}.
+     *
+     * @param t0 {@code System.nanoTime()} of the first, black picture.
+     */
+    void startIntro(long t0) {
+        if (this.mode != Mode.INTRO || this.introPlayer != null) return;
+        this.introPlayer = new ClassicIntroPlayer(this, t0, assets(), this.items);
+        this.introPlayer.start();
+        logger.info("Classic intro: started after "
+            + ClassicStartupScreen.sinceLaunchMs() + " ms since launch");
+    }
+
+    /**
+     * The intro has ended or was skipped: the live title menu -- the same
+     * picture the intro ended on, so nothing jumps.  EDT only; ignored
+     * outside {@link Mode#INTRO}.
+     *
+     * @param skipped Whether a key or click ended it.
+     */
+    void finishIntro(boolean skipped) {
+        if (this.mode != Mode.INTRO) return;
+        final ClassicIntroPlayer p = this.introPlayer;
+        logger.info("Classic intro: " + (skipped ? "skipped" : "finished")
+            + " after " + ((p == null) ? 0L : p.elapsedMs()) + " ms");
+        showTitle(null);
+    }
+
+    /** Stop the intro's drawing for good (any mode change away from INTRO). */
+    private void stopIntroPlayer() {
+        if (this.introPlayer != null) {
+            this.introPlayer.stop();
+            this.introPlayer = null;
+        }
+    }
+
+    /**
+     * A key press during the intro: any fresh press skips to the title and
+     * is used up by it.  Left alone, as in the departure: chords with Alt,
+     * Ctrl or Meta (Alt+Enter full screen and Alt+F4 quit keep their
+     * meaning) and bare modifiers.  The skipping key is remembered
+     * ({@link #introSkipKey}) so its auto-repeat and typed character are
+     * swallowed until it is released.
+     *
+     * @param e The event.
+     * @param repeat Whether the key was already held (auto-repeat).
+     */
+    private void onIntroKey(KeyEvent e, boolean repeat) {
+        if (this.mode != Mode.INTRO) return;
+        if (e.isAltDown() || e.isControlDown() || e.isMetaDown()) return;
+        e.consume();
+        if (repeat || isModifierKey(e.getKeyCode())) return;
+        this.introSkipKey = e.getKeyCode();
+        finishIntro(true);
     }
 
     /**
@@ -846,6 +967,11 @@ final class ClassicMainMenuPanel extends JPanel {
      */
     boolean offerQuit() {
         switch (this.mode) {
+        case INTRO:
+            // Stop the show (setMode does) and ask; "Nein" leaves on the
+            // title, whose items the intro has already prepared.
+            openQuitBox();
+            return true;
         case NEW_WORLD:
             // The chain holds no engine state, so dropping it is all the
             // teardown there is; "Nein" then returns to the title.
@@ -914,13 +1040,15 @@ final class ClassicMainMenuPanel extends JPanel {
      * passive picture and the frozen BUSY / STARTING screens.
      * {@code ClassicGUI.showMainPanel} leaves a live panel alone instead of
      * resetting it to the title, so a choice made in the early start-up
-     * window survives the start-up's own call to it.
+     * window survives the start-up's own call to it.  The intro counts as
+     * live too: it is still running in the early window when that call
+     * comes (~4 s after launch) and must not be cut to the title.
      *
-     * @return True in TITLE, LOAD, NOTICE, QUIT and NEW_WORLD.
+     * @return True in INTRO, TITLE, LOAD, NOTICE, QUIT and NEW_WORLD.
      */
     boolean isLive() {
         switch (this.mode) {
-        case TITLE: case LOAD: case NOTICE: case QUIT: case NEW_WORLD:
+        case INTRO: case TITLE: case LOAD: case NOTICE: case QUIT: case NEW_WORLD:
             return true;
         default:
             return false;
@@ -952,15 +1080,28 @@ final class ClassicMainMenuPanel extends JPanel {
                                RenderingHints.VALUE_ANTIALIAS_OFF);
             // Fit the 320x200 canvas at the largest whole scale (as
             // ClassicColonyPanel.paintComponent); the black ground letterboxes.
-            this.scale = Math.max(1, Math.min(getWidth() / VW, getHeight() / VH));
-            this.originX = (getWidth() - VW * this.scale) / 2;
-            this.originY = (getHeight() - VH * this.scale) / 2;
+            final Rectangle place = canvasPlacement(getWidth(), getHeight());
+            this.scale = place.width / VW;
+            this.originX = place.x;
+            this.originY = place.y;
             g.translate(this.originX, this.originY);
             g.scale(this.scale, this.scale);
             g.clipRect(0, 0, VW, VH);
 
             final MenuAssets a = assets();
             switch (this.mode) {
+            case INTRO:
+                // Only the intro thread's latest finished picture (black
+                // before the first): one renderer, identical output.
+                final ClassicIntroPlayer ip = this.introPlayer;
+                final BufferedImage img = (ip == null) ? null : ip.latest();
+                if (img != null) {
+                    g.drawImage(img, 0, 0, null);
+                } else {
+                    g.setColor(Color.BLACK);
+                    g.fillRect(0, 0, VW, VH);
+                }
+                break;
             case TITLE:
                 paintTitleScreen(g, a, TITLE_LINE, this.items, this.selected);
                 break;
@@ -1008,6 +1149,21 @@ final class ClassicMainMenuPanel extends JPanel {
         } finally {
             g.dispose();
         }
+    }
+
+
+    /**
+     * Where the 320x200 canvas goes in a panel of the given size: the
+     * largest whole scale that fits, centred, the rest black letterbox.
+     * Shared with the intro thread, which draws onto the panel itself.
+     *
+     * @param w The panel width.
+     * @param h The panel height.
+     * @return The canvas rectangle in panel pixels (width = 320 x scale).
+     */
+    static Rectangle canvasPlacement(int w, int h) {
+        final int s = Math.max(1, Math.min(w / VW, h / VH));
+        return new Rectangle((w - VW * s) / 2, (h - VH * s) / 2, VW * s, VH * s);
     }
 
 
@@ -1065,11 +1221,15 @@ final class ClassicMainMenuPanel extends JPanel {
      * Whether the pointer is hidden altogether: over the departure and the
      * frozen picture after it, where the original shows no arrow (none of
      * the 23 departure captures has one) -- the system arrow must not
-     * appear there either.
+     * appear there either.  Over the intro always, even before the pointer
+     * has been seen: the EDT is blocked during its first seconds, so no
+     * mouse event could tell where it is (the original intro shows no
+     * arrow, capture {@code intro-original/opening_084}).
      */
     private boolean hidesPointer() {
-        return this.pointerX >= 0 && this.pointerY >= 0
-            && (this.mode == Mode.DEPARTURE || this.mode == Mode.STARTING);
+        return this.mode == Mode.INTRO
+            || (this.pointerX >= 0 && this.pointerY >= 0
+                && (this.mode == Mode.DEPARTURE || this.mode == Mode.STARTING));
     }
 
     /**
@@ -1134,10 +1294,11 @@ final class ClassicMainMenuPanel extends JPanel {
     }
 
     /**
-     * Bind keys to a menu action.  In {@link Mode#NEW_WORLD} and
-     * {@link Mode#DEPARTURE} the bound actions do nothing: the key listener
-     * ({@link #onChainKey}, {@link #onDepartureKey}) handles and consumes
-     * those keys, so nothing is handled twice.
+     * Bind keys to a menu action.  In {@link Mode#INTRO},
+     * {@link Mode#NEW_WORLD} and {@link Mode#DEPARTURE} the bound actions do
+     * nothing: the key listener ({@link #onIntroKey}, {@link #onChainKey},
+     * {@link #onDepartureKey}) handles and consumes those keys, so nothing
+     * is handled twice.
      */
     private void bind(InputMap im, ActionMap am, String name,
                       Runnable r, int... keys) {
@@ -1145,7 +1306,8 @@ final class ClassicMainMenuPanel extends JPanel {
         am.put(name, new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
-                    if (ClassicMainMenuPanel.this.mode == Mode.NEW_WORLD
+                    if (ClassicMainMenuPanel.this.mode == Mode.INTRO
+                        || ClassicMainMenuPanel.this.mode == Mode.NEW_WORLD
                         || ClassicMainMenuPanel.this.mode == Mode.DEPARTURE) return;
                     r.run();
                 }
@@ -1370,7 +1532,7 @@ final class ClassicMainMenuPanel extends JPanel {
      *
      * <p>WHY the engine starts only afterwards, not in parallel: the show
      * ends on a still picture (LEVN0010 with its caption, held for about
-     * 9 s), so the engine's 1-2 s start -- which blocks this thread, see
+     * 8.5 s), so the engine's 1-2 s start -- which blocks this thread, see
      * {@code ClassicGUI.startNewWorldGame} -- falls on that same frozen
      * frame ({@link Mode#STARTING}).  Nothing of the engine exists while
      * the show runs: skipping, Alt+F4 and failures need no special care,
@@ -1380,9 +1542,13 @@ final class ClassicMainMenuPanel extends JPanel {
      * has gone, not two seconds into the night picture.  The cost is the
      * engine's start time spent on the last picture.
      *
-     * <p>All eleven frames (the audience still and the ten steps) and the
-     * ten dissolve orders are prepared here at once; that takes a few tens
-     * of milliseconds.
+     * <p>All eleven frames (black and the ten steps) and the ten dissolve
+     * orders are prepared here at once; that takes a few tens of
+     * milliseconds.  Frame 0 is BLACK, not the audience: the original cuts
+     * the audience to black on the key and dissolves picture 1 in from
+     * black about 0.56 s later (timed capture 167 is all black, 168 and
+     * 169 hold only black and LEVN0001 pixels; see
+     * {@link ClassicDepartureTimeline}).
      *
      * @param setup The chain's choices.
      * @return False when the departure is unavailable (pack material
@@ -1400,7 +1566,8 @@ final class ClassicMainMenuPanel extends JPanel {
         }
         final long prep = System.nanoTime();
         final int[][] frames = new int[ClassicDeparture.STEPS + 1][];
-        for (int k = 0; k <= ClassicDeparture.STEPS; k++) {
+        frames[0] = new int[ClassicDeparture.PIXELS];   // black (0x000000)
+        for (int k = 1; k <= ClassicDeparture.STEPS; k++) {
             frames[k] = ClassicDeparture.renderStep(cd.assets, cd.texts, c, k);
         }
         final int[][] orders = new int[ClassicDeparture.STEPS][];
@@ -1689,8 +1856,21 @@ final class ClassicMainMenuPanel extends JPanel {
 
     private void onPress(MouseEvent e) {
         requestFocusInWindow();
+        // The second press of a double click that skipped the intro must
+        // not act on the title the skip just showed.
+        if (this.introClickSeries) {
+            if (e.getClickCount() > 1) return;
+            this.introClickSeries = false;
+        }
         final int x = vx(e), y = vy(e);
         switch (this.mode) {
+        case INTRO:
+            if (e.getButton() == MouseEvent.BUTTON1
+                || e.getButton() == MouseEvent.BUTTON3) {
+                this.introClickSeries = true;
+                finishIntro(true);
+            }
+            break;
         case NEW_WORLD:
             if (this.chain == null) break;
             // The second press of a double click must not act on the screen

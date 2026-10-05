@@ -67,6 +67,7 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import net.sf.freecol.client.ClientOptions;
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.gui.SplashScreen;
+import net.sf.freecol.client.gui.classic.ClassicEarlyMusic;
 import net.sf.freecol.client.gui.classic.ClassicStartupScreen;
 import net.sf.freecol.common.FreeColException;
 import net.sf.freecol.common.FreeColSeed;
@@ -1671,7 +1672,11 @@ public final class FreeCol {
      *       debug start or a save argument (which go straight to a game) it
      *       shows the passive title picture without a menu.
      *       {@code ClassicGUI.startGUI} adopts this window later, so there
-     *       is no splash at all: null is returned.</li>
+     *       is no splash at all: null is returned.  On a normal launch
+     *       (the live menu) the window opens on the intro (Vorspann) and
+     *       the original title piece starts with its first picture
+     *       ({@code ClassicEarlyMusic}, prepared here before the window is
+     *       built so the audio set-up overlaps it).</li>
      *   <li>otherwise, in full screen (no positive {@code --windowsize}, the
      *       same test as {@code ClassicGUI.startGUI}): a black borderless
      *       window over the whole default monitor -- the monitor the main
@@ -1693,12 +1698,18 @@ public final class FreeCol {
             splashStream.close();
         } catch (IOException ioe) {} // Unused, nothing to lose
         splashStream = null;
-        if (!headless) {
-            // The same start decision as startClient makes right after this.
-            final boolean menu = !(debugStart || fastStart
-                || FreeColDirectories.getSavegameFile() != null);
-            if (ClassicStartupScreen.show(windowSize, menu)) return null;
-        }
+        if (headless) return null;
+        // The same start decision as startClient makes right after this.
+        final boolean menu = !(debugStart || fastStart
+            || FreeColDirectories.getSavegameFile() != null);
+        // A normal launch: the title piece is prepared now, on its own
+        // thread while the window is built, and starts with the first
+        // picture (ClassicEarlyMusic); the intro (Vorspann) runs before the
+        // title.  --no-intro is deliberately not consulted: it skips
+        // FreeCol's intro video, which the Classic UI never shows.
+        if (menu && sound) ClassicEarlyMusic.prepare();
+        final boolean intro = menu && ClassicStartupScreen.introEnabled();
+        if (ClassicStartupScreen.show(windowSize, menu, intro)) return null;
         if (windowSize != null && windowSize.width > 0
             && windowSize.height > 0) return null;
         try {
@@ -1706,6 +1717,7 @@ public final class FreeCol {
                 GraphicsEnvironment.getLocalGraphicsEnvironment()
                     .getDefaultScreenDevice());
             black.setVisible(true);
+            ClassicEarlyMusic.go();     // no-op unless prepared
             return black;
         } catch (Exception e) {
             logger.log(Level.WARNING, "Classic start-up screen failure", e);

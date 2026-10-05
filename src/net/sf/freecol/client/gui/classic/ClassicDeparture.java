@@ -59,11 +59,14 @@ import java.util.logging.Logger;
  * with 0 differing pixels over the full 320x200 frame.
  *
  * <p><b>Transitions</b> are a random pixel dissolve over the whole screen,
- * caption band included (the two captures caught mid-way, {@code 042} and
- * {@code 077}, contain only old-frame and new-frame pixels, and old and
- * new captions overlap).  The original's order is fixed -- every pixel new
- * in {@code 077} is new in {@code 042} too, 6,047 of 6,047, in runs made
- * on different days -- but its generator is unknown (Galois LFSRs and the
+ * caption band included (all twelve captures caught mid-way -- {@code 042},
+ * {@code 077} and ten of the timed run {@code departure-dutch-timed} --
+ * contain only old-frame and new-frame pixels, and old and new captions
+ * overlap).  The first one starts from BLACK, not from the audience (timed
+ * capture 167 is black, 168/169 hold only black and LEVN0001 pixels).
+ * The original's order is fixed and covers all 64,000 positions -- the
+ * twelve captures, seven transitions in three runs, nest without one
+ * exception -- but its generator is unknown (Galois LFSRs and the
  * Microsoft C {@code rand()} were rejected), so {@link #dissolveOrder}
  * uses one fixed seeded shuffle instead.  Mid-dissolve frames therefore
  * never match the original pixel for pixel; settled frames always do.
@@ -342,8 +345,10 @@ final class ClassicDeparture {
      * @param a The chain's assets.
      * @param t The chain's texts.
      * @param c The captions.
-     * @param k 0 = the audience still the show starts from (as the chain
-     *     paints it, without the arrow); 1..10 = the departure steps.
+     * @param k 0 = the audience still the key leaves (as the chain paints
+     *     it, without the arrow; the show itself starts from black, see
+     *     {@code ClassicMainMenuPanel.startDeparture}); 1..10 = the
+     *     departure steps.
      * @return The frame.
      */
     static BufferedImage renderImage(ClassicNewWorldScreens.Assets a,

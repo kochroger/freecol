@@ -25,10 +25,14 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import net.sf.freecol.client.ClientOptions;
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.control.SoundController;
+import net.sf.freecol.common.option.AudioMixerOption;
+import net.sf.freecol.common.option.PercentageOption;
 import net.sf.freecol.common.resources.AudioResource;
 import net.sf.freecol.common.resources.ResourceManager;
 import net.sf.freecol.common.sound.SoundPlayer;
@@ -95,6 +99,16 @@ import net.sf.freecol.common.sound.SoundPlayer;
  * Without the pack (or with a broken track: one undecodable file drops the
  * whole directory resource, AudioResource.java:62-66) music is silent -- never
  * FreeCol's.
+ *
+ * <p><b>Music from the first second:</b> on a normal launch the title piece
+ * is already playing when this controller is built -- {@link ClassicEarlyMusic}
+ * started it with the first picture of the early window, on a player of its
+ * own.  The constructor adopts that very player (through the protected
+ * {@code SoundController} constructor), forwards the real volume and mixer
+ * options into it and records TITLE without touching it
+ * ({@link Jukebox#adoptTitle}), so the piece never restarts at client
+ * attach, at the title screen or at game start.  Without an early player
+ * everything is as before: the title screen starts the piece.
  */
 public final class ClassicSoundController extends SoundController {
 
@@ -320,6 +334,21 @@ public final class ClassicSoundController extends SoundController {
             this.out.setDefaultPlaylist(new ArrayList<>(s.gameTracks));
             return true;
         }
+
+        /**
+         * The title piece is ALREADY playing (started with the first
+         * picture by {@link ClassicEarlyMusic}, on the very player this
+         * controller adopted): just record it.  No output call at all --
+         * a stop would restart the piece -- and the later {@link #title}
+         * of the title screen is then the usual no-op.
+         *
+         * @return True if the mode changed (SILENT before).
+         */
+        synchronized boolean adoptTitle() {
+            if (this.mode != Mode.SILENT) return false;
+            this.mode = Mode.TITLE;
+            return true;
+        }
     }
 
 
@@ -334,7 +363,20 @@ public final class ClassicSoundController extends SoundController {
      * @param sound Enable sound if true.
      */
     public ClassicSoundController(FreeColClient freeColClient, boolean sound) {
-        super(freeColClient, sound);
+        this(freeColClient, sound, ClassicEarlyMusic.take());
+    }
+
+    /**
+     * Create the controller, adopting the music player that
+     * {@link ClassicEarlyMusic} started with the first picture, if any.
+     *
+     * @param freeColClient The {@code FreeColClient} for the game.
+     * @param sound Enable sound if true.
+     * @param early The early player, or null.
+     */
+    private ClassicSoundController(FreeColClient freeColClient, boolean sound,
+                                   ClassicEarlyMusic.Early early) {
+        super(freeColClient, sound, (early == null) ? null : early.player);
         this.jukebox = new Jukebox(new MusicOutput() {
                 @Override
                 public void setDefaultPlaylist(List<File> files) {
@@ -352,6 +394,84 @@ public final class ClassicSoundController extends SoundController {
                     mp.stop();
                 }
             });
+        if (early != null) adoptEarly(freeColClient, early);
+    }
+
+    /**
+     * Take over the early title piece (see {@link ClassicEarlyMusic}).
+     * <ul>
+     *   <li>Not usable -- {@code --no-sound}, an unreadable mixer option
+     *       (the base class then built no players and ignored this one), or
+     *       no valid mixer: the early player is silenced for good (its
+     *       thread never ends, so it must not keep playing).</li>
+     *   <li>Otherwise the real music volume and mixer options are forwarded
+     *       into the stand-ins the player listens to -- the volume applies to
+     *       the line already playing -- and kept forwarded.</li>
+     *   <li>If the piece already plays and is the title the resources
+     *       resolve to (or they resolve to nothing yet), the jukebox records
+     *       TITLE without touching the player ({@link Jukebox#adoptTitle}),
+     *       so {@code playTitleMusic} at the title screen is a no-op and
+     *       the piece never restarts.  A different resolved title switches
+     *       once.</li>
+     * </ul>
+     */
+    private void adoptEarly(FreeColClient fcc, ClassicEarlyMusic.Early early) {
+        if (getMusicPlayer() != early.player || !canPlaySound()) {
+            early.player.setDefaultPlaylist();
+            early.player.stop();
+            logger.info("Classic music: early title piece silenced (sound off"
+                + " or no usable mixer)");
+            return;
+        }
+        try {
+            final ClientOptions opts = fcc.getClientOptions();
+            final PercentageOption realVolume
+                = opts.getOption(ClientOptions.MUSIC_VOLUME, PercentageOption.class);
+            final AudioMixerOption realMixer
+                = opts.getOption(ClientOptions.AUDIO_MIXER, AudioMixerOption.class);
+            if (realVolume != null) {
+                early.volume.setValue(realVolume.getValue());
+                realVolume.addPropertyChangeListener(e ->
+                    early.volume.setValue(realVolume.getValue()));
+            }
+            if (realMixer != null) {
+                early.mixer.setValue(realMixer.getValue());
+                realMixer.addPropertyChangeListener(e ->
+                    early.mixer.setValue(realMixer.getValue()));
+            }
+        } catch (RuntimeException e) {
+            logger.log(Level.WARNING, "Classic music: options not forwarded", e);
+        }
+        if (!early.playing) return;     // the title screen starts it as usual
+        final Soundtrack s = resolve();
+        if (s.isEmpty() || sameFile(s.title, early.title)) {
+            this.jukebox.adoptTitle();
+            logger.info("Classic music: title piece adopted from the start-up ("
+                + early.title.getName() + ")");
+        } else {
+            this.jukebox.title(s);
+            logger.info("Classic music: start-up played " + early.title.getName()
+                + ", resources say " + s.title.getName() + " -- switched");
+        }
+    }
+
+    /** Whether two files are the same file (canonical paths). */
+    static boolean sameFile(File a, File b) {
+        if (a == null || b == null) return false;
+        try {
+            return a.getCanonicalPath().equals(b.getCanonicalPath());
+        } catch (IOException e) {
+            return a.getAbsolutePath().equals(b.getAbsolutePath());
+        }
+    }
+
+    /**
+     * The jukebox (tests).
+     *
+     * @return The music state machine.
+     */
+    Jukebox jukebox() {
+        return this.jukebox;
     }
 
     /**
