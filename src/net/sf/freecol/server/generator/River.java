@@ -384,7 +384,12 @@ flow:
     }
 
     private void delta(Tile tile, Direction direction, RiverSection section, Direction d) {
+        // Near the map edge (a mouth on the polar rows of column 0 or
+        // width-1) a neighbour can be missing.  That used to throw and
+        // abort the whole map, so no map that generated before ever met
+        // a null here: the two guards leave every such map unchanged.
         Tile t = tile.getNeighbourOrNull(d);
+        if (t == null) return;
         if (!t.isLand()) {
             List<RiverSection> deltaSections = new ArrayList<>();
             section.setBranch(d, TileImprovement.SMALL_RIVER);
@@ -392,6 +397,7 @@ flow:
             drawToMap(deltaSections);
         } else if (riverType.isTileTypeAllowed(t.getType())) {
             Tile t2 = t.getNeighbourOrNull(direction);
+            if (t2 == null) return;
             if (!t2.isLand() && randomInt(logger, "Delta", random, 2) == 0) {
                 List<RiverSection> deltaSections = new ArrayList<>();
                 section.setBranch(d, TileImprovement.SMALL_RIVER);

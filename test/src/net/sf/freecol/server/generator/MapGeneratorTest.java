@@ -27,8 +27,10 @@ import java.util.Random;
 
 import javax.xml.stream.XMLStreamException;
 
+import net.sf.freecol.FreeCol;
 import net.sf.freecol.common.FreeColException;
 import net.sf.freecol.common.io.FreeColDirectories;
+import net.sf.freecol.common.io.FreeColRules;
 import net.sf.freecol.common.model.FreeColObject;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.IndianSettlement;
@@ -39,10 +41,13 @@ import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Region;
 import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.Tile;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Turn;
 import net.sf.freecol.common.option.MapGeneratorOptions;
+import net.sf.freecol.common.option.OptionGroup;
 import net.sf.freecol.common.util.LogBuilder;
 import net.sf.freecol.server.FreeColServer;
+import net.sf.freecol.server.model.ServerGame;
 import net.sf.freecol.server.model.ServerPlayer;
 import net.sf.freecol.server.model.ServerUnit;
 import net.sf.freecol.util.test.FreeColTestCase;
@@ -203,6 +208,51 @@ public class MapGeneratorTest extends FreeColTestCase {
             }
             // Clear import file option from a standard spec!
             spec.setFile(MapGeneratorOptions.IMPORT_FILE, null);
+        }
+    }
+
+    /**
+     * A river may reach the sea right next to the map edge, where its
+     * delta finds no neighbour.  That used to throw in River.delta and
+     * abort the whole map.  A warm climate lets rivers into the polar
+     * rows of a square map of the original's size; with seeds 28 and 38
+     * a mouth lands on such a tile in column 0 or 57.
+     */
+    public void testRiverMouthAtMapEdge() {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            for (int seed : new int[] { 28, 38 }) {
+                Specification spec = FreeCol.loadSpecification(
+                    FreeColRules.getFreeColRulesFile("freecol"), null,
+                    "model.difficulty.medium");
+                spec.setFile(MapGeneratorOptions.IMPORT_FILE, null);
+                OptionGroup mgo = spec.getMapGeneratorOptions();
+                MapGeneratorOptions.applyTopologyDefaults(mgo);
+                mgo.setInteger(MapGeneratorOptions.TEMPERATURE,
+                               MapGeneratorOptions.TEMPERATURE_WARM);
+                Game game = new ServerGame(spec);
+                NationOptions nationOptions = new NationOptions(spec);
+                for (Nation n : spec.getEuropeanNations()) {
+                    nationOptions.setNationState(n,
+                        NationOptions.NationState.AVAILABLE);
+                }
+                game.setNationOptions(nationOptions);
+                for (Nation n : spec.getNations()) {
+                    if (n.isUnknownEnemy()) continue;
+                    Player p = new ServerPlayer(game, false, n);
+                    boolean ai = !n.getType().isEuropean()
+                        || n.getType().isREF();
+                    p.setAI(ai);
+                    if (ai || game.canAddNewPlayer()) game.addPlayer(p);
+                }
+                MapGenerator gen = new SimpleMapGenerator(new Random(seed));
+                gen.generateMap(game, null, false, new LogBuilder(-1));
+                assertNotNull("map for seed " + seed, game.getMap());
+                assertEquals(58, game.getMap().getWidth());
+            }
+        } finally {
+            Topology.setCurrent(saved);
         }
     }
 
