@@ -24,10 +24,12 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 
 import net.sf.freecol.client.gui.ImageLibrary;
+import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Resource;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileImprovement;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.resources.ResourceManager;
 
 
@@ -89,8 +91,9 @@ import net.sf.freecol.common.resources.ResourceManager;
  * Rivers are linear and — because FreeCol lays them out along the isometric
  * long-sides, which flatten to raw diagonals — fold each diagonal neighbour
  * into its two adjacent cardinal bits so a diagonal river still reads as
- * connected.  Roads simply draw a spoke toward every one of the eight raw
- * neighbours that has a road.
+ * connected (on the square {@link Topology} the model's own N/E/S/W river
+ * connections are used instead).  Roads simply draw a spoke toward every one
+ * of the eight raw neighbours that has a road.
  */
 final class ClassicTileArt {
 
@@ -287,8 +290,23 @@ final class ClassicTileArt {
      * which flatten to raw diagonals, so each diagonal neighbour with a river
      * lights both its adjacent cardinal bits — keeping a diagonally-running
      * river visually connected on the square grid.
+     *
+     * <p>With the square {@link Topology} the model's rivers already connect
+     * across the four sides of a cell, so its own connections (including a
+     * mouth into the sea) are the frame bits.
      */
     private int riverMask(Map map, int x, int y) {
+        if (Topology.current() == Topology.SQUARE) {
+            final Tile tile = map.getTile(x, y);
+            final TileImprovement river = (tile == null) ? null : tile.getRiver();
+            if (river == null) return 0;
+            int m = 0;
+            if (river.isConnectedTo(Direction.N)) m |= N;
+            if (river.isConnectedTo(Direction.E)) m |= E;
+            if (river.isConnectedTo(Direction.S)) m |= S;
+            if (river.isConnectedTo(Direction.W)) m |= W;
+            return m;
+        }
         final boolean up = hasRiver(map, x, y - 1), dn = hasRiver(map, x, y + 1);
         final boolean lf = hasRiver(map, x - 1, y), rt = hasRiver(map, x + 1, y);
         final boolean ul = hasRiver(map, x - 1, y - 1), ur = hasRiver(map, x + 1, y - 1);

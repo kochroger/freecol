@@ -86,6 +86,7 @@ import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.StringTemplate;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Unit;
+import net.sf.freecol.common.option.MapGeneratorOptions;
 import net.sf.freecol.common.resources.ImageCache;
 import net.sf.freecol.server.FreeColServer;
 
@@ -981,6 +982,9 @@ public class ClassicGUI extends GUI {
                     showMainPanel(Messages.message("classic.mainMenu.startFailed"));
                     return;
                 }
+                // Square topology: map size and land shares of the original.
+                MapGeneratorOptions.applyTopologyDefaults(
+                    spec.getMapGeneratorOptions());
                 if (setup.playerName != null) {
                     final String name = setup.playerName.trim();
                     if (!isFreePlayerName(spec, name)) {

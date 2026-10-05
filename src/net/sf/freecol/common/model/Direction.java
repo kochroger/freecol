@@ -33,6 +33,9 @@ import static net.sf.freecol.common.util.RandomUtils.*;
  * The directions a Unit can move to. Includes deltas for moving
  * to adjacent squares, which are required due to the isometric
  * map. Starting north and going clockwise.
+ *
+ * The {@link Topology} in use decides how a direction steps, so
+ * these deltas only apply to the isometric map.
 */
 public enum Direction implements Named {
     N  ( 0, -2,  0, -2),
@@ -52,10 +55,18 @@ public enum Direction implements Named {
                                Direction.S, Direction.SW,
                                Direction.W, Direction.NW);
 
+    /**
+     * The edges of an isometric tile.  Map logic should use
+     * {@link Topology#edgeDirections} instead.
+     */
     public static final List<Direction> longSides
         = makeUnmodifiableList(Direction.NE, Direction.SE,
                                Direction.SW, Direction.NW);
 
+    /**
+     * The corners of an isometric tile.  Map logic should use
+     * {@link Topology#cornerDirections} instead.
+     */
     public static final List<Direction> corners
         = makeUnmodifiableList(Direction.N, Direction.E,
                                Direction.S, Direction.W);
@@ -91,6 +102,18 @@ public enum Direction implements Named {
      * @return The map position after the step.
      */
     public Map.Position step(int x, int y) {
+        return Topology.current().step(this, x, y);
+    }
+
+    /**
+     * Step the x and y coordinates in this direction on the isometric
+     * map, where the increments depend on the parity of the row.
+     *
+     * @param x The x coordinate.
+     * @param y The y coordinate.
+     * @return The map position after the step.
+     */
+    Map.Position stepIsometric(int x, int y) {
         return ((y & 1) != 0)
             ? new Map.Position(x + oddDX, y + oddDY)
             : new Map.Position(x + evenDX, y + evenDY);

@@ -26,6 +26,7 @@ import java.util.EnumMap;
 import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileImprovement;
+import net.sf.freecol.common.model.Topology;
 
 
 /**
@@ -157,7 +158,7 @@ public class RiverSection {
 
     public String encodeStyle() {
         StringBuilder sb = new StringBuilder();
-        for (Direction direction : Direction.longSides) {
+        for (Direction direction : Topology.current().edgeDirections()) {
             sb.append(Integer.toString(getBranch(direction), Character.MAX_RADIX));
         }
         return sb.toString();

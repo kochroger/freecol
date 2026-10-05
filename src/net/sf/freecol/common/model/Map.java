@@ -70,6 +70,8 @@ import net.sf.freecol.common.util.LogBuilder;
  * A rectangular isometric map.  The map is represented as a
  * two-dimensional array of tiles.  Off-map destinations, such as
  * {@link Europe}, can be reached via the {@link HighSeas}.
+ * The current {@link Topology} decides which tiles are neighbours,
+ * so the same class also serves a square map.
  *
  * In theory, a {@link Game} might contain several Map instances
  * connected by the HighSeas.
@@ -88,7 +90,8 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
 
     /**
      * The number of tiles from the upper edge that are considered
-     * polar by default.
+     * polar by default on the isometric map.  Map logic should use
+     * {@link Topology#polarHeight} instead.
      */
     public final static int POLAR_HEIGHT = 2;
 
@@ -174,11 +177,8 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
         }
 
         /**
-         * Gets the distance in tiles between two map positions.
-         * With an isometric map this is a non-trivial task.
-         * The formula below has been developed largely through trial and
-         * error.  It should cover all cases, but I wouldn't bet my
-         * life on it.
+         * Gets the distance in tiles between two map positions,
+         * as measured by the current {@link Topology}.
          *
          * @param ax The x-coordinate of the first position.
          * @param ay The y-coordinate of the first position.
@@ -187,14 +187,7 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
          * @return The distance in tiles between the positions.
          */
         public static int getXYDistance(int ax, int ay, int bx, int by) {
-            int r = (bx - ax) - (ay - by) / 2;
-
-            if (by > ay && ay % 2 == 0 && by % 2 != 0) {
-                r++;
-            } else if (by < ay && ay % 2 != 0 && by % 2 == 0) {
-                r--;
-            }
-            return Math.max(Math.abs(ay - by + r), Math.abs(r));
+            return Topology.current().distance(ax, ay, bx, by);
         }
 
         /**
@@ -728,8 +721,9 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
      * @return True if the tile is in a polar region.
      */
     public boolean isPolar(Tile tile) {
-        return tile.getY() <= POLAR_HEIGHT
-            || tile.getY() >= getHeight() - POLAR_HEIGHT - 1;
+        final int polarHeight = Topology.current().polarHeight();
+        return tile.getY() <= polarHeight
+            || tile.getY() >= getHeight() - polarHeight - 1;
     }
 
     /**
@@ -979,9 +973,15 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
      * An iterator returning positions in a spiral starting at a given
      * center tile.  The center tile is never included in the returned
      * tiles, and all returned tiles are valid.
+     *
+     * The walk is written in isometric directions, a ring is a square
+     * whose sides run NE/SE/SW/NW.  Other topologies map each direction
+     * with {@link Topology#ringDirection}.
      */
     private final class CircleIterator implements Iterator<Tile> {
 
+        /** The topology the walk is mapped to. */
+        private final Topology topology = Topology.current();
         /** The maximum radius. */
         private final int radius;
         /** The current radius of the iteration. */
@@ -1010,7 +1010,7 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
             if (radius <= 0) {
                 x = y = UNDEFINED;
             } else if (isFilled || radius == 1) {
-                step = Direction.NE.step(center.getX(), center.getY());
+                step = ring(Direction.NE).step(center.getX(), center.getY());
                 x = step.x;
                 y = step.y;
                 currentRadius = 1;
@@ -1019,15 +1019,25 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
                 x = center.getX();
                 y = center.getY();
                 for (int i = 1; i < radius; i++) {
-                    step = Direction.N.step(x, y);
+                    step = ring(Direction.N).step(x, y);
                     x = step.x;
                     y = step.y;
                 }
-                step = Direction.NE.step(x, y);
+                step = ring(Direction.NE).step(x, y);
                 x = step.x;
                 y = step.y;
             }
             if (!isValid(x, y)) nextTile();
+        }
+
+        /**
+         * Map a direction of the isometric walk to the topology.
+         *
+         * @param direction The isometric {@code Direction}.
+         * @return The {@code Direction} to step in.
+         */
+        private Direction ring(Direction direction) {
+            return this.topology.ringDirection(direction);
         }
 
         /**
@@ -1049,7 +1059,7 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
                     } else {
                         n = 0;
                         started = false;
-                        Position step = Direction.NE.step(x, y);
+                        Position step = ring(Direction.NE).step(x, y);
                         x = step.x;
                         y = step.y;
                     }
@@ -1073,7 +1083,7 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
                         throw new IllegalStateException("i=" + i + ", n=" + n
                             + ", width=" + width);
                     }
-                    Position step = direction.step(x, y);
+                    Position step = ring(direction).step(x, y);
                     x = step.x;
                     y = step.y;
                 }

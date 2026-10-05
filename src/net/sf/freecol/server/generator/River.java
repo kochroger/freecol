@@ -30,6 +30,7 @@ import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileImprovement;
 import net.sf.freecol.common.model.TileImprovementType;
 import net.sf.freecol.common.model.TileType;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.option.MapGeneratorOptions;
 import net.sf.freecol.server.model.ServerRegion;
 import static net.sf.freecol.common.util.CollectionUtils.*;
@@ -55,6 +56,12 @@ public class River {
         LEFT_TURN;
 
         public Direction getNewDirection(Direction oldDirection) {
+            if (Topology.current() == Topology.SQUARE) {
+                // Rivers flow along the edge directions N/E/S/W,
+                // so a turn is a quarter turn.
+                return (this == STRAIGHT_AHEAD) ? oldDirection
+                    : oldDirection.rotate((this == RIGHT_TURN) ? 2 : -2);
+            }
             switch(this) {
             case STRAIGHT_AHEAD:
                 return oldDirection;
@@ -146,8 +153,8 @@ public class River {
         this.random = random;
         this.riverType = map.getSpecification()
             .getTileImprovementType("model.improvement.river");
-        this.direction = getRandomMember(logger, "River", Direction.longSides,
-                                         random);
+        this.direction = getRandomMember(logger, "River",
+            Topology.current().edgeDirections(), random);
         logger.fine("Starting new river flowing " + direction);
     }
 
@@ -230,7 +237,7 @@ public class River {
      * @return true if the given tile is next to this river.
      */
     private boolean isNextToSelf(Tile tile) {
-        return any(Direction.longSides,
+        return any(Topology.current().edgeDirections(),
             d -> this.contains(tile.getNeighbourOrNull(d)));
     }
 
@@ -241,7 +248,7 @@ public class River {
      * @return true if the given tile is next to a river, lake or sea.
      */
     private boolean isNextToWater(Tile tile) {
-        return any(Direction.longSides,
+        return any(Topology.current().edgeDirections(),
             d -> {
                 Tile t = tile.getNeighbourOrNull(d);
                 return t != null && (!t.isLand() || t.hasRiver());

@@ -83,6 +83,7 @@ import net.sf.freecol.common.model.Constants.IntegrityType;
 import net.sf.freecol.common.model.NationOptions.Advantages;
 import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.StringTemplate;
+import net.sf.freecol.common.option.MapGeneratorOptions;
 import net.sf.freecol.common.option.OptionGroup;
 import net.sf.freecol.common.util.LogBuilder;
 import net.sf.freecol.common.util.OSUtils;
@@ -1004,6 +1005,8 @@ public final class FreeCol {
 
     /**
      * Get the specification from the currently selected rules.
+     * Used for new games only (fast, debug and stand-alone server
+     * starts), so the map options are adjusted to the map topology.
      *
      * @return A {@code Specification}, quits on error.
      */
@@ -1014,6 +1017,7 @@ public final class FreeCol {
             fatal(StringTemplate.template("cli.error.badTC")
                 .addName("%tc%", getRules()));
         }
+        MapGeneratorOptions.applyTopologyDefaults(spec.getMapGeneratorOptions());
         return spec;
     }
 

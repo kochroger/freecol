@@ -41,6 +41,7 @@ import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileImprovement;
 import net.sf.freecol.common.model.TileImprovementType;
 import net.sf.freecol.common.model.TileType;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.option.MapGeneratorOptions;
 import net.sf.freecol.common.option.OptionGroup;
 import net.sf.freecol.common.util.LogBuilder;
@@ -292,7 +293,7 @@ public class TerrainGenerator {
      * Creates land map regions in the given Map.
      *
      * First, the arctic/antarctic regions are defined, based on
-     * {@code Map.POLAR_HEIGHT}.
+     * {@code Topology.polarHeight()}.
      *
      * For the remaining land tiles, one region per contiguous
      * landmass is created.
@@ -768,16 +769,18 @@ public class TerrainGenerator {
      * @param tile The {@code Tile} to set the style of.
      */
     public static void encodeStyle(Tile tile) {
+        final List<Direction> corners = Topology.current().cornerDirections();
+        final List<Direction> edges = Topology.current().edgeDirections();
         EnumMap<Direction, Boolean> connections
             = new EnumMap<>(Direction.class);
 
         // corners
-        for (Direction d : Direction.corners) {
+        for (Direction d : corners) {
             Tile t = tile.getNeighbourOrNull(d);
             connections.put(d, t != null && t.isLand());
         }
         // edges
-        for (Direction d : Direction.longSides) {
+        for (Direction d : edges) {
             Tile t = tile.getNeighbourOrNull(d);
             if (t != null && t.isLand()) {
                 connections.put(d, Boolean.TRUE);
@@ -790,11 +793,11 @@ public class TerrainGenerator {
         }
         int result = 0;
         int index = 0;
-        for (Direction d : Direction.corners) {
+        for (Direction d : corners) {
             if (connections.get(d)) result += (int)Math.pow(2, index);
             index++;
         }
-        for (Direction d : Direction.longSides) {
+        for (Direction d : edges) {
             if (connections.get(d)) result += (int)Math.pow(2, index);
             index++;
         }

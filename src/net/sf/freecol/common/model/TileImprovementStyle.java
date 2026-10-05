@@ -33,7 +33,8 @@ import java.util.Map;
  * As of 0.10.6 we use:
  *   - Four character encoded strings for rivers: a "0" for no connection,
  *     otherwise the string value of the integer magnitude of the river
- *     for each of Direction.longSides.
+ *     for each of Topology.edgeDirections() (Direction.longSides on
+ *     the isometric map).
  *   - Eight character binary encoded strings for roads: a "0" or "1" for
  *     each of Direction.values()
  *   These are distinct so that the overlays can vary.

@@ -122,6 +122,9 @@ public class SimpleMapGenerator implements MapGenerator {
      */
     @Override
     public Map generateMap(Game game, Map importMap, boolean generateEuropeanPlayerUnits, LogBuilder lb) {
+        // The land map is grown before the Map exists, so it relies on
+        // the JVM wide Topology.current().  FIXME: a topology stored
+        // with the map generator options would have to be applied here.
         final LandMap landMap = (importMap != null)
             ? new LandMap(importMap, this.cache)
             : new LandMap(game.getMapGeneratorOptions(), this.cache);

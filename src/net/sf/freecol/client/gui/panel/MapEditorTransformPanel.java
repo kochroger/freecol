@@ -68,6 +68,7 @@ import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileImprovement;
 import net.sf.freecol.common.model.TileImprovementType;
 import net.sf.freecol.common.model.TileType;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.server.model.ServerIndianSettlement;
 
@@ -106,7 +107,8 @@ public final class MapEditorTransformPanel extends FreeColPanel {
                 tile.removeRiver();
             } else {
                 StringBuilder sb = new StringBuilder(64);
-                for (Direction direction : Direction.longSides) {
+                for (Direction direction
+                         : Topology.current().edgeDirections()) {
                     Tile t = tile.getNeighbourOrNull(direction);
                     TileImprovement otherRiver = (t == null) ? null
                         : t.getRiver();

@@ -19,6 +19,9 @@
 
 package net.sf.freecol.common.option;
 
+import java.util.logging.Logger;
+
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.server.generator.MapGenerator;
 
 
@@ -30,6 +33,8 @@ import net.sf.freecol.server.generator.MapGenerator;
  * @see net.sf.freecol.common.option.OptionGroup
  */
 public class MapGeneratorOptions {
+
+    private static final Logger logger = Logger.getLogger(MapGeneratorOptions.class.getName());
 
     public static final String TAG = "mapGeneratorOptions";
 
@@ -144,6 +149,50 @@ public class MapGeneratorOptions {
                             TEMPERATURE_TEMPERATE = 2,
                             TEMPERATURE_WARM      = 3,
                             TEMPERATURE_HOT       = 4;
+
+
+    /**
+     * Adjust the map generator options of a new game to the current
+     * {@link Topology}.  Does nothing on the isometric map.
+     *
+     * On the square map the options approximate the map of the
+     * original game: 58x72 tiles, sparse land (the original's random
+     * maps are mostly ocean), about three quarters of the land
+     * forested, and sea lanes on both sides.  The specification
+     * defaults are left alone, as the "freecol" rules and the test
+     * suite inherit them.
+     *
+     * FIXME: square topology spike.  These values belong in a ruleset
+     * or mod, together with a stored topology option.
+     *
+     * @param mgo The map generator {@code OptionGroup} to adjust.
+     */
+    public static void applyTopologyDefaults(OptionGroup mgo) {
+        if (mgo == null || Topology.current() != Topology.SQUARE) return;
+        mgo.setInteger(MAP_WIDTH, 58);
+        mgo.setInteger(MAP_HEIGHT, 72);
+        // The option minimum is 15.
+        mgo.setInteger(LAND_MASS, 18);
+        // A range option (10/30/50/70/90) giving the chance of forest
+        // on flat land only.  90 makes about 75% of all land forest,
+        // 70 only about 58%.
+        mgo.setInteger(FOREST_NUMBER, 90);
+        // "large": about 15% of the land has a river, as on the
+        // original America map (16%), instead of about 11%.
+        mgo.setInteger(RIVER_NUMBER, 20);
+        // High seas may start up to 16 columns from either edge.
+        mgo.setInteger(MAXIMUM_DISTANCE_TO_EDGE, 16);
+        logger.info("Square topology map options: "
+            + mgo.getInteger(MAP_WIDTH) + "x" + mgo.getInteger(MAP_HEIGHT)
+            + ", landMass=" + mgo.getInteger(LAND_MASS)
+            + ", forestNumber=" + mgo.getInteger(FOREST_NUMBER)
+            + ", riverNumber=" + mgo.getInteger(RIVER_NUMBER)
+            + ", preferredDistanceToEdge="
+            + mgo.getInteger(PREFERRED_DISTANCE_TO_EDGE)
+            + ", maximumDistanceToEdge="
+            + mgo.getInteger(MAXIMUM_DISTANCE_TO_EDGE)
+            + ", distanceToHighSea=" + mgo.getInteger(DISTANCE_TO_HIGH_SEA));
+    }
 
 
     // Serialization

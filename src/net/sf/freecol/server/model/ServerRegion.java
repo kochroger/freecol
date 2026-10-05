@@ -32,6 +32,7 @@ import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Region;
 import net.sf.freecol.common.model.Tile;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Turn;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.networking.ChangeSet;
@@ -334,7 +335,7 @@ public class ServerRegion extends Region {
         // defined but with no tiles assigned to them, thus they will
         // not be seen on the map.  Generated games though will not
         // have the region defined, and so will create it here.
-        final int arcticHeight = Map.POLAR_HEIGHT;
+        final int arcticHeight = Topology.current().polarHeight();
         ServerRegion arctic = (ServerRegion)fixed.get("model.region.arctic");
         if (arctic == null) {
             arctic = new ServerRegion(map, "model.region.arctic",
@@ -350,7 +351,7 @@ public class ServerRegion extends Region {
             lb.add("+arctic");
         }
         result.add(arctic);
-        final int antarcticHeight = map.getHeight() - Map.POLAR_HEIGHT - 1;
+        final int antarcticHeight = map.getHeight() - arcticHeight - 1;
         ServerRegion antarctic = (ServerRegion)fixed.get("model.region.antarctic");
         if (antarctic == null) {
             antarctic = new ServerRegion(map, "model.region.antarctic",

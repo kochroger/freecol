@@ -196,7 +196,7 @@ public class LandMap {
         if (!setLand(x, y)) return;
 
         Position p = new Position(x, y);
-        for (Direction direction : Direction.longSides) {
+        for (Direction direction : Topology.current().edgeDirections()) {
             Position n = new Position(p, direction);
             if (n.isValid(getWidth(), getHeight())) {
                 growLand(n.getX(), n.getY(), distanceToEdge);
@@ -261,15 +261,19 @@ public class LandMap {
      * @param minNumberOfTiles Lower bound for the tiles to create.
      */
     private void createClassicLandMap(int distanceToEdge, int minNumberOfTiles) {
-        final int edg = distanceToEdge * 2;
-        final int wid = getWidth() - edg * 2;
-        final int hgt = getHeight() - edg * 2;
+        // Seeds keep 2 * distanceToEdge columns from the left and right
+        // edges, and distanceToEdge steps from the top and bottom,
+        // which on the isometric map takes twice as many rows.
+        final int edgX = distanceToEdge * 2;
+        final int edgY = distanceToEdge * Topology.current().rowFactor();
+        final int wid = getWidth() - edgX * 2;
+        final int hgt = getHeight() - edgY * 2;
         int x, y;
         while (this.numberOfLandTiles < minNumberOfTiles) {
             int failCounter = 0;
             do {
-                x = edg + this.cache.nextInt(wid);
-                y = edg + this.cache.nextInt(hgt);
+                x = edgX + this.cache.nextInt(wid);
+                y = edgY + this.cache.nextInt(hgt);
                 failCounter++;
                 // If landmass% is set too high, this loop may fail to
                 // find a free tile.  Decrease necessary minimum over
@@ -287,14 +291,15 @@ public class LandMap {
 
     /**
      * Add land to the polar map rows at the top and bottom of the map,
-     * with height determined by Map.POLAR_HEIGHT.
+     * with height determined by Topology.polarHeight().
      *
-     * FIXME: Make POLAR_HEIGHT an option.
+     * FIXME: Make the polar height an option.
      */
     private void addPolarRegions() {
+        final int polarHeight = Topology.current().polarHeight();
         for (int x = 0; x < this.width; x++) {
-            for (int y = 0; y < Map.POLAR_HEIGHT; y++) setLand(x, y);
-            int limit = this.height - 1 - Map.POLAR_HEIGHT;
+            for (int y = 0; y < polarHeight; y++) setLand(x, y);
+            int limit = this.height - 1 - polarHeight;
             for (int y = limit; y < this.height; y++) setLand(x, y);
         }
     }
@@ -346,7 +351,8 @@ public class LandMap {
                 && p.getX() < getWidth() - distanceToEdge);
         final Function<Direction, Position> positionMapper = d ->
             new Position(position, d);
-        return transform(map(Direction.longSides, positionMapper), landPred);
+        return transform(map(Topology.current().edgeDirections(),
+                             positionMapper), landPred);
     }
 
     /**
@@ -369,10 +375,12 @@ public class LandMap {
         // this tile will be set to land.
         // This value is part random, part based on position, that is:
         // -1 in the center of the map, and growing to
-        // distanceToEdge (*2 for pole ends) at the maps edges.
+        // distanceToEdge (*Topology.rowFactor() for pole ends) at the
+        // maps edges.
+        final int rowFactor = Topology.current().rowFactor();
         int r = this.cache.nextInt(8) + Math.max(-1,
             (1 + Math.max(distanceToEdge - Math.min(x, getWidth()-x),
-                2 * distanceToEdge - Math.min(y, getHeight()-y))));
+                rowFactor * distanceToEdge - Math.min(y, getHeight()-y))));
 
         final Position p = new Position(x, y);
         final Predicate<Direction> landPred = d -> {
