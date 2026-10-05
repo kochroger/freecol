@@ -19,7 +19,6 @@
 
 package net.sf.freecol.client.gui.classic;
 
-import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dialog;
@@ -31,6 +30,7 @@ import java.awt.Window;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -47,12 +47,9 @@ import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
-import javax.swing.JMenu;
 import javax.swing.JOptionPane;
 import javax.swing.MenuSelectionManager;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
-import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
@@ -63,13 +60,11 @@ import net.sf.freecol.client.control.PreGameController;
 import net.sf.freecol.client.control.SoundController;
 import net.sf.freecol.client.gui.ChoiceItem;
 import net.sf.freecol.client.gui.action.ActionManager;
-import net.sf.freecol.client.gui.action.FreeColAction;
 import net.sf.freecol.client.gui.DialogHandler;
 import net.sf.freecol.client.gui.GUI;
 import net.sf.freecol.client.gui.ImageLibrary;
 import net.sf.freecol.client.gui.LoadingSavegameInfo;
 import net.sf.freecol.client.gui.FontLibrary;
-import net.sf.freecol.client.gui.menu.InGameMenuBar;
 import net.sf.freecol.client.gui.panel.FreeColImageBorder;
 import net.sf.freecol.client.gui.panel.FreeColPanel;
 import net.sf.freecol.common.FreeColException;
@@ -126,8 +121,8 @@ public class ClassicGUI extends GUI {
      */
     private ClassicFrame frameState;
 
-    /** The Alt+Enter / Alt+F4 dispatcher, once installed. */
-    private KeyEventDispatcher frameKeys;
+    /** The Alt+Enter / Alt+F4 dispatcher and key tracker, once installed. */
+    private FrameKeys frameKeys;
 
     /** Whether {@link #closeRequested} is asking "really quit?" right now. */
     private boolean closeAsked = false;
@@ -141,13 +136,11 @@ public class ClassicGUI extends GUI {
     /** The build-queue screen's window, while one is open (see {@link #showBuildQueuePanel}). */
     private JFrame buildQueueFrame;
 
-    /**
-     * The original's menu bar is a dark strip with light labels (design ref:
-     * {@code opening_008}), where FreeCol's reused bar is dark-on-parchment.
-     * See {@link #styleClassicMenuBar}.
-     */
-    private static final Color MENU_BAR_BG = new Color(0x20, 0x18, 0x10);
-    private static final Color MENU_BAR_FG = new Color(0xE8, 0xE0, 0xC0);
+    /** The in-game canvas (strip, map, panel), while a game is shown. */
+    private ClassicHudPane hudPane;
+
+    /** The painted menu strip of {@link #hudPane}, while a game is shown. */
+    private ClassicMenuStrip menuStrip;
 
     /** The Europe screen's window, while one is open (see {@link #showEuropePanel}). */
     private JFrame europeFrame;
@@ -186,6 +179,47 @@ public class ClassicGUI extends GUI {
      * hands out the first free one); null = keep the server's choice.
      */
     private String pendingNationId;
+
+    /**
+     * Whether the single-player start under way was asked for by the title
+     * screen ({@link #startNewWorldGame}: the NEUE WELT chain or its
+     * chain-less defaults), as opposed to FreeCol's own {@code --fast} start,
+     * which calls {@code startSinglePlayerGame} itself (FreeCol.java:1619 ->
+     * FreeColClient) and must never stop on the first scene (it is the
+     * scripted smoke path).  Set right before {@code startSinglePlayerGame},
+     * consumed by {@link #showStartGamePanel}, cleared on every failure path
+     * and by {@link #loadSavedGame}.  Volatile for the same reason as
+     * {@link #firstScenePending}.
+     */
+    private volatile boolean newWorldStartRequested = false;
+
+    /**
+     * Whether the game being started is a FRESH game from the title screen,
+     * so its first view opens on the original's first scene (the admiral,
+     * {@link ClassicFirstScene}).  Set in {@link #showStartGamePanel} -- the
+     * engine path every fresh single-player game takes, never a loaded save
+     * -- and only when {@link #newWorldStartRequested} says the title screen
+     * asked for it (the NEUE WELT chain, the chain-less defaults; never
+     * {@code --fast}); consumed by the HUD build in {@link #reconnectGUI};
+     * cleared by every way back to the title or into a load
+     * ({@link #loadSavedGame}, {@link #prepareShowingMainMenu},
+     * {@link #teardownInGame}, {@link #showMainPanel}).  Volatile: the
+     * login reply that reaches showStartGamePanel normally runs on the EDT,
+     * but nothing guarantees it.
+     */
+    private volatile boolean firstScenePending = false;
+
+    /** Whether the first scene is on screen (EDT only). */
+    private boolean sceneShowing = false;
+
+    /**
+     * Engine notices that arrived while the first scene was pending or up,
+     * in arrival order, shown after it is dismissed (EDT only).
+     */
+    private final List<HeldMessages> heldMessages = new ArrayList<>();
+
+    /** The layer that shows the first scene, created on first use. */
+    private ClassicHudOverlay hudOverlay;
 
     /** Persistent image cache, shared by the image libraries. */
     private final ImageCache imageCache;
@@ -580,11 +614,12 @@ public class ClassicGUI extends GUI {
      * because it must work everywhere -- on the title screen, in game, and in
      * every classic sub-window -- and must <em>win</em> against the panels'
      * own Enter keys: the title menu and the map bind plain {@code ENTER}
-     * (select / end turn), and FreeCol's reused in-game menu has its own
-     * "alt ENTER" accelerator ({@code changeWindowedModeAction}).  The
-     * dispatcher sees the key before any component, and consumes it, so
-     * Alt+Enter does exactly one thing.  (That menu item still works when
-     * clicked: {@link #changeWindowedMode} routes it here.)
+     * (select / end turn), and an open in-game dropdown
+     * ({@link ClassicMenuStrip}) takes every key through its own dispatcher,
+     * registered later and so asked after this one.  The dispatcher sees the
+     * key before any component, and consumes it, so Alt+Enter does exactly
+     * one thing.  (FreeCol's {@code changeWindowedModeAction}, should anything
+     * fire it, is routed here by {@link #changeWindowedMode}.)
      */
     private void installFrameKeys() {
         if (this.frameKeys != null) return;
@@ -634,8 +669,53 @@ public class ClassicGUI extends GUI {
         /** When the last Alt+Enter press (first or repeated) arrived. */
         private long lastPress = 0L;
 
+        /**
+         * Keys held down: key code -> time of its latest KEY_PRESSED.  The
+         * frame-wide record of which press is an OS auto-repeat, for
+         * screens that appear while a key is still held (the first scene,
+         * {@link ClassicHudOverlay}, after the departure was skipped with a
+         * key held through the engine start).  A press more than
+         * {@link #REPEAT_GAP_MS} after the previous one of the same key is
+         * new even without a release in between (a release can be lost
+         * with a disposed window).
+         */
+        private final Map<Integer, Long> down = new HashMap<>();
+
+        /** The latest KEY_PRESSED seen: code, time, and whether it repeated. */
+        private int lastCode = KeyEvent.VK_UNDEFINED;
+        private long lastWhen = 0L;
+        private boolean lastRepeat = false;
+
+        /**
+         * Whether {@code e} -- a KEY_PRESSED already seen by this dispatcher,
+         * which runs before every component -- is an auto-repeat.
+         */
+        boolean isAutoRepeat(KeyEvent e) {
+            return e.getID() == KeyEvent.KEY_PRESSED
+                && e.getKeyCode() == this.lastCode && e.getWhen() == this.lastWhen
+                && this.lastRepeat;
+        }
+
+        /** Record presses and releases (see {@link #down}). */
+        private void track(KeyEvent e) {
+            final int code = e.getKeyCode();
+            if (code == KeyEvent.VK_UNDEFINED) return;
+            if (e.getID() == KeyEvent.KEY_PRESSED) {
+                // The same event seen twice (re-dispatched) is not a repeat.
+                if (code == this.lastCode && e.getWhen() == this.lastWhen) return;
+                final Long prev = this.down.put(code, e.getWhen());
+                this.lastCode = code;
+                this.lastWhen = e.getWhen();
+                this.lastRepeat = prev != null
+                    && e.getWhen() - prev < REPEAT_GAP_MS;
+            } else if (e.getID() == KeyEvent.KEY_RELEASED) {
+                this.down.remove(code);
+            }
+        }
+
         @Override
         public boolean dispatchKeyEvent(KeyEvent e) {
+            track(e);
             final boolean ourMods = e.isAltDown() && !e.isControlDown()
                 && !e.isMetaDown() && !e.isAltGraphDown();
             if (e.getKeyCode() == KeyEvent.VK_F4) {
@@ -912,14 +992,17 @@ public class ClassicGUI extends GUI {
                     FreeCol.setName(name);
                 }
                 this.pendingNationId = setup.nationId;
+                this.newWorldStartRequested = true;
                 if (!getFreeColClient().getConnectController()
                         .startSinglePlayerGame(spec)) {
                     this.pendingNationId = null;
+                    this.newWorldStartRequested = false;
                     showMainPanel(null);
                 }
             } catch (RuntimeException e) {
                 logger.log(Level.WARNING, "ClassicGUI: new game failed.", e);
                 this.pendingNationId = null;
+                this.newWorldStartRequested = false;
                 // Shows the error, then returns to the title (GUI.java:945-951).
                 showErrorPanel(e,
                     StringTemplate.key("classic.mainMenu.startFailed"));
@@ -961,6 +1044,8 @@ public class ClassicGUI extends GUI {
     void loadSavedGame(final File file) {
         // A hand-off left by a failed new-game start must never apply here.
         this.pendingNationId = null;
+        this.newWorldStartRequested = false;
+        this.firstScenePending = false;
         SwingUtilities.invokeLater(() -> {
             try {
                 if (!getFreeColClient().getConnectController()
@@ -993,9 +1078,19 @@ public class ClassicGUI extends GUI {
             closeReportPanel();
         }
         if (this.mapViewer != null) this.mapViewer.dispose();
+        if (this.menuStrip != null) this.menuStrip.closeMenu();
         if (this.frame != null) this.frame.setJMenuBar(null);
         this.mapViewer = null;
         this.infoPanel = null;
+        this.menuStrip = null;
+        this.hudPane = null;
+        // No first scene and no held notices survive the game view.
+        this.firstScenePending = false;
+        this.heldMessages.clear();
+        if (this.sceneShowing) {
+            this.sceneShowing = false;
+            if (this.hudOverlay != null) this.hudOverlay.hideScene();
+        }
     }
 
     /**
@@ -1069,7 +1164,7 @@ public class ClassicGUI extends GUI {
                 return;
             }
             playTitleMusic();
-            teardownInGame();
+            teardownInGame();    // also drops a pending first scene
             final boolean keep = userMsg == null && this.mainMenuPanel != null
                 && this.frame.getContentPane() == this.mainMenuPanel
                 && (replay != null || this.mainMenuPanel.isLive());
@@ -1162,6 +1257,7 @@ public class ClassicGUI extends GUI {
      */
     @Override
     public void prepareShowingMainMenu() {
+        this.firstScenePending = false;
         invokeNowOrLater(() -> {
             teardownInGame();
             if (this.frame == null) return;
@@ -1236,6 +1332,8 @@ public class ClassicGUI extends GUI {
             // Without a pick (--fast, defaults) nothing changes.
             final String nid = this.pendingNationId;
             this.pendingNationId = null;
+            final boolean fromTitle = this.newWorldStartRequested;
+            this.newWorldStartRequested = false;
             if (nid != null) {
                 boolean ok;
                 try {
@@ -1250,6 +1348,10 @@ public class ClassicGUI extends GUI {
                     return null;
                 }
             }
+            // A fresh game from the title screen: its first view is the
+            // admiral's scene (see firstScenePending; loads never pass
+            // through here, and --fast never sets newWorldStartRequested).
+            this.firstScenePending = fromTitle;
             player.setReady(true);
             getFreeColClient().getPreGameController().requestLaunch();
         }
@@ -1371,10 +1473,11 @@ public class ClassicGUI extends GUI {
      * {@inheritDoc}
      *
      * Called from {@code FreeColClient.restoreGUI} once a game is ready (the
-     * initial active unit / focus tile are supplied here).  Phase 1: build the
-     * {@link ClassicMapViewer} and swap it in for the title screen
+     * initial active unit / focus tile are supplied here).  Build the
+     * {@link ClassicMapViewer} and the in-game HUD around it
+     * ({@link #installInGameHud}) in place of the title screen
      * ({@link ClassicMainMenuPanel}), then set the initial view state so the
-     * map renders centred on the action.  The view is only built while
+     * map renders on the action.  The view is only built while
      * {@code mapViewer} is null; {@link #teardownInGame} resets it on the way
      * back to the title, which is what lets this run again for the next game.
      */
@@ -1385,27 +1488,7 @@ public class ClassicGUI extends GUI {
             if (this.mapViewer == null) {
                 this.mapViewer = new ClassicMapViewer(getFreeColClient(),
                                                       this, this.imageLibrary);
-                this.infoPanel = new ClassicInfoPanel(getFreeColClient(),
-                                                      this.mapViewer,
-                                                      this.imageLibrary);
-                // Phase 2 HUD: the map fills the centre, the classic info/orders
-                // strip sits on the right, and the reused InGameMenuBar (wired to
-                // the real FreeColActions) is the top menu bar.
-                final JPanel content = new JPanel(new BorderLayout());
-                content.add(this.mapViewer, BorderLayout.CENTER);
-                content.add(this.infoPanel, BorderLayout.EAST);
-                this.frame.setContentPane(content);
-                try {
-                    final InGameMenuBar menuBar
-                        = new InGameMenuBar(getFreeColClient(), null);
-                    styleClassicMenuBar(menuBar);
-                    remapClassicReportAccelerators();
-                    this.frame.setJMenuBar(menuBar);
-                } catch (Exception e) {
-                    logger.log(Level.WARNING, "ClassicGUI: menu bar unavailable",
-                               e);
-                }
-                this.frame.revalidate();
+                installInGameHud();
             }
             if (active != null) {
                 this.mapViewer.changeToMoveUnits(active);
@@ -1434,110 +1517,103 @@ public class ClassicGUI extends GUI {
             repaintInfo();
             updateActions();
             logger.info("ClassicGUI: in-game map installed.");
+            // A fresh game opens on the original's first scene.  The engine's
+            // start message and any other notice that arrived before this
+            // point were held by showMessagePopup (startGameInternal reaches
+            // it before this queued build runs).
+            if (this.firstScenePending) {
+                this.firstScenePending = false;
+                if (!showFirstScene()) flushHeldMessages();
+            }
         });
     }
 
     /**
-     * Give the reused {@link InGameMenuBar} the original's <b>light-on-dark</b>
-     * menu bar (design ref: the expert's {@code opening_008}), in place of
-     * FreeCol's dark-on-parchment one.
+     * Build the in-game HUD and make it the window's content: the original's
+     * screen as one integer-scaled 320x200 canvas ({@link ClassicHudPane})
+     * holding the painted menu strip ({@link ClassicMenuStrip}), the map on
+     * the same grid and the right panel ({@link ClassicInfoPanel}), plus the
+     * explicit key map ({@link ClassicKeyMap}).  EDT only; called once per
+     * game view by {@link #reconnectGUI}.
      *
-     * <p>The hook is {@code FreeColMenuBar.paintComponent}, which tiles its
-     * parchment background <em>only while the bar is non-opaque</em> and otherwise
-     * defers to {@code super.paintComponent} — so making the bar opaque with a dark
-     * background swaps the parchment for Col1's dark strip.  The menu labels are
-     * then re-coloured light for contrast.  The bar's own golden gold/tax/year
-     * status line already reads on dark (it is drawn after this, over the
-     * background, by {@code InGameMenuBar.paintComponent}), and the wood border is
-     * kept — it still reads classic.
-     *
-     * <p>Safe to do after construction: {@code InGameMenuBar.reset()} — which
-     * rebuilds (and would re-create) the menus — is only called from its own
-     * constructor and from {@code FreeColFrame}, which the classic UI does not use.
-     * The dropdown popups get their own wood/green reskin — see {@link
-     * #installClassicMenuDropdownDefaults}, installed earlier at start-up — plus
-     * one per-instance touch-up here for the separators (below).
+     * <p>No {@code JMenuBar} any more.  FreeCol's reused {@code InGameMenuBar}
+     * could only look like a Swing menu bar (and drew a gold/tax/year line the
+     * original keeps in the panel); its accelerators, which only fired because
+     * the bar was installed, are replaced by {@link ClassicKeyMap}.  The
+     * strip's items fire the same {@code FreeColAction}s by id, so every
+     * engine path (save, quit, back to the title, reports) is unchanged.
+     * Without the pack the HUD still works: flat colours, Swing-font text and
+     * no menu titles, the keys bound as usual.
      */
-    private void styleClassicMenuBar(InGameMenuBar menuBar) {
-        menuBar.setOpaque(true);
-        menuBar.setBackground(MENU_BAR_BG);
-        for (int i = 0; i < menuBar.getMenuCount(); i++) {
-            final JMenu menu = menuBar.getMenu(i);
-            if (menu == null) continue;   // separators/glue are null here
-            menu.setOpaque(false);
-            menu.setForeground(MENU_BAR_FG);
-            styleClassicDropdownSeparators(menu.getPopupMenu());
-        }
-    }
-
-    /**
-     * Colour one dropdown's separator lines to match its wood/green reskin.
-     *
-     * <p>Unlike the rest of {@link #installClassicMenuDropdownDefaults}'s
-     * {@code UIManager}-defaults approach, {@code JSeparator}'s bevel-line
-     * painter (at least on some JDK versions) reads the <em>component's own</em>
-     * foreground/background rather than a {@code UIManager} key, so a global
-     * default alone would leave it unstyled on those JDKs — this per-instance
-     * pass is the belt-and-suspenders fallback.
-     */
-    private void styleClassicDropdownSeparators(JPopupMenu popup) {
-        for (Component c : popup.getComponents()) {
-            if (c instanceof JPopupMenu.Separator) {
-                c.setForeground(ClassicDialog.BORDER_HI);
-                c.setBackground(ClassicDialog.BORDER_LO);
-            }
-        }
-    }
-
-    /**
-     * Reassign the reused report actions' keyboard accelerators to match the
-     * <b>observed original 1994 game's F-key scheme</b> (the expert's capture
-     * {@code 00_BERICHTE-Menu_Tastenbelegung}: F1 terrain-info, F2 Religious,
-     * F3 Congress, F4 Labour, F5 Trade, F6 Colony, F7 Naval, F8 Foreign
-     * Affairs, F9 Indian, F10 score — no shift-F* layer at all) rather than
-     * FreeCol's own arbitrary layout in {@code FreeColMessages.properties}
-     * (e.g. that file's F1=Religious, F3=Colony, F4=Foreign Affairs, F2=Labour
-     * — a layout with nothing to do with Col1, just FreeCol's own history).
-     *
-     * <p><b>Runtime-only, never touches the properties file:</b> that file is
-     * shared with {@code SwingGUI}, so editing it would silently re-map the
-     * standard game's shortcuts too. {@link FreeColAction#setAccelerator} only
-     * mutates the live in-memory {@code Action} object, and {@code --classic}
-     * exclusively selects {@code ClassicGUI} for the whole process — see the
-     * GUI selector in {@code FreeColClient} — so a standard-UI session never
-     * shares a process (or these mutated action objects) with a classic one.
-     * Same trick as {@link #styleClassicMenuBar}: reuse the shared component,
-     * restyle only this process's copy.
-     *
-     * <p>Covers only the <b>six reports with a confirmed Col1 counterpart</b>
-     * (README "Report screens" / plan §6) plus the two newly-built ones
-     * (Labour, Foreign Affairs) — eight remaps. <b>Deliberately leaves
-     * Military / Production / Exploration / Cargo's keys untouched</b>: none
-     * of those four has a confirmed original counterpart, so reassigning them
-     * is not this fix's call to make (plan §6 — a decision for the user/expert).
-     *
-     * <p>⚠️ <b>Known collision, flagged rather than silently resolved:</b>
-     * Naval's confirmed key is F7 — already occupied by Military, left alone
-     * per the above. Until §6 is settled both menu items will display "F7" but
-     * only one actually responds when pressed (Swing's shared
-     * keystroke-to-action input map only keeps the most recently registered
-     * binding for a given keystroke).
-     */
-    private void remapClassicReportAccelerators() {
+    private void installInGameHud() {
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicText text = ClassicText.load(pack);
+        final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
+        final BufferedImage wood = (pack == null) ? null
+            : pack.image(ClassicMenuBar.WOOD_KEY);
+        this.infoPanel = new ClassicInfoPanel(getFreeColClient(), this.mapViewer,
+            this.imageLibrary, text, tiny, wood);
         final ActionManager am = getFreeColClient().getActionManager();
-        remapAccelerator(am, "reportReligionAction", "F2");
-        remapAccelerator(am, "reportCongressAction", "F3");
-        remapAccelerator(am, "reportLabourAction", "F4");
-        remapAccelerator(am, "reportTradeAction", "F5");
-        remapAccelerator(am, "reportColonyAction", "F6");
-        remapAccelerator(am, "reportNavalAction", "F7");
-        remapAccelerator(am, "reportForeignAction", "F8");
-        remapAccelerator(am, "reportIndianAction", "F9");
+        this.menuStrip = new ClassicMenuStrip(new ClassicMenuStrip.Host() {
+                @Override
+                public ClassicMenuModel.Context context() {
+                    final ClassicMapViewer mv = mapViewer;
+                    return (mv == null) ? ClassicMenuModel.Context.NONE
+                        : ClassicMenuModel.Context.of(mv.getActiveUnit(),
+                                                      mv.getViewMode());
+                }
+
+                @Override
+                public javax.swing.Action action(String id) {
+                    return (am == null || id == null) ? null
+                        : am.getFreeColAction(id);
+                }
+
+                @Override
+                public boolean inputBlocked() {
+                    return sceneShowing;
+                }
+
+                @Override
+                public void unavailable(ClassicMenuModel.Item item) {
+                    // An inert row (normal ink as in the original, but no
+                    // engine equivalent or no classic screen yet): say so,
+                    // rather than do nothing.
+                    showInformationNotice(Messages.message(
+                        "classic.mainMenu.notYet"));
+                }
+            }, tiny, wood, text);
+        this.hudPane = new ClassicHudPane(this.menuStrip, this.mapViewer,
+            this.infoPanel, arrowSprite(pack), () -> sceneShowing);
+        ClassicKeyMap.install(this.hudPane, this.mapViewer,
+            id -> (am == null) ? null : am.getFreeColAction(id),
+            () -> (mapViewer == null) ? null : mapViewer.getViewMode(),
+            () -> (mapViewer == null) ? ClassicMenuModel.Context.NONE
+                : ClassicMenuModel.Context.of(mapViewer.getActiveUnit(),
+                                              mapViewer.getViewMode()),
+            () -> sceneShowing || (menuStrip != null && menuStrip.isMenuOpen()));
+        this.frame.setJMenuBar(null);
+        this.frame.setContentPane(this.hudPane);
+        this.frame.revalidate();
     }
 
-    private void remapAccelerator(ActionManager am, String actionId, String keyStroke) {
-        final FreeColAction action = am.getFreeColAction(actionId);
-        if (action != null) action.setAccelerator(KeyStroke.getKeyStroke(keyStroke));
+    /**
+     * The original mouse arrow for the in-game canvas and the first scene
+     * ({@link ClassicPointer}), or null without the pack (system cursor).
+     */
+    private static BufferedImage arrowSprite(ClassicPackFiles pack) {
+        return (pack == null) ? null : ClassicMainMenuPanel.cursorSprite(
+            pack.image(ClassicMainMenuPanel.CURSOR_KEY));
+    }
+
+    /**
+     * A one-page classic notice (the shared {@link ClassicDialog}), e.g. for
+     * a menu row whose feature follows later.  EDT only.
+     */
+    private void showInformationNotice(String text) {
+        ClassicDialog.showMessages(dialogOwner(),
+            Messages.message("classic.dialog.messages"),
+            List.of(new ClassicDialog.Page(text, null)));
     }
 
     // View mode / focus — delegated to the map viewer.
@@ -1564,6 +1640,7 @@ public class ClassicGUI extends GUI {
         } catch (Exception e) {
             logger.log(Level.WARNING, "ClassicGUI: updateActions failed.", e);
         }
+        repaintHud();
     }
 
     /** {@inheritDoc} */
@@ -1613,8 +1690,35 @@ public class ClassicGUI extends GUI {
      */
     @Override
     public void updateMenuBar() {
-        if (this.frame != null && this.frame.getJMenuBar() != null) {
-            this.frame.getJMenuBar().repaint();
+        repaintHud();
+    }
+
+    /**
+     * Repaint the painted HUD: the strip (its open dropdown reads the
+     * actions' enabled state at paint time) and the panel (gold, tax and
+     * year live there now, as in the original).
+     */
+    private void repaintHud() {
+        if (this.menuStrip != null) {
+            this.menuStrip.repaint();
+            this.menuStrip.dropLayer().repaint();
+        }
+        if (this.infoPanel != null) this.infoPanel.repaint();
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The base seam no-ops; here it closes the menu strip's open dropdown
+     * (the engine calls it before it shows something that needs the screen,
+     * e.g. {@code PreGameController.startGameInternal}).
+     */
+    @Override
+    public void closeMenus() {
+        if (SwingUtilities.isEventDispatchThread()) {
+            if (this.menuStrip != null) this.menuStrip.closeMenu();
+        } else {
+            SwingUtilities.invokeLater(this::closeMenus);
         }
     }
 
@@ -2117,9 +2221,33 @@ public class ClassicGUI extends GUI {
      * Show {@code messages} as a paged classic popup titled {@code titleKey}.
      * Each notice keeps the illustration FreeCol associates with it (the colony,
      * unit or goods the message is about).
+     *
+     * <p>The shared funnel of {@link #showModelMessages} and
+     * {@link #showReportTurnPanel}, so the first scene is handled here:
+     * <ul>
+     *   <li>FreeCol's own start message ({@link #START_GAME_MESSAGE},
+     *       "Nach Monaten auf See ...", Player.addStartGameMessage) is always
+     *       dropped.  For a fresh game the admiral's scene replaces it; for
+     *       a loaded save of turn 1, which FreeCol re-greets
+     *       (PreGameController.startGameInternal), the original shows
+     *       nothing.  The scene is triggered by {@link #firstScenePending},
+     *       never by this message, so it shows even when the tutorial
+     *       messages are switched off (model.option.guiShowTutorial).</li>
+     *   <li>Anything else that arrives while the scene is pending or up is
+     *       held and shown after it ({@link #flushHeldMessages}).  The
+     *       callers are on the EDT already (invokeNowOrWait), so holding
+     *       blocks nothing.</li>
+     * </ul>
      */
     private void showMessagePopup(List<ModelMessage> messages, String titleKey) {
-        if (messages == null || messages.isEmpty()) return;
+        messages = withoutStartMessage(messages);
+        if (messages.isEmpty()) return;
+        if (this.firstScenePending || this.sceneShowing) {
+            this.heldMessages.add(new HeldMessages(messages, titleKey));
+            logger.info("ClassicGUI: " + messages.size()
+                + " notice(s) held until the first scene is dismissed.");
+            return;
+        }
         final Game game = getGame();
         if (game == null) return;
         final List<ClassicDialog.Page> pages = new ArrayList<>();
@@ -2134,6 +2262,171 @@ public class ClassicGUI extends GUI {
                     Messages.message(titleKey), pages);
                 return null;
             }, null);
+    }
+
+    // First game scene (ClassicFirstScene)
+
+    /** The id of FreeCol's start message (Player.java:2731). */
+    static final String START_GAME_MESSAGE = "model.player.startGame";
+
+    /**
+     * {@code messages} without FreeCol's start message (and without nulls),
+     * in their order.
+     *
+     * @param messages The messages, or null.
+     * @return A new list, possibly empty.
+     */
+    static List<ModelMessage> withoutStartMessage(List<ModelMessage> messages) {
+        final List<ModelMessage> rest = new ArrayList<>();
+        if (messages == null) return rest;
+        for (ModelMessage m : messages) {
+            if (m != null && !START_GAME_MESSAGE.equals(m.getId())) rest.add(m);
+        }
+        return rest;
+    }
+
+    /** Notices held while the first scene is pending or up. */
+    private static final class HeldMessages {
+
+        final List<ModelMessage> messages;
+        final String titleKey;
+
+        HeldMessages(List<ModelMessage> messages, String titleKey) {
+            this.messages = new ArrayList<>(messages);
+            this.titleKey = titleKey;
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * True while the first scene is up, so every {@code FreeColAction}
+     * disables itself ({@code FreeColAction.shouldBeEnabled}) once
+     * {@link #updateActions} runs: the menu bar under the scene goes grey
+     * and no accelerator can act behind the admiral's back.  (The scene's
+     * layer also consumes every key; this is the backstop.)
+     */
+    @Override
+    public boolean isDialogShowing() {
+        return this.sceneShowing || super.isDialogShowing();
+    }
+
+    /**
+     * Show the original's first game scene over the fresh game's view, if
+     * everything it needs is there: turn 1, a ship on the map (the active
+     * unit, else the player's first ship), one of the four original nations,
+     * the pack's texts, FONTTINY and the admiral's portrait.  EDT only;
+     * called once by {@link #reconnectGUI} after the HUD is built.
+     *
+     * @return Whether the scene is shown; false leaves the game as it is.
+     */
+    private boolean showFirstScene() {
+        try {
+            final Game game = getGame();
+            final Player player = getMyPlayer();
+            if (game == null || player == null || this.frame == null
+                || this.mapViewer == null || game.getTurn() == null
+                || game.getTurn().getNumber() != 1) return false;
+            Unit ship = this.mapViewer.getActiveUnit();
+            if (ship == null || !ship.isNaval() || !ship.hasTile()
+                || ship.getOwner() != player) {
+                ship = player.getUnits()
+                    .filter(u -> u.isNaval() && u.hasTile())
+                    .findFirst().orElse(null);
+            }
+            if (ship == null || ship.getTile() == null) {
+                logger.info("Classic first scene skipped: no ship on the map.");
+                return false;
+            }
+            final int nation = java.util.Arrays.asList(
+                ClassicNewWorldScreens.NATION_IDS).indexOf(player.getNationId());
+            final int shipRow = ClassicFirstScene.shipRow(ship.getType().getId());
+            final ClassicPackFiles pack = ClassicPackFiles.runtime();
+            final ClassicText text = ClassicText.load(pack);
+            if (nation < 0 || shipRow < 0 || text == null) {
+                logger.info("Classic first scene skipped: nation " + nation
+                    + ", ship row " + shipRow + ", texts "
+                    + (text != null) + ".");
+                return false;
+            }
+            final ClassicFont tiny = pack.font(ClassicFont.TINY);
+            final BufferedImage wood = pack.image(ClassicMenuBar.WOOD_KEY);
+            final BufferedImage mss0 = pack.image(
+                ClassicPackFiles.ssKey(ClassicFirstScene.PORTRAIT));
+            final ClassicFirstScene.Model model
+                = ClassicFirstScene.build(text, tiny, mss0, nation, shipRow);
+            if (model == null) {
+                logger.info("Classic first scene skipped: the pack lacks a piece"
+                    + " (FONTTINY, MSS0 or a text; re-run ant classic-assets).");
+                return false;
+            }
+            final net.sf.freecol.common.model.Map map = game.getMap();
+            final Tile t = ship.getTile();
+            final int[] view = ClassicHud.viewFor(map.getWidth(), map.getHeight(),
+                                                  t.getX(), t.getY());
+            final ClassicHud.PanelModel panel = new ClassicHud.PanelModel(
+                ClassicHud.minimapOf(map, view[0], view[1]),
+                ClassicHud.seasonLine(text, game.getTurn().getSeason(),
+                                      game.getTurn().getYear()),
+                ClassicHud.goldLine(text, Math.max(0, player.getGold()),
+                                    player.getTax()),
+                true);
+            final BufferedImage picture
+                = ClassicFirstScene.render(model, panel, wood, tiny);
+            if (this.hudOverlay == null) {
+                this.hudOverlay = new ClassicHudOverlay(this::isAutoRepeat,
+                                                        arrowSprite(pack));
+            }
+            if (this.frame.getGlassPane() != this.hudOverlay) {
+                this.frame.setGlassPane(this.hudOverlay);
+            }
+            closeMenus();
+            this.sceneShowing = true;
+            this.hudOverlay.showScene(picture, this.mapViewer,
+                                      this::dismissFirstScene);
+            updateActions();
+            logger.info("Classic first scene shown (" + model.band.length()
+                + "-char band, " + model.lines.size() + " text lines).");
+            return true;
+        } catch (RuntimeException e) {
+            logger.log(Level.WARNING, "Classic first scene failed", e);
+            this.sceneShowing = false;
+            if (this.hudOverlay != null) this.hudOverlay.hideScene();
+            return false;
+        }
+    }
+
+    /**
+     * The player dismissed the first scene: back to the game, actions
+     * re-enabled, then the notices that waited.  EDT only.
+     */
+    private void dismissFirstScene() {
+        if (!this.sceneShowing) return;
+        this.sceneShowing = false;
+        if (this.hudOverlay != null) this.hudOverlay.hideScene();
+        updateActions();
+        if (this.mapViewer != null) {
+            this.mapViewer.requestFocusInWindow();
+            this.mapViewer.repaint();
+        }
+        // The HUD's own arrow takes over (it was held back under the scene).
+        if (this.hudPane != null) this.hudPane.pointer().refresh();
+        repaintInfo();
+        logger.info("Classic first scene dismissed.");
+        flushHeldMessages();
+    }
+
+    /** Show the held notices, in arrival order.  EDT only. */
+    private void flushHeldMessages() {
+        if (this.heldMessages.isEmpty()) return;
+        final List<HeldMessages> held = new ArrayList<>(this.heldMessages);
+        this.heldMessages.clear();
+        for (HeldMessages h : held) showMessagePopup(h.messages, h.titleKey);
+    }
+
+    /** Whether a key press is an auto-repeat (see {@code FrameKeys}). */
+    private boolean isAutoRepeat(KeyEvent e) {
+        return this.frameKeys != null && this.frameKeys.isAutoRepeat(e);
     }
 
     /**
@@ -2520,21 +2813,17 @@ public class ClassicGUI extends GUI {
      *
      * Called once during client startup ({@code FreeColClient} constructor).
      * The base {@code GUI} no-ops this, which leaves {@link FontLibrary}'s main
-     * font null — fine while nothing painted text, but the Phase 2 HUD (the
-     * reused {@link InGameMenuBar} draws a golden gold/tax/year status line via
-     * {@code FontLibrary.getMainFont()}) then NPEs.  So initialise the main font
-     * here, and the image-border scale factor so the menu bar's wood border
-     * renders.
+     * font null, and FreeCol panels the classic UI still reuses (and the old
+     * {@code InGameMenuBar}, before the painted strip replaced it) NPE on
+     * {@code FontLibrary.getMainFont()}.  So initialise the main font here, and
+     * the image-border scale factor so FreeCol's image borders render.
      *
      * <p>We deliberately do <em>not</em> install {@code FreeColLookAndFeel}: it
      * swaps in a {@code PanelUI} that paints the FreeCol parchment texture behind
-     * every {@code JPanel}, which would override the classic map's black fog and
-     * the dark info panel.  The reused {@link InGameMenuBar} paints its own
-     * parchment background + wood border regardless of the active L&F, so the top
-     * bar still reads classic; the dropdown popups get the Phase-3 wood/green
-     * reskin instead (see {@link #installClassicMenuDropdownDefaults}).  All
-     * guarded so a failure just leaves the default look rather than aborting
-     * startup.
+     * every {@code JPanel}, which would override the classic map's black fog.
+     * Any stock {@code JPopupMenu} that still appears gets the wood/green reskin
+     * (see {@link #installClassicMenuDropdownDefaults}).  All guarded so a
+     * failure just leaves the default look rather than aborting startup.
      */
     @Override
     public void installLookAndFeel(String fontName) throws FreeColException {
@@ -2549,14 +2838,15 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * Reskin the reused {@link InGameMenuBar}'s dropdown popups — still stock
-     * Swing look, per {@link #styleClassicMenuBar}'s Javadoc — to {@link
-     * ClassicDialog}'s wood-framed, green-on-wood palette (the same guess its
-     * Javadoc already flags for the expert's Q3 sign-off; extending it here adds
-     * no new risk).
+     * Reskin stock Swing popup menus to {@link ClassicDialog}'s wood-framed,
+     * green-on-wood palette.  Written for FreeCol's reused
+     * {@code InGameMenuBar}; the in-game HUD now paints the original's menus
+     * itself ({@link ClassicMenuStrip}), so this only still styles any
+     * FreeCol {@code JPopupMenu} that might appear -- harmless, and kept for
+     * that.
      *
      * <p>Installed as {@code UIManager} <em>defaults</em>, once, here — before
-     * {@link #reconnectGUI} ever builds the {@code InGameMenuBar} — rather than
+     * any menu is built — rather than
      * restyling the {@code JMenuItem}s after the fact: every item/popup then picks
      * these up as its own built-in colours at construction, Swing's normal
      * hover/disabled painting comes along for free, and the real
@@ -2581,8 +2871,7 @@ public class ClassicGUI extends GUI {
      * any of this — {@code BasicPopupMenuUI} forces {@code JPopupMenu} opaque
      * regardless — so its wood fill and bevelled border always render.
      *
-     * <p>Safe process-wide for the same reason as
-     * {@link #remapClassicReportAccelerators}: {@code --classic} selects
+     * <p>Safe process-wide: {@code --classic} selects
      * {@code ClassicGUI} for the whole process, and only the
      * {@code MenuItem}/{@code CheckBoxMenuItem}/{@code RadioButtonMenuItem}/
      * {@code PopupMenu}/{@code Separator} keys are touched — the still-Swing

@@ -55,6 +55,7 @@ import javax.swing.ActionMap;
 import javax.swing.InputMap;
 import javax.swing.JPanel;
 import javax.swing.KeyStroke;
+import javax.swing.Timer;
 
 import net.sf.freecol.client.gui.ImageLibrary;
 import net.sf.freecol.common.i18n.Messages;
@@ -87,11 +88,14 @@ import net.sf.freecol.common.resources.ResourceManager;
  * Alt+F4 opens too, see {@link #offerQuit}), {@link Mode#NEW_WORLD} (the
  * original's new-game chain -- difficulty, power, name, the nation's two
  * pages, the audience -- painted by {@link ClassicNewWorldScreens} and
- * driven by a {@link ClassicNewWorldChain}) and {@link Mode#STARTING} (the
- * chain's last screen frozen while the engine starts the game).  In
- * PASSIVE, BUSY and STARTING all input is ignored -- that is the
- * double-start guard, as the EDT is free between login and the in-game
- * view.
+ * driven by a {@link ClassicNewWorldChain}), {@link Mode#DEPARTURE} (the
+ * original's ten-picture departure after the audience, painted by
+ * {@link ClassicDeparture} on a {@link ClassicDepartureTimeline}; any key
+ * or click skips it) and {@link Mode#STARTING} (the departure's last
+ * picture -- or, without the departure, the audience -- frozen while the
+ * engine starts the game).  In PASSIVE, BUSY and STARTING all input is
+ * ignored -- that is the double-start guard, as the EDT is free between
+ * login and the in-game view.
  *
  * <p>The pointer is the original's own arrow ({@code CURSOR.SS.000}), drawn
  * into the canvas at the canvas scale -- see {@link #paintCursor}.
@@ -132,7 +136,7 @@ final class ClassicMainMenuPanel extends JPanel {
     }
 
     /** What the canvas currently shows. */
-    enum Mode { PASSIVE, TITLE, LOAD, NOTICE, BUSY, QUIT, NEW_WORLD, STARTING }
+    enum Mode { PASSIVE, TITLE, LOAD, NOTICE, BUSY, QUIT, NEW_WORLD, DEPARTURE, STARTING }
 
     /** The images and font the static painters use; any may be null. */
     static final class MenuAssets {
@@ -570,6 +574,63 @@ final class ClassicMainMenuPanel extends JPanel {
     /** Whether the "chain unavailable" INFO line was logged. */
     private static boolean chainMissLogged = false;
 
+    /**
+     * Repaint period of the departure, ms (about 66 Hz).  The timer only
+     * samples the {@link ClassicDepartureTimeline} by wall-clock time, so
+     * its own jitter never changes the show's length.
+     */
+    static final int DEPARTURE_TICK_MS = 15;
+
+    /** A running departure (EDT only). */
+    private static final class Departure {
+
+        /** The choices to start the game with when the show ends. */
+        final ClassicGUI.NewWorldSetup setup;
+        /** Frame 0 (audience) .. 10 (last picture), 64,000 RGB pixels each. */
+        final int[][] frames;
+        /** The reveal order of transition k (frame k -> k+1). */
+        final int[][] orders;
+        final ClassicDepartureTimeline timeline;
+        /** What is on screen; {@link #shown} is its pixel array. */
+        final BufferedImage image;
+        final int[] shown;
+        /** System.nanoTime() at the start. */
+        final long t0;
+        /** The transition being applied and how many of its pixels are. */
+        int appliedTransition = 0, appliedCount = 0;
+
+        Departure(ClassicGUI.NewWorldSetup setup, int[][] frames, int[][] orders,
+                  ClassicDepartureTimeline timeline, BufferedImage image, long t0) {
+            this.setup = setup;
+            this.frames = frames;
+            this.orders = orders;
+            this.timeline = timeline;
+            this.image = image;
+            this.shown = ClassicDeparture.pixels(image);
+            this.t0 = t0;
+        }
+
+        long elapsedMs() {
+            return (System.nanoTime() - this.t0) / 1000000L;
+        }
+    }
+
+    /** The running departure (DEPARTURE), else null. */
+    private Departure departure = null;
+
+    /** Drives the departure while it runs (DEPARTURE only). */
+    private Timer departureTimer = null;
+
+    /**
+     * The departure's last picture, kept on screen after the show while
+     * the engine starts (STARTING) and while the passive picture stands in
+     * for the game view ({@code ClassicGUI.closeMainPanel} calls
+     * {@link #showPassive} from {@code startGameInternal} just before the
+     * game view replaces this panel).  Without it the title picture would
+     * flash between the ship and the game.  Null otherwise.
+     */
+    private BufferedImage frozenFrame = null;
+
 
     /**
      * Create the panel (in {@link Mode#PASSIVE}).
@@ -628,7 +689,11 @@ final class ClassicMainMenuPanel extends JPanel {
                 @Override
                 public void keyPressed(KeyEvent e) {
                     final boolean repeat = !heldKeys.add(e.getKeyCode());
-                    onChainKey(e, repeat);
+                    if (mode == Mode.DEPARTURE) {
+                        onDepartureKey(e, repeat);
+                    } else {
+                        onChainKey(e, repeat);
+                    }
                 }
 
                 @Override
@@ -655,21 +720,45 @@ final class ClassicMainMenuPanel extends JPanel {
     // Mode changes
 
     /**
-     * Switch mode.  Leaving the load box stops its label thread, and the
-     * pointer shape follows the mode (see {@link #updatePointerShape}).
+     * Switch mode.  Leaving the load box stops its label thread, leaving
+     * the departure stops its timer, entering a live mode drops the frozen
+     * departure picture, and the pointer shape follows the mode (see
+     * {@link #updatePointerShape}).
      */
     private void setMode(Mode m) {
         if (this.mode == Mode.LOAD && m != Mode.LOAD) {
             this.loadGeneration.incrementAndGet();
         }
+        if (m != Mode.DEPARTURE) {
+            stopDepartureTimer();
+            this.departure = null;
+        }
         this.mode = m;
+        if (isLive()) this.frozenFrame = null;
         updatePointerShape();
     }
 
-    /** Just the picture; all input ignored. */
+    /**
+     * Just the picture; all input ignored.  Coming from STARTING (the game
+     * is about to be shown, see {@code ClassicGUI.closeMainPanel}) the
+     * departure's last picture stays up; any other way it is the title
+     * picture -- e.g. the backdrop of an in-game load, long after the
+     * departure.
+     */
     void showPassive() {
+        if (this.mode != Mode.STARTING) this.frozenFrame = null;
         setMode(Mode.PASSIVE);
         repaint();
+    }
+
+    /**
+     * The game view has replaced this panel: the frozen departure picture
+     * has done its job.
+     */
+    @Override
+    public void removeNotify() {
+        if (this.mode == Mode.PASSIVE) this.frozenFrame = null;
+        super.removeNotify();
     }
 
     /**
@@ -888,8 +977,19 @@ final class ClassicMainMenuPanel extends JPanel {
             case QUIT:
                 paintQuitBox(g, a, quitPrompt(), quitRows(), this.quitSel);
                 break;
+            case DEPARTURE:
+                if (this.departure != null) {
+                    g.drawImage(this.departure.image, 0, 0, null);
+                } else {
+                    paintBackground(g, a);
+                }
+                break;
             case NEW_WORLD: case STARTING:
-                if (this.chain != null && this.chainData != null) {
+                // STARTING: the departure's last picture, or -- without
+                // the departure -- the audience, frozen.
+                if (this.mode == Mode.STARTING && this.frozenFrame != null) {
+                    g.drawImage(this.frozenFrame, 0, 0, null);
+                } else if (this.chain != null && this.chainData != null) {
                     ClassicNewWorldScreens.paint(g, this.chainData.assets,
                         this.chainData.texts, this.chain.view());
                 } else {
@@ -897,7 +997,11 @@ final class ClassicMainMenuPanel extends JPanel {
                 }
                 break;
             case PASSIVE: default:
-                paintBackground(g, a);
+                if (this.frozenFrame != null) {
+                    g.drawImage(this.frozenFrame, 0, 0, null);
+                } else {
+                    paintBackground(g, a);
+                }
                 break;
             }
             if (drawsPointer()) paintCursor(g, a, this.pointerX, this.pointerY);
@@ -957,9 +1061,23 @@ final class ClassicMainMenuPanel extends JPanel {
                 c.getWidth() * this.scale, c.getHeight() * this.scale);
     }
 
-    /** Hide the system cursor exactly while the arrow is drawn. */
+    /**
+     * Whether the pointer is hidden altogether: over the departure and the
+     * frozen picture after it, where the original shows no arrow (none of
+     * the 23 departure captures has one) -- the system arrow must not
+     * appear there either.
+     */
+    private boolean hidesPointer() {
+        return this.pointerX >= 0 && this.pointerY >= 0
+            && (this.mode == Mode.DEPARTURE || this.mode == Mode.STARTING);
+    }
+
+    /**
+     * Hide the system cursor exactly while the arrow is drawn, and over
+     * the departure ({@link #hidesPointer}).
+     */
     private void updatePointerShape() {
-        final Cursor want = drawsPointer() ? blankCursor() : null;
+        final Cursor want = (drawsPointer() || hidesPointer()) ? blankCursor() : null;
         if (!isCursorSet() ? want != null : getCursor() != want) {
             setCursor(want);    // null: inherit the default arrow
         }
@@ -1016,9 +1134,10 @@ final class ClassicMainMenuPanel extends JPanel {
     }
 
     /**
-     * Bind keys to a menu action.  In {@link Mode#NEW_WORLD} the bound
-     * actions do nothing: the chain's key listener ({@link #onChainKey})
-     * handles and consumes those keys, so nothing is handled twice.
+     * Bind keys to a menu action.  In {@link Mode#NEW_WORLD} and
+     * {@link Mode#DEPARTURE} the bound actions do nothing: the key listener
+     * ({@link #onChainKey}, {@link #onDepartureKey}) handles and consumes
+     * those keys, so nothing is handled twice.
      */
     private void bind(InputMap im, ActionMap am, String name,
                       Runnable r, int... keys) {
@@ -1026,7 +1145,8 @@ final class ClassicMainMenuPanel extends JPanel {
         am.put(name, new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
-                    if (ClassicMainMenuPanel.this.mode == Mode.NEW_WORLD) return;
+                    if (ClassicMainMenuPanel.this.mode == Mode.NEW_WORLD
+                        || ClassicMainMenuPanel.this.mode == Mode.DEPARTURE) return;
                     r.run();
                 }
             });
@@ -1227,16 +1347,175 @@ final class ClassicMainMenuPanel extends JPanel {
             repaint();
             break;
         case DONE:
-            // Freeze the audience (no arrow: the EDT now blocks while the
-            // server starts) and hand the choices to the engine.
+            // The original's departure, then the engine start.  Without the
+            // departure's pictures or captions: freeze the audience (no
+            // arrow: the EDT now blocks while the server starts) and hand
+            // the choices to the engine at once, as before.
             final ClassicGUI.NewWorldSetup setup = this.chain.setup();
-            setMode(Mode.STARTING);
-            paintImmediately(0, 0, getWidth(), getHeight());
-            this.actions.newWorld(setup);
+            if (!startDeparture(setup)) {
+                setMode(Mode.STARTING);
+                paintImmediately(0, 0, getWidth(), getHeight());
+                this.actions.newWorld(setup);
+            }
             break;
         case STAY: default:
             break;
         }
+    }
+
+    // The departure
+
+    /**
+     * Start the departure after the audience (see {@link ClassicDeparture}).
+     *
+     * <p>WHY the engine starts only afterwards, not in parallel: the show
+     * ends on a still picture (LEVN0010 with its caption, held for about
+     * 9 s), so the engine's 1-2 s start -- which blocks this thread, see
+     * {@code ClassicGUI.startNewWorldGame} -- falls on that same frozen
+     * frame ({@link Mode#STARTING}).  Nothing of the engine exists while
+     * the show runs: skipping, Alt+F4 and failures need no special care,
+     * no autosave or turn report can arrive mid-show, the in-game view and
+     * {@code closeMainPanel} need no gating, and the in-game music
+     * ({@code PreGameController.startGameInternal}) begins when the ship
+     * has gone, not two seconds into the night picture.  The cost is the
+     * engine's start time spent on the last picture.
+     *
+     * <p>All eleven frames (the audience still and the ten steps) and the
+     * ten dissolve orders are prepared here at once; that takes a few tens
+     * of milliseconds.
+     *
+     * @param setup The chain's choices.
+     * @return False when the departure is unavailable (pack material
+     *     missing, see {@link ClassicDeparture#available}); the caller then
+     *     starts the game directly.
+     */
+    private boolean startDeparture(ClassicGUI.NewWorldSetup setup) {
+        final ChainData cd = this.chainData;
+        if (cd == null || !ClassicDeparture.available(cd.assets, cd.texts)) return false;
+        final ClassicDeparture.Captions c = ClassicDeparture.Captions.of(cd.texts, setup);
+        if (c == null) {
+            logger.info("Classic departure: no captions for " + setup.nationId
+                + " / " + setup.difficultyId + " -- skipped");
+            return false;
+        }
+        final long prep = System.nanoTime();
+        final int[][] frames = new int[ClassicDeparture.STEPS + 1][];
+        for (int k = 0; k <= ClassicDeparture.STEPS; k++) {
+            frames[k] = ClassicDeparture.renderStep(cd.assets, cd.texts, c, k);
+        }
+        final int[][] orders = new int[ClassicDeparture.STEPS][];
+        final int[] changed = new int[ClassicDeparture.STEPS];
+        for (int k = 0; k < ClassicDeparture.STEPS; k++) {
+            orders[k] = ClassicDeparture.dissolveOrder(frames[k], frames[k + 1]);
+            changed[k] = orders[k].length;
+        }
+        final BufferedImage image = new BufferedImage(ClassicDeparture.W,
+            ClassicDeparture.H, BufferedImage.TYPE_INT_RGB);
+        final int[] shown = ClassicDeparture.pixels(image);
+        System.arraycopy(frames[0], 0, shown, 0, shown.length);
+        final ClassicDepartureTimeline tl = new ClassicDepartureTimeline(changed);
+        this.departure = new Departure(setup, frames, orders, tl, image, System.nanoTime());
+        this.frozenFrame = null;
+        setMode(Mode.DEPARTURE);
+        logger.info("Classic departure: start (prepared in "
+            + (System.nanoTime() - prep) / 1000000L + " ms, about "
+            + tl.endMs() / 1000L + " s)");
+        this.departureTimer = new Timer(DEPARTURE_TICK_MS, ev -> departureTick());
+        this.departureTimer.setCoalesce(true);
+        this.departureTimer.start();
+        requestFocusInWindow();
+        repaint();
+        return true;
+    }
+
+    /**
+     * One timer tick: bring the screen up to the timeline's state.  Every
+     * transition before the current one is completed first, so a stalled
+     * event thread only skips ahead, never lags behind.
+     */
+    private void departureTick() {
+        final Departure d = this.departure;
+        if (this.mode != Mode.DEPARTURE || d == null) {
+            stopDepartureTimer();
+            return;
+        }
+        final ClassicDepartureTimeline.State st = d.timeline.at(d.elapsedMs());
+        boolean changed = false;
+        while (d.appliedTransition < st.transition) {
+            final int[] order = d.orders[d.appliedTransition];
+            if (d.appliedCount < order.length) {
+                ClassicDeparture.apply(d.shown, d.frames[d.appliedTransition + 1],
+                                       order, d.appliedCount, order.length);
+                changed = true;
+            }
+            d.appliedTransition++;
+            d.appliedCount = 0;
+        }
+        final int[] order = d.orders[d.appliedTransition];
+        final int target = st.done ? order.length : st.revealed;
+        if (target > d.appliedCount) {
+            ClassicDeparture.apply(d.shown, d.frames[d.appliedTransition + 1],
+                                   order, d.appliedCount, target);
+            d.appliedCount = target;
+            changed = true;
+        }
+        if (changed) repaint();
+        if (st.done) finishDeparture(false);
+    }
+
+    /** A key or click ends the show at once (see {@link #onDepartureKey}). */
+    private void skipDeparture() {
+        final Departure d = this.departure;
+        if (this.mode != Mode.DEPARTURE || d == null) return;
+        d.timeline.skip();
+        finishDeparture(true);
+    }
+
+    /**
+     * The show is over (or skipped): the last picture stays up, frozen,
+     * and the engine starts -- the unchanged path of a chain without the
+     * departure ({@code ClassicGUI.beginNewWorldSetup}).
+     */
+    private void finishDeparture(boolean skipped) {
+        final Departure d = this.departure;
+        if (this.mode != Mode.DEPARTURE || d == null) return;
+        stopDepartureTimer();
+        final int[] last = d.frames[ClassicDeparture.STEPS];
+        System.arraycopy(last, 0, d.shown, 0, d.shown.length);
+        logger.info("Classic departure: finished after " + d.elapsedMs()
+            + " ms (skipped=" + skipped + ")");
+        this.frozenFrame = d.image;
+        setMode(Mode.STARTING);
+        paintImmediately(0, 0, getWidth(), getHeight());
+        this.actions.newWorld(d.setup);
+    }
+
+    private void stopDepartureTimer() {
+        if (this.departureTimer != null) {
+            this.departureTimer.stop();
+            this.departureTimer = null;
+        }
+    }
+
+    /**
+     * A key press during the departure.  How the original reacts is not
+     * known (stills cannot show it); this is a PROPOSAL: any new press
+     * skips the rest of the show, Escape included -- there is no way back
+     * to the audience.  Left alone: chords with Alt, Ctrl or Meta (Alt+Enter
+     * full screen and Alt+F4 quit are handled by {@code ClassicGUI}'s
+     * frame keys), bare modifiers, and the auto-repeat of a key still held
+     * from the audience ({@code repeat}), so a held Enter cannot swallow the
+     * show -- one physical press, at most one screen, as in the chain.
+     *
+     * @param e The event.
+     * @param repeat Whether the key was already held (auto-repeat).
+     */
+    private void onDepartureKey(KeyEvent e, boolean repeat) {
+        if (this.mode != Mode.DEPARTURE) return;
+        if (e.isAltDown() || e.isControlDown() || e.isMetaDown()) return;
+        e.consume();
+        if (repeat || isModifierKey(e.getKeyCode())) return;
+        skipDeparture();
     }
 
     /** Whether a key code is a bare modifier or lock key. */
@@ -1435,6 +1714,17 @@ final class ClassicMainMenuPanel extends JPanel {
                     || r == ClassicNewWorldChain.Result.CANCEL
                     || this.chain.step() != before;
                 handleChain(r);
+            }
+            break;
+        case DEPARTURE:
+            // Left or right press skips -- but not the rest of the click
+            // series that dismissed the audience (a double click there must
+            // not swallow the whole show), the same rule as above.
+            if (e.getClickCount() > 1 && this.chainPressChangedScreen) break;
+            if (e.getButton() == MouseEvent.BUTTON1
+                || e.getButton() == MouseEvent.BUTTON3) {
+                this.chainPressChangedScreen = true;
+                skipDeparture();
             }
             break;
         case TITLE:

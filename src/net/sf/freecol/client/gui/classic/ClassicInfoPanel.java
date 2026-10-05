@@ -19,28 +19,21 @@
 
 package net.sf.freecol.client.gui.classic;
 
-import java.awt.Color;
-import java.awt.Dimension;
-import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
-import java.awt.RenderingHints;
-import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
-import javax.swing.Action;
-import javax.swing.Icon;
-import javax.swing.ImageIcon;
-import javax.swing.JPanel;
+import javax.swing.JComponent;
 
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.gui.ImageLibrary;
-import net.sf.freecol.client.gui.action.FreeColAction;
 import net.sf.freecol.common.i18n.Messages;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Player;
@@ -49,412 +42,172 @@ import net.sf.freecol.common.model.Unit;
 
 
 /**
- * The classic-UI info / orders panel: the vertical strip on the right of the
- * original 1994 <em>Colonization</em> map screen.
+ * The original's <b>right-hand panel</b> in play: x 240..319, y 8..199 of
+ * the 320x200 in-game canvas ({@link ClassicHudPane}), painted by the static
+ * {@link ClassicHud} painters from the live game -- wood, minimap with the
+ * viewport ring, season and gold lines, the active unit with its flag and
+ * order lines, and the cargo or the other units on its tile (Steam
+ * {@code opening_032}, {@code 000}; start-sequence {@code 052}).
  *
- * <p>It shows, top to bottom: the turn (season + year), the player's gold and
- * tax rate, then information about whatever is in focus — the active unit (type,
- * moves, state, the terrain it stands on) or, in TERRAIN mode, the selected
- * tile's terrain — then a row of <b>clickable order buttons</b> for the active
- * unit, and a short reminder of the classic order keys.
+ * <p>It paints its 80x192 pixels into an off-screen picture and scales it
+ * up nearest-neighbour by the HUD's integer scale, so the screen shows the
+ * very pixels the headless preview diffs against the captures.  There are
+ * no buttons and no hint footer: the original panel has neither; orders go
+ * through the BEFEHLE menu and the keys ({@link ClassicKeyMap}).  A click in
+ * the minimap recentres the map there.  {@code ClassicGUI.repaintInfo}
+ * repaints it whenever the view or the model changes.
  *
- * <p><b>Phase 2 HUD.</b> A plain {@code Graphics2D}-painted panel (dark ground,
- * light text) that reads live state directly from the model and from the
- * {@link ClassicMapViewer}'s view state; not yet the pixel-faithful wood-panel
- * chrome of the original (that needs the {@code WOODPANL.PIK} art — see
- * CLASSIC_UI_PLAN.md Phase 2). {@link ClassicGUI} repaints it whenever the view
- * state or model changes.
- *
- * <p><b>Order buttons.</b> The lower half hosts the original's unit-order buttons
- * — fortify, sentry, build colony, road/plow/clear, wait, skip and disband — by
- * reusing the real {@link FreeColAction}s (the "reuse {@code action/}" path): each
- * carries its own order-button art ({@link FreeColAction#BUTTON_IMAGE}), enables
- * itself via {@code shouldBeEnabled}, and its {@code actionPerformed} drives the
- * real {@code InGameController}. We paint the icon of every currently-enabled
- * order action and hit-test clicks against the painted rectangles, so the buttons
- * track the active unit exactly as the menu items do.
+ * <p>In <em>scene mode</em> ({@link #setSceneMode}, the first game scene)
+ * the unit block is hidden.
  */
-final class ClassicInfoPanel extends JPanel {
+final class ClassicInfoPanel extends JComponent {
 
-    /** Fixed on-screen width (px) of the right-hand strip. */
-    private static final int PANEL_WIDTH = 240;
-
-    /** Left inset (px) for the text column. */
-    private static final int PAD = 14;
-
-    /** Order-button metrics. */
-    private static final int BTN = 32;
-    private static final int BTN_GAP = 6;
-
-    /** Minimap box: sits at the top of the strip (as in the original). */
-    private static final int MM_TOP = 10;
-    private static final int MM_MAX_H = 130;
-
-    private static final Color GROUND = new Color(0x20, 0x1a, 0x12); // dark wood
-    private static final Color HEAD = new Color(0xF0, 0xD8, 0x8C);   // gold-ish
-    private static final Color TEXT = new Color(0xE8, 0xE0, 0xD0);   // parchment
-    private static final Color DIM = new Color(0x9a, 0x8f, 0x7c);    // muted
-    private static final Color RULE = new Color(0x4a, 0x3c, 0x2a);   // separator
-    private static final Color BTN_HOT = new Color(0x4a, 0x3c, 0x2a); // hover plate
-
-    /**
-     * The unit-order actions to offer, in the original's rough order.  Looked up
-     * by id in the {@code ActionManager}; any that is absent, disabled or has no
-     * order-button art is simply skipped, so this list is a superset — the
-     * improvement actions ({@code road}/{@code plow}/{@code clearForest}) in
-     * particular exist only for the ruleset's improvement types.
-     */
-    private static final String[] ORDER_ACTION_IDS = {
-        "fortifyAction", "sentryAction", "buildColonyAction",
-        "roadAction", "plowAction", "clearForestAction",
-        "waitAction", "skipUnitAction", "disbandUnitAction",
-    };
-
-    /** Size (px) of the active unit's portrait box. */
-    private static final int PORTRAIT = 36;
-
-    /** Plate behind the unit portrait. */
-    private static final Color PORTRAIT_BG = new Color(0x14, 0x10, 0x0a);
+    private static final Logger logger = Logger.getLogger(ClassicInfoPanel.class.getName());
 
     private final FreeColClient freeColClient;
 
-    /** Source of the live view state (active unit / selected tile / mode). */
+    /** Source of the live view state (active unit, focus, mode). */
     private final ClassicMapViewer mapViewer;
 
-    /** For the active unit's portrait sprite. */
+    /** For the units' sprites (ICONS.SS through the pack's aliases). */
     private final ImageLibrary lib;
 
-    /** Order-button hit targets, rebuilt each paint. */
-    private final List<Rectangle> buttonBounds = new ArrayList<>();
-    private final List<FreeColAction> buttonActions = new ArrayList<>();
+    /** The pack's texts, FONTTINY and wood; null without the pack. */
+    private final ClassicText text;
+    private final ClassicFont font;
+    private final BufferedImage wood;
 
-    /** Index of the hovered order button, or -1. */
-    private int hovered = -1;
+    /** Scene mode: no unit block. */
+    private boolean scene = false;
 
-    /** Minimap draw geometry, recorded each paint for click-to-recentre. */
-    private Rectangle minimapRect;
-    private double minimapScale = 1.0;
+    /** The minimap shown in the last paint (for click-to-recentre). */
+    private ClassicHud.MinimapModel lastMinimap = null;
+
+    /** Logged once when painting fails. */
+    private boolean failLogged = false;
 
 
     ClassicInfoPanel(FreeColClient freeColClient, ClassicMapViewer mapViewer,
-                     ImageLibrary lib) {
+                     ImageLibrary lib, ClassicText text, ClassicFont font,
+                     BufferedImage wood) {
         this.freeColClient = freeColClient;
         this.mapViewer = mapViewer;
         this.lib = lib;
+        this.text = text;
+        this.font = font;
+        this.wood = wood;
         setOpaque(true);
-        setBackground(GROUND);
-        setPreferredSize(new Dimension(PANEL_WIDTH, 100));
-        setMinimumSize(new Dimension(PANEL_WIDTH, 100));
         addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent e) {
                     onClick(e);
                 }
-                @Override
-                public void mouseExited(MouseEvent e) {
-                    if (hovered != -1) { hovered = -1; repaint(); }
-                }
-            });
-        addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
-                @Override
-                public void mouseMoved(MouseEvent e) {
-                    onHover(e);
-                }
             });
     }
 
 
-    /** Render a StringTemplate, guarding against nulls / missing keys. */
-    private static String msg(net.sf.freecol.common.model.StringTemplate t) {
-        try {
-            return (t == null) ? "" : Messages.message(t);
-        } catch (RuntimeException e) {
-            return "";
+    /** Hide (true) or show the unit block. */
+    void setSceneMode(boolean on) {
+        if (this.scene == on) return;
+        this.scene = on;
+        repaint();
+    }
+
+    /** The canvas scale: this component is 80 virtual pixels wide. */
+    private int scale() {
+        return Math.max(1, getWidth() / ClassicHud.PANEL_W);
+    }
+
+    /**
+     * The panel's model from the live game.
+     *
+     * @return The model; never null (an empty panel without a game).
+     */
+    ClassicHud.PanelModel model() {
+        final Game game = this.freeColClient.getGame();
+        final Player player = this.freeColClient.getMyPlayer();
+        ClassicHud.MinimapModel mm = null;
+        String season = null, gold = null;
+        if (game != null && game.getMap() != null) {
+            final int[] o = this.mapViewer.viewOrigin();
+            if (o != null) mm = ClassicHud.minimapOf(game.getMap(), o[0], o[1]);
         }
+        if (game != null && game.getTurn() != null) {
+            season = ClassicHud.seasonLine(this.text, game.getTurn().getSeason(),
+                                           game.getTurn().getYear());
+            if (season == null) {
+                season = Messages.message(game.getTurn().getLabel());
+            }
+        }
+        if (player != null) {
+            gold = ClassicHud.goldLine(this.text, Math.max(0, player.getGold()),
+                                       player.getTax());
+            if (gold == null) {
+                gold = Messages.message("gold") + ": " + player.getGold()
+                    + "  " + Messages.message("tax") + ": " + player.getTax();
+            }
+        }
+        ClassicHud.UnitFacts active = null;
+        final List<ClassicHud.UnitFacts> list = new ArrayList<>();
+        final Unit unit = this.mapViewer.getActiveUnit();
+        if (unit != null && unit.hasTile()) {
+            active = facts(unit);
+            final List<Unit> others = new ArrayList<>();
+            if (unit.isCarrier() && unit.hasCargo()) {
+                others.addAll(unit.getUnitList());
+            } else {
+                final Tile t = unit.getTile();
+                for (Unit u : t.getUnitList()) {
+                    if (u != unit) others.add(u);
+                }
+            }
+            for (Unit u : others) list.add(facts(u));
+        }
+        return new ClassicHud.PanelModel(mm, season, gold, this.scene, active, list);
+    }
+
+    private ClassicHud.UnitFacts facts(Unit u) {
+        BufferedImage sprite = null;
+        try {
+            sprite = this.lib.getScaledUnitImage(u);
+        } catch (RuntimeException e) {
+            sprite = null;
+        }
+        return ClassicHud.UnitFacts.of(u, sprite);
     }
 
     @Override
-    protected void paintComponent(Graphics g0) {
-        super.paintComponent(g0);
-        final Graphics2D g = (Graphics2D) g0;
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                           RenderingHints.VALUE_ANTIALIAS_ON);
-
-        paintWoodChrome(g);
-
-        final Font base = getFont().deriveFont(Font.PLAIN, 14f);
-        final Font head = getFont().deriveFont(Font.BOLD, 15f);
-
-        // --- Minimap (top of the strip, as in the original) -------------
-        int y = paintMinimap(g) + 20;
-
-        final Game game = this.freeColClient.getGame();
-        final Player player = this.freeColClient.getMyPlayer();
-
-        // --- Turn / treasury header -------------------------------------
-        if (game != null && game.getTurn() != null) {
-            g.setColor(HEAD);
-            g.setFont(head);
-            y = line(g, msg(game.getTurn().getLabel()), y);
-        }
-        if (player != null) {
-            g.setColor(TEXT);
-            g.setFont(base);
-            y = line(g, Messages.message("gold") + ": " + player.getGold(), y);
-            y = line(g, Messages.message("tax") + ": " + player.getTax() + "%", y);
-        }
-        y = rule(g, y);
-
-        // --- Focus: active unit, else selected tile ---------------------
-        final Unit unit = this.mapViewer.getActiveUnit();
-        final Tile selected = this.mapViewer.getSelectedTile();
-        if (unit != null) {
-            g.setColor(HEAD);
-            g.setFont(head);
-            y = line(g, msg(unit.getLabel()), y);
-
-            // The portrait sits left of the unit's moves/terrain, as the original
-            // puts a sprite beside each unit (design ref: opening_006/008).  The
-            // name keeps its own full-width line above: our localized labels
-            // ("Pionier (Freier Kolonist)") are far longer than the original's and
-            // would not fit beside a portrait in a 240px strip.
-            final int top = y - 6;
-            paintUnitPortrait(g, unit, PAD, top);
-            final int tx = PAD + PORTRAIT + 8;
-
-            g.setColor(TEXT);
-            g.setFont(base);
-            int ty = lineAt(g, Messages.message("infoPanel.moves") + " "
-                            + safeMoves(unit), tx, y + 8);
-            final Tile ut = unit.getTile();
-            if (ut != null && ut.getType() != null) {
-                g.setColor(DIM);
-                ty = lineAt(g, msg(ut.getLabel()), tx, ty);
-            }
-            y = Math.max(ty, top + PORTRAIT + 6);
-        } else if (selected != null && selected.getType() != null) {
-            g.setColor(HEAD);
-            g.setFont(head);
-            y = line(g, msg(selected.getLabel()), y);
-        } else {
-            g.setColor(DIM);
-            g.setFont(base);
-            y = line(g, Messages.message("endTurnAction.name"), y);
-        }
-
-        // --- Order buttons (for the active unit) ------------------------
-        paintOrderButtons(g, y + 4);
-
-        // --- Order-key reminder (bottom) --------------------------------
-        g.setFont(base.deriveFont(12f));
-        g.setColor(DIM);
-        int yb = getHeight() - 74;
-        yb = rule(g, yb);
-        // Localize the action names (reusing the real action keys); the key
-        // tokens are our actual classic bindings, so they stay literal.
-        yb = line(g, "Enter: " + Messages.message("endTurnAction.name"), yb);
-        yb = line(g, "Space: " + Messages.message("skipUnitAction.name"), yb);
-        line(g, "W: " + Messages.message("waitAction.name"), yb);
-    }
-
-    /**
-     * The original's wood-panel chrome behind the strip, with a light dark wash
-     * so the gold/parchment text keeps its contrast.  Falls back to the flat
-     * {@code GROUND} colour (already painted by {@code super}) when the pack is
-     * absent.  The seam-free tiling itself lives in {@link ClassicWood}, shared
-     * with the classic dialogs.
-     */
-    private void paintWoodChrome(Graphics2D g) {
-        if (!ClassicWood.paint(g, 0, 0, getWidth(), getHeight())) return;
-        g.setColor(new Color(0x18, 0x10, 0x0A, 0x66));
-        g.fillRect(0, 0, getWidth(), getHeight());
-    }
-
-    /**
-     * Draw the whole-map minimap at the top of the strip — the raster the
-     * {@link ClassicMapViewer} builds (and keeps fresh), scaled to fit the panel
-     * width, framed, with a box marking the tile region visible in the main view.
-     * Records the draw geometry so {@link #onClick} can recentre the map on a
-     * minimap click.  Returns the y just below the minimap (or {@code MM_TOP} when
-     * there is no map yet).
-     */
-    private int paintMinimap(Graphics2D g) {
-        this.minimapRect = null;
-        final BufferedImage mm = this.mapViewer.getMinimapImage();
-        if (mm == null || mm.getWidth() <= 0 || mm.getHeight() <= 0) return MM_TOP;
-
-        final int targetW = getWidth() - 2 * PAD;
-        final double sc = Math.min((double) targetW / mm.getWidth(),
-                                   (double) MM_MAX_H / mm.getHeight());
-        final int dw = Math.max(1, (int) Math.round(mm.getWidth() * sc));
-        final int dh = Math.max(1, (int) Math.round(mm.getHeight() * sc));
-        final int x = (getWidth() - dw) / 2;
-        final Rectangle box = new Rectangle(x, MM_TOP, dw, dh);
-        this.minimapRect = box;
-        this.minimapScale = sc;
-
-        g.setColor(Color.BLACK);
-        g.fillRect(box.x - 2, box.y - 2, dw + 4, dh + 4);
-        final Object oldHint = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                           RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-        g.drawImage(mm, box.x, box.y, dw, dh, null);
-        if (oldHint != null) {
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldHint);
-        }
-        g.setColor(HEAD);
-        g.drawRect(box.x - 1, box.y - 1, dw + 1, dh + 1);
-
-        // Viewport box: the tile span the main view shows, centred on the focus.
-        final Tile f = this.mapViewer.getFocus();
-        final int ppt = this.mapViewer.getMinimapPixelsPerTile();
-        if (f != null && ppt > 0) {
-            final double pp = ppt * sc;
-            final int halfCols = this.mapViewer.getViewHalfCols();
-            final int halfRows = this.mapViewer.getViewHalfRows();
-            final int vx = box.x + (int) Math.round((f.getX() - halfCols) * pp);
-            final int vy = box.y + (int) Math.round((f.getY() - halfRows) * pp);
-            final int vw = (int) Math.round((halfCols * 2 + 1) * pp);
-            final int vh = (int) Math.round((halfRows * 2 + 1) * pp);
-            final java.awt.Shape oldClip = g.getClip();
-            g.setClip(box);
-            g.setColor(HEAD);
-            g.drawRect(vx, vy, vw, vh);
-            g.setClip(oldClip);
-        }
-        return box.y + dh;
-    }
-
-    /**
-     * Paint the enabled unit-order buttons as a wrapped grid of icons starting at
-     * {@code y0}, recording each one's bounds + action for {@link #onClick}.
-     */
-    private void paintOrderButtons(Graphics2D g, int y0) {
-        this.buttonBounds.clear();
-        this.buttonActions.clear();
-        if (this.freeColClient.getActionManager() == null) return;
-
-        int x = PAD;
-        int y = y0;
-        int i = 0;
-        for (String id : ORDER_ACTION_IDS) {
-            final FreeColAction action
-                = this.freeColClient.getActionManager().getFreeColAction(id);
-            if (action == null || !action.isEnabled()) continue;
-            final Icon icon = (Icon) action.getValue(FreeColAction.BUTTON_IMAGE);
-            if (!(icon instanceof ImageIcon)) continue;
-
-            if (x + BTN > getWidth() - PAD) {      // wrap to next row
-                x = PAD;
-                y += BTN + BTN_GAP;
-            }
-            final Rectangle r = new Rectangle(x, y, BTN, BTN);
-            if (i == this.hovered) {
-                g.setColor(BTN_HOT);
-                g.fillRect(r.x - 2, r.y - 2, BTN + 4, BTN + 4);
-            }
-            g.drawImage(((ImageIcon) icon).getImage(), x, y, BTN, BTN, this);
-            this.buttonBounds.add(r);
-            this.buttonActions.add(action);
-            x += BTN + BTN_GAP;
-            i++;
-        }
-    }
-
-    private void onClick(MouseEvent e) {
-        // A minimap click recentres the main view on the corresponding tile.
-        final Rectangle mm = this.minimapRect;
-        if (mm != null && mm.contains(e.getPoint())) {
-            final int ppt = this.mapViewer.getMinimapPixelsPerTile();
-            final double pp = ppt * this.minimapScale;
-            if (pp > 0) {
-                this.mapViewer.recenterOnTile(
-                    (int) ((e.getX() - mm.x) / pp),
-                    (int) ((e.getY() - mm.y) / pp));
-            }
-            return;
-        }
-        for (int i = 0; i < this.buttonBounds.size(); i++) {
-            if (this.buttonBounds.get(i).contains(e.getPoint())) {
-                final FreeColAction action = this.buttonActions.get(i);
-                action.actionPerformed(new ActionEvent(this,
-                    ActionEvent.ACTION_PERFORMED, action.getId()));
-                repaint();
-                return;
-            }
-        }
-    }
-
-    private void onHover(MouseEvent e) {
-        int found = -1;
-        for (int i = 0; i < this.buttonBounds.size(); i++) {
-            if (this.buttonBounds.get(i).contains(e.getPoint())) { found = i; break; }
-        }
-        if (found != this.hovered) {
-            this.hovered = found;
-            repaint();
-        }
-    }
-
-    /** Draw one text line at {@code (PAD, y)} and return the next baseline. */
-    private int line(Graphics2D g, String s, int y) {
-        return lineAt(g, s, PAD, y);
-    }
-
-    /** Draw one text line at {@code (x, y)} and return the next baseline. */
-    private int lineAt(Graphics2D g, String s, int x, int y) {
-        if (s != null && !s.isEmpty()) g.drawString(s, x, y);
-        return y + g.getFontMetrics().getHeight() + 2;
-    }
-
-    /**
-     * The active unit's map sprite, on a dark plate, as the info panel's portrait.
-     *
-     * <p>The original {@code ICONS.SS} unit sprites are ~16px, so they are
-     * up-scaled into the box <b>nearest-neighbour</b> — the same crisp-pixels
-     * treatment {@code ClassicMapViewer.drawCentered} gives them on the map (a
-     * plain scale would blur them to mush).  Guarded: with no pack the base art is
-     * larger and simply shrinks to fit instead.
-     */
-    private void paintUnitPortrait(Graphics2D g, Unit unit, int x, int y) {
-        g.setColor(PORTRAIT_BG);
-        g.fillRect(x, y, PORTRAIT, PORTRAIT);
-        g.setColor(RULE);
-        g.drawRect(x, y, PORTRAIT - 1, PORTRAIT - 1);
-
-        final BufferedImage img = this.lib.getScaledUnitImage(unit);
-        if (img == null || img.getWidth() <= 0 || img.getHeight() <= 0) return;
-
-        final Object old = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                           RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-        final int inner = PORTRAIT - 6;
-        final double s = Math.min((double) inner / img.getWidth(),
-                                  (double) inner / img.getHeight());
-        final int w = Math.max(1, (int) Math.round(img.getWidth() * s));
-        final int h = Math.max(1, (int) Math.round(img.getHeight() * s));
-        g.drawImage(img, x + (PORTRAIT - w) / 2, y + (PORTRAIT - h) / 2, w, h,
-                    null);
-        if (old != null) {
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, old);
-        }
-    }
-
-    /** Draw a horizontal separator and return the y below it. */
-    private int rule(Graphics2D g, int y) {
-        final Color old = g.getColor();
-        g.setColor(RULE);
-        g.drawLine(PAD, y - 4, getWidth() - PAD, y - 4);
-        g.setColor(old);
-        return y + 8;
-    }
-
-    /** Unit moves as a short string, guarded. */
-    private static String safeMoves(Unit unit) {
+    protected void paintComponent(Graphics g) {
+        final BufferedImage img = new BufferedImage(ClassicHud.PANEL_W,
+            ClassicHud.PANEL_H, BufferedImage.TYPE_INT_RGB);
+        final Graphics2D ig = img.createGraphics();
         try {
-            return unit.getMovesAsString();
+            ig.translate(-ClassicHud.PANEL_X, -ClassicHud.PANEL_Y);
+            final ClassicHud.PanelModel p = model();
+            this.lastMinimap = p.minimap;
+            ClassicHud.paintPanel(ig, this.font, this.wood, this.text, p);
         } catch (RuntimeException e) {
-            return "";
+            if (!this.failLogged) {
+                this.failLogged = true;
+                logger.log(Level.WARNING, "Classic panel paint failed", e);
+            }
+        } finally {
+            ig.dispose();
         }
+        ClassicMenuStrip.blit(g, img, 0, 0, scale());
+    }
+
+    /** A click in the minimap's interior recentres the map on that tile. */
+    private void onClick(MouseEvent e) {
+        final ClassicHud.MinimapModel m = this.lastMinimap;
+        if (m == null) return;
+        final int s = scale();
+        final int vx = ClassicHud.PANEL_X + e.getX() / s;
+        final int vy = ClassicHud.PANEL_Y + e.getY() / s;
+        final Rectangle in = ClassicHud.MINIMAP;
+        if (!in.contains(vx, vy)) return;
+        this.mapViewer.recenterOnTile(
+            ClassicHud.minimapOriginX(m.mapWidth, m.c0) + vx - in.x,
+            ClassicHud.minimapOriginY(m.mapHeight, m.r0) + vy - in.y);
     }
 }

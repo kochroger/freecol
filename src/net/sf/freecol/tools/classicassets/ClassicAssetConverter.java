@@ -169,9 +169,12 @@ public final class ClassicAssetConverter {
     /**
      * The original's text files the classic UI reads at runtime (the
      * new-game screens: picker labels, prompts, nation pages, the audience
-     * scroll).  See {@code ClassicText}.
+     * scroll, the in-game panel's labels) and {@code MENU.TXT}, the in-game
+     * menu bar's titles and items ({@code ClassicMenuBar}).  See
+     * {@code ClassicText}.
      */
-    static final String[] TEXT_FILES = { "GAME.TXT", "NAMES.TXT", "LABELS.TXT" };
+    static final String[] TEXT_FILES = { "GAME.TXT", "NAMES.TXT", "LABELS.TXT",
+                                         "MENU.TXT" };
 
     /**
      * Copy {@link #TEXT_FILES} byte for byte into {@code <pack>/text/}, under

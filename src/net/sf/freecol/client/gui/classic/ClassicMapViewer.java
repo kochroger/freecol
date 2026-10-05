@@ -100,6 +100,20 @@ final class ClassicMapViewer extends JPanel {
     /** Minimum integer up-scale from the native 16&times;16 tile. */
     private static final int MIN_SCALE = 3;
 
+    /** The HUD's fixed scale ({@link #setFixedScale}), or 0 for adaptive. */
+    private int fixedScale = 0;
+
+    /**
+     * The keystrokes this viewer binds {@code WHEN_IN_FOCUSED_WINDOW}
+     * ({@link #installKeyBindings}); {@link ClassicKeyMap} leaves them to the
+     * map.  Kept in step with the bindings by hand.
+     */
+    static final String[] BOUND_KEYS = {
+        "UP", "NUMPAD8", "DOWN", "NUMPAD2", "LEFT", "NUMPAD4", "RIGHT",
+        "NUMPAD6", "HOME", "NUMPAD7", "PAGE_UP", "NUMPAD9", "END", "NUMPAD1",
+        "PAGE_DOWN", "NUMPAD3", "ENTER", "SPACE", "W", "B"
+    };
+
     /** Native tile-sprite size requested from {@link ImageLibrary}. */
     private static final Dimension SRC_SIZE = new Dimension(TILE_SRC, TILE_SRC);
 
@@ -279,6 +293,7 @@ final class ClassicMapViewer extends JPanel {
                 }
             });
         this.edgeScrollTimer = new Timer(EDGE_SCROLL_INTERVAL_MS, e -> {
+                if (inputBlocked()) return;
                 if (this.edgeDX != 0 || this.edgeDY != 0) {
                     panFocus(this.edgeDX, this.edgeDY);
                 }
@@ -352,6 +367,7 @@ final class ClassicMapViewer extends JPanel {
         am.put("classic_endTurn", new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
+                    if (inputBlocked()) return;
                     endTurn();
                 }
             });
@@ -359,6 +375,7 @@ final class ClassicMapViewer extends JPanel {
         am.put("classic_skip", new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
+                    if (inputBlocked()) return;
                     skipActiveUnitOrEndTurn();
                 }
             });
@@ -366,6 +383,7 @@ final class ClassicMapViewer extends JPanel {
         am.put("classic_wait", new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
+                    if (inputBlocked()) return;
                     waitActiveUnit();
                 }
             });
@@ -373,6 +391,7 @@ final class ClassicMapViewer extends JPanel {
         am.put("classic_buildColony", new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
+                    if (inputBlocked()) return;
                     buildColony();
                 }
             });
@@ -454,9 +473,20 @@ final class ClassicMapViewer extends JPanel {
         am.put(name, new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
+                    if (inputBlocked()) return;
                     handleMoveKey(intent, panDx, panDy);
                 }
             });
+    }
+
+    /**
+     * Whether the map's own keys must do nothing: while the first game scene
+     * is up ({@link ClassicGUI#isDialogShowing}).  The scene's layer holds
+     * the focus and consumes every key, so this is only the backstop for a
+     * key that reaches the map anyway (e.g. the focus was lost).
+     */
+    private boolean inputBlocked() {
+        return this.gui != null && this.gui.isDialogShowing();
     }
 
     /**
@@ -577,8 +607,8 @@ final class ClassicMapViewer extends JPanel {
         this.minimapDirty = true;
     }
 
-    // Minimap accessors — the whole-map overview now lives in ClassicInfoPanel
-    // (the original's right column hosts it), which reuses this cached raster.
+    // Minimap accessors -- the in-game panel now draws the original's 56x39
+    // window itself (ClassicHud.minimapOf); this raster is no longer shown.
 
     /** The cached whole-map minimap raster, rebuilt if stale; null if no map. */
     BufferedImage getMinimapImage() {
@@ -743,10 +773,36 @@ final class ClassicMapViewer extends JPanel {
      * 320&times;200 screen showed — and never below {@link #MIN_SCALE}.
      */
     private int scale() {
+        if (this.fixedScale > 0) return this.fixedScale;
         final int w = getWidth();
         if (w <= 0) return MIN_SCALE;
         return Math.max(MIN_SCALE,
             Math.round((float) w / (CLASSIC_VIEW_COLS * TILE_SRC)));
+    }
+
+    /**
+     * Put the viewer on the in-game HUD's 320x200 grid
+     * ({@link ClassicHudPane}): tiles of exactly {@code 16 * s} pixels,
+     * bypassing {@link #MIN_SCALE}, so the 240x192 map area shows the
+     * original's 15x12 tiles at the same scale as the strip and the panel;
+     * the focus tile then sits in view column {@link ClassicHud#UNIT_COL}
+     * and row {@link ClassicHud#UNIT_ROW} (the original keeps the unit in
+     * row 6; 083/032) instead of the half-tile-centred adaptive layout.
+     *
+     * @param s The HUD scale, or 0 for the adaptive scale.
+     */
+    void setFixedScale(int s) {
+        if (s == this.fixedScale) return;
+        this.fixedScale = Math.max(0, s);
+        repaint();
+    }
+
+    /** The top-left tile of the 15x12 HUD view, {x, y}; null without a focus. */
+    int[] viewOrigin() {
+        final Tile f = getFocus();
+        if (f == null) return null;
+        return new int[] { f.getX() - ClassicHud.UNIT_COL,
+                           f.getY() - ClassicHud.UNIT_ROW };
     }
 
     /** On-screen tile cell width (square, like the original game). */
@@ -761,11 +817,17 @@ final class ClassicMapViewer extends JPanel {
 
     /** Screen x of the left edge of the cell for map column {@code x}. */
     private int screenX(int x, int focusX) {
+        if (this.fixedScale > 0) {
+            return (x - focusX + ClassicHud.UNIT_COL) * tileW();
+        }
         return getWidth() / 2 + (x - focusX) * tileW() - tileW() / 2;
     }
 
     /** Screen y of the top edge of the cell for map row {@code y}. */
     private int screenY(int y, int focusY) {
+        if (this.fixedScale > 0) {
+            return (y - focusY + ClassicHud.UNIT_ROW) * tileH();
+        }
         return getHeight() / 2 + (y - focusY) * tileH() - tileH() / 2;
     }
 
@@ -838,10 +900,11 @@ final class ClassicMapViewer extends JPanel {
         final Map map = getMap();
         final Tile f = getFocus();
         if (map == null || f == null) return null;
-        final int x = f.getX()
-            + Math.floorDiv(px - (getWidth() / 2 - tileW() / 2), tileW());
-        final int y = f.getY()
-            + Math.floorDiv(py - (getHeight() / 2 - tileH() / 2), tileH());
+        // The inverse of screenX/screenY: the focus cell's top-left corner.
+        final int fx = screenX(f.getX(), f.getX());
+        final int fy = screenY(f.getY(), f.getY());
+        final int x = f.getX() + Math.floorDiv(px - fx, tileW());
+        final int y = f.getY() + Math.floorDiv(py - fy, tileH());
         return map.getTile(x, y);
     }
 
@@ -1309,8 +1372,8 @@ final class ClassicMapViewer extends JPanel {
     // aid the 48px main view cannot (it shows only a handful of tiles).  Not
     // isometric — a plain rectangular map.getWidth() x map.getHeight() raster,
     // unlike FreeCol's own iso MiniMap.  The raster is built here (it is map data);
-    // it is *drawn* by ClassicInfoPanel, which hosts the minimap in the right
-    // column as the original does (see the accessors above).
+    // it was drawn by the old ClassicInfoPanel; the HUD panel now builds its own
+    // 1-px-per-tile window (ClassicHud.minimapOf), see the accessors above.
 
     /** {@code c} if non-null, else {@code fallback} (guards missing resources). */
     private static Color orElse(Color c, Color fallback) {

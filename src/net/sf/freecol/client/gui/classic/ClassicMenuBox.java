@@ -47,8 +47,15 @@ import java.util.List;
  *       {@code @width + 6} (three 1-px rings each side).</li>
  *   <li>The box is centred horizontally: {@code x = (320 - outer) / 2}; its
  *       top is {@code @y}, or vertically centred when there is none.</li>
- *   <li>Height {@code H = 8 * (promptLines + rows) + 16}: verified for one
- *       prompt line with 5 (title), 8 (save) and 10 (load) rows.</li>
+ *   <li>Height {@code H = 6 * promptLines + 8 * rows + 18}: prompt lines
+ *       are 6 px apart, option rows 8 px.  Measured on every captured box:
+ *       one prompt line with 5 (title {@code 033}), 8 (save {@code 054}) and
+ *       10 (load {@code 055}) rows; five prompt lines and no rows (the first
+ *       scene's advisor box, {@code opening_083}/{@code 049}: H = 48); three
+ *       and two prompt lines with 4 and 7 rows in the Europe advisor boxes
+ *       ({@code opening_011}/{@code 013}: 68 and 86, plus a 6-px
+ *       "(F1 ...)" footer line).  The older inference {@code 8 * (P + R) +
+ *       16} agrees only for P = 1, the only case the title screen has.</li>
  *   <li>The fill is the 32x24 sprite {@code OPENTILE.SS}/{@code WOODTILE.SS}
  *       tiled from the box's <em>outer</em> top-left corner -- not the large
  *       {@code WOODPANL.PIK}, which is why {@link ClassicWood} is not reused
@@ -66,8 +73,17 @@ final class ClassicMenuBox {
     static final int VW = 320;
     static final int VH = 200;
 
-    /** Line pitch of prompt lines and rows. */
+    /** Line pitch of option rows (and dropdown slots). */
     static final int PITCH = 8;
+
+    /**
+     * Line pitch of prompt lines: 6, not 8.  The multi-line prompts of
+     * {@code opening_083}/{@code 049} (glyph tops 121, 127, 133, 139, 145)
+     * and {@code 011} (111, 117, 123) are 6 px apart.  With one prompt line
+     * the pitch never shows, which is why the title, save and load boxes
+     * could not tell.
+     */
+    static final int PROMPT_PITCH = 6;
 
     /** The Swing font used only when the pack has no bitmap font. */
     private static final Font FALLBACK_FONT = new Font(Font.DIALOG, Font.PLAIN, 7);
@@ -113,15 +129,29 @@ final class ClassicMenuBox {
     static final Theme GAME = new Theme(0x593424, 0x794934, 0x3C2018,
         0x559634, 0xC7A220, "image.classic_original.ss.WOODTILE.SS.000", 0x5C3A22);
 
+    /**
+     * The ink of a greyed dropdown row, hotkey letter included (Steam
+     * {@code opening_001}: the forest-clearing and the road order).
+     */
+    static final int DISABLED_INK = 0x555555;
+
+    /** {@link #GAME} with both text colours {@link #DISABLED_INK}. */
+    private static final Theme DISABLED = new Theme(0x593424, 0x794934, 0x3C2018,
+        DISABLED_INK, DISABLED_INK, "image.classic_original.ss.WOODTILE.SS.000",
+        0x5C3A22);
+
 
     private ClassicMenuBox() {}   // static helpers only
 
 
     // Geometry (all in virtual pixels)
 
-    /** Outer height of a dialog with {@code promptLines} and {@code rows}. */
+    /**
+     * Outer height of a dialog with {@code promptLines} and {@code rows}:
+     * {@code 6P + 8R + 18} (the captures are listed in the class comment).
+     */
     static int dialogHeight(int promptLines, int rows) {
-        return PITCH * (promptLines + rows) + 16;
+        return PROMPT_PITCH * promptLines + PITCH * rows + 18;
     }
 
     /**
@@ -144,9 +174,9 @@ final class ClassicMenuBox {
         return b.x + 5;
     }
 
-    /** Glyph top of prompt line {@code k}. */
+    /** Glyph top of prompt line {@code k} (lines 6 px apart). */
     static int promptTop(Rectangle b, int k) {
-        return b.y + 9 + PITCH * k;
+        return b.y + 9 + PROMPT_PITCH * k;
     }
 
     /** Left edge of the row text (indented 4 px against the prompt). */
@@ -154,9 +184,14 @@ final class ClassicMenuBox {
         return b.x + 9;
     }
 
-    /** Glyph top of row {@code i} (the prompt-to-first-row gap is 10 px). */
+    /**
+     * Glyph top of row {@code i}: {@code y + 13 + 6P + 8i}, so the first row
+     * sits 10 px below the last prompt line's top (011: last prompt line
+     * 123, first row 133).  Equal to the older {@code y + 11 + 8P + 8i} for
+     * one prompt line.
+     */
     static int rowTop(Rectangle b, int promptLines, int i) {
-        return b.y + 11 + PITCH * promptLines + PITCH * i;
+        return b.y + 13 + PROMPT_PITCH * promptLines + PITCH * i;
     }
 
     /** The selection bar behind row {@code i}: capitals-1 .. descender. */
@@ -291,11 +326,29 @@ final class ClassicMenuBox {
     /**
      * A DROPDOWN menu ({@code opening_053}): fill and a black ring only, a
      * green separator line for each {@code null} row, the bar, and marked
-     * text ('~' hotkey letters in gold).  Not wired yet; it is here for the
-     * coming SPIEL menu so all boxes share one renderer.
+     * text ('~' hotkey letters in gold).  The in-game menu strip
+     * ({@link ClassicMenuStrip}) draws its six menus with the overload
+     * below; every row here is enabled.
      */
     static void paintDropdown(Graphics2D g, Rectangle b, Theme t, BufferedImage tile,
                               ClassicFont font, List<String> rows, int selected) {
+        paintDropdown(g, b, t, tile, font, rows, null, selected);
+    }
+
+    /**
+     * A DROPDOWN menu with greyed rows.  A disabled row draws every glyph --
+     * its '~' letter included -- in {@link #DISABLED_INK}: Steam
+     * {@code opening_001}'s two unusable orders are 141 pixels of
+     * {@code 0x555555} and nothing green or gold.  Everything else is the
+     * enabled painter's; the in-game menus ({@code 001}-{@code 005},
+     * {@code 053}) match it with 0 differing pixels.
+     *
+     * @param disabled Per row (same index as {@code rows}), whether it is
+     *     greyed; null or a short array means enabled.
+     */
+    static void paintDropdown(Graphics2D g, Rectangle b, Theme t, BufferedImage tile,
+                              ClassicFont font, List<String> rows,
+                              boolean[] disabled, int selected) {
         fillTiled(g, tile, b, b.x, b.y, t.fallbackFill);
         g.setColor(Color.BLACK);
         ring(g, b.x, b.y, b.width, b.height);
@@ -311,7 +364,11 @@ final class ClassicMenuBox {
                 g.setColor(t.dark);
                 g.fillRect(b.x + 2, top, b.width - 4, 7);
             }
-            text(g, font, s, b.x + 5, top + 1, t, true);
+            if (disabled != null && k < disabled.length && disabled[k]) {
+                text(g, font, s, b.x + 5, top + 1, DISABLED, true);
+            } else {
+                text(g, font, s, b.x + 5, top + 1, t, true);
+            }
         }
     }
 

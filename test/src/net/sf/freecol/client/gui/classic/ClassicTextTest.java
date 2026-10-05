@@ -188,6 +188,52 @@ public class ClassicTextTest extends TestCase {
         assertEquals("ÄBC:", ClassicText.upperAscii("Äbc:"));
     }
 
+    /**
+     * MENU.TXT: the title trimmed (the first one is indented like an
+     * item), items lose exactly two spaces, '~', '#' and a trailing space
+     * stay, a blank line ends the menu; without the file, no menus.
+     */
+    public void testMenus() throws IOException {
+        final File text = new File(this.dir, "text");
+        final File menu = new File(text, "MENU.TXT");
+        Files.write(menu.toPath(), raw(";c\r\n\r\n@GAME\r\n  TITLE ~G\r\n  Item ~one\r\n"
+            + "  Zoom#  ~Z\r\n  Keep (~x )\r\n\r\n  after\r\n@VIEW\r\n\r\nVIEW ~V\r\n"
+            + "  B`r\r\n\r\n@END\r\n\u001A"));
+        try {
+            final ClassicText t = ClassicText.fromFiles(new File(text, "GAME.TXT"),
+                new File(text, "NAMES.TXT"), new File(text, "LABELS.TXT"), menu);
+            assertTrue(t.hasMenus());
+            final List<String> g = t.menu("GAME");
+            assertEquals(4, g.size());
+            assertEquals("TITLE ~G", g.get(0));
+            assertEquals("Item ~one", g.get(1));
+            assertEquals("Zoom#  ~Z", g.get(2));
+            assertEquals("Keep (~x )", g.get(3));
+            final List<String> v = t.menu("VIEW");
+            assertEquals("VIEW ~V", v.get(0));
+            assertEquals("Bär", v.get(1));
+            assertNull(t.menu("PEDIA"));
+            // The pack loader picks the file up when present.
+            assertTrue(text().hasMenus());
+            final ClassicText plain = ClassicText.fromFiles(new File(text, "GAME.TXT"),
+                new File(text, "NAMES.TXT"), new File(text, "LABELS.TXT"));
+            assertFalse(plain.hasMenus());
+            assertNull(plain.menu("GAME"));
+        } finally {
+            menu.delete();
+        }
+    }
+
+    /** {@code label} works on any LABELS section with the misc convention. */
+    public void testLabel() {
+        final ClassicText t = text();
+        assertEquals("i0", t.label("INFO", 0));
+        assertEquals("m2", t.label("MISC", 2));
+        assertEquals(t.misc(3), t.label("MISC", 3));
+        assertNull(t.label("INFO", 1));
+        assertNull(t.label("NONE", 0));
+    }
+
     public void testMissingFiles() {
         new File(new File(this.dir, "text"), "LABELS.TXT").delete();
         final File other = new File(this.dir, "other");

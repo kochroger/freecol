@@ -45,23 +45,20 @@ fastest way to the in-game view. It starts at sea: the ship on an ocean patch.
   and its code path is unchanged. `showMainPanel` makes the menu live (see
   "Title screen & main menu" below); a private `teardownInGame()` lets the HUD
   and the title replace each other in both directions. `reconnectGUI(active, tile)` — the game-start hook fired
-  by `FreeColClient.restoreGUI` — builds the Phase-2 HUD: a `BorderLayout`
-  content pane with the `ClassicMapViewer` in the centre, the `ClassicInfoPanel`
-  on the right (`EAST`), and the reused `InGameMenuBar` as the frame's menu bar;
-  then seeds the initial view state/focus. `quitGUI` disposes the frame. See
-  "Phase 2 HUD" below.
+  by `FreeColClient.restoreGUI` — builds the in-game HUD
+  (`installInGameHud`): one integer-scaled 320x200 canvas (`ClassicHudPane`)
+  with the painted menu strip, the `ClassicMapViewer` and the `ClassicInfoPanel`,
+  no `JMenuBar`, plus the explicit key map; then seeds the initial view
+  state/focus. `quitGUI` disposes the frame. See "In-game HUD" below.
 - **`installLookAndFeel(fontName)`.** The base `GUI` no-ops this, leaving
-  `FontLibrary`'s main font null — which NPEs once the reused `InGameMenuBar`
-  paints its golden gold/tax/year status line via `FontLibrary.getMainFont()`.
+  `FontLibrary`'s main font null — which NPEs in FreeCol panels the classic UI
+  still reuses (and did in the old reused `InGameMenuBar`).
   So the classic GUI overrides it to create the main font (and set the
-  image-border scale factor so the menu bar's wood border renders; and installs
-  the menu-dropdown `UIManager` defaults — see "Menu dropdowns" below). It
+  image-border scale factor; and installs the stock `JPopupMenu` `UIManager`
+  defaults, `installClassicMenuDropdownDefaults`). It
   deliberately does **not** install `FreeColLookAndFeel`: that L&F swaps in a
   `PanelUI` that paints the parchment texture behind every `JPanel`, which would
-  override the classic map's black fog and the dark info panel. The menu bar
-  paints its own parchment background + wood border regardless of the L&F, so the
-  top bar still reads classic; the dropdown popups get their own wood/green
-  reskin instead, targeted narrowly enough not to need the full L&F.
+  override the classic map's black fog.
 - **Pre-game lobby = the new-game chain's last step.** The original has no
   lobby: the choices are made on the new-game screens before the server
   exists (see "New-game chain" below). `showStartGamePanel` therefore
@@ -226,7 +223,7 @@ minimap box.
 viewer *builds and caches* it (it is map data); it is **drawn by
 `ClassicInfoPanel`**, which hosts the minimap at the top of the right column as
 the original does. (It began as a bottom-left overlay on the map itself; the
-"HUD minimap" slice moved it into the info panel — see "Phase 2 HUD" below.)
+"HUD minimap" slice moved it into the info panel — see "In-game HUD" below; it is now the original's 56x39 window at 1 px per tile, built by `ClassicHud.minimapOf`, and this raster is unused by the panel.)
 
 - Colours: unexplored → `ImageLibrary.getMinimapBackgroundColor()`; explored →
   `getMinimapPoliticsColor(tile.getType())`; a tile with a settlement/unit →
@@ -427,131 +424,319 @@ the full history (including the round-by-round expert feedback that produced the
 split-mechanism design and the coast-frame removal) and
 [Q7, Resolved](../../../../../../../classic_ui_plan/ui-phases.md#open-questions-for-the-expert).
 
-## Phase 2 HUD (menu bar + info/orders panel)
+## In-game HUD (menu strip, dropdowns, right panel)
 
-The map view no longer fills the whole frame. `ClassicGUI.reconnectGUI` composes
-the classic map screen: the `ClassicMapViewer` in the centre, a `ClassicInfoPanel`
-strip on the right, and a menu bar on top. This is the **first Phase-2 slice**,
-driven by the expert's original-game screenshots (local `screenshots/`, git-
-excluded); it is functional, not yet pixel-faithful chrome.
+(`ClassicHudPane`, `ClassicMenuStrip`, `ClassicMenuBar`, `ClassicMenuModel`,
+`ClassicKeyMap`, `ClassicHud`, `ClassicInfoPanel`.)  This replaces the old
+"Phase 2 HUD": FreeCol's reused `InGameMenuBar` (restyled Swing menus with a
+gold/tax/score/year line) and a 240-px Swing info strip with order buttons.
+The in-game screen now *is* the original's: every pixel of the strip, the
+open dropdowns and the right panel is reproduced from the pack and diffed
+against native captures with **0 differing pixels** (Steam
+`dosbox_windows\capture\opening_000..005`, `032`; start-sequence `052`,
+`053`).
 
-- **Menu bar — reused `InGameMenuBar`.** Rather than build a classic menu bar, the
-  frame uses FreeCol's own `InGameMenuBar` (the sanctioned "reuse `action/`"
-  path): five menus (Game / View / Orders / Report / Colopedia) already wired to
-  the real `FreeColAction`s, plus a golden gold/tax/score/year status line it
-  paints itself. Building the bar only looks up pre-built actions, so it is safe.
-  In the user's locale the menus render localized (German in the expert's shots).
-- **Menu-bar contrast — `ClassicGUI.styleClassicMenuBar`.** The original's bar is a
-  **dark strip with light labels** (design ref: `opening_008`); FreeCol's reused bar
-  is dark-on-parchment, which read as nearly illegible in our HUD. The hook is
-  `FreeColMenuBar.paintComponent`, which tiles its parchment background **only while
-  the bar is non-opaque** and otherwise defers to `super.paintComponent` — so making
-  the bar **opaque with a dark background** swaps the parchment for Col1's dark
-  strip, and the menu labels are then re-coloured light. The bar's own golden status
-  line already reads on dark (`InGameMenuBar.paintComponent` draws it *after* the
-  background), and the wood border is kept — it still reads classic.
-  - Safe **after construction**: `InGameMenuBar.reset()` rebuilds (and would
-    re-create) the menus, but it is only called from its own constructor and from
-    `FreeColFrame`, which the classic UI does not use.
-  - **Dropdown reskin — done (Phase 3 §3).** The dropdown popups now get
-    `ClassicDialog`'s wood-framed, green-on-wood palette too — see "Menu dropdowns"
-    below. *Triggering* a few items still reaches `GUI` methods the classic UI
-    no-ops (unrelated to the look).
-- **Menu dropdowns — `ClassicGUI.installClassicMenuDropdownDefaults`.** Reuses
-  `ClassicDialog`'s palette (`WOOD_FALLBACK`/`TEXT_FG`/`BORDER_HI`/`BORDER_LO`/
-  `BTN_BG`/`BTN_FG`/`COUNT_FG`, now package-visible for this) rather than
-  restyling each `JMenuItem` after construction: the colours are installed as
-  `UIManager` *defaults* once, at start-up (from `installLookAndFeel`, well
-  before `reconnectGUI` ever builds the `InGameMenuBar`), so every
-  `JMenuItem`/`JCheckBoxMenuItem`/`JRadioButtonMenuItem`/`JPopupMenu` picks them
-  up as its own built-in look at construction — no component is touched
-  individually, and the real `FreeColAction`s/accelerators/`updateActions()`
-  wiring are untouched.
-  - **The idle/hover asymmetry (found live, not guessed).**
-    `FreeColMenuBar.getMenuItem()` (shared with `SwingGUI`, so not touched here)
-    leaves every item `setOpaque(false)`. Screenshotting an open dropdown at
-    rest and mid-hover showed what that actually does: Swing's
-    `BasicMenuItemUI.paintBackground` skips an item's *idle* background fill
-    when non-opaque (so idle items show no rectangle of their own and sit
-    directly on the popup's wood fill), but paints the *armed/hover* fill
-    unconditionally regardless of opaque — an asymmetry easy to get backwards
-    from reading the source alone. Left unaddressed, hover would have shown the
-    platform L&F's own default blue; `MenuItem.selectionBackground` (etc.) is
-    therefore set to `ClassicDialog`'s `BTN_BG` (its darker plate tone — not
-    `BTN_HOT`, which is numerically identical to `WOOD_FALLBACK` and so would
-    have been invisible against the popup).
-  - **Popup chrome.** `PopupMenu.background`/`.border` give the popup itself
-    `WOOD_FALLBACK` and a bevelled `BORDER_HI`/`BORDER_LO` border (`JPopupMenu`
-    is forced opaque by `BasicPopupMenuUI` regardless of the item quirk above).
-    Separators get both eras of the relevant `UIManager` key
-    (`Separator.*`/`PopupMenu.separator*Foreground/Background`, since which one
-    a given JDK's `JSeparator` UI delegate reads varies) plus a per-instance
-    fallback in `styleClassicMenuBar` for belt-and-suspenders.
-  - **Scope.** Only `MenuItem`/`CheckBoxMenuItem`/`RadioButtonMenuItem`/
-    `PopupMenu`/`Separator` `UIManager` keys are touched, safe process-wide for
-    the same reason as the F-key remap below: `--classic` is the only `GUI` this
-    process ever runs, and the still-Swing choice/input dialog stopgaps
-    (`JOptionPane`, Phase 3 §1) read different keys, so this cannot bleed into
-    them. Checkbox/radio glyphs themselves stay the platform default (out of
-    scope — only `FreeColLookAndFeel`, deliberately not installed, supplies
-    custom ones).
-  - **Verified live** (2026-07-26): all five menus (Game/View/Orders/Report/
-    Colopedia), open and mid-hover, screenshotted; the F-key remap below still
-    reads correctly through the reskin (including the confirmed Naval/Military
-    F7 collision); 0 SEVERE in `FreeCol.log`.
-- **`ClassicInfoPanel` — the right strip.** A fixed-width (240px) `Graphics2D`-
-  painted panel echoing the original's right column, backed by the original's
-  **`WOODPANL.PIK`** wood-panel texture (`paintWoodChrome`, washed slightly darker
-  so the gold/parchment text keeps contrast; flat dark ground when the pack is
-  absent). `WOODPANL.PIK` has a dark ornamental border on all four edges, so
-  tiling the whole image repeats its top/bottom border mid-strip as hard
-  horizontal seams; instead `paintWoodChrome` tiles only the **central grain band**
-  (the borderless middle 40% of the source) — the left/right border *columns* are
-  full-height so they stay continuous and keep the framed look, while the seams
-  fall in uninterrupted wood — and **flips every other copy vertically** so
-  adjacent copies meet at a matching grain edge (a mirror fold) rather than a hard
-  discontinuity. It
-  reads live state directly from the model (`game.getTurn()`, `player.getGold()`
-  / `getTax()`) and from the `ClassicMapViewer`'s view state (`getActiveUnit` /
-  `getSelectedTile`), showing top-to-bottom: the **minimap** (at the very top, as
-  in the original — `paintMinimap` draws the map viewer's cached raster scaled to
-  the strip width, framed, with the viewport box, and recentres the map on a
-  click; see "Minimap raster" above); turn (season+year), gold, tax; then
-  the active unit — its localized `getLabel` on its own line, then a **portrait**
-  (`paintUnitPortrait`: the unit's map sprite on a dark plate, left of the
-  `getMovesAsString` / terrain lines, as the original puts a sprite beside each
-  unit — design ref `opening_006`/`opening_008`; the name keeps a full-width line
-  because our localized labels, "Pionier (Freier Kolonist)", are far longer than
-  Col1's and would not fit beside a 36px portrait in a 240px strip). The `ICONS.SS`
-  sprites are ~16px, so the portrait up-scales them **nearest-neighbour**, the same
-  crisp-pixels treatment the map gives them. In TERRAIN mode the selected tile's
-  terrain shows instead; then the **order buttons** (below); and a bottom reminder
-  of the classic order keys (Enter / Space / W, each followed by its **localized**
-  action name via the reused `endTurnAction`/`skipUnitAction`/`waitAction` `.name`
-  keys). It
-  is repainted by `ClassicGUI`'s `repaintInfo()` on every
-  `changeView`/`refresh`/`refreshTile`, so it tracks the active unit and treasury
-  live (verified: moving the ship updated Moves 5/5 → 3/5 and the terrain line). The
-  Gold/Tax/Moves captions are localized (`gold`/`tax`/`infoPanel.moves`).
-- **Order buttons (the "orders" half).** The panel's lower half hosts the original's
-  unit-order buttons by **reusing the real `FreeColAction`s** (the sanctioned "reuse
-  `action/`" path). Each order action carries its own four-state order-button art
-  (`FreeColAction.BUTTON_IMAGE`, populated from `ImageLibrary.getButtonImages`),
-  enables itself via `shouldBeEnabled`, and its `actionPerformed` drives the real
-  `InGameController`. `paintOrderButtons` walks a curated id list
-  (`fortifyAction`, `sentryAction`, `buildColonyAction`, `roadAction`, `plowAction`,
-  `clearForestAction`, `waitAction`, `skipUnitAction`, `disbandUnitAction`), looks
-  each up in the `ActionManager`, and paints the `BUTTON_IMAGE` of every one that is
-  **currently enabled** into a wrapped icon grid — recording each rectangle so
-  `onClick` can fire the matching action (`onHover` highlights). Because the buttons
-  read the same enabled state the menu items do (kept fresh by the `updateActions()`
-  wiring), they track the active unit automatically: a pioneer shows fortify / sentry
-  / build-colony / road / plow / clear / wait / skip / disband, a ship a different
-  set. Verified live: the pioneer's two button rows render with the real art and
-  hover-highlight, and clicking **build colony** opens the founding confirm dialog
-  (proving click→action). **Still not ported** (later slices): the in-panel minimap
-  (the map viewer still draws its own bottom-left overlay), a unit portrait, the
-  wood-panel (`WOODPANL.PIK`) chrome, and the remaining key-hint captions.
+### One 320x200 canvas (`ClassicHudPane`)
+
+`ClassicGUI.reconnectGUI` → `installInGameHud` makes a `JLayeredPane` the
+frame's content pane, with **no `JMenuBar`**.  Like the title screen it is one
+integer-scaled canvas: `S = max(1, min(W/320, H/200))`, centred, the rest
+black (`ClassicHudOverlay.scale/canvas`, shared with the first scene's glass
+pane, so the scene lies exactly on it).  In 320x200 pixels:
+
+| part | rect | component |
+| --- | --- | --- |
+| menu strip | (0,0,320,8) | `ClassicMenuStrip` (palette layer) |
+| map | (0,8,240,192) | `ClassicMapViewer`, `setFixedScale(S)` |
+| right panel | (240,8,80,192) | `ClassicInfoPanel` |
+| dropdown | whole canvas | `ClassicMenuStrip.dropLayer()` (popup layer, visible only while a menu is open) |
+
+`ClassicMapViewer.setFixedScale` makes `scale()` return S (bypassing
+`MIN_SCALE`), so the map shows the original's **15x12 tiles of 16 px** on the
+same grid as strip and panel, and anchors the focus tile in view column 7,
+row 6 (`ClassicHud.UNIT_COL/UNIT_ROW`; the original keeps the unit in row 6,
+083/032) instead of the half-tile-centred adaptive layout; `tileAt` follows.
+The original's edge clamping of the view and its unit shadow/flags on the
+map are still a follow-up (see "Open" below).
+
+Strip, dropdown and panel each paint their 320x200 pixels into an off-screen
+picture with the static painters and blit it up nearest-neighbour
+(`ClassicMenuStrip.blit`), so the screen shows exactly what the headless
+harness diffs; the harness's check `M4` paints the live Swing strip at scale 3
+and compares it with the painters (0 px).
+
+### The strip (`ClassicMenuBar`)
+
+- Chrome: `WOODTILE.SS.000` (the GAME box fill) tiled from (0,0) over rows
+  0..6, a black row 7 (032/000/052, also the first scene's band 083/049).
+- Titles: MENU.TXT's six title lines (`@GAME @VIEW @ORDERS @REPORTS @TRADE
+  @PEDIA`; `@CUP` is the cheat menu and never shown), FONTTINY, glyph top 1,
+  green `0x559634`, the '~' letter gold `0xC7A220`, no shadow.  x: the first
+  at 13, each next 14 px after the previous one's end, the last right-aligned
+  13 px before the edge: widths 26/34/34/32/30/44 → x 13, 53, 101, 149, 195,
+  263 (measured, 0 px on 032/000/052).
+- Open title: a flat `0x3C2018` rectangle `(x-1, 0, w+4, 7)` (001-005, 053).
+- Without MENU.TXT (an old pack) the strip shows wood only, one INFO line asks
+  for `ant classic-assets`; the keys still work.
+
+### Dropdowns
+
+- Box: `y = 9`, `x = titleX - 1`, outer width = the widest item of the
+  **whole** MENU.TXT section + 10 (every capture agrees, also when context
+  hides items), height `8·slots + 5`; pushed left to stay on screen (assumed
+  for COLONIPÄDIE, no capture: x 243, width 77).  Measured: SPIEL
+  (12,9,100x109), ANSICHT (52,9,112x133), BEFEHLE (100,9,105x117), BERICHTE
+  (148,9,110x109), HANDEL (194,9,92x29).
+- Painting is `ClassicMenuBox.paintDropdown` (wood from the box corner, black
+  ring, separator = green line at slot top + 3, bar `0x3C2018` at
+  `(x+2, top, w-4, 7)`, text at x+5) plus the new **greyed rows**: every glyph
+  of a grey row, its '~' letter included, in `DISABLED_INK = 0x555555`
+  (001: the forest-clearing and the road order; 141 grey pixels, nothing green).
+  Only a BEFEHLE order whose wired action is disabled is grey (see below);
+  every other row keeps the normal ink, as in every capture.
+- Separators: MENU.TXT has none; `ClassicMenuModel` holds the groups and draws
+  a separator between two groups that both list something (an empty group
+  adds none).  SPIEL [0,1][2,3][4,5][6][7,8]; ANSICHT [0-2][3][4,5][6-9][10,11];
+  BEFEHLE [0-4][5-9][10-12][13-16][17][18,19] (hidden groups inferred);
+  BERICHTE [0][1-4][5-8][9]; HANDEL and COLONIPÄDIE one group (the latter
+  unknown).
+
+### Items → engine actions (`ClassicMenuModel`)
+
+Tracked code holds only section names and item indices (0 = first item after
+the title); the words come from the pack.  How a row LOOKS and what it DOES
+are separate (`ClassicMenuModel.Slot.greyed` / `.enabled`):
+
+- **Usable** (`isLive`) = the item has an action, the action is enabled
+  (`FreeColAction.isEnabled`, which already follows the active unit) and its
+  classic seam is not a no-op (`NOOP_SEAMS`).
+- **Grey** (`isGreyed`) = only a BEFEHLE order whose action is wired and
+  disabled right now — the original's "does not fit the unit's situation"
+  (001: clearing without tools, a road where one exists).
+- **Inert** = normal ink but not usable: no engine equivalent, or a no-op
+  seam.  The bar may sit on it (Alt+G bars SPIEL row 0, options, as in 053);
+  firing it closes the menu and shows the one-page classic notice
+  `classic.mainMenu.notYet` ("Diese Funktion folgt in einer späteren
+  Version.").
+
+Why: the captures draw every SPIEL/ANSICHT/BERICHTE/HANDEL row in normal
+ink, also rows that cannot be used — 053 (1492) shows "declare
+independence" in normal ink.  The first version greyed every inert row
+(7 of 9 SPIEL rows grey in 1492); an independent review diffed that against
+053/003/004 at 837/862/788 px.  The harness now renders the live rule (M1,
+M4) and gets 0 px.
+
+| menu | item → action |
+| --- | --- |
+| SPIEL | 0 `preferencesAction`ⁿ, 1 —, 2 —, 3 —, 4 `saveAction`ⁿ, 5 `openAction`ⁿ, 6 `declareIndependenceAction`ⁿ, 7 `retireAction`, 8 `quitAction` |
+| ANSICHT | 0 `toggleViewModeAction` (fires only in TERRAIN mode, key M), 1 `toggleViewModeAction` (fires only outside it, key V), 2 `europeAction`, 3 `findSettlementAction`ⁿ, 4 `zoomInAction`, 5 `zoomOutAction` (both disable themselves: `GUI.canZoomInMap` is false), 6-9 —, 10 —, 11 `centerAction` |
+| BEFEHLE | 0 `clearOrdersAction`, 1 `waitAction`, 2 `fortifyAction`, 3 (second fortify line: hidden, context unknown), 4 `sentryAction`, 5/6 `buildColonyAction` (no colony / colony on the tile), 7 `clearForestAction` (forest), 8 `plowAction` (no forest), 9 `roadAction`, 10 `loadAction` (carriers), 11 `unloadAction` (carrier in a colony), 12 — (armed land units), 13/14 `gotoAction`ⁿ (ship / land), 15 `assignTradeRouteAction`ⁿ (carriers), 16 — (ships), 17 `skipUnitAction`, 18 `unloadAction` (ship at sea: dumps cargo), 19 `disbandUnitAction` |
+| BERICHTE | 0 —, 1 `reportReligionAction`, 2 `reportCongressAction`, 3 `reportLabourAction`, 4 `reportTradeAction`, 5 `reportColonyAction`, 6 `reportNavalAction`, 7 `reportForeignAction`, 8 `reportIndianAction`, 9 `reportHighScoresAction` (the hall of fame, not the live score: earlier README decision) |
+| HANDEL | 0-2 `tradeRouteAction`ⁿ (FreeCol's one panel does all three) |
+| COLONIPÄDIE | 0 `colopediaAction.goods`ⁿ, 1 `.units`ⁿ, 2 `.terrain`ⁿ, 3 —, 4 `.buildings`ⁿ, 5 `.fathers`ⁿ, 6 `.concepts`ⁿ, 7 — |
+
+ⁿ = in `NOOP_SEAMS`: drawn in normal ink but **inert** until a classic screen
+exists (`showClientOptionsDialog`, `showSaveDialog`, `showLoadSaveFileDialog`,
+`showDeclarationPanel`, `showFindSettlementPanel`, `showSelectDestinationDialog`,
+`showTradeRoutePanel`, `showColopediaPanel` are still the base `GUI` no-ops).
+— = **no engine equivalent**, drawn like the original (normal ink) and always
+inert: colony-report options, sound options, choose music, the four
+zoom-level presets, show hidden terrain, F1 terrain information, pillage,
+back to Europe, colonist skills, complete Colonipädie.  Zoom in/out are wired
+but disable themselves; outside BEFEHLE that only makes them inert, not grey.
+
+**Visibility** (manual + 001): BEFEHLE lists only the orders that apply to
+the active unit's kind and tile (`ClassicMenuModel.Context`: unit, naval,
+carrier, armed, forest, colony on the tile, view mode); with no active unit
+only 0, 1 and 17.  001 (a colonist without tools on a forest road, no
+colony) gives exactly 0 1 2 4 | 5 7 9 | 14 | 17 | 19 with 7 and 9 greyed.
+The other menus list every item (004 shows both view-mode items green).
+
+### Interaction (`ClassicMenuStrip`)
+
+- Mouse (001-005 were opened with the mouse: no bar): a press on a title
+  opens its menu (or closes it if open); moving over a normal-ink row bars
+  it; releasing over one fires it (press-drag-release works too); a press
+  anywhere else closes the menu and is swallowed (the drop layer covers the
+  canvas while open).
+- Keys (053 was opened with Alt+G: row 0 barred): Alt + a title's gold
+  letter (G V O R T C) opens it with the first normal-ink row barred (SPIEL:
+  row 0, as in 053).  While open a `KeyEventDispatcher` takes every key:
+  Up/Down move over the normal-ink rows (skipping grey ones: assumed),
+  Left/Right switch menus (assumed), Enter fires, Escape or a bare Alt
+  (press and release with nothing between) closes, a row's gold letter or
+  its printed key (F2, Shift-D, ...) fires it, Alt + another title letter
+  switches; everything else is swallowed.  Only VK_A..VK_Z count as letters
+  (`ClassicMenuStrip.letterOf`): the numpad and F-key codes equal letters'
+  codes (VK_NUMPAD2 = 'b', VK_F1 = 'p'), and reading them as letters fired
+  BEFEHLE orders from the movement keys while a menu was open (fixed; tested
+  in `ClassicMenuBarTest.testKeyLetters`).  Alt+Enter / Alt+F4 stay the
+  frame's (`FrameKeys` runs first).  A key in another window closes the menu.
+- Firing closes the menu, then on a later event `action.actionPerformed(new
+  ActionEvent(strip, ACTION_PERFORMED, id))` if still enabled -- the old order
+  buttons' pattern; an inert row shows the "follows later" notice instead
+  (`Host.unavailable`).  `ClassicGUI.closeMenus` (a base no-op) closes it;
+  `updateActions`/`updateMenuBar` repaint strip, dropdown and panel.
+- While the first scene is up the strip ignores input (`Host.inputBlocked`).
+
+### Keys (`ClassicKeyMap`) — why a table is needed
+
+FreeCol's accelerators only fired because its `JMenuBar` was installed (Swing
+dispatches menu-item accelerators through the window's menu bar).  Without it
+every key but the map viewer's own would have died, so the original's keys
+are bound explicitly, `WHEN_IN_FOCUSED_WINDOW` on the HUD pane, **skipping
+every keystroke the map viewer binds** (`ClassicMapViewer.BOUND_KEYS` and its
+live input map: arrows, numpad, Enter, Space, W, B) — with two bindings for
+one key Swing's `KeyboardManager` would decide by registration order, and the
+map must keep winning as it did over the old accelerators.
+
+| key | action |
+| --- | --- |
+| A F S L | clearOrders, fortify, sentry, load |
+| U, O | unload (both `unloadAction`; each only where its BEFEHLE row is listed: U in a colony, O for a ship outside one — `Binding.when`, `contextAllows`; FreeCol's action would otherwise unload a whole ship on O in a colony, or dump cargo at sea on U without asking) |
+| T, G | assignTradeRoute, goto (no-op seams: ignored for now) |
+| Shift+D | disbandUnit |
+| P, R | clearForest else plow, road |
+| M / V | toggleViewMode, only from TERRAIN / only from MOVE_UNITS |
+| E Z X C | europe, zoomIn, zoomOut, center |
+| F2..F9 | Religion, Congress, Labour, Trade, Colony, Naval, Foreign, Indian |
+| F10 | HighScores |
+| Shift+F1 / F2 / F4 | Cargo / Exploration / Production (FreeCol's keys, no original entry) |
+| Shift+F7 | **Military — moved off F7** (now Naval, as in the original): owner decision flagged |
+| Ctrl+N | FreeCol's `newAction`: **back to the classic title** (asks first, `confirmStopGame`; then `showNewPanel` → `showMainPanel`). No original key: the original leaves a game only by retiring or quitting to DOS. Kept because dropping the `JMenuBar` had removed every in-game way back to the title or to a second game. |
+
+This ends the old F7 Naval/Military clash and replaces
+`remapClassicReportAccelerators` (deleted, with `styleClassicMenuBar`,
+`styleClassicDropdownSeparators` and `MENU_BAR_BG/FG`).
+`installClassicMenuDropdownDefaults` is kept: harmless, it still styles any
+stock `JPopupMenu`.  Dropped with the `JMenuBar`: every FreeCol accelerator not
+in the table (e.g. Ctrl+S, whose save dialog is a no-op anyway; Ctrl+Q, F11
+turn report, F12 requirements, Shift+F3 history, Shift+F5 education, Ctrl+C
+center).  Ctrl+N is the one brought back (above).
+
+### The mouse arrow (`ClassicPointer`)
+
+083/049 (first scene), 032/052 (play) and 001-005/053 (open dropdowns) all
+show the original arrow `CURSOR.SS.000`; until now only the title canvas drew
+it and the game showed the Windows pointer.  `ClassicPointer` is a
+transparent layer as large as its host that draws the arrow on the
+letterboxed 320×200 grid at the canvas scale (drawn, not a custom system
+cursor: Windows caps those at 32×32, see "Why the arrow is drawn into the
+canvas" above), clipped to the canvas, hot spot = sprite origin.
+
+- HUD: the top layer of `ClassicHudPane` (DRAG_LAYER, above the dropdown).
+  It never takes a mouse event (`contains` is false) and follows the mouse
+  through an `AWTEventListener` for its own window.  Over the canvas it
+  draws the arrow and gives the HUD pane (whose children inherit it) a blank
+  cursor; in the letterbox, outside the window, while another window has the
+  mouse (a classic dialog, the colony/report windows) and after the window is
+  deactivated it draws nothing and the system arrow returns — never no
+  pointer, never two.  It starts from `MouseInfo` and is held back while the
+  first scene is up.
+- First scene: the overlay has its own `ClassicPointer` child, placed at
+  (160,100) when the scene appears (the original parks the mouse there:
+  083/049) until the mouse first moves; only real motion moves it.  The real
+  pointer is not moved (no `Robot`), so after the scene the HUD arrow is
+  wherever the mouse really is.
+- Limits: the drawn arrow moves on the EDT, so it pauses while the EDT is
+  blocked (the short synchronous server calls).  Each move repaints two
+  arrow-sized rectangles; the map viewer repaints its tiles under them.
+- Harness: S1 now paints the scene through `ClassicHudOverlay.paintOverlay`
+  with the overlay's arrow at `SCENE_X/Y`; H1/H2/M1 draw the arrow through
+  `ClassicPointer.paintArrow` at the mouse position found in each capture;
+  M4 draws it on the x3 live strip.  All 0 px.
+
+### The right panel (`ClassicHud`, `ClassicInfoPanel`)
+
+All in 320x200 pixels, 0 px on 032 (Dutch merchantman with a veteran soldier
+and a pioneer aboard), 052 (English caravel, same cargo) and 000 (late game:
+settler on a forest road, hardy pioneer, fortified veteran dragoon; minimap
+terrain copied from the capture).  Green `0x559634`, gold `0xC7A220`.
+
+- Chrome: black column x 240 (y 8..199), `WOODTILE.SS.000` over 241..319
+  from phase (0,0) (not `WOODPANL`); minimap frame: 1-px `0xAA5500` ring
+  (251,8,58,41), interior (252,9,56,39) black where unexplored; black row
+  y 49.
+- Minimap: 1 px per tile, explored ocean `0x202C8A`, own units/colonies in the
+  nation colour, land in FreeCol's minimap colours (the 000 land colours are
+  not mapped yet).  Window: x origin 1 when the map is ≤ 58 wide (else
+  scrolls, assumed); y so the white 15x12 viewport ring sits at rows 13..24,
+  clamped (032/052/083: ring (293,22); 000: y 26).  The ring shows the map
+  viewer's actual view (`ClassicMapViewer.viewOrigin`).  A click in the
+  interior recentres the map.
+- Season (242,51): NAMES `@SEASONS` + year; gold (242,58):
+  `label(CTITLE,1) + gold + "$  " + label(CTITLE,9) + " " + tax`, clipped at
+  x 319 only.
+- Active unit (hidden in scene mode): icon cell (242,68) — black silhouette
+  shifted (-2,0), then the flag (7x9 black ring, 5x7 nation fill, the
+  `@ORDERS` letter in FONTTINY at ring+(2,2), black for '-', else the dark
+  shade: Holland FF7100/AA4900, England FF0000/AA0000, France/Spain FreeCol's
+  colour and 2/3 of it, unmeasured), then the sprite at cell + 3 (widths
+  6/7/13) or + 2 (8/14), others centred (unmeasured).  Flag at the cell's
+  top-left for sprites ≥ 13 wide (ships, mounted), else at
+  `(sprite.x + w - 2, y + 7)`.
+  Lines: (260,70) `@INFO 0` + moves ("N k/3" for fractions: assumed);
+  (260,77) `@INFO 1` + " (x, y)" (FreeCol tile coordinates: assumed mapping);
+  (242,86) `@NATIONALITY` + `@UNIT` row (by role for colonists, by type
+  otherwise); then 7 apart from y 93: the colonist's skill `@JOB` (gold), the
+  tools "(" + n / tools word + ")" (gold, 007), the orders `@ORDERS` (gold),
+  "(" + terrain + ")" and "(" + road + ")" (green).
+- List (cargo of a carrier, else the tile's other units): first sprite 10
+  below the last active line, text at x 260 from sprite.y + 4, all gold:
+  the veteran word (misc 64) for a veteran in a military role, the expert word (misc 4)
+  + tool count for a unit in its own skill (hardy pioneer; scouts and
+  missionaries assumed alike), else the bare tool count, else the skill of a
+  colonist without a role or with a non-free-colonist skill; the tools word
+  on its own line after a count; lines 7 apart; the orders 6 below the last;
+  the next sprite 8 below the orders (at least 18 below the sprite:
+  assumed); entries that would cross y 199 are left out (overflow unknown).
+- Removed: the order buttons, the Enter/Space/W footer, the Swing fonts, the
+  `WOODPANL` chrome and the 240-px width.  `repaintInfo` hooks unchanged.
+
+`ClassicHud.UnitFacts.of(Unit, sprite)` turns a FreeCol unit into plain facts
+(`@UNIT`/`@JOB` rows, qualifier, tools from the role's required goods, orders
+from the unit state: sentry, fortify/fortified, improving → plough/road,
+trade route, destination → goto); the painter never touches the model, so the
+harness builds the captures' facts by hand.
+
+### Sprite aliases (corrected)
+
+The panel draws `ICONS.SS` sprites 1:1, so the captures pin them down
+(`tools/classic_assets/aliases.properties`, re-run `ant classic-assets`):
+free colonist without a role 100 (was 058), free colonist pioneer 073 (was
+081), hardy pioneer as pioneer 101 (081), free colonist soldier 074 (089),
+veteran soldier 102 (089), veteran dragoon 104 (076).  These also change the
+map, colony and Europe screens — check them live.  Other colonist types keep
+the older guesses.
+
+### Harness, tests, open
+
+- Scratch harness `...\scratchpad\departure\preview\run.ps1 -only hud|menus`
+  (never committed: it renders original words): H1 strip 032/000/052, H2
+  panel 032/052/000, M1 dropdowns 003/053/004/001/002/005 through the LIVE
+  rule (`ClassicMenuModel.slots` over action states: all enabled, 053
+  without independence, 001 without clearing and road; the bar from
+  `ClassicMenuStrip.nextSelectable`), plus 003/053/004/002/005 again with
+  every action disabled (ink must not change outside BEFEHLE) — 0 px each,
+  the arrow drawn by `ClassicPointer.paintArrow` where the capture has it;
+  M2 `colonipaedie_review.png` (no capture); M3 reports the 001 rule
+  ('+' usable, '~' inert, '-' grey); M4 the live Swing strip opened with
+  Alt+G on a 1492 host, at scale 3, plus the arrow = capture 053, 0 px.
+- JUnit: `ClassicMenuBarTest` (title x, highlight, boxes incl. the clamp, slot
+  counts, the 001 and other BEFEHLE contexts, the item → action table, the
+  live rule, the grey rule, the bar on row 0, key letters vs numpad/F-keys,
+  the view-mode rows, hotkeys, greyed rows), `ClassicHudTest` (unit lines
+  and list positions of 032/000/007 on synthetic texts, flag rings, sprite
+  offsets, unit tables, the HUD layout, the key map: no duplicate, no map
+  key, P/G/M/V rules, U/O context, Ctrl+N), `ClassicTextTest` (`menu`,
+  `label`).
+- Open / assumed: the map viewer's original framing (edge clamping), unit
+  shadow and order flags on the map; minimap land colours and horizontal
+  scrolling; fractional moves; the position line's coordinate base; list overflow;
+  COLONIPÄDIE position and groups; the second fortify line; whether the
+  keyboard bar skips greyed rows and Left/Right switch menus; the four
+  Military/Production/Exploration/Cargo keys; the original's starting soldier
+  is a veteran only on FreeCol's two easiest levels (`expertStartingUnits`).
 
 ## Colony screen (`ClassicColonyPanel`)
 
@@ -863,34 +1048,18 @@ in `screenshots/Berichte_fuer_Pascal/`). All **twelve** are built — the
 original's ten, plus Labour and Foreign Affairs (both reversed-in / newly built
 2026-07-24, see their own sections below) — sharing one frame.
 
-**Key scheme (2026-07-24).** Report accelerators now follow the *observed*
-original F-key layout (`00_BERICHTE-Menu_Tastenbelegung`: F2 Religious, F3
-Congress, F4 Labour, F5 Trade, F6 Colony, F7 Naval, F8 Foreign Affairs, F9
-Indian — no shift-F* layer at all) rather than FreeCol's own arbitrary one
-(that file's F1 Religious, F3 Colony, F4 Foreign Affairs, F2 Labour, etc. — a
-layout with nothing to do with Col1). `ClassicGUI.remapClassicReportAccelerators`
-does this **at runtime only**, mutating the shared `FreeColAction` objects'
-`ACCELERATOR_KEY` in memory — it never touches `FreeColMessages.properties`,
-which is shared with `SwingGUI` and would silently re-map the standard game's
-shortcuts too. Safe because `--classic` exclusively selects `ClassicGUI` for
-the whole process (`FreeColClient`'s GUI selector), so a standard-UI session
-never shares a process — or these mutated objects — with a classic one. Same
-trick as `styleClassicMenuBar` below: reuse the shared component, restyle only
-this process's copy.
-
-Covers only the **six reports with a confirmed Col1 counterpart** plus the two
-new ones — eight remaps. **Deliberately leaves Military / Production /
-Exploration / Cargo's keys untouched**: none of those four has a confirmed
-original counterpart (see "Which reports are actually Col1's" below), so
-reassigning them is a call for the user/expert, not this fix.
-
-> ⚠️ **Live, confirmed key collision.** Naval's confirmed key F7 is already
-> occupied by Military (left alone per the above), so both menu items now show
-> "F7" but only one actually responds — verified live: pressing F7 opens
-> **Militärberater** (Military), not Naval. Swing's shared keystroke-to-action
-> input map only keeps the most recently registered binding for a given
-> keystroke. Tracked as Q6 in `classic_ui_plan/ui-phases.md`, pending the
-> expert's call on the four unconfirmed reports.
+**Key scheme.** The report keys follow the *observed* original F-key layout
+(`00_BERICHTE-Menu_Tastenbelegung`, and the BERICHTE dropdown, Steam 002: F2
+Religious, F3 Congress, F4 Labour, F5 Trade, F6 Colony, F7 Naval, F8 Foreign
+Affairs, F9 Indian, F10 score) rather than FreeCol's own. Since the painted
+menu strip replaced FreeCol's `JMenuBar` (see "In-game HUD"), the keys are
+bound by `ClassicKeyMap`, not by remapping the actions' accelerators (the old
+`remapClassicReportAccelerators` is gone; `FreeColMessages.properties` was
+never touched). The four FreeCol reports without a Col1 counterpart keep a key:
+Cargo Shift+F1, Exploration Shift+F2, Production Shift+F4 (their FreeCol keys)
+and **Military Shift+F7** — moved off F7, which ends the old collision where F7
+opened Military instead of Naval (Q6 in `classic_ui_plan/ui-phases.md`; the
+Shift+F7 choice is flagged for the owner).
 
 **The subsection headings below now show each report's *new*, post-remap key.**
 The dated "Verified live" notes further down were captured *before* the remap
@@ -1505,8 +1674,10 @@ differing pixels.
   Europe screens do). The background is `OPENMENU.PIK` drawn 1:1. It is *not*
   `OPENING.PIK`, which is a 960×132 sea chart. Only the menu box is drawn on
   top. Modes: `PASSIVE` (picture only), `TITLE`, `LOAD`, `NOTICE`, `BUSY`,
-  `QUIT`, `NEW_WORLD` (the new-game chain, see below) and `STARTING` (the
-  chain's last screen frozen while the engine starts). In PASSIVE, BUSY and
+  `QUIT`, `NEW_WORLD` (the new-game chain, see below), `DEPARTURE` (the
+  ten-picture departure after the audience, see "Departure" below) and
+  `STARTING` (the departure's last picture — or, without the departure, the
+  audience — frozen while the engine starts). In PASSIVE, BUSY and
   STARTING all input is ignored, which guards against starting twice.
   All painting is in package-private **static** methods (`paintTitleScreen`,
   `paintLoadBox`, `paintNotice`) taking explicit `MenuAssets`. A scratch
@@ -1530,18 +1701,25 @@ differing pixels.
   @y=91` and `@LOADGAME @width=190`, all measured):
   - Outer width = `@width + 6`, centred horizontally. Top = `@y`, or centred
     vertically when there is none.
-  - Height = `8·(promptLines + rows) + 16`.
+  - Height = `6·promptLines + 8·rows + 18` (measured: prompt lines are 6 px
+    apart, option rows 8). Every captured box fits: title 64, save 88, load
+    104, SAILPORT 32 (one prompt line), the first scene's advisor box 48
+    (five lines, no rows, 083/049), the Europe advisor boxes 68 and 86 (3+4
+    and 2+7, each plus a 6-px "(F1 …)" footer line, 011/013). The earlier
+    inference `8·(promptLines + rows) + 16` agreed only for one prompt line,
+    so the title screen's boxes are unchanged (the title/load previews still
+    give the same pixels).
   - Fill: the 32×24 `OPENTILE.SS.000` (title) or `WOODTILE.SS.000` (in game),
     tiled from the **outer** corner. Not `WOODPANL`, so `ClassicWood` is not
     reused.
   - Frame: a black ring, a flat ring, then a bevel (light on top and right,
     dark on left and bottom).
-  - Prompt text at `(X+5, Y+9+8k)`. Rows at `(X+9, Y+11+8P+8i)`. Selection bar
+  - Prompt text at `(X+5, Y+9+6k)`. Rows at `(X+9, Y+13+6P+8i)`. Selection bar
     `(X+4, rowTop-1, W-8, 7)` in the dark colour; text on it stays green.
   - The title box is `(77,91,166,64)`. The load box with 10 rows is
     `(62,48,196,104)`.
   - Two themes: `TITLE` and `GAME` (the colours measured from 054/055).
-    `paintDropdown` (the SPIEL menu, 053) is ready but not wired yet.
+    `paintDropdown` draws the in-game menus (053, 001-005; see "In-game HUD"), with greyed rows in `DISABLED_INK`.
 - **Title line:** `{COLONIZATION} Version 2026` -- the owner's wording
   (2026-10-04), deliberately not the original's. The original reads
   `{COLONIZATION} Version 2.26 -- 19-Sept-94` (GAME.TXT:42, filled in by
@@ -1624,8 +1802,10 @@ differing pixels.
 - **Open / not yet:**
   - The in-game "Öffnen" still gets `null` from the un-overridden
     `showLoadDialog`.
-  - The SPIEL dropdown is not wired.
-  - Notice height for multi-line prompts is inferred (`8P+16`), not captured.
+  - The in-game SPIEL items save, load and options are drawn as in the original but stay inert (they show the "follows later" notice): their classic seams (`showSaveDialog`, `showLoadSaveFileDialog`, `showClientOptionsDialog`) are still no-ops (see "In-game HUD", `NOOP_SEAMS`).
+  - Notice height for multi-line prompts now follows the measured
+    `6P+8R+18` rule (with R = 0: `6P+18`); no multi-line title-screen notice
+    was captured itself.
   - The title-screen load box uses the TITLE theme by inference; no capture of
     it exists.
   - RUHMESHALLE still opens the generic report window: a separate, decorated
@@ -1636,8 +1816,9 @@ differing pixels.
   - The window is still titled "FreeCol — Classic UI (experimental)" (the
     live-test harness finds it by that title); it only shows in the taskbar
     and Alt+Tab now that the window is borderless full screen.
-  - Only the title panel draws the original arrow; the in-game HUD still
-    shows the system cursor.
+  - The colony, Europe and report windows still show the system cursor (the
+    title canvas, the in-game HUD and the first scene draw the original
+    arrow: see "The mouse arrow").
 
 ## New-game chain (`ClassicNewWorldChain`, `ClassicNewWorldScreens`, `ClassicText`, `ClassicTextLayout`, `ClassicPackFiles`)
 
@@ -1655,9 +1836,10 @@ run: `screenshots/start-sequence`.
 | 6 | Audience | Dutch 068 (Holland: a stadtholder, `@VICEROY2`), English 039 (a king, `@VICEROY`) | `KINGLSS1.PIK` + banner + `KING1.SS` |
 
 The headless preview harness renders **all 19 captures with 0 differing
-pixels** (arrow included), through the production code only. The departure
-animation (069-082) and the first scene (083) are the next step; today the
-game starts right after the audience.
+pixels** (arrow included), through the production code only. After the
+audience comes the departure (069-082, see "Departure" below), then the
+game opens on the original's first scene with the admiral (083/049, see
+"First scene" below) instead of the engine's own start message.
 
 - **Where it runs.** On the title canvas itself (`ClassicMainMenuPanel` mode
   `NEW_WORLD`): one panel, one letterbox, one arrow, no panel swap. The chain
@@ -1769,9 +1951,13 @@ game starts right after the audience.
     and a key's auto-repeat (`heldKeys`, cleared on focus loss) only steps
     through a picker or repeats Backspace on the name — Enter, Escape and the
     pages' "any key" act once per press.
-  - After the audience: mode `STARTING` (screen frozen, system arrow, input
-    ignored — the EDT blocks while the server starts), then the in-game view
-    replaces it through `reconnectGUI`.
+  - After the audience: mode `DEPARTURE` (the original's departure, see the
+    next section), then mode `STARTING` (the departure's last picture
+    frozen, no arrow, input ignored — the EDT blocks while the server
+    starts), then the in-game view replaces it through `reconnectGUI`. When
+    the pack lacks the departure's pictures or captions, one INFO line says
+    so and `STARTING` follows the audience directly (the frozen audience),
+    exactly as before the departure existed.
 - **Engine order** (`ClassicGUI.startNewWorldGame`, `showStartGamePanel`):
   1. Spec + difficulty: `FreeCol.loadSpecification(rules, advantages,
      difficultyId)`; if `spec.getDifficultyLevel()` differs (an unknown id
@@ -1826,6 +2012,324 @@ game starts right after the audience.
   `classic`; Spain's home port is Cádiz in FreeCol, Sevilla in the original.
   The France/Spain banner positions come from the sprite headers, not from
   captures.
+
+## Departure (LEVN0001-0010, @BUILD1-10) (`ClassicDeparture`, `ClassicDepartureTimeline`)
+
+After the audience the original shows the expedition leaving the home port:
+night, dawn, day, the ship leaves the pier and sails to the horizon, one
+caption at a time. References: Dutch `start-sequence-dutch/opening_069..082`
+(from Amsterdam), English `start-sequence/opening_040..048` (from London);
+`INDEX.md` in both folders lists each frame.
+
+- **What it is (measured).** A slideshow of ten full-screen pictures
+  `LEVN0001.PIK`..`LEVN0010.PIK` (already in the pack:
+  `image.classic_original.pik.LEVN000n.PIK`, no converter change), each
+  drawn 1:1 with one GAME.TXT caption `@BUILD1`..`@BUILD10`. Below the
+  caption band every settled capture equals its picture exactly (Dutch
+  069 = 070 pixel for pixel, 4 s apart): nothing moves inside a step, no
+  sprites, no palette cycling, **no mouse arrow**. The pictures are the same
+  for every nation. Capture → step: Dutch 069/070→1, 071/072→2, 073→3,
+  074/075→4, 076→5, 078→6, 079→7, 080→8, 081→9, 082→10; English 040→1,
+  041→2, 043→4, 044→5, 045→6, 046→7, 047→9, 048→10.
+- **Night to day is baked into the art.** All ten palettes are
+  byte-identical; pictures 1→5 move the sky and sea one index at a time down
+  the blue ramp at palette indices 48..63. So there is no palette fade to
+  imitate. The pictures derive from the Europe harbour, but `EUROPE.PIK`'s
+  palette differs in 190 entries — only the LEVN pictures are used.
+- **Captions (measured, 0 px).** FONTINTR in ink `0xFFFF9A`, shade
+  `0x698AC3`, shadow `0x0C0C0C` (the same on night and day), laid out by
+  `ClassicNewWorldScreens.paintMessage` like the nation pages: `@width=310`
+  → left x=5, `@y=10` → top 13, pitch 10; `^^` lines centred with leading
+  spaces counted, plain lines flowed left. Placeholders
+  (`ClassicDeparture.Captions`): `@BUILD2` `%STRING0` = the difficulty's
+  title (NAMES.TXT `@DIFFICULTY` column 0 as written — **inferred**: both
+  runs played the easiest level), `%STRING1` = the leader's name; `@BUILD3`
+  `%STRING0` = NAMES.TXT `@HOMEPORT`; `@BUILD4`/`@BUILD7` `%STRING0` = the
+  nation (NAMES.TXT `@COUNTRY` column 0).
+- **Holland quirk (measured, source unknown).** The Dutch captures 074, 075
+  and 079 show two spaces before the nation's name, the English ones one.
+  With the plain name those frames differ by 912/1410 px, with one extra
+  leading space by 0 (`ClassicDeparture.DUTCH_COUNTRY_PREFIX`). NAMES.TXT,
+  GAME.TXT and the audience (which matched with the plain name) have no such
+  space. France and Spain have no captures and get no prefix (unverified).
+- **Transitions: random pixel dissolve, fixed order (measured), generator
+  unknown.** The two captures caught mid-way, English 042 (2→3, 78.0 %
+  new) and Dutch 077 (5→6, 72.6 % new), contain only old-frame and new-frame
+  pixels; the dissolve covers the whole screen, caption included, so old and
+  new captions overlap. The order is the same in both runs (every pixel new
+  in 077 is new in 042, 6,047/6,047) and shows no spatial structure, but
+  Galois LFSRs and the MS C `rand()` were rejected as its generator.
+  `ClassicDeparture.dissolveOrder` therefore reveals exactly the differing
+  pixels in the order of one fixed Fisher-Yates permutation
+  (`Random(0x1492)`), the same for every transition. Mid-dissolve frames
+  never match the original pixel for pixel; settled frames always do.
+- **Timing (ESTIMATED, `ClassicDepartureTimeline`).** Measured are only the
+  capture stamps after the audience still, which are upper bounds (taken by
+  hand): Dutch 069 +4.6 … 082 +93.4, game 083 +104.8; English 040 +11.7 …
+  048 +95.5, game 049 +113.5. A constant step period fits neither run; the
+  fitted model is: each dissolve runs at `DISSOLVE_PX_PER_SEC` = 39,000
+  changed pixels/s (≈1.6 s for the audience and the four dawn steps,
+  0.05-0.25 s for the ship steps), then the new picture is held `HOLD_MS` =
+  8.9 s. Total ≈97.7 s. The preview harness fits both runs with **0
+  contradicting captures** (stamps as upper bounds after the previous
+  stamp; Dutch start offset 0.0-0.25 s after the audience still). Both
+  constants live in that one class; tune them after a timed DOSBox
+  recording. **The stamps do not single out this model:** an independent
+  fit with a CONSTANT dissolve duration per step (a full-screen random scan
+  over all 64,000 positions, as classic dissolves often are) also has 0
+  contradictions on all 25 stamps for any duration from 0.25 to 2.5 s with
+  a hold of 7.0-8.15 s, and 077 (caught 72.6 % through the 5→6 ship step,
+  which lasts only 0.23 s here) mildly favours visibly longer ship steps.
+  Owner check in DOSBox: if the ship steps visibly dissolve, reveal by
+  position in `ClassicDeparture`'s full-screen permutation over a fixed
+  ≈1.6 s and refit `HOLD_MS` so step 10 still settles by 093/048. Time comes from `System.nanoTime()` differences, never tick
+  counts, so a stalled EDT only skips ahead.
+- **How it runs (`ClassicMainMenuPanel`, mode `DEPARTURE`).** `handleChain`
+  DONE → `startDeparture`: builds the captions from the chain's setup,
+  renders frame 0 (the audience still, without the arrow) and frames 1..10
+  offscreen, computes the ten dissolve orders (a few tens of ms in all), and
+  starts a 15 ms `javax.swing.Timer`. Each tick reads the timeline and copies
+  the newly revealed pixels into the shown 320×200 image (repaint only when
+  something changed); earlier transitions are completed first. The pictures
+  and captions are loaded with the chain's art on its daemon prefetch
+  (`ClassicNewWorldScreens.Assets.levn`, `Texts.build/diffTitles/homePorts`).
+  If anything is missing, `ClassicDeparture.available` logs one INFO line
+  and the old `STARTING` path runs. Log lines: `Classic departure: start
+  (prepared in N ms, about 97 s)` and `Classic departure: finished after N
+  ms (skipped=true|false)`.
+- **Why the engine starts AFTER the departure, not in parallel — a
+  deviation from this step's specification, for the owner to confirm.** The
+  specification asked for the engine to start in the background during the
+  show with the EDT never blocked. It does not: `finishDeparture` →
+  `actions.newWorld` → `ClassicGUI.startNewWorldGame` runs
+  `loadSpecification` and `startSinglePlayerGame` on the EDT (an
+  `invokeLater`), after the show, so the EDT is still blocked for 1-2 s
+  (repaint, Alt+Enter and Alt+F4 wait) and the player waits ≈97.7 s plus
+  that start. Moving it off the EDT is not a local change:
+  `startSinglePlayerGame` runs the login whose reply re-enters
+  `showStartGamePanel` with nested synchronous asks on the EDT
+  (`applyNewWorldNation`, Connection.java:436-441), FreeCol's own
+  `NewPanel` makes the same calls on the EDT, and the game view, the
+  `closeMainPanel` call and every failure path would need to be held until
+  the show ends — too much engine threading to change without live tests.
+  Instead the show ends on a still picture (LEVN0010 + `@BUILD10`, held
+  ≈8.9 s in the original), so the engine's 1-2 s start falls on that same
+  frozen frame — exactly what `STARTING` already did with the audience. Nothing of the engine exists during the show: skip, Alt+F4 and
+  failures need no special care, no autosave or turn report can arrive
+  mid-show, `closeMainPanel`/`reconnectGUI` need no gating, and the in-game
+  music (`PreGameController.startGameInternal`, `sound.intro.<nation>`)
+  starts when the ship has left, not two seconds into the night picture.
+  The title piece plays on during the show. Cost: the engine's start time
+  on the last picture. `finishDeparture` freezes frame 10 (`frozenFrame`),
+  switches to `STARTING`, paints it at once and calls `actions.newWorld` —
+  the unchanged path `ClassicGUI.beginNewWorldSetup` →
+  `startNewWorldGame`. `closeMainPanel` then calls `showPassive` from
+  `startGameInternal`; coming from `STARTING`, PASSIVE keeps painting the
+  frozen picture, so the title picture never flashes between the ship and
+  the game. Any other `showPassive`, a live mode, or the panel being
+  replaced by the game view drops the frozen picture.
+- **Input (the original's behaviour is unknown — a PROPOSAL).** Any new key
+  press skips the rest of the show (Escape too; there is no way back), as
+  does a left or right click. Not skipping: chords with Alt/Ctrl/Meta
+  (Alt+Enter toggles full screen via `FrameKeys`; Alt+F4 quits directly, as
+  `offerQuit` is false in this non-live mode and no server exists yet),
+  bare modifiers, the auto-repeat of a key still held from the audience
+  (`heldKeys`), and the rest of the click series that dismissed the audience
+  (`clickCount > 1 && chainPressChangedScreen`) — one physical press, at most
+  one screen. The system cursor stays blank over the departure and the
+  frozen picture after it (`hidesPointer`). `isLive()` stays false, so
+  `ClassicGUI.showMainPanel`'s start-up call leaves a running show alone.
+- **Preview harness** (scratch only, never in the repo — it renders original
+  words): `StartPreview` in the classic package plus `run.ps1 [-only anim]`
+  under the session's `scratchpad\departure\preview`, compiled against
+  `FreeCol.jar` with `javac --release 11`, run headless with `-pack -dutch
+  -english -steam -out`. It calls only production code
+  (`ClassicDeparture`, `ClassicDepartureTimeline`, `ClassicNewWorldScreens`,
+  `ClassicMainMenuPanel.paintCursor`). Section `anim`: A0 frame 0 + arrow at
+  (160,100) vs 068/039 — 0 px; A1 all 21 settled captures, full frame — **0
+  px each**; A2 042/077 consist only of old/new pixels — 0 "neither"; A3
+  (report only) the production order's prefix disagrees with 042/077 in
+  21,132/3,558 px, as expected from an unknown order; A4 (report only) the
+  timing fit above plus contact sheets `timeline_dutch.png` /
+  `timeline_english.png`. Exits 1 if an EXACT check fails.
+- **Tests:** `ClassicDepartureTimelineTest` (schedule boundaries, monotonic
+  capped reveal, done at the end and not before, skip, a typical show lasts
+  97-100 s, the dissolve order is a fixed non-sequential permutation of
+  exactly the differing pixels) and `ClassicDepartureCaptionsTest`
+  (synthetic text files: the `@BUILD2/3/4/7` substitutions, Holland's
+  prefix, missing entries, `available`).
+- **Open items:** how the original reacts to input during the show; whether
+  the audience → picture 1 and picture 10 → first scene changes are cuts or
+  dissolves (we dissolve in and cut out); the exact dissolve order and the
+  per-step hold times (a timed recording would settle them); the source of
+  Holland's extra space and whether France/Spain have one; `@BUILD2`'s
+  `%STRING0` at other difficulty levels; the music during the departure.
+
+## First scene (MSS0 + @TUTORIAL1) (`ClassicFirstScene`, `ClassicMenuBar`, `ClassicHud`, `ClassicHudOverlay`)
+
+After the departure the original opens the game on a scene of its own: the
+admiral tells the player where the ship is. References: Dutch
+`start-sequence-dutch/opening_083` (Dutch merchantman), English
+`start-sequence/opening_049` (English caravel). FreeCol's equivalent is its
+start message "Nach Monaten auf See …" (`model.player.startGame`,
+Player.java:2725-2733) in a popup with the coat of arms; the classic UI now
+shows the original scene instead.
+
+- **What it shows (measured, 0 px).** The preview harness repaints the band,
+  the right panel, the advisor box and the portrait's opaque pixels —
+  30,469 pixels per capture — with **0 differing pixels in both 083 and
+  049** when the original's arrow is painted at (160,100); without the arrow
+  exactly its 4 pixels at (165..166, 112..113) differ. The map area is not
+  compared (see "Open items").
+  - **Title band** instead of the menu bar (`ClassicMenuBar.paintBand`):
+    `WOODTILE.SS.000` tiled from screen (0,0) over rows 0..6, a black row 7,
+    then the whole line in gold `0xC7A220`, FONTTINY, glyph top y = 1,
+    centred `x = (320 − w)/2` (083: x = 83, w = 154; 049: x = 98, w = 124).
+    Text = NAMES.TXT `@NATIONALITY[n]` + " " + `@UNIT[ship]` + " " + LABELS.TXT
+    `@MISC` 6 ("arriving from") + " " + `@HOMEPORT[n]`. Ship rows of
+    `@UNIT`: caravel 13, merchantman 14, galleon 15, privateer 16, frigate
+    17, man-of-war 18 (NAMES.TXT:332-337). The menu bar of the next stage
+    uses the same chrome.
+  - **Right panel in scene mode** (`ClassicHud`): a black column x = 240,
+    `WOODTILE.SS.000` over x 241..319 from phase (0,0) (not `WOODPANL`), the
+    minimap frame (1-px `0xAA5500` ring at (251,8,58,41), interior 56×39 at
+    (252,9), black where unexplored, one pixel per tile, explored ocean
+    `0x202C8A`, a tile with a unit or colony in its owner's colour — Holland
+    `0xFF7100`, England `0xFF0000`), the white 15×12 viewport ring drawn last
+    at (293,22), a black row y = 49, then FONTTINY green lines at (242,51)
+    season and year (NAMES.TXT `@SEASONS`; FreeCol has no season before 1600,
+    which reads as spring) and (242,58) gold label + gold + `$` + two spaces
+    + tax label + " " + tax (LABELS.TXT `@CTITLE` 1 and 9 via the new
+    `ClassicText.label`; no space after the colon, two before the tax label,
+    FONTTINY's `$` is the coin glyph). No unit block — that is the panel's
+    normal mode, the next stage.
+  - **Minimap window** (rules shared with the next stage): horizontally
+    `px = 251 + mapX` on maps up to 58 columns (the original's; a wider
+    FreeCol map scrolls around the ring — assumed); vertically the ring sits
+    at minimap row 13 (y = 22) unless clamped at the map's ends. The view
+    for the scene is the original's framing: the ship in view column 7, row
+    6, clamped to columns/rows 1 .. size−2 (`ClassicHud.viewFor`: in 083 the
+    ship at column 53 of 58 gives c0 = 42, ring x = 293, the ship in view
+    column 11).
+  - **The advisor** (`ClassicFirstScene.paintAdvisor`): the in-game dialog
+    frame (`ClassicMenuBox.paintDialogFrame`, GAME theme, wood from the box
+    corner), the text, and the admiral `MSS0.SS.000` (75×91) drawn LAST — his
+    hands overlap the box's top and left edges. Text = GAME.TXT `@TUTORIAL1`
+    with `%STRING0` = the ship's `@UNIT` name (the original does not inflect
+    the fixed possessive before it, also for the feminine caravel), laid out
+    by `ClassicTextLayout` in FONTTINY with the message's `@width` 230 (228..232 give the captured breaks, 226 does not),
+    at box + (5, 9), pitch 6, green with `{…}` in gold.
+- **Geometry rule (observed; fits 083, 049 and the Europe boxes 011/013).**
+  Box = `@width + 6` wide, `ClassicMenuBox.dialogHeight(P, 0)` tall (P laid-out
+  lines; 5 → 48). The portrait sits at a fixed offset from the box that
+  depends on the advisor — admiral `MSS0` at box + (−4, −71), trade advisor
+  `MSS2` (122×84) at box + (57, −78) — and the UNION of portrait and box is
+  centred on the screen: `x = (320 − w)/2`, `y = (200 − h + 1)/2`. For the
+  admiral: union 240×119 at (40,41) → portrait (40,41), box (44,112,236,48);
+  for 011: box (42,102), portrait (99,24); for 013: box (42,93), portrait
+  (99,15). The portraits' SS anchors are degenerate (1,1), so the anchor
+  cannot place them. TUTORIAL1's `@x=10` / `@y=40` are not used: they are
+  neither the text (49,121), the box nor the portrait position; their
+  meaning is unknown.
+- **Dialog formula fix (part of this step).** The advisor box exposed that
+  prompt lines are 6 px apart, not 8: `dialogHeight = 6P + 8R + 18`,
+  `promptTop = y + 9 + 6k`, `rowTop = y + 13 + 6P + 8i`
+  (`ClassicMenuBox.PROMPT_PITCH`). One-line boxes (all title-screen boxes)
+  are unchanged; multi-line notices get the measured height.
+- **When it shows: a fresh-game flag, never the message.**
+  `ClassicGUI.firstScenePending` is set in `showStartGamePanel` right before
+  `setReady`/`requestLaunch` — the one engine path every fresh single-player
+  game takes and no load does — but only when `newWorldStartRequested` says
+  the title screen asked for the game (`startNewWorldGame`: NEUE WELT or the
+  chain-less defaults). FreeCol's `--fast` start calls
+  `startSinglePlayerGame` itself (FreeCol.java:1619 → `FreeColClient`), so
+  it never shows the scene: it is the scripted smoke path, and a modal
+  scene would stop it. The flag is cleared on every way to a load or back to
+  the title (`loadSavedGame`, `prepareShowingMainMenu`, `teardownInGame`,
+  hence `showMainPanel`). The HUD build in `reconnectGUI` consumes it and
+  calls `showFirstScene`, which shows the scene if the turn is 1, the
+  player is one of the four original nations, a ship of theirs is on the
+  map (the active unit, else the first ship), and the pack has the texts,
+  FONTTINY and `MSS0`; otherwise one INFO line says why and the game starts
+  as before. Why not trigger on FreeCol's message: it is filtered by the
+  client option `guiShowTutorial`, and FreeCol re-adds it for every LOADED
+  save of turn 1 (PreGameController.startGameInternal :322-324), where the
+  original shows nothing.
+- **The start message and other notices (`showMessagePopup`, the shared
+  funnel of `showModelMessages` and `showReportTurnPanel`).** FreeCol's start
+  message is ALWAYS dropped (`withoutStartMessage`). Anything else that
+  arrives while the scene is pending or up is held (`heldMessages`) and
+  shown, in arrival order, right after it is dismissed. Ordering:
+  `startGameInternal` runs on the EDT and only queues the HUD build
+  (`reconnectGUI` → `invokeLater`), then adds the start message and calls
+  `nextModelMessage`, which reaches the funnel before the HUD exists; the
+  flag is already set, so nothing modal blocks and the queued build runs
+  next.
+- **Where it is drawn.** The scene lives in `ClassicHudOverlay`, installed
+  as the frame's glass pane: it paints its own integer-scaled, letterboxed
+  320×200 canvas (the title screen's formula), with band, panel and advisor
+  opaque, the letterbox black and the map area transparent so the live map
+  shows through. Since the in-game HUD became the same canvas
+  (`ClassicHudPane`, see "In-game HUD"; same scale and letterbox, no
+  `JMenuBar`), the band lies exactly on the strip, the scene's panel on the
+  live panel and the map area exactly over the map viewer, which is on the
+  HUD's grid (15×12 tiles of 16 px, the unit in column 7, row 6; the
+  original's edge clamping that puts 083's ship in column 11 is still a
+  follow-up). Any part of the map area not over the live map viewer is
+  still painted black, as a guard. The strip ignores menu input while the
+  scene is up, and `showFirstScene` closes an open dropdown first. Rendered
+  once per show (`ClassicFirstScene.render`, a 320×200 ARGB picture), so
+  painting is one scaled blit.
+- **Input while it is up** (the original's rule is not visible in stills —
+  a proposal, like the departure's skip). The layer takes the focus,
+  consumes every key (so the map's Enter/Space/W/B/arrow bindings and the
+  menu bar's accelerators cannot fire) and every mouse event. It is
+  dismissed by a key press that is not auto-repeat, not a bare modifier and
+  without Alt/Ctrl/Meta, or by a left/right press. Input made before the
+  scene was on screen never dismisses it: events time-stamped before the
+  show are ignored, and the auto-repeat of a key held since before (for
+  example one that skipped the departure and stayed down through the
+  engine start) is recognised by `FrameKeys`, which now records every key's
+  press and release frame-wide (`isAutoRepeat`; a press more than 1.1 s
+  after the previous one of the same key counts as new). Alt+Enter toggles
+  full screen and Alt+F4 asks to quit as usual (`FrameKeys` runs first).
+  Backstops: `ClassicGUI.isDialogShowing()` is true while the scene is up,
+  so every `FreeColAction` disables itself on `updateActions` (the menu bar
+  greys out), and the map viewer's own key actions and edge scroll do
+  nothing while it is true. On dismissal: layer hidden, actions re-enabled,
+  focus back to the map, then the held notices. Log lines: `Classic first
+  scene shown (…)`, `Classic first scene dismissed.`, `… notice(s) held
+  until the first scene is dismissed.`
+- **Preview harness** (scratch, never in the repo): section `scene` of
+  `StartPreview` (`run.ps1 -only scene`). S1 renders band + panel + advisor
+  through `ClassicFirstScene.paintScene` over the capture's map area, with
+  the minimap state measured in the capture (083: explored 3×3 at
+  303..305 × 27..29, ship pixel (304,28); 049: column x = 306, the ship
+  under the ring) on a synthetic 58×72 map framed by `ClassicHud.viewFor`:
+  **0 px** with the arrow, exactly the 4 arrow pixels without it, in both
+  captures; H3 the panel alone: 0 px; S2 the dialog formula for every
+  captured box. It also writes `overlay_1920x1080_review.png` /
+  `overlay_800x600_review.png` (the live layer over a stand-in game view).
+  `regress.ps1` re-runs the title (`MainMenuPreview`) and new-game chain
+  (`NewWorldPreview`) previews after the formula change: the chain stays
+  at 0 px on all 19 captures, the load box at 0 px, the title box at the
+  same 78 px (86 with the arrow) as before — the owner's "Version 2026" line.
+- **Tests:** `ClassicMenuBoxTest` (the formula against every captured box,
+  P = 1 unchanged), `ClassicFirstSceneTest` (placement for MSS0/MSS2, ship
+  rows, band and advisor texts with the placeholder on synthetic text
+  files, the start-message filter), `ClassicHudTest` (view framing, ring and
+  minimap scrolling incl. clamps, minimap painting, status lines and
+  `ClassicText.label`, the strip chrome, the layer's canvas and its black
+  uncovered map area).
+- **Open items:** the map under the scene is on the original's grid (15×12
+  tiles of 16 px, unit in row 6) but not yet its framing (ship in column 11,
+  clamped at the map edge) nor its unit drawing (the (−2,0) shadow and the
+  order flag) — the map viewer follow-up; the original's dismiss rule; the original's land
+  colours on the minimap (FreeCol's minimap terrain colours stand in);
+  France/Spain unit colours on the minimap are FreeCol's (not measured); the
+  meaning of TUTORIAL1's `@x`/`@y`; the original's starting soldier is a
+  veteran, FreeCol's only on the two easiest levels (the scene's text names
+  "a soldier" either way).
 
 ## Music (original soundtrack) (`ClassicSoundController`)
 
@@ -2216,6 +2720,31 @@ Hard-won details, each of which silently wastes a run:
   ~30–55 s before). Without the pack it still takes a few seconds more, and a
   cold disk cache is unmeasured: keep polling `MainWindowHandle` for a minute
   rather than giving up after a few seconds.
+- **NEUE WELT now ends in the ~98 s departure.** After the audience the
+  ten-picture departure runs before the engine starts. Press one fresh key
+  (not one still held from the audience — auto-repeat never skips) or click
+  once to skip it, then wait for `Classic departure: finished after N ms`
+  in the log; the game view follows ~1-2 s later. `--fast` never shows it.
+- **Every fresh game from the title opens on the admiral's first scene** —
+  after NEUE WELT (or its chain-less defaults). `--fast` never shows it, also
+  not on a profile without saves. It holds the focus and swallows every key
+  and click until it is dismissed: press one fresh key (not one held since
+  before it appeared) or click once, then wait for `Classic first scene
+  dismissed.` in the log. Notices held meanwhile appear right after. A
+  loaded save never shows the scene.
+- **The original arrow is drawn in game** (first scene at (160,100) until
+  the mouse moves, then HUD and dropdowns); the system cursor is hidden over
+  the canvas and visible in the letterbox and over other windows.
+- **Ctrl+N goes back to the title** (asks first). Menu rows whose feature
+  does not exist yet (save, load, options, Colonipädie, ...) look like the
+  original's and show "Diese Funktion folgt in einer späteren Version."
+- **The in-game menus are painted, not Swing.** There is no `JMenuBar` any
+  more: open a menu with Alt + its gold letter (G V O R T C) or a click on
+  its title, move with the arrows, Enter fires, Escape closes. FreeCol's own
+  accelerators are gone; the original keys are bound instead (A F S L U O P
+  R G Shift+D, M/V, E Z X C, F2-F10, Ctrl+N; Military moved to Shift+F7). Old smoke
+  steps that used FreeCol menu keys (e.g. Ctrl+S) need the new keys or menus.
+  The log shows `Classic key map: N keys bound.` once per game view.
 - **Drive states that actually produce output.** An idle unit generates no
   notices at all. Populated saves, ending turns, `B` (found colony) and sailing
   a ship east into the high seas (fires the `highseas.text` confirm) do.

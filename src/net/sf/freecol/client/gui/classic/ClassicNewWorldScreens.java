@@ -188,10 +188,28 @@ final class ClassicNewWorldScreens {
         /** The mouse arrow (may be null). */
         final BufferedImage cursor;
 
+        /**
+         * The departure's ten pictures LEVN0001..0010.PIK
+         * ({@link ClassicDeparture}); entries are null when the pack lacks
+         * them -- the chain itself works without them, only the departure
+         * is then skipped ({@link ClassicDeparture#available}).
+         */
+        final BufferedImage[] levn;
+
         Assets(BufferedImage difficul, BufferedImage nations, BufferedImage woodpanl,
                BufferedImage kinglss1, BufferedImage king, Point kingAt,
                BufferedImage[] banner, Point[] bannerAt, ClassicFont tiny,
                ClassicFont intro, ClassicFont kingFont, BufferedImage cursor) {
+            this(difficul, nations, woodpanl, kinglss1, king, kingAt, banner,
+                 bannerAt, tiny, intro, kingFont, cursor,
+                 new BufferedImage[ClassicDeparture.STEPS]);
+        }
+
+        Assets(BufferedImage difficul, BufferedImage nations, BufferedImage woodpanl,
+               BufferedImage kinglss1, BufferedImage king, Point kingAt,
+               BufferedImage[] banner, Point[] bannerAt, ClassicFont tiny,
+               ClassicFont intro, ClassicFont kingFont, BufferedImage cursor,
+               BufferedImage[] levn) {
             this.difficul = difficul;
             this.nations = nations;
             this.woodpanl = woodpanl;
@@ -204,6 +222,7 @@ final class ClassicNewWorldScreens {
             this.intro = intro;
             this.kingFont = kingFont;
             this.cursor = cursor;
+            this.levn = levn;
         }
 
         /**
@@ -231,7 +250,8 @@ final class ClassicNewWorldScreens {
                 p.font(ClassicFont.TINY), p.font(ClassicFont.INTRO),
                 p.font(ClassicFont.KING),
                 ClassicMainMenuPanel.cursorSprite(
-                    p.image(ClassicPackFiles.ssKey("CURSOR.SS.000"))));
+                    p.image(ClassicPackFiles.ssKey("CURSOR.SS.000"))),
+                ClassicDeparture.loadPictures(p));
             if (a.difficul == null || a.nations == null || a.woodpanl == null
                 || a.kinglss1 == null || a.king == null || a.kingAt == null
                 || a.tiny == null || a.intro == null || a.kingFont == null) {
@@ -280,12 +300,40 @@ final class ClassicNewWorldScreens {
         final ClassicText.Message[] pageA, pageB;
         /** The audience scroll per nation, {@code %COUNTRY} filled in. */
         final ClassicText.Message[] audience;
+        /**
+         * The departure's captions GAME.TXT {@code @BUILD1..10}, raw (see
+         * {@link ClassicDeparture.Captions}); entries null when missing.
+         */
+        final ClassicText.Message[] build;
+        /**
+         * The difficulty titles as written (NAMES.TXT {@code @DIFFICULTY}
+         * column 0, easiest first), for {@code @BUILD2}.
+         */
+        final String[] diffTitles;
+        /**
+         * The home ports (NAMES.TXT {@code @HOMEPORT}, original nation
+         * order), for {@code @BUILD3}; null when missing.
+         */
+        final String[] homePorts;
 
         Texts(String[] diffNames, String[] diffSubs, String[] nationNames,
               String[] bonus, String[] headDiff, String[] headNation,
               String footer, String namePrompt, int nameFieldLength,
               String[] defaultLeaders, ClassicText.Message[] pageA,
               ClassicText.Message[] pageB, ClassicText.Message[] audience) {
+            this(diffNames, diffSubs, nationNames, bonus, headDiff, headNation,
+                 footer, namePrompt, nameFieldLength, defaultLeaders, pageA,
+                 pageB, audience, new ClassicText.Message[ClassicDeparture.STEPS],
+                 null, null);
+        }
+
+        Texts(String[] diffNames, String[] diffSubs, String[] nationNames,
+              String[] bonus, String[] headDiff, String[] headNation,
+              String footer, String namePrompt, int nameFieldLength,
+              String[] defaultLeaders, ClassicText.Message[] pageA,
+              ClassicText.Message[] pageB, ClassicText.Message[] audience,
+              ClassicText.Message[] build, String[] diffTitles,
+              String[] homePorts) {
             this.diffNames = diffNames;
             this.diffSubs = diffSubs;
             this.nationNames = nationNames;
@@ -303,6 +351,9 @@ final class ClassicNewWorldScreens {
             this.pageA = pageA;
             this.pageB = pageB;
             this.audience = audience;
+            this.build = build;
+            this.diffTitles = diffTitles;
+            this.homePorts = homePorts;
         }
 
         /**
@@ -324,6 +375,10 @@ final class ClassicNewWorldScreens {
                 diffNames[i] = ClassicText.upperAscii(diffRows.get(i)[0]) + ":";
                 diffSubs[i] = t.misc(ClassicText.MISC_DIFF_SUB0 + i);
             }
+            final String[] diffTitles = new String[nd];
+            for (int i = 0; i < nd; i++) diffTitles[i] = diffRows.get(i)[0];
+            final List<String[]> ports = t.names("HOMEPORT");
+            final String[] homePorts = (ports.size() < nn) ? null : new String[nn];
             final String[] nationNames = new String[nn], bonus = new String[nn],
                 defaults = new String[nn];
             final ClassicText.Message[] pageA = new ClassicText.Message[nn],
@@ -332,6 +387,7 @@ final class ClassicNewWorldScreens {
             for (int i = 0; i < nn; i++) {
                 nationNames[i] = countries.get(i)[0];
                 defaults[i] = leaders.get(i)[0];
+                if (homePorts != null) homePorts[i] = ports.get(i)[0];
                 bonus[i] = t.misc(ClassicText.MISC_BONUS0 + i);
                 pageA[i] = t.message("NATION" + i + "A");
                 pageB[i] = t.message("NATION" + i + "B");
@@ -365,7 +421,8 @@ final class ClassicNewWorldScreens {
             for (int i = 0; i < nn; i++) if (bonus[i] == null) return missing("LABELS.TXT @MISC");
             return new Texts(diffNames, diffSubs, nationNames, bonus, headDiff,
                 headNation, "(" + footer + ")", prompt, fieldLength, defaults,
-                pageA, pageB, audience);
+                pageA, pageB, audience, ClassicDeparture.loadCaptions(t),
+                diffTitles, homePorts);
         }
 
         private static Texts missing(String what) {

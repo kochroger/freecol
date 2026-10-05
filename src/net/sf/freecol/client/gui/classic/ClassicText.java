@@ -57,6 +57,13 @@ import java.util.logging.Logger;
  * <p><b>Markup</b> is kept as written ({@code { } ^ _ %}); the layout
  * ({@link ClassicTextLayout}) and the font ({@link ClassicFont#drawMarked})
  * interpret it.
+ *
+ * <p><b>MENU.TXT</b> (optional, the in-game menu bar) has the same codes and
+ * section layout: {@code @GAME}, {@code @VIEW}, {@code @ORDERS},
+ * {@code @REPORTS}, {@code @TRADE}, {@code @CUP}, {@code @PEDIA}, each a
+ * title line and then the items indented by two spaces, '~' marking the
+ * gold hotkey letters.  Packs converted before it was copied lack it; the
+ * menu strip then shows its wood only ({@link #hasMenus}).
  */
 final class ClassicText {
 
@@ -64,6 +71,9 @@ final class ClassicText {
 
     /** The three files, as the converter names them in {@code <pack>/text}. */
     static final String GAME = "GAME.TXT", NAMES = "NAMES.TXT", LABELS = "LABELS.TXT";
+
+    /** The optional fourth file: the in-game menu bar's titles and items. */
+    static final String MENU = "MENU.TXT";
 
     /**
      * The game's codes for the German letters, as {code, char} pairs.  Every
@@ -140,13 +150,18 @@ final class ClassicText {
     /** Sections of each file: name (without '@') -> body lines. */
     private final Map<String, List<String>> game, names, labels;
 
+    /** The sections of MENU.TXT, or null when the pack has no such file. */
+    private final Map<String, List<String>> menus;
+
 
     private ClassicText(Map<String, List<String>> game,
                         Map<String, List<String>> names,
-                        Map<String, List<String>> labels) {
+                        Map<String, List<String>> labels,
+                        Map<String, List<String>> menus) {
         this.game = game;
         this.names = names;
         this.labels = labels;
+        this.menus = menus;
     }
 
     /**
@@ -166,8 +181,14 @@ final class ClassicText {
             if (g == null || n == null || l == null) {
                 return logMiss("classic_original pack has no text/ folder");
             }
+            final File m = pack.textFile(MENU);
+            if (m == null) {
+                logger.info("classic_original pack has no text/" + MENU
+                    + " -- the in-game menu strip shows no titles"
+                    + " (re-run ant classic-assets)");
+            }
             try {
-                t = fromFiles(g, n, l);
+                t = fromFiles(g, n, l, m);
             } catch (IOException e) {
                 logger.log(Level.WARNING, "Unreadable original texts", e);
                 return null;
@@ -192,9 +213,22 @@ final class ClassicText {
      * @throws IOException if one cannot be read.
      */
     static ClassicText fromFiles(File game, File names, File labels) throws IOException {
+        return fromFiles(game, names, labels, null);
+    }
+
+    /**
+     * Parse three files in the original format plus the optional menu file.
+     *
+     * @param menu MENU.TXT, or null when there is none.
+     * @throws IOException if one cannot be read.
+     */
+    static ClassicText fromFiles(File game, File names, File labels, File menu)
+        throws IOException {
         return new ClassicText(sections(decode(Files.readAllBytes(game.toPath()))),
                                sections(decode(Files.readAllBytes(names.toPath()))),
-                               sections(decode(Files.readAllBytes(labels.toPath()))));
+                               sections(decode(Files.readAllBytes(labels.toPath()))),
+                               (menu == null) ? null
+                                   : sections(decode(Files.readAllBytes(menu.toPath()))));
     }
 
 
@@ -343,7 +377,22 @@ final class ClassicText {
      * @return The entry, or null when out of range.
      */
     String misc(int index) {
-        final List<String> body = this.labels.get("MISC");
+        return label("MISC", index);
+    }
+
+    /**
+     * An entry of any LABELS.TXT section, with the {@link #misc} convention
+     * (blank lines skipped, 0-based).  The in-game screens need more than
+     * {@code @MISC}: {@code @CTITLE} 1 and 9 are the right panel's gold and
+     * tax labels (LABELS.TXT:256/264), {@code @INFO} 0 and 1 its moves and
+     * position labels (:9-10).
+     *
+     * @param section The section name without '@', e.g. {@code CTITLE}.
+     * @param index The index.
+     * @return The entry, or null when the section or index is missing.
+     */
+    String label(String section, int index) {
+        final List<String> body = this.labels.get(section);
         if (body == null || index < 0) return null;
         int i = 0;
         for (String l : body) {
@@ -351,6 +400,44 @@ final class ClassicText {
             if (i++ == index) return l;
         }
         return null;
+    }
+
+
+    // MENU.TXT
+
+    /** @return Whether MENU.TXT was in the pack. */
+    boolean hasMenus() {
+        return this.menus != null;
+    }
+
+    /**
+     * One menu of MENU.TXT: the title line first, then the items in file
+     * order, up to the section's first blank line.  The title is trimmed (the
+     * file indents the first one, {@code @GAME}, like an item); each item
+     * loses exactly its two-space indent, so a deliberate trailing space
+     * stays.  The '~' markup and the digit-width blank '#' are kept:
+     * {@link ClassicFont#drawMarked} draws both as the original does.
+     *
+     * @param section The section name without '@', e.g. {@code ORDERS}.
+     * @return The lines, or null when MENU.TXT or the section is missing.
+     */
+    List<String> menu(String section) {
+        if (this.menus == null) return null;
+        final List<String> body = this.menus.get(section);
+        if (body == null) return null;
+        final List<String> out = new ArrayList<>();
+        for (String l : body) {
+            if (l.trim().isEmpty()) {
+                if (out.isEmpty()) continue;
+                break;
+            }
+            if (out.isEmpty()) {
+                out.add(l.trim());
+            } else {
+                out.add(l.startsWith("  ") ? l.substring(2) : l.trim());
+            }
+        }
+        return out.isEmpty() ? null : Collections.unmodifiableList(out);
     }
 
 
