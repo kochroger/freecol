@@ -20,6 +20,7 @@
 package net.sf.freecol.client.gui.classic;
 
 import java.awt.Color;
+import java.awt.Graphics;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.util.function.BooleanSupplier;
@@ -51,6 +52,10 @@ import javax.swing.JLayeredPane;
  * {@link ClassicHudOverlay} as the frame's glass pane, which uses the same
  * scale and letterbox ({@link ClassicHudOverlay#canvas}), so it lies exactly
  * on this canvas.
+ *
+ * <p>While the acceptance recorder runs ({@link ClassicFrameRecorder}),
+ * this pane is the painting origin of all its children and paints through
+ * the recorder's copy of the screen; otherwise it paints as any pane.
  */
 final class ClassicHudPane extends JLayeredPane {
 
@@ -58,6 +63,12 @@ final class ClassicHudPane extends JLayeredPane {
     private final ClassicMapViewer map;
     private final ClassicInfoPanel panel;
     private final ClassicPointer pointer;
+
+    /** The acceptance recorder of frames, or null: the usual case. */
+    private final ClassicFrameRecorder recorder = ClassicFrameRecorder.forFrames();
+
+    /** True while this pane paints into the recorder's copy. */
+    private boolean recording = false;
 
 
     /**
@@ -116,5 +127,42 @@ final class ClassicHudPane extends JLayeredPane {
         this.strip.dropLayer().setBounds(r[0]);
         // The whole pane: the arrow layer maps points with the pane's canvas.
         this.pointer.setBounds(0, 0, getWidth(), getHeight());
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * While recording: true, so a repaint of any child (the slide's
+     * {@code paintImmediately} included) is painted from here, through the
+     * recorder's copy.
+     */
+    @Override
+    protected boolean isPaintingOrigin() {
+        return this.recorder != null;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * While recording, the pane and its children are painted into the
+     * recorder's copy (as a print, which bypasses Swing's back buffer), and
+     * the copy is shown in {@code g}.
+     */
+    @Override
+    public void paint(Graphics g) {
+        final ClassicFrameRecorder rec = this.recorder;
+        if (rec == null || this.recording) {
+            super.paint(g);
+            return;
+        }
+        rec.paintThrough(this, g, ClassicHudOverlay.canvas(getWidth(), getHeight()),
+            ClassicHudOverlay.scale(getWidth(), getHeight()), cg -> {
+                this.recording = true;
+                try {
+                    print(cg);
+                } finally {
+                    this.recording = false;
+                }
+            });
     }
 }

@@ -3062,3 +3062,77 @@ Hard-won details, each of which silently wastes a run:
 - In PowerShell, `Write-Output` inside a function becomes part of its **return
   value**; a logging line will silently corrupt an `if (Check ...)` boolean. Use
   `Write-Host`.
+
+## Acceptance harness: frame recorder and input script (`ClassicFrameRecorder`, `ClassicScript`, `ClassicScriptDriver`, `ClassicTestHarness`, `ClassicPrefs`)
+
+Build spec W1. Two JVM properties turn a game into a measurable, unattended
+run; without them nothing changes (each hook is one volatile read, the HUD
+paints as before). `ClassicTestHarness.install` (from `startGUI`) binds both.
+
+**Recorder** (`-Dfreecol.classic.recordDir=<dir>`, palette
+`-Dfreecol.classic.recordPalette=<png|768-byte file>`). Writes the HUD the way
+`ZmbvExtract` decoded the original's DOSBox clips, so the clip-analysis tools
+(BlinkScan, MoveScan2, Activation, MarginCheck, Ring, EndTurn) run on it:
+- `frame_NNNNNN.png` for frame 0 and every changed frame, 320x200, 8-bit
+  indexed with the given palette (the landfall clip's frame #0). RGB maps to
+  indices exactly, a colour held twice (59/120, 56/121) takes the lowest index,
+  a colour not in the palette its nearest entry (counted in `summary.txt`).
+- `timeline.csv`, one row per frame on an absolute 70.086303 Hz grid
+  (the clips' strh rate), ZmbvExtract's columns and number format.
+- `events.log`: `nanoTime,ms,frame,event,detail`. Events: `state` (the probe:
+  turn, current player, view mode, active unit and moves, view origin, open
+  dialogs; logged when it changes), `script*`, `key-post/press/release`,
+  `click`, `move-key`, `move-done`, `pan`, `slide-start` (unit, tiles, view,
+  cell), `slide-step`, `slide-end`, `slide-skip`, `final-draw`, `end-turn`,
+  `dialog-open/close`, `music-request`, `music-mode`, `pref`, `late`. Reserved
+  for the M1 items: `blink` (W3), `endturn-timer-start/fire` (W5),
+  `palette-step` (W6c), `music-fade`. Add a hook with
+  `ClassicFrameRecorder.event(name, detail)`; guard a costly detail with
+  `ClassicFrameRecorder.on()`.
+- `summary.txt`: frames, PNGs, late ticks, palette misses, paint cost.
+
+How the pixels are taken: while recording, `ClassicHudPane` is the painting
+origin of all its children (`isPaintingOrigin`), paints itself as a print into
+the recorder's image and shows that image; each finished paint is copied under
+a lock for the sampler thread, which reads the centre pixel of every s x s
+block. So the samples are exactly what the screen shows, all painting stays on
+the EDT, and the blocking slide (`paintImmediately`) is captured frame by
+frame. Not captured: the first scene (glass pane) and the JDialog popups (only
+their open/close events). Cost at s = 3: about 5.4 ms per HUD paint + 0.4 ms
+copy + 1.5-2 ms blit, i.e. a step of today's slide takes ~30 ms instead of
+~25 ms; `-Dfreecol.classic.recordFrames=false` records the events alone with
+the HUD painting untouched, to time the game itself.
+
+Timing on Windows: `LockSupport.parkNanos` wakes on the 15.6 ms system tick
+(measured up to 15 ms late); `Thread.sleep` keeps to ~1 ms. The sampler sleeps
+to ~1.5 ms before each tick and spins the rest (`waitUntil`, ~11 % of a core);
+2-3 late ticks per 33 s run remain. Schedule slides and blinks the same way,
+not with `parkNanos`.
+
+**Input script** (`-Dfreecol.classic.script=<file>`, format in
+`ClassicScript`'s class comment): `wait <ms>`, `key <KeyStroke>` (e.g. `LEFT`,
+`NUMPAD7`, `ENTER`, `alt G`), `click <x> <y>` (canvas pixels), `waitGame`,
+`waitIdle`, `waitTurn` (optional timeout ms), `pref <name> on|off` (the classic
+prefs below, or `autoSave`/`combatAnalysis`/`tutorTips`, which set FreeCol's
+own options), `log <text>`, `quit`. It runs on its own thread. A key is a
+press, 80 ms, a release (plus `KEY_TYPED` for a character), dispatched on the
+EDT with `Component.dispatchEvent` to the component a real key would reach:
+the focus owner, else the open modal dialog's or the frame's most recent focus
+owner, else the map. That is the real `KeyboardFocusManager` path (frame
+dispatchers, then bindings incl. the map's `WHEN_IN_FOCUSED_WINDOW` ones) and
+works while the window has no focus, which an unattended start cannot
+guarantee (posting to the event queue would drop the key then). A timeout or
+error logs `script-error`, stops the recorder and quits; the outcome is in
+`<script>.result` (`ok`, `ended`, `error ...`). `quit` flushes the recorder
+and leaves through `FreeColClient.quit`.
+
+**Classic prefs** (`ClassicPrefs`, `classic-options.properties` in the user
+config directory, build spec section 2): `showNativeMoves` on,
+`showEuropeanMoves` on, `moveAccelerator` off, `endTurnPrompt` off,
+`waterCycling` on (the original's state A). Autom. Sichern, Kampfanalyse and
+Tutortips are FreeCol options (`autosavePeriod`, `guiShowPreCombat`,
+`guiShowTutorial`). Read a pref where it is used, not once at start. Nothing
+reads the prefs yet; W2/W5/W14/W17 will.
+
+The sandbox launcher, the copied tools and today's baseline are outside the
+repo, in `C:\Users\koch_\freecol-spike-results\m1` (`W1.md`).

@@ -290,6 +290,9 @@ public class ClassicGUI extends GUI {
     @Override
     public void startGUI(final Dimension desiredWindowSize) {
         logger.info("Starting ClassicGUI.");
+        // The acceptance harness (recorder, input script); a no-op unless
+        // its properties are set.
+        ClassicTestHarness.install(getFreeColClient(), this);
         if (SwingUtilities.isEventDispatchThread()) {
             final ClassicStartupScreen.Taken early = ClassicStartupScreen.take();
             if (early != null) {
@@ -2326,6 +2329,23 @@ public class ClassicGUI extends GUI {
         return this.sceneShowing || super.isDialogShowing();
     }
 
+    // Accessors for the acceptance harness (ClassicTestHarness).
+
+    /** @return The main window, or null before it exists. */
+    JFrame currentFrame() {
+        return this.frame;
+    }
+
+    /** @return The in-game map, or null outside a game. */
+    ClassicMapViewer currentMapViewer() {
+        return this.mapViewer;
+    }
+
+    /** @return The in-game HUD, or null outside a game. */
+    ClassicHudPane currentHudPane() {
+        return this.hudPane;
+    }
+
     /**
      * Show the original's first game scene over the fresh game's view, if
      * everything it needs is there: turn 1, a ship on the map (the active
@@ -2397,6 +2417,7 @@ public class ClassicGUI extends GUI {
             }
             closeMenus();
             this.sceneShowing = true;
+            ClassicFrameRecorder.event("dialog-open", "first scene");
             this.hudOverlay.showScene(picture, this.mapViewer,
                                       this::dismissFirstScene);
             updateActions();
@@ -2418,6 +2439,7 @@ public class ClassicGUI extends GUI {
     private void dismissFirstScene() {
         if (!this.sceneShowing) return;
         this.sceneShowing = false;
+        ClassicFrameRecorder.event("dialog-close", "first scene");
         if (this.hudOverlay != null) this.hudOverlay.hideScene();
         updateActions();
         if (this.mapViewer != null) {

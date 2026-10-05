@@ -224,6 +224,12 @@ final class ClassicMapViewer extends JPanel {
     private Tile animTo;
     private float animFraction;
 
+    /**
+     * Recording only: a slide ended, so the next paint is its final draw
+     * (logged as {@code final-draw}, see {@link ClassicFrameRecorder}).
+     */
+    private boolean finalDrawPending = false;
+
     /** Cached spec lookup for plain ocean (unexplored-area art), lazy. */
     private TileType oceanType;
 
@@ -405,6 +411,7 @@ final class ClassicMapViewer extends JPanel {
      * hooks {@link ClassicGUI} already delegates here.
      */
     private void endTurn() {
+        ClassicFrameRecorder.event("end-turn", "request");
         this.freeColClient.getInGameController().endTurn(false);
     }
 
@@ -540,7 +547,16 @@ final class ClassicMapViewer extends JPanel {
             final Direction d = intentToDirection(intent, this.activeUnit.getTile());
             if (d != null) {
                 final Unit u = this.activeUnit;
+                if (ClassicFrameRecorder.on()) {
+                    ClassicFrameRecorder.event("move-key", intent + " " + d
+                        + " unit=" + u.getId() + " at=" + xy(u.getTile())
+                        + " moves=" + u.getMovesLeft());
+                }
                 this.freeColClient.getInGameController().moveUnit(u, d);
+                if (ClassicFrameRecorder.on()) {
+                    ClassicFrameRecorder.event("move-done", "unit=" + u.getId()
+                        + " at=" + xy(u.getTile()) + " moves=" + u.getMovesLeft());
+                }
                 // Focus follows the (possibly moved) unit — but only jumps
                 // when it nears the view edge (view-follows-the-action).
                 if (u.getTile() != null) {
@@ -559,7 +575,15 @@ final class ClassicMapViewer extends JPanel {
             return;
         }
         // Nothing selected: keep the map navigable with a raw-grid free pan.
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("pan", intent + " mode=" + this.viewMode);
+        }
         panFocus(panDx, panDy);
+    }
+
+    /** "x,y" of a tile for the recorder's events, "-" for none. */
+    private static String xy(Tile t) {
+        return (t == null) ? "-" : t.getX() + "," + t.getY();
     }
 
 
@@ -694,12 +718,30 @@ final class ClassicMapViewer extends JPanel {
      * instead (see {@link #paintTile} / {@link #paintAnimatedUnit}).
      */
     void animateMove(Unit unit, Tile srcTile, Tile dstTile) {
+        final boolean rec = ClassicFrameRecorder.on();
         if (unit == null || srcTile == null || dstTile == null
-            || !isShowing()) return;
-        // Fog: only animate moves the player can actually see.
-        if (!srcTile.isExplored() && !dstTile.isExplored()) return;
+            || !isShowing()
+            // Fog: only animate moves the player can actually see.
+            || (!srcTile.isExplored() && !dstTile.isExplored())) {
+            if (rec) {
+                ClassicFrameRecorder.event("slide-skip", "unit="
+                    + ((unit == null) ? "-" : unit.getId()) + " from="
+                    + xy(srcTile) + " to=" + xy(dstTile));
+            }
+            return;
+        }
         // The original scrolls the view along with the action.
         ensureTileVisible(dstTile);
+        if (rec) {
+            final int[] v = viewOrigin();
+            ClassicFrameRecorder.event("slide-start", "unit=" + unit.getId()
+                + " owner=" + unit.getOwner().getNationId()
+                + " from=" + xy(srcTile) + " to=" + xy(dstTile)
+                + ((v == null) ? "" : " view=" + v[0] + "," + v[1]
+                    + " cell=" + (srcTile.getX() - v[0]) + ","
+                    + (srcTile.getY() - v[1]))
+                + " steps=" + ANIM_STEPS + "x" + ANIM_STEP_MS + "ms");
+        }
         this.animUnit = unit;
         this.animFrom = srcTile;
         this.animTo = dstTile;
@@ -710,6 +752,9 @@ final class ClassicMapViewer extends JPanel {
                     paintImmediately(0, 0, getWidth(), getHeight());
                 } else {
                     repaint();
+                }
+                if (rec) {
+                    ClassicFrameRecorder.event("slide-step", i + "/" + ANIM_STEPS);
                 }
                 try {
                     Thread.sleep(ANIM_STEP_MS);
@@ -722,8 +767,21 @@ final class ClassicMapViewer extends JPanel {
             this.animUnit = null;
             this.animFrom = null;
             this.animTo = null;
+            if (rec) {
+                ClassicFrameRecorder.event("slide-end", "unit=" + unit.getId());
+                this.finalDrawPending = true;
+            }
             repaint();
         }
+    }
+
+    /**
+     * Whether a slide is running ({@link #animateMove}).
+     *
+     * @return True mid-slide.
+     */
+    boolean isAnimating() {
+        return this.animUnit != null;
     }
 
     /** END_TURN mode: clear active unit and selected tile. */
@@ -800,6 +858,19 @@ final class ClassicMapViewer extends JPanel {
     /** The top-left tile of the 15x12 HUD view, {x, y}; null without a focus. */
     int[] viewOrigin() {
         final Tile f = getFocus();
+        if (f == null) return null;
+        return new int[] { f.getX() - ClassicHud.UNIT_COL,
+                           f.getY() - ClassicHud.UNIT_ROW };
+    }
+
+    /**
+     * {@link #viewOrigin} without choosing a default focus: a plain read,
+     * for the recorder's probe on another thread.
+     *
+     * @return {x, y}, or null while there is no focus yet.
+     */
+    int[] peekViewOrigin() {
+        final Tile f = this.focus;
         if (f == null) return null;
         return new int[] { f.getX() - ClassicHud.UNIT_COL,
                            f.getY() - ClassicHud.UNIT_ROW };
@@ -986,6 +1057,10 @@ final class ClassicMapViewer extends JPanel {
 
         paintAnimatedUnit(g, focusX, focusY);
         paintCursor(g, focusX, focusY);
+        if (this.finalDrawPending && this.animUnit == null) {
+            this.finalDrawPending = false;
+            ClassicFrameRecorder.event("final-draw", "");
+        }
     }
 
     /** Paint the sliding sprite of an in-progress move (see {@link #animateMove}). */

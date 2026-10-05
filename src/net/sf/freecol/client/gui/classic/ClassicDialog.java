@@ -235,7 +235,15 @@ final class ClassicDialog extends JPanel {
         // decorated as before in a window.  See ClassicGUI.prepareChildWindow.
         ClassicGUI.prepareChildWindow(d, owner, false);
         SwingUtilities.invokeLater(p::requestFocusInWindow);
+        if (ClassicFrameRecorder.on()) {
+            final String text = pages.isEmpty() ? "" : pages.get(0).text;
+            ClassicFrameRecorder.event("dialog-open", title + ": "
+                + text.substring(0, Math.min(120, text.length())));
+        }
         d.setVisible(true);   // blocks until disposed
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("dialog-close", title + " chosen=" + p.chosen);
+        }
         return p.chosen;
     }
 

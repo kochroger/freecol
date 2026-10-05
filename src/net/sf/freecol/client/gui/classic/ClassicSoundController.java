@@ -533,6 +533,8 @@ public final class ClassicSoundController extends SoundController {
     public void playTitleMusic() {
         final Soundtrack s = resolve();
         if (this.jukebox.title(s)) {
+            ClassicFrameRecorder.event("music-mode", "title "
+                + (s.isEmpty() ? "silent" : s.title.getName()));
             logger.info("Classic music: title screen -- "
                 + ((s.isEmpty()) ? "silent (no '" + PACK_ID + "' soundtrack)"
                     : s.title.getName() + " (looping)"));
@@ -546,6 +548,8 @@ public final class ClassicSoundController extends SoundController {
     private void playGameMusic() {
         final Soundtrack s = resolve();
         if (this.jukebox.game(s)) {
+            ClassicFrameRecorder.event("music-mode", "game "
+                + (s.isEmpty() ? "silent" : s.gameTracks.size() + " tracks"));
             logger.info("Classic music: game started -- "
                 + ((s.isEmpty()) ? "silent (no '" + PACK_ID + "' soundtrack)"
                     : "current piece plays on, then "
@@ -589,6 +593,7 @@ public final class ClassicSoundController extends SoundController {
      */
     @Override
     public void playMusic(String sound) {
+        ClassicFrameRecorder.event("music-request", sound);
         if (isGameStartKey(sound)) {
             playGameMusic();
         } else {
