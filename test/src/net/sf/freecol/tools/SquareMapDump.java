@@ -63,7 +63,9 @@ import net.sf.freecol.server.model.ServerPlayer;
 
 
 /**
- * Square topology spike tool: dump maps as PNG and ASCII with statistics.
+ * Square topology tool: dump maps as PNG and ASCII with statistics.
+ * It lives in the test tree, so it is built by {@code ant
+ * build-unit-tests} into build/ but never packed into FreeCol.jar.
  *
  * Generates maps for seeds 1..N with the real server map generator
  * under the square {@link Topology} and the options of
@@ -73,7 +75,8 @@ import net.sf.freecol.server.model.ServerPlayer;
  * original Colonization .MP map the same way.  The tool sets the
  * topology itself, so -Dfreecol.topology is not needed.
  *
- * Run from the FreeCol directory, which holds data/:
+ * Run from the FreeCol directory, which holds data/, after
+ * {@code ant build-unit-tests}:
  * <pre>
  *   java -cp "build;jars/*" net.sf.freecol.tools.SquareMapDump OUTDIR
  *       [MPFILE] [--seeds N] [--set OPTION_ID=VALUE]...
