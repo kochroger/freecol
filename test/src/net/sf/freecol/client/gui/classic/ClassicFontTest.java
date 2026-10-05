@@ -252,7 +252,7 @@ public class ClassicFontTest extends TestCase {
         final int[] quits = { 0 };
         final ClassicMainMenuPanel p = new ClassicMainMenuPanel(
             new ClassicMainMenuPanel.Actions() {
-                @Override public void newWorld() {}
+                @Override public void newWorld(ClassicGUI.NewWorldSetup s) {}
                 @Override public void loadGame(java.io.File file) {}
                 @Override public void hallOfFame() {}
                 @Override public void quit() { quits[0]++; }
