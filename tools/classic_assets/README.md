@@ -26,8 +26,9 @@ ant classic-assets -Dcol.install="C:\Program Files (x86)\GOG Galaxy\Games\Coloni
 `*.PIK`, `*.FF` (bitmap fonts) and `VICEROY.PAL` files (the GOG/Steam "Classic" release keeps them
 under `MPS\COLONIZE\`).
 
-Output: `data/mods/classic_original/` — `mod.xml`, `resources.properties`, and
-`resources/images/{pik,ss,ff}/*.png`.
+Output: `data/mods/classic_original/` — `mod.xml`, `resources.properties`,
+`resources/images/{pik,ss,ff}/*.png`, `ss-anchors.properties` and
+`text/{GAME,NAMES,LABELS}.TXT` (see below).
 
 ## How it works
 
@@ -48,8 +49,27 @@ The `classic-assets` Ant target compiles the source and runs
      directory for every image it maps (~2 s for ~480 glyph files), and the
      many zero-width glyph slots cannot be stored as images at all. The
      runtime reader is `net.sf.freecol.client.gui.classic.ClassicFont`.
-3. Writes `resources.properties` exposing every frame under a stable
+3. Copies the original's text files `GAME.TXT`, `NAMES.TXT` and `LABELS.TXT`
+   (found case-insensitively) **byte for byte** into `text/` of the pack.
+   They hold every German string of the new-game screens (picker labels,
+   prompts, nation pages, the audience scroll). They are copyrighted, so they
+   live only in this git-ignored pack, never in tracked files; they are
+   copied unchanged so the runtime parser
+   (`net.sf.freecol.client.gui.classic.ClassicText`) alone owns the format
+   (the game's umlaut codes, markup, sections). A missing file is a warning;
+   the client then skips the new-game screens and starts with defaults.
+4. Writes `ss-anchors.properties`: one line `STEM.SS.nnn=ax,ay` per SS frame,
+   the raw bottom-centre screen anchor from bytes 8-11 of the frame's 16-byte
+   sprite header (`SsDecoder.anchors`). The original places its sprites by
+   these (e.g. the king and the nation banner of the audience screen); the
+   frame's top-left is `(ax - w/2, ay - h + 1)` with its PNG size. Numbers
+   only, no content.
+5. Writes `resources.properties` exposing every frame under a stable
    `image.classic_original.*` key namespace, plus `mod.xml` and messages.
+
+**Packs built before `text/` and `ss-anchors.properties` existed must be
+regenerated** (re-run `ant classic-assets`); until then the classic UI's
+NEUE WELT starts a game with defaults and logs one INFO line saying so.
 
 The decode path (MADSPACK container, FAB decompression, `.SS` linemode RLE,
 `.PIK` indexed images, VGA palettes, `.FF` fonts) is implemented directly in Java —

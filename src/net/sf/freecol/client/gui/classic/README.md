@@ -36,8 +36,11 @@ fastest way to the in-game view. It starts at sea: the ship on an ocean patch.
 
 `ClassicGUI extends GUI` and overrides only the methods it implements:
 
-- **Lifecycle.** `startGUI` shows the main `JFrame` with the title screen
-  (`ClassicMainMenuPanel`) in **passive** mode: the original title picture
+- **Lifecycle.** `startGUI` shows the main `JFrame` (or, with the pack, adopts
+  the one `ClassicStartupScreen` opened a second after launch — see "Fast
+  start") with the title screen
+  (`ClassicMainMenuPanel`) in **passive** mode (the early window already
+  shows the live menu, except for `--fast` or a save argument): the original title picture
   `OPENMENU.PIK`, no menu, no input — so `--fast` loads over a clean backdrop
   and its code path is unchanged. `showMainPanel` makes the menu live (see
   "Title screen & main menu" below); a private `teardownInGame()` lets the HUD
@@ -59,10 +62,15 @@ fastest way to the in-game view. It starts at sea: the ship on an ocean patch.
   paints its own parchment background + wood border regardless of the L&F, so the
   top bar still reads classic; the dropdown popups get their own wood/green
   reskin instead, targeted narrowly enough not to need the full L&F.
-- **Pre-game lobby stopgap.** There is no classic lobby yet, so
-  `showStartGamePanel` auto-launches single-player games (`player.setReady(true)`
-  + `requestLaunch`); otherwise a new game stalls at login because the base
-  `GUI` no-ops the lobby. Multiplayer no-ops.
+- **Pre-game lobby = the new-game chain's last step.** The original has no
+  lobby: the choices are made on the new-game screens before the server
+  exists (see "New-game chain" below). `showStartGamePanel` therefore
+  auto-launches single-player games (`player.setReady(true)` +
+  `requestLaunch`; the base `GUI` no-ops the lobby, which would stall a new
+  game at login). Before that it applies the nation the chain picked
+  (`applyNewWorldNation`: switch, line-up, server-side verification), or
+  aborts back to the title if the server did not assign it. Multiplayer
+  no-ops.
 - **View-state delegation.** `changeView(Tile|Unit|)`, `getViewMode`,
   `getActiveUnit`, `getSelectedTile`, `getFocus`/`setFocus`,
   `refresh`/`refreshTile` all delegate to the `ClassicMapViewer`, which *owns*
@@ -1496,8 +1504,10 @@ differing pixels.
   largest whole scale, nearest-neighbour, black letterbox (as the colony and
   Europe screens do). The background is `OPENMENU.PIK` drawn 1:1. It is *not*
   `OPENING.PIK`, which is a 960×132 sea chart. Only the menu box is drawn on
-  top. Modes: `PASSIVE` (picture only), `TITLE`, `LOAD`, `NOTICE`, `BUSY`. In
-  PASSIVE and BUSY all input is ignored, which guards against starting twice.
+  top. Modes: `PASSIVE` (picture only), `TITLE`, `LOAD`, `NOTICE`, `BUSY`,
+  `QUIT`, `NEW_WORLD` (the new-game chain, see below) and `STARTING` (the
+  chain's last screen frozen while the engine starts). In PASSIVE, BUSY and
+  STARTING all input is ignored, which guards against starting twice.
   All painting is in package-private **static** methods (`paintTitleScreen`,
   `paintLoadBox`, `paintNotice`) taking explicit `MenuAssets`. A scratch
   harness calls them from a jar classpath without a `FreeColClient` and diffs
@@ -1558,14 +1568,15 @@ differing pixels.
 - **The pack palette** is expanded the way DOSBox does it, `(v<<2)|(v>>4)`, so
   pack PNGs, the colour constants and the captures compare bit for bit.
 - **Menu actions** (`ClassicGUI.menuActions`):
-  - NEUE WELT → `beginNewWorldSetup()`. This is **the seam** for the
-    difficulty, nation and name screens (034/035/036), which will build a
-    `NewWorldSetup(difficultyId, nationId, playerName)`. Today it calls
-    `startNewWorldGame(NewWorldSetup.defaults())`. That loads a fresh spec and
-    calls `startSinglePlayerGame`; it never resumes a save.
-    `showStartGamePanel` applies a chosen nation via
-    `PreGameController.setNation`/`setNationType`, because the server ignores
-    the nation at login.
+  - NEUE WELT → the original's new-game chain on the same canvas
+    (difficulty, power, name, the nation's two pages, the audience; see
+    "New-game chain" below). Dismissing the audience calls
+    `Actions.newWorld(setup)` → `beginNewWorldSetup(NewWorldSetup)` →
+    `startNewWorldGame`, which loads a fresh spec with the chosen difficulty,
+    sets the name and calls `startSinglePlayerGame`; it never resumes a save.
+    A pack converted before the chain's material existed (no `text/`) skips
+    the chain: NEUE WELT then starts at once with `NewWorldSetup.defaults()`
+    and logs one INFO line asking for `ant classic-assets`.
   - AMERIKA and INDIVIDUALISIEREN show the notice "Diese Funktion folgt in
     einer späteren Version." FreeCol's America maps would look about 3.6×
     too tall in the rectangular view; the faithful route is converting
@@ -1627,6 +1638,194 @@ differing pixels.
     and Alt+Tab now that the window is borderless full screen.
   - Only the title panel draws the original arrow; the in-game HUD still
     shows the system cursor.
+
+## New-game chain (`ClassicNewWorldChain`, `ClassicNewWorldScreens`, `ClassicText`, `ClassicTextLayout`, `ClassicPackFiles`)
+
+What follows NEUE WELT in the original, rebuilt screen by screen against the
+native DOSBox captures. Dutch run: `screenshots/start-sequence-dutch`; English
+run: `screenshots/start-sequence`.
+
+| # | Screen | Captures | Picture |
+|---|--------|----------|---------|
+| 1 | Difficulty (five portraits) | Dutch 056-060 (each level highlighted), English 034 | `DIFFICUL.PIK` |
+| 2 | European power (four cards) | Dutch 061-064 (England, France, Spain, Holland), English 035 | `NATIONS.PIK` |
+| 3 | Leader name | Dutch 065 (Holland's default leader), English 036 | `WOODPANL.PIK` |
+| 4 | Nation page A (history) | Dutch 066, English 037 | `WOODPANL.PIK` |
+| 5 | Nation page B (bonus) | Dutch 067, English 038 | `WOODPANL.PIK` |
+| 6 | Audience | Dutch 068 (Holland: a stadtholder, `@VICEROY2`), English 039 (a king, `@VICEROY`) | `KINGLSS1.PIK` + banner + `KING1.SS` |
+
+The headless preview harness renders **all 19 captures with 0 differing
+pixels** (arrow included), through the production code only. The departure
+animation (069-082) and the first scene (083) are the next step; today the
+game starts right after the audience.
+
+- **Where it runs.** On the title canvas itself (`ClassicMainMenuPanel` mode
+  `NEW_WORLD`): one panel, one letterbox, one arrow, no panel swap. The chain
+  holds no engine state, so Escape at any point needs no teardown. Its art
+  and texts are read from pack files (`ClassicPackFiles`, not
+  `ResourceManager`) on a daemon thread when the title first goes live and
+  joined when NEUE WELT is chosen.
+- **Painters.** `ClassicNewWorldScreens` has static painters per screen
+  (`paintDifficulty`, `paintNation`, `paintName`, `paintNationPage`,
+  `paintAudience`, dispatcher `paint`) taking explicit `Assets`, `Texts` and
+  the chain's `View`. Each screen is the untouched PIK 1:1 plus overlays;
+  unselected cards are pure PIK pixels.
+- **Constants** (all measured; the Javadoc names the capture of each):
+  - Difficulty cards: five 68×90 rects in reading order (top row of two,
+    bottom row of three); nation cards: four 88×82 rects. The selection
+    frame is a 1-px outline exactly on the card bounds, which are also the
+    click rects.
+  - Frame/label colours are palette entries of each PIK: difficulty
+    green, blue, yellow, orange, red; nations red, blue, yellow, orange —
+    the colour column of NAMES.TXT `@COUNTRY`. Palette index 12 differs
+    between the two pictures (`0xEF0404` vs `0xF70000`), so the screens do
+    not share a red.
+  - Headings: two FONTINTR lines, pitch 13, centred in a span of 116
+    (difficulty) / 114 (nations), shadow black. Footer: FONTTINY in the UI
+    ink, same spans, the parentheses added by code.
+  - Card labels: FONTTINY, `x = card.x + 1 + (card.w - w)/2`, black shadow
+    one pixel to the right, then the card colour. Difficulty at card top
+    +38/+46; nations at card top +2 and card bottom −8.
+  - Name screen: prompt at y 88 centred in `@width=300`, box (79,98,167,14)
+    in the ink, the untouched default on a fill in the menu's selection
+    colour `0x3C2018`, name at (82,101), a static FONTINTR `_` caret after
+    it. FONTINTR's shadow is `0x0C0C0C` on WOODPANL but black on the pickers.
+  - Nation pages: FONTINTR, normal ink/shade/shadow, highlighted words in
+    gold `0xC7A220`.
+  - Audience: banner `<ENGLND|FRANCE|SPAIN|DUTCH>1.SS.000` and `KING1.SS.000`
+    (the same seated figure for king and stadtholder) at their sprite-header
+    anchors; scroll text FONTKING `0x715545`/black, `@x`, `@y + 3`, pitch 8.
+- **Text strategy.** Every string comes from the original's own files at
+  runtime; tracked code holds only section names, line/index numbers,
+  geometry and colours.
+  - `ant classic-assets` copies `GAME.TXT`, `NAMES.TXT`, `LABELS.TXT` byte
+    for byte into the git-ignored `<pack>/text/` (they are copyrighted).
+  - `ClassicText` decodes them with a 7-entry table (0x1C ö, 0x1D ß, 0x1E Ä,
+    0x1F Ö, 0x5C Ü, 0x60 ä, 0x7F ü — the codes `ClassicFont.toCode` draws),
+    never a charset, because ä, Ü and ü sit on printable ASCII. CR stripped,
+    stop at 0x1A or `@END`, ';' lines are comments.
+  - Sources: difficulty labels from NAMES.TXT `@DIFFICULTY` (not GAME.TXT
+    `@DIFFICULTY`: the hardest level's label in 060 has a lowercase ö that
+    only NAMES.TXT has), upper-cased a–z only (`upperAscii`, never
+    `toUpperCase`) plus ':'; nation names `@COUNTRY` column 0; default
+    leaders `@LEADERNAME` column 0; headings, subtitles, bonus words and
+    footer from LABELS.TXT `@MISC`; the prompt GAME.TXT `@LEADERNAME` (line 1
+    without `^^`, field length = its 22-underscore option); pages
+    `@NATION0A..@NATION3B`; audience `@VICEROY` (England, France, Spain) and
+    `@VICEROY2` (Holland), `%COUNTRY` = the nation name.
+  - **LABELS index convention:** `@MISC` with blank lines SKIPPED, 0-based.
+    Checked: 160 = LABELS.TXT:176, 161 = :177, 162 = :178, 164..168 =
+    :180-184, 169 = :185, 170 = :186, 172..175 = :188-191 (the blank line
+    :51 is skipped).
+  - **Markup:** `{`/`}` highlight; `^^` at the start = centred hard line
+    (`x = L + ceil((W − width(rtrim))/2)`, leading spaces count); `^` at the
+    start = left hard line (bare `^` = empty line); `^` elsewhere removed;
+    `_` is an invisible placeholder, removed before measuring (FONTINTR has
+    a 7-px `_`); `%%` = `%`, any other `%` stays.
+  - **Wrap rule** (`ClassicTextLayout`): other lines are joined with one
+    space — also after a trailing '-', a quirk the Holland page really shows
+    — spaces collapse, greedy wrap at spaces, never at hyphens. Measure =
+    drawn width + 1 per `{`, `}` and `ß`; a line fits if the measure is at
+    most W − 2. An open highlight is closed/re-opened across a break for
+    drawing. Left = `@x` or `(320 − W)/2`; top = `@y + 3`, else the block is
+    centred, `(200 − pitch·lines)/2`. `ClassicFont.wrap` is not used (plain
+    width breaks the 066 page differently). Unknown: whether ö/Ä/Ö/ü/Ü count
+    extra (ä does not) — France and Spain pages have no capture, so their
+    breaks are reviewed by eye only.
+- **Input model** (`ClassicNewWorldChain`, a Swing-free state machine; the
+  panel maps events onto it). The captures prove only reading-order stepping
+  and the initial index 0; the rest are documented assumptions:
+  - Pickers: Left/Up/keypad 4/8 previous, Right/Down/keypad 6/2 next,
+    clamped without wrap (like the title menu); Home/End first/last; Enter
+    confirms. A click on a card selects it, a click on the selected card or
+    on the footer confirms. Hover does nothing. Forward entry starts at 0
+    (England on the power screen); a Back return keeps the choice.
+  - Name: on every forward entry the nation's default leader, highlighted.
+    The first typed character replaces it; markup characters and characters
+    outside the game's set are ignored; at most 22 characters and text +
+    caret within the box (163 px). Backspace clears the highlighted default,
+    else deletes one character. Enter confirms; an empty name becomes the
+    default leader. A click in the box only drops the highlight. Arrow keys
+    do nothing; keypad digits type digits.
+  - Pages and audience: any key (except Escape and bare modifiers) or a left
+    click advances; dismissing the audience starts the game. The trigger
+    (key, click or timer) is not visible in stills.
+  - Everywhere: Escape or a right click = one screen back; from the
+    difficulty screen back to the title with NEUE WELT barred. Chords with
+    Alt/Ctrl/Meta are left alone, so Alt+Enter toggles full screen on every
+    chain screen without advancing, and Alt+F4 opens the quit box ("Nein"
+    returns to the title). The chain's key listener consumes what it handles
+    and the menu's bound actions do nothing in `NEW_WORLD`, so no key is
+    handled twice.
+  - One physical press, at most one screen. Every screen is left by a single
+    press, and the difficulty card under the pointer lies inside the
+    England card of the nation screen (which opens on England), so a double
+    click on the pre-highlighted easiest card used to confirm England as well,
+    a held Enter ran through to the name screen with England, and a double
+    click on the bonus page skipped the audience. Now (`ClassicMainMenuPanel`
+    `onPress` / `onChainKey`): the later presses of a click series whose
+    press changed the screen are ignored (`chainPressChangedScreen`; a double
+    click on a card that is not yet selected still selects and confirms it),
+    and a key's auto-repeat (`heldKeys`, cleared on focus loss) only steps
+    through a picker or repeats Backspace on the name — Enter, Escape and the
+    pages' "any key" act once per press.
+  - After the audience: mode `STARTING` (screen frozen, system arrow, input
+    ignored — the EDT blocks while the server starts), then the in-game view
+    replaces it through `reconnectGUI`.
+- **Engine order** (`ClassicGUI.startNewWorldGame`, `showStartGamePanel`):
+  1. Spec + difficulty: `FreeCol.loadSpecification(rules, advantages,
+     difficultyId)`; if `spec.getDifficultyLevel()` differs (an unknown id
+     silently applies nothing, Specification.java:645-669), a WARNING and a
+     reload with `FreeCol.getDifficulty()`. The server plays on this spec
+     object (FreeColServer.java:318-329); the save records the level, which
+     the load list shows.
+  2. Name validation: trimmed; refused if empty, `mapEditor`, or equal to
+     any ruler name of the rules (those are the AI players' names,
+     ServerPlayer.java:239, and duplicates break `Game.getPlayerByName` and
+     loading) — then a notice in our own wording
+     (`classic.newWorld.nameTaken`) and back to the title.
+  3. `FreeCol.setName(name)`: the login name (ConnectController.java:351),
+     the player's name (LoginMessage.java:233) and the save owner
+     (FreeColServer.java:908-909) — hence the load-list label with the
+     typed name needs no further work.
+  4. `startSinglePlayerGame` → login. Pre-game login **ignores the requested
+     nation** and takes the first AVAILABLE one in HashMap order
+     (LoginMessage.java:214); that is Holland only because Portugal and
+     Sweden are NOT_AVAILABLE with four Europeans.
+  5. `showStartGamePanel` → `applyNewWorldNation`: if the target is not the
+     player's nation, `setAvailable(AVAILABLE)` when needed (covers
+     `--europeans` < 4), then `setNation` and THEN `setNationType` (FIXED
+     advantages check the type against the current nation,
+     SetNationTypeMessage.java:100-118). Line-up: the other originals that
+     are NOT_AVAILABLE become AVAILABLE; every other European without a
+     player becomes NOT_AVAILABLE — so `buildGame` (FreeColServer.java:
+     1199-1208) makes exactly the other three originals AI.
+  6. Verify on the in-process server (`getPlayerByNationId(nid)` must be the
+     human, by name): a server rejection only shows an error dialog while the
+     ask returns true. On failure `abortNewWorldStart`: notice
+     `classic.newWorld.nationFailed`, logout, `stopServer` (deferred until the
+     login call stack has unwound), never a silent launch as the wrong power.
+  7. `player.setReady(true)`, `requestLaunch()`.
+  `--fast` (`startSinglePlayerGame` directly, `pendingNationId` null) and
+  loading saves (`startSavedGame` → `requestLaunch` without
+  `showStartGamePanel`) never pass through the chain or the new checks;
+  `loadSavedGame` also clears `pendingNationId`. `FreeCol.setDifficulty`,
+  `setAdvantages` and `setEuropeanCount` are never touched.
+- **Preview harness** (scratch only — it prints original words, so it never
+  goes into the repo): `NewWorldPreview` in the classic package, compiled
+  against `FreeCol.jar` with `javac --release 11`, run headless with
+  `-pack data/mods/classic_original -shots screenshots -out <dir>`. It drives
+  a `ClassicNewWorldChain` with the player's own operations, paints with
+  `ClassicNewWorldScreens.paint` and `ClassicMainMenuPanel.paintCursor` at
+  (160,100), diffs against the 19 captures, writes renders and ×4 residual
+  maps, renders France/Spain pages and audience for review, asserts the
+  sprite anchors, and exits 1 on any difference.
+- **Open items** (product questions, out of this step): FreeCol names the AI
+  Europeans after their monarchs, the original perhaps after the NAMES.TXT
+  leaders; NEUE WELT uses the `freecol` rules (FreeCol.java:172), not
+  `classic`; Spain's home port is Cádiz in FreeCol, Sevilla in the original.
+  The France/Spain banner positions come from the sprite headers, not from
+  captures.
 
 ## Music (original soundtrack) (`ClassicSoundController`)
 
@@ -1747,9 +1946,13 @@ The owner wants the game to look like the original running full screen in
 DOSBox: no window chrome anywhere. (2026-10-04)
 
 - **Default = borderless full screen.** Without an explicit `--windowsize`,
-  `startGUI` shows the main `JFrame` undecorated with bounds = the *whole*
+  the main `JFrame` is shown undecorated with bounds = the *whole*
   monitor (`GraphicsConfiguration.getBounds()`, taskbar included) —
-  `applyFrameMode(true)`. On the owner's 1920×1200 (16:10, 100 % scaling)
+  `ClassicFrame.applyFrameMode(true)`. The frame, its mode and the remembered
+  windowed bounds live in `ClassicFrame` (moved out of `ClassicGUI`
+  unchanged), because two parties create the window: the early start-up
+  window (see "Fast start" below) and, without it, `ClassicGUI.startGUI`.
+  On the owner's 1920×1200 (16:10, 100 % scaling)
   monitor the 320×200 title canvas fills the screen at exactly ×6, no black
   bars: the panels take their whole scale from the content pane's size, and
   undecorated that is the full monitor (no insets, no menu bar on the
@@ -1763,19 +1966,22 @@ DOSBox: no window chrome anywhere. (2026-10-04)
   never flashes grey).
 - **With `--windowsize WxH`** the window opens decorated at that size, as
   before.
-- **Start-up screen = black, not FreeCol's splash.** Under `--classic`
-  without an explicit `--splash`, FreeCol's `splash.jpg` (FreeCol logo, "an
-  open source Colonization game", in a box on the desktop for the whole
-  ~15 s pack load) is replaced by a black borderless window over the whole
-  default monitor (`FreeCol.createClassicSplashScreen`,
-  `SplashScreen.blackFullScreen`). `FreeColClient` disposes it only *after*
-  `startGUI` has shown the main window (a dispose queued behind `startGUI`'s
-  own `invokeLater`), so the screen goes black at the double click and stays
-  black until the title picture replaces it — the desktop never shows in
-  between. It also keeps the process in the foreground during the load, so
-  the main window may take the foreground (`toFront` + `requestFocus` right
-  after the first show), which is what makes Windows hide the taskbar behind
-  it. `--no-splash` or a positive `--windowsize`: no start-up screen at all.
+- **Start-up screen = the title itself, not FreeCol's splash.** Under
+  `--classic` without an explicit `--splash`, FreeCol's `splash.jpg` (FreeCol
+  logo, "an open source Colonization game", in a box on the desktop) is never
+  shown. With the `classic_original` pack the main window opens about a
+  second after the double click with the title already painted (see "Fast
+  start" below); it is the first window the process shows, so `toFront` +
+  `requestFocus` get the foreground, which is what makes Windows hide the
+  taskbar behind it. **Fallback** (no pack, or the early window failed): the
+  old black borderless window over the whole default monitor
+  (`FreeCol.createClassicSplashScreen`, `SplashScreen.blackFullScreen`), which
+  `FreeColClient` disposes only *after* `startGUI` has shown the main window
+  (a dispose queued behind `startGUI`'s own `invokeLater`), so the desktop
+  never shows in between and the process keeps the foreground. `--no-splash`
+  switches both off (no early window, no black screen: the window opens when
+  the client is ready — a developer escape hatch); a positive `--windowsize`
+  without the pack: no start-up screen.
 - **Alt+Enter** toggles borderless full screen ⇄ a decorated window, as in
   DOSBox — on the title, in game and in every classic sub-window. It is a
   `KeyEventDispatcher` (`FrameKeys`), so it wins over the panels' own Enter
@@ -1855,6 +2061,112 @@ DOSBox: no window chrome anywhere. (2026-10-04)
     (`SelectableOptionAction` reads a client option this action does not
     have).
 
+## Fast start (`ClassicStartupScreen`, `ClassicFrame`, `ClassicPackFiles`)
+
+The owner waited ~30 s (warm disk cache; up to a minute as he perceived it)
+in front of a black screen before the title appeared. The FreeCol.log of the
+2026-10-04 live test splits that into two blocks of ~12-15 s each; both are
+gone, and the title is painted before the client even exists. (2026-10-05)
+
+| Stage | What | Where | Measured (headless harness, warm cache) |
+|---|---|---|---|
+| 1 | Directory-listing cache for the image size/variation search | `FreeColDataFile.getResourceMapping` / `sortedListing` | `classic_original` mapping 14.7 s → 0.56-0.64 s; tc 1.6 s → 0.55-0.57 s; whole headless `FreeColClient` constructor with the classic packs 17.7 s → 2.6 s |
+| 2 | The Classic UI no longer waits for the full resource preload | `FreeColClient.startClassicGui`, `ResourceManager` | the 12-15 s preload (2954 resources) now runs in the background at `MIN_PRIORITY` |
+| 3 | The main window opens before the client is built, title painted from pack files | `ClassicStartupScreen`, `FreeCol.createClassicSplashScreen` | JVM start → title painted 0.45-0.46 s headless (+ AWT/window ≈ 0.45 s), 0 px vs `opening_033` |
+
+- **Stage 1 — why the pack mapping took 13 s.** For every image key
+  `FreeColDataFile` looks for size alternatives (`x.size64.png`) and
+  variations (`x2.png`): it listed, sorted and regex-matched the image's whole
+  directory twice per image, recompiling the regex for every entry. The pack
+  keeps its 1517 SS frames in one directory: ~3000 listings × 1517 entries.
+  Now each directory is listed once per `getResourceMapping` call (a local
+  map passed down the call chain, so concurrent calls never share it and a
+  later call sees new files), the pattern is compiled once per lookup and a
+  `startsWith`/`endsWith` pre-filter skips almost every entry. The result is
+  unchanged: dumps of all 3071 image resources (770 with size alternatives,
+  55 with variations) were identical before and after, and
+  `FreeColDataFileListingTest` passes against both the old and the new class.
+  Zip data files (saves) open a new `FileSystem` per lookup and so keep the
+  old behaviour.
+- **Stage 2 — why the window waited for every image.** `FreeColClient`
+  started the GUI only from the completion callback of
+  `ResourceManager.startPreloading`, i.e. after all 2954 resources were read
+  (FreeCol's own 782 images alone 9 s). That is an optimisation, not a
+  precondition: `ImageResource.getImage` loads a missing image on demand
+  (`preload` is synchronized, so an EDT request waits for at most one image).
+  Under `--classic` the constructor now calls `startGUI`, `updateActions` and
+  the first task directly (it runs on the EDT already) and then starts the
+  preload in the background (log line "Classic UI: background preload done.").
+  `ResourceManager.preloadThread` is `volatile` now: a `prepare()` (every
+  `--fast` start, every load from the title) regularly overlaps the running
+  preload and polls that field. The SwingGUI path is unchanged.
+- **Stage 3 — the early window.** The constructor still takes ~3 s and must
+  stay on the EDT (`FreeColAction.addImageIcons` posts EDT tasks that use
+  the GUI, created only near its end — off the EDT they NPE). So
+  `FreeCol.createClassicSplashScreen`, which runs on the EDT just before the
+  constructor is queued, calls `ClassicStartupScreen.show(windowSize, menu)`:
+  - The window is built by `ClassicFrame` — the same borderless full screen
+    or decorated `--windowsize` window as ever — with a real
+    `ClassicMainMenuPanel` whose images and font come straight from the pack
+    files (`MenuAssets.fromPackFiles` via `ClassicPackFiles`, no
+    `ResourceManager`) and whose menu strings come from `Messages` (loaded at
+    `FreeCol.java:323`). `menu` is false for `--fast`, a debug start or a save
+    argument: then the passive picture, no menu, no music (as before).
+  - It is painted with `paintImmediately` right after it is shown, so the
+    picture is on screen before the constructor blocks the EDT (Swing's back
+    buffer then also serves the OS's expose requests).
+  - `ClassicGUI.startGUI` (called from the constructor, on the EDT) adopts
+    it **synchronously** via `ClassicStartupScreen.take()`: frame, mode,
+    panel, the real menu actions, the close listener and Alt+Enter/Alt+F4.
+    Keys and clicks that AWT queued while the constructor blocked are
+    dispatched after that, so they reach a live, attached menu.
+  - **Typing ahead.** `show` runs in the same EDT task that queues the
+    constructor (`FreeCol.startClient`), so practically all "early" input is
+    dispatched only after the constructor, by the real actions — but still
+    *before* the start-up task that calls `showMainPanel`. Enter mashed
+    through the chain, or Down×3 + Enter + Enter for a save, has therefore
+    already started the game or the load (panel STARTING / BUSY) when that
+    call comes. `ClassicGUI.startupTitlePending` (set on adopting a live
+    early window, cleared by the next `showMainPanel`) makes that one call
+    change nothing — no title reset, no teardown, the title piece only if no
+    music was chosen yet (`playTitleMusicIfSilent`). Without it the frozen
+    audience was replaced by a live title for the seconds the server needs,
+    and NEUE WELT clicked there started a second game while logged in.
+  - Input that does reach the early window before the constructor (rare) is
+    handled by the panel itself (the bar, the load box and the whole
+    new-game chain need no client). A choice that needs the client (the end
+    of the chain, loading a save, the hall of fame) is kept by
+    `DeferringActions` (the first one only) and replayed by
+    `ClassicGUI.showMainPanel` after the start-up's own call to it. "Ja" in
+    the quit box ends at once (`FreeCol.quit(0)`).
+  - `showMainPanel` no longer resets a live menu (`ClassicMainMenuPanel.isLive`:
+    TITLE, LOAD, NOTICE, QUIT, NEW_WORLD) when it has no notice to show —
+    otherwise the start-up's call would undo the bar or a half-done chain.
+    PASSIVE, BUSY and STARTING (a failed start or load, an ended game) are
+    still reset to the title by every call except the start-up's own one
+    described above.
+  - Without the pack, `--no-splash`, or on any failure the old path runs
+    (black screen; the window when the client is ready).
+- **What the player sees now** (expected, warm cache; the live numbers are
+  the two log lines below): the title and menu ~1-1.5 s after the double
+  click; the menu reacts from ~4 s (the constructor's ~3 s, during which the
+  Windows arrow shows and input is queued); the title music starts when the
+  client is attached (~3-4 s, `showMainPanel` → `playTitleMusic`). The
+  new-game chain needs only pack files, so it works fully while the
+  background preload still runs; its art is prefetched on a daemon thread as
+  soon as the title is live.
+- **Log lines for live checks:** `Classic start-up: title shown after N ms`
+  (JVM start → painted) and `Classic start-up: client attached after N ms`;
+  "ClassicGUI selected" now follows "overlaying 'classic_music'" within
+  about a second, and "Classic UI: background preload done." comes after the
+  window, not before.
+- **Open:** cold-cache timings are unmeasured (the harness cannot flush the
+  OS cache and may not launch the GUI); the title music could start before
+  the client is attached (an early `SoundPlayer` handed over to
+  `ClassicSoundController`, ~0.3 s) if the live test shows it too late; the
+  background preload still reads FreeCol's own art too (9 of its 15 s of
+  CPU), which a key filter could skip.
+
 ## Seam facts (for the remaining/next work)
 
 **`GUI` methods** (all no-ops in the base class; each Javadoc names its callers):
@@ -1886,17 +2198,24 @@ frontmost with a minimize(6)→restore(9)→`SetForegroundWindow` bounce (a plai
 variable — use another name. **Kill the game process as soon as verification is
 done** (the window stealing foreground interrupts parallel work). A `WM_CLOSE`
 no longer exits the classic UI: it asks first (see "Exits without a title
-bar"). Under `--classic` the first top-level window is the untitled black
-start-up screen, so during the load `MainWindowHandle` can be that window;
-wait for the handle whose title is the main window's before bouncing it.
+bar"). Under `--classic` with the pack, the first top-level window is
+already the titled main window ("FreeCol — Classic UI (experimental)",
+see "Fast start"), shown about a second after launch but unresponsive for the
+next ~3 s while the client is built — wait for the log line
+`Classic start-up: client attached` before driving it. Without the pack (or
+with `--no-splash`) the first window is the old untitled black start-up
+screen, so `MainWindowHandle` can be that window; wait for the handle whose
+title is the main window's before bouncing it.
 
 Hard-won details, each of which silently wastes a run:
 
 - **`--fast` resumes the last save**, so the start state is whatever you left —
   and your test turns get autosaved back. The "starts at sea" start only happens
   on a profile with no saves.
-- **The window takes ~30–55 s.** Poll `MainWindowHandle` for a couple of minutes;
-  a 30 s timeout reports "no window" on a perfectly healthy launch.
+- **The window takes ~1-2 s, the menu ~4 s** since the fast start (it took
+  ~30–55 s before). Without the pack it still takes a few seconds more, and a
+  cold disk cache is unmeasured: keep polling `MainWindowHandle` for a minute
+  rather than giving up after a few seconds.
 - **Drive states that actually produce output.** An idle unit generates no
   notices at all. Populated saves, ending turns, `B` (found colony) and sailing
   a ship east into the high seas (fires the `highseas.text` confirm) do.

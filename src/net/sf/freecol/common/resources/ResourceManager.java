@@ -48,8 +48,17 @@ public class ResourceManager {
 
     private static final Logger logger = Logger.getLogger(ResourceManager.class.getName());
     
-    /** The thread that handles preloading of resources. */
-    private static Thread preloadThread = null;
+    /**
+     * The thread that handles preloading of resources.
+     *
+     * Volatile because {@link #waitForPreloadingToStop} polls it from
+     * another thread while the loader thread clears it without holding the
+     * class lock.  Under the Classic UI the preload runs in the background
+     * after the window is up (see FreeColClient), so a {@link #prepare}
+     * (every --fast start, every load from the title) routinely overlaps a
+     * running preload; without volatile the poll may never see the null.
+     */
+    private static volatile Thread preloadThread = null;
 
     /** Flag to inform the preload thead that all mappings are queued. */
     private static volatile boolean preloadDone = false;
@@ -157,6 +166,10 @@ public class ResourceManager {
                     });
                 }
             };
+        // Background work: never compete with the EDT (the Classic UI shows
+        // and drives its window while this runs; an image missing from the
+        // cache is loaded on demand by ImageResource.getImage).
+        preloadThread.setPriority(Thread.MIN_PRIORITY);
         preloadThread.start();
     }
 

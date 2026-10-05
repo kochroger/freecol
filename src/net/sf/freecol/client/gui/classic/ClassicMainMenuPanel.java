@@ -29,6 +29,9 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -38,7 +41,11 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -74,15 +81,30 @@ import net.sf.freecol.common.resources.ResourceManager;
  * <p>Modes: {@link Mode#PASSIVE} (just the picture: the backdrop while
  * {@code --fast} loads a game, before {@code showMainPanel} makes the menu
  * live), {@link Mode#TITLE}, {@link Mode#LOAD}, {@link Mode#NOTICE},
- * {@link Mode#BUSY} and {@link Mode#QUIT} (the "Colonization beenden?" box
+ * {@link Mode#BUSY}, {@link Mode#QUIT} (the "Colonization beenden?" box
  * that Escape opens on the title -- in borderless full screen there is no
  * window close button, see {@code ClassicGUI.applyFrameMode} -- and that
- * Alt+F4 opens too, see {@link #offerQuit}).  In PASSIVE
- * and BUSY all input is ignored -- that is the double-start guard, as the
- * EDT is free between login and the in-game view.
+ * Alt+F4 opens too, see {@link #offerQuit}), {@link Mode#NEW_WORLD} (the
+ * original's new-game chain -- difficulty, power, name, the nation's two
+ * pages, the audience -- painted by {@link ClassicNewWorldScreens} and
+ * driven by a {@link ClassicNewWorldChain}) and {@link Mode#STARTING} (the
+ * chain's last screen frozen while the engine starts the game).  In
+ * PASSIVE, BUSY and STARTING all input is ignored -- that is the
+ * double-start guard, as the EDT is free between login and the in-game
+ * view.
  *
  * <p>The pointer is the original's own arrow ({@code CURSOR.SS.000}), drawn
  * into the canvas at the canvas scale -- see {@link #paintCursor}.
+ *
+ * <p><b>Fast start.</b>  This panel usually exists before any client does:
+ * {@link ClassicStartupScreen} creates it about a second after launch with
+ * pack-file assets ({@link #useAssets}, {@link MenuAssets#fromPackFiles})
+ * and actions that only queue a choice, and {@code ClassicGUI} later adopts
+ * it and swaps in its real actions ({@link #setActions}).  Everything the
+ * title, the load box and the new-game chain draw therefore comes from
+ * plain pack files, never from the resource manager, which is still being
+ * set up then; {@link #isLive} tells {@code ClassicGUI.showMainPanel} not
+ * to reset a menu the player is already using.
  */
 final class ClassicMainMenuPanel extends JPanel {
 
@@ -90,8 +112,14 @@ final class ClassicMainMenuPanel extends JPanel {
 
     /** What the menu items do; implemented by {@link ClassicGUI}. */
     interface Actions {
-        /** "Ein Spiel in der NEUEN WELT starten". */
-        void newWorld();
+        /**
+         * "Ein Spiel in der NEUEN WELT starten", once the new-game chain
+         * is through.
+         *
+         * @param setupOrNull The player's choices, or null for FreeCol's
+         *     defaults (a pack without the original texts skips the chain).
+         */
+        void newWorld(ClassicGUI.NewWorldSetup setupOrNull);
         /** "Spiel LADEN", after a save was picked. */
         void loadGame(File file);
         /** "Ruhmeshalle besuchen". */
@@ -104,7 +132,7 @@ final class ClassicMainMenuPanel extends JPanel {
     }
 
     /** What the canvas currently shows. */
-    enum Mode { PASSIVE, TITLE, LOAD, NOTICE, BUSY, QUIT }
+    enum Mode { PASSIVE, TITLE, LOAD, NOTICE, BUSY, QUIT, NEW_WORLD, STARTING }
 
     /** The images and font the static painters use; any may be null. */
     static final class MenuAssets {
@@ -137,6 +165,35 @@ final class ClassicMainMenuPanel extends JPanel {
                 image(ClassicMenuBox.GAME.fillKey),
                 ClassicFont.get(ClassicFont.TINY),
                 cursorSprite(image(CURSOR_KEY)));
+        }
+
+        /**
+         * Load straight from the pack's files, without the resource manager
+         * (the early start-up window, {@link ClassicStartupScreen}): the
+         * same title picture, menu fill tiles, FONTTINY atlas and metrics and
+         * arrow that {@link #fromResources} gets, read by
+         * {@link ClassicPackFiles}.  WHY: at the moment the early window
+         * opens, FreeCol has not even begun to register the pack (12-15 s
+         * before the fast start, ~0.6 s after it, and only inside the
+         * client's constructor); these few files take ~0.1-0.2 s.  A
+         * headless render of the title from exactly these files has 0
+         * differing pixels against {@code opening_033} (with the original
+         * version line).
+         *
+         * @param p The pack, or null.
+         * @return The assets, or null when the pack lacks the title picture,
+         *     the title fill tile or the font (the caller then falls back to
+         *     the old start-up).
+         */
+        static MenuAssets fromPackFiles(ClassicPackFiles p) {
+            if (p == null) return null;
+            final BufferedImage title = p.image(TITLE_KEY);
+            final BufferedImage openTile = p.image(ClassicMenuBox.TITLE.fillKey);
+            final ClassicFont font = p.font(ClassicFont.TINY);
+            if (title == null || openTile == null || font == null) return null;
+            return new MenuAssets(title, openTile,
+                p.image(ClassicMenuBox.GAME.fillKey), font,
+                cursorSprite(p.image(CURSOR_KEY)));
         }
 
         private static BufferedImage image(String key) {
@@ -422,9 +479,20 @@ final class ClassicMainMenuPanel extends JPanel {
 
     // Instance state (EDT only)
 
-    private final Actions actions;
+    /**
+     * What the menu items do.  Not final: the early start-up window
+     * ({@link ClassicStartupScreen}) creates this panel before any client
+     * exists, with actions that only queue a choice, and
+     * {@code ClassicGUI} swaps in its real ones when it adopts the window
+     * ({@link #setActions}).  EDT only.
+     */
+    private Actions actions;
 
-    /** Loaded on the first paint, then kept. */
+    /**
+     * Loaded on the first paint, then kept -- or given up front from the
+     * pack files ({@link #useAssets}), so the early window never touches
+     * the resource manager, which is not even set up at that point.
+     */
     private MenuAssets assets;
 
     private Mode mode = Mode.PASSIVE;
@@ -472,6 +540,35 @@ final class ClassicMainMenuPanel extends JPanel {
 
     /** Accumulated precise wheel rotation (touchpads send fractions). */
     private double wheelRest = 0.0;
+
+    /** The new-game chain's art and texts, loaded together. */
+    private static final class ChainData {
+
+        final ClassicNewWorldScreens.Assets assets;
+        final ClassicNewWorldScreens.Texts texts;
+
+        ChainData(ClassicNewWorldScreens.Assets assets,
+                  ClassicNewWorldScreens.Texts texts) {
+            this.assets = assets;
+            this.texts = texts;
+        }
+    }
+
+    /**
+     * The chain's art and texts, read from pack files on a daemon thread as
+     * soon as the title first goes live, so NEUE WELT opens without a pause
+     * (joined in {@link #startChain}).
+     */
+    private FutureTask<ChainData> chainPrefetch = null;
+
+    /** The loaded chain data while the chain is shown, else null. */
+    private ChainData chainData = null;
+
+    /** The running new-game chain (NEW_WORLD, STARTING), else null. */
+    private ClassicNewWorldChain chain = null;
+
+    /** Whether the "chain unavailable" INFO line was logged. */
+    private static boolean chainMissLogged = false;
 
 
     /**
@@ -522,6 +619,36 @@ final class ClassicMainMenuPanel extends JPanel {
                     trackPointer(e);
                 }
             });
+        // The new-game chain reads raw key events (any key advances a page,
+        // typed characters fill the name); see onChainKey.  The listener sees
+        // every press before the menu's key bindings do (JComponent
+        // processKeyEvent), in every mode, so heldKeys also knows about the
+        // Enter on NEUE WELT that opened the chain.
+        addKeyListener(new KeyAdapter() {
+                @Override
+                public void keyPressed(KeyEvent e) {
+                    final boolean repeat = !heldKeys.add(e.getKeyCode());
+                    onChainKey(e, repeat);
+                }
+
+                @Override
+                public void keyReleased(KeyEvent e) {
+                    heldKeys.remove(e.getKeyCode());
+                }
+
+                @Override
+                public void keyTyped(KeyEvent e) {
+                    onChainTyped(e);
+                }
+            });
+        // A release made while another window has the focus never arrives
+        // here: forget everything held rather than block that key for good.
+        addFocusListener(new FocusAdapter() {
+                @Override
+                public void focusLost(FocusEvent e) {
+                    heldKeys.clear();
+                }
+            });
     }
 
 
@@ -556,6 +683,9 @@ final class ClassicMainMenuPanel extends JPanel {
         for (String key : ITEM_KEYS) list.add(Messages.message(key));
         this.items = list;
         this.selected = 0;
+        this.chain = null;
+        this.chainData = null;
+        prefetchChain();
         setMode(Mode.TITLE);
         if (userMsg != null && !userMsg.isEmpty()) {
             showNotice(userMsg, Mode.TITLE);
@@ -627,6 +757,13 @@ final class ClassicMainMenuPanel extends JPanel {
      */
     boolean offerQuit() {
         switch (this.mode) {
+        case NEW_WORLD:
+            // The chain holds no engine state, so dropping it is all the
+            // teardown there is; "Nein" then returns to the title.
+            this.chain = null;
+            this.chainData = null;
+            openQuitBox();
+            return true;
         case TITLE: case LOAD: case NOTICE:
             openQuitBox();
             return true;
@@ -660,6 +797,56 @@ final class ClassicMainMenuPanel extends JPanel {
     private MenuAssets assets() {
         if (this.assets == null) this.assets = MenuAssets.fromResources();
         return this.assets;
+    }
+
+    /**
+     * Use these images and font from now on instead of loading them through
+     * the resource manager on the first paint (the early start-up window,
+     * see {@link MenuAssets#fromPackFiles}).  EDT only.
+     *
+     * @param a The assets; null is ignored.
+     */
+    void useAssets(MenuAssets a) {
+        if (a != null) this.assets = a;
+    }
+
+    /**
+     * Replace what the menu items do (see {@link #actions}).  EDT only.
+     *
+     * @param a The new actions; null is ignored.
+     */
+    void setActions(Actions a) {
+        if (a != null) this.actions = a;
+    }
+
+    /**
+     * Whether the player is using the menu right now: the title, the load
+     * box, a notice, the quit box or the new-game chain.  Not live: the
+     * passive picture and the frozen BUSY / STARTING screens.
+     * {@code ClassicGUI.showMainPanel} leaves a live panel alone instead of
+     * resetting it to the title, so a choice made in the early start-up
+     * window survives the start-up's own call to it.
+     *
+     * @return True in TITLE, LOAD, NOTICE, QUIT and NEW_WORLD.
+     */
+    boolean isLive() {
+        switch (this.mode) {
+        case TITLE: case LOAD: case NOTICE: case QUIT: case NEW_WORLD:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    /**
+     * Whether only the passive title picture is up ({@code --fast}, a save
+     * argument, or a game about to be shown, see
+     * {@code ClassicGUI.closeMainPanel}).
+     *
+     * @return True in PASSIVE.
+     */
+    boolean isPassive() {
+        return this.mode == Mode.PASSIVE;
     }
 
 
@@ -701,6 +888,14 @@ final class ClassicMainMenuPanel extends JPanel {
             case QUIT:
                 paintQuitBox(g, a, quitPrompt(), quitRows(), this.quitSel);
                 break;
+            case NEW_WORLD: case STARTING:
+                if (this.chain != null && this.chainData != null) {
+                    ClassicNewWorldScreens.paint(g, this.chainData.assets,
+                        this.chainData.texts, this.chain.view());
+                } else {
+                    paintBackground(g, a);
+                }
+                break;
             case PASSIVE: default:
                 paintBackground(g, a);
                 break;
@@ -731,7 +926,8 @@ final class ClassicMainMenuPanel extends JPanel {
     private boolean drawsPointer() {
         return this.pointerX >= 0 && this.pointerY >= 0
             && (this.mode == Mode.TITLE || this.mode == Mode.LOAD
-                || this.mode == Mode.NOTICE || this.mode == Mode.QUIT)
+                || this.mode == Mode.NOTICE || this.mode == Mode.QUIT
+                || this.mode == Mode.NEW_WORLD)
             && assets().cursor != null && blankCursor() != null;
     }
 
@@ -819,12 +1015,18 @@ final class ClassicMainMenuPanel extends JPanel {
         bind(im, am, "classic_menuEscape", this::escape, KeyEvent.VK_ESCAPE);
     }
 
-    private static void bind(InputMap im, ActionMap am, String name,
-                             Runnable r, int... keys) {
+    /**
+     * Bind keys to a menu action.  In {@link Mode#NEW_WORLD} the bound
+     * actions do nothing: the chain's key listener ({@link #onChainKey})
+     * handles and consumes those keys, so nothing is handled twice.
+     */
+    private void bind(InputMap im, ActionMap am, String name,
+                      Runnable r, int... keys) {
         for (int k : keys) im.put(KeyStroke.getKeyStroke(k, 0), name);
         am.put(name, new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
+                    if (ClassicMainMenuPanel.this.mode == Mode.NEW_WORLD) return;
                     r.run();
                 }
             });
@@ -917,8 +1119,7 @@ final class ClassicMainMenuPanel extends JPanel {
     private void activate(int item) {
         switch (item) {
         case ITEM_NEW_WORLD:
-            showBusy(Messages.message("classic.mainMenu.starting"));
-            this.actions.newWorld();
+            startChain();
             break;
         case ITEM_AMERICA: case ITEM_CUSTOMIZE:
             showNotice(Messages.message("classic.mainMenu.notYet"), Mode.TITLE);
@@ -932,6 +1133,213 @@ final class ClassicMainMenuPanel extends JPanel {
         default:
             break;
         }
+    }
+
+    // The new-game chain
+
+    /**
+     * Start reading the chain's art and texts in the background, once.
+     * They come from plain pack files ({@link ClassicPackFiles}), not from
+     * the resource manager, so this never waits for or competes with it.
+     */
+    private void prefetchChain() {
+        if (this.chainPrefetch != null) return;
+        this.chainPrefetch = new FutureTask<>(ClassicMainMenuPanel::loadChainData);
+        final Thread t = new Thread(this.chainPrefetch, "classic-newworld-prefetch");
+        t.setDaemon(true);
+        t.setPriority(Thread.MIN_PRIORITY);
+        t.start();
+    }
+
+    /** Load the chain's assets and texts, or null when the pack lacks them. */
+    private static ChainData loadChainData() {
+        final ClassicPackFiles p = ClassicPackFiles.runtime();
+        final ClassicNewWorldScreens.Assets a = ClassicNewWorldScreens.Assets.load(p);
+        final ClassicNewWorldScreens.Texts t = (a == null) ? null
+            : ClassicNewWorldScreens.Texts.load(ClassicText.load(p));
+        return (a == null || t == null) ? null : new ChainData(a, t);
+    }
+
+    /** The prefetched chain data (joined), or null. */
+    private ChainData joinChainData() {
+        prefetchChain();
+        try {
+            return this.chainPrefetch.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (ExecutionException e) {
+            logger.log(Level.WARNING, "Classic new-game screens failed to load", e);
+            return null;
+        }
+    }
+
+    /**
+     * NEUE WELT: open the original's new-game chain on this canvas.  A pack
+     * converted before the chain's material existed has no texts: then the
+     * game starts at once with FreeCol's defaults, as before, and one INFO
+     * line asks for {@code ant classic-assets}.
+     */
+    private void startChain() {
+        final ChainData cd = joinChainData();
+        if (cd == null) {
+            if (!chainMissLogged) {
+                chainMissLogged = true;
+                logger.info("Classic new-game screens unavailable (re-run ant"
+                    + " classic-assets); starting with FreeCol's defaults.");
+            }
+            showBusy(Messages.message("classic.mainMenu.starting"));
+            this.actions.newWorld(null);
+            return;
+        }
+        this.chainData = cd;
+        this.chain = ClassicNewWorldChain.create(cd.texts, cd.assets.intro);
+        setMode(Mode.NEW_WORLD);
+        requestFocusInWindow();
+        repaint();
+    }
+
+    /**
+     * The key codes held down right now (KEY_PRESSED seen, KEY_RELEASED not
+     * yet), EDT only.  Another press of a held key is the keyboard's
+     * auto-repeat; see {@link #onChainKey}.
+     */
+    private final Set<Integer> heldKeys = new HashSet<>();
+
+    /**
+     * Whether the last mouse press in the chain changed its screen; see
+     * {@link #onPress}.  EDT only.
+     */
+    private boolean chainPressChangedScreen = false;
+
+    /** Act on what a chain operation returned. */
+    private void handleChain(ClassicNewWorldChain.Result r) {
+        switch (r) {
+        case REPAINT:
+            repaint();
+            break;
+        case CANCEL:
+            // Back from the first screen: the title, NEUE WELT barred.
+            this.chain = null;
+            this.chainData = null;
+            this.selected = ITEM_NEW_WORLD;
+            setMode(Mode.TITLE);
+            repaint();
+            break;
+        case DONE:
+            // Freeze the audience (no arrow: the EDT now blocks while the
+            // server starts) and hand the choices to the engine.
+            final ClassicGUI.NewWorldSetup setup = this.chain.setup();
+            setMode(Mode.STARTING);
+            paintImmediately(0, 0, getWidth(), getHeight());
+            this.actions.newWorld(setup);
+            break;
+        case STAY: default:
+            break;
+        }
+    }
+
+    /** Whether a key code is a bare modifier or lock key. */
+    private static boolean isModifierKey(int k) {
+        switch (k) {
+        case KeyEvent.VK_SHIFT: case KeyEvent.VK_CONTROL: case KeyEvent.VK_ALT:
+        case KeyEvent.VK_META: case KeyEvent.VK_WINDOWS: case KeyEvent.VK_ALT_GRAPH:
+        case KeyEvent.VK_CAPS_LOCK: case KeyEvent.VK_NUM_LOCK:
+        case KeyEvent.VK_SCROLL_LOCK: case KeyEvent.VK_CONTEXT_MENU:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    /**
+     * A key press in the chain.  Chords with Alt, Ctrl or Meta are left
+     * alone, so Alt+Enter (full screen) and Alt+F4 (quit box) still reach
+     * {@code ClassicGUI.installFrameKeys}; every other press is consumed,
+     * which also keeps the menu's own key bindings out.
+     *
+     * <ul>
+     *   <li>Pickers: Left/Up/keypad 4/8 = previous, Right/Down/keypad 6/2 =
+     *       next in reading order, Home/End = first/last, Enter = confirm.</li>
+     *   <li>Name: Enter = confirm, Backspace = delete (typing arrives via
+     *       {@link #onChainTyped}).</li>
+     *   <li>Pages and audience: any key but a bare modifier advances.</li>
+     *   <li>Everywhere: Escape = one screen back.</li>
+     * </ul>
+     *
+     * <p><b>Auto-repeat never changes the screen.</b>  A held key repeats its
+     * press many times a second, and every screen of the chain is left by a
+     * single press: a held Enter would confirm the difficulty and then
+     * England (each nation screen opens on England) -- the wrong nation for
+     * a family that always plays Holland -- and a held key on the pages
+     * would skip the audience.  So a repeated press ({@code repeat}) only
+     * does what is harmless to repeat: stepping through a picker, and
+     * Backspace on the name.  Enter, Escape and the "any key" of the pages
+     * act once per physical press.
+     *
+     * @param e The event.
+     * @param repeat Whether the key was already held (auto-repeat).
+     */
+    private void onChainKey(KeyEvent e, boolean repeat) {
+        if (this.mode != Mode.NEW_WORLD || this.chain == null) return;
+        if (e.isAltDown() || e.isControlDown() || e.isMetaDown()) return;
+        final int k = e.getKeyCode();
+        if (repeat) {
+            final ClassicNewWorldChain.Step step = this.chain.step();
+            final boolean harmless = (step == ClassicNewWorldChain.Step.NAME)
+                ? k == KeyEvent.VK_BACK_SPACE
+                : !this.chain.advancesOnAnyInput()
+                    && k != KeyEvent.VK_ENTER && k != KeyEvent.VK_ESCAPE;
+            if (!harmless) {
+                e.consume();
+                return;
+            }
+        }
+        final ClassicNewWorldChain.Result r;
+        if (k == KeyEvent.VK_ESCAPE) {
+            r = this.chain.back();
+        } else if (this.chain.advancesOnAnyInput()) {
+            r = isModifierKey(k) ? ClassicNewWorldChain.Result.STAY : this.chain.anyKey();
+        } else if (this.chain.step() == ClassicNewWorldChain.Step.NAME) {
+            r = (k == KeyEvent.VK_ENTER) ? this.chain.confirm()
+                : (k == KeyEvent.VK_BACK_SPACE) ? this.chain.backspace()
+                : ClassicNewWorldChain.Result.STAY;
+        } else {
+            switch (k) {
+            case KeyEvent.VK_LEFT: case KeyEvent.VK_KP_LEFT: case KeyEvent.VK_NUMPAD4:
+            case KeyEvent.VK_UP: case KeyEvent.VK_KP_UP: case KeyEvent.VK_NUMPAD8:
+                r = this.chain.prev();
+                break;
+            case KeyEvent.VK_RIGHT: case KeyEvent.VK_KP_RIGHT: case KeyEvent.VK_NUMPAD6:
+            case KeyEvent.VK_DOWN: case KeyEvent.VK_KP_DOWN: case KeyEvent.VK_NUMPAD2:
+                r = this.chain.next();
+                break;
+            case KeyEvent.VK_HOME: case KeyEvent.VK_NUMPAD7:
+                r = this.chain.first();
+                break;
+            case KeyEvent.VK_END: case KeyEvent.VK_NUMPAD1:
+                r = this.chain.last();
+                break;
+            case KeyEvent.VK_ENTER:
+                r = this.chain.confirm();
+                break;
+            default:
+                r = ClassicNewWorldChain.Result.STAY;
+                break;
+            }
+        }
+        e.consume();
+        handleChain(r);
+    }
+
+    /** A typed character in the chain: only the name screen takes it. */
+    private void onChainTyped(KeyEvent e) {
+        if (this.mode != Mode.NEW_WORLD || this.chain == null
+            || this.chain.step() != ClassicNewWorldChain.Step.NAME) return;
+        final char c = e.getKeyChar();
+        if (c == KeyEvent.CHAR_UNDEFINED) return;
+        e.consume();
+        handleChain(this.chain.typed(c));
     }
 
     private void loadSelected() {
@@ -1004,6 +1412,31 @@ final class ClassicMainMenuPanel extends JPanel {
         requestFocusInWindow();
         final int x = vx(e), y = vy(e);
         switch (this.mode) {
+        case NEW_WORLD:
+            if (this.chain == null) break;
+            // The second press of a double click must not act on the screen
+            // the first one opened: the difficulty card under the pointer
+            // lies inside the England card of the nation screen (which opens
+            // on England), so double-clicking the highlighted card would
+            // confirm England too; on the pages it would skip the audience.
+            // Only a press that changed the screen makes the rest of its
+            // click series inert, so double-clicking a card that is not yet
+            // selected still selects and then confirms it.
+            if (e.getClickCount() > 1 && this.chainPressChangedScreen) break;
+            if (e.getButton() == MouseEvent.BUTTON1
+                || e.getButton() == MouseEvent.BUTTON3) {
+                final ClassicNewWorldChain.Step before = this.chain.step();
+                final ClassicNewWorldChain.Result r
+                    = (e.getButton() == MouseEvent.BUTTON1)
+                    ? this.chain.clickPrimary(x, y)
+                    : this.chain.clickSecondary(x, y);
+                this.chainPressChangedScreen
+                    = r == ClassicNewWorldChain.Result.DONE
+                    || r == ClassicNewWorldChain.Result.CANCEL
+                    || this.chain.step() != before;
+                handleChain(r);
+            }
+            break;
         case TITLE:
             if (e.getButton() == MouseEvent.BUTTON1) {
                 final int i = titleItemAt(x, y);

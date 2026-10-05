@@ -35,6 +35,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -172,6 +173,20 @@ public class FreeColDataFile {
     /**
      * Creates a {@code ResourceMapping} from the available resource files.
      *
+     * Directory listings are cached for the duration of this one call
+     * (see {@link #sortedListing}).  WHY: the size/variation search used
+     * to list, sort and regex-match an image's whole directory twice per
+     * image, recompiling the regex for every entry.  With the 1517 sprite
+     * frames of the Classic UI's {@code classic_original} pack in a single
+     * directory that was ~3000 listings x 1517 regex compiles, 12.6-14.2 s
+     * of the start-up behind a black screen; with the cache it is
+     * ~0.6 s.  A dump of all 3071 image resources (key, locator, size
+     * alternatives, variations) of base + tc + pack was identical before
+     * and after (0 differences), and FreeColDataFileListingTest pins the
+     * semantics.  Zip data files open a fresh FileSystem per lookup, so
+     * across lookups their paths never hit the cache and they keep the
+     * old behaviour.
+     *
      * @return A {@code ResourceMapping} or {@code null}
      *     there is no resource mapping file.
      */
@@ -185,7 +200,15 @@ public class FreeColDataFile {
         }
 
         final ResourceMapping rc = new ResourceMapping();
-        final List<String> virtualResources = handleResources(properties, rc);
+        // One sorted listing per directory for this whole call: the
+        // variation/size search below used to list (and sort, and
+        // regex-match) the image's directory twice PER IMAGE, which is
+        // quadratic in the directory size -- ~13 s for the 1517 frames in
+        // the classic_original pack's ss/ folder.  Local to the call, so
+        // concurrent mappings never share it and a later call sees files
+        // added in between.
+        final Map<Path, List<Path>> listings = new HashMap<>();
+        final List<String> virtualResources = handleResources(properties, rc, listings);
         handleVirtualResources(virtualResources, lb, properties, rc);
         
         if (lb.grew()) lb.log(logger, Level.FINE);
@@ -204,7 +227,8 @@ public class FreeColDataFile {
      *      author wants to reuse graphics that are defined in other FreeCol
      *      data files.
      */
-    private List<String> handleResources(final Properties properties, ResourceMapping rc) {
+    private List<String> handleResources(final Properties properties, ResourceMapping rc,
+                                         Map<Path, List<Path>> listings) {
         final ResourceFactory resourceFactory = new ResourceFactory();
         final List<String> virtualResources = new ArrayList<>();
         final Enumeration<?> pn = properties.propertyNames();
@@ -222,13 +246,14 @@ public class FreeColDataFile {
             if (value.startsWith(resourceScheme)) {
                 virtualResources.add(updatedKey);
             } else {
-                handleNormalResource(resourceFactory, rc, key, value);
+                handleNormalResource(resourceFactory, rc, key, value, listings);
             }
         }
         return virtualResources;
     }
 
-    private void handleNormalResource(ResourceFactory resourceFactory, ResourceMapping rc, final String key, final String value) {
+    private void handleNormalResource(ResourceFactory resourceFactory, ResourceMapping rc, final String key, final String value,
+                                      Map<Path, List<Path>> listings) {
         final URI uri = getURI(value);
         if (uri == null) {
             return;
@@ -251,7 +276,7 @@ public class FreeColDataFile {
         
         if (resource instanceof ImageResource && supportsVariations) {
             final ImageResource imageResource = (ImageResource) resource;
-            extendWithAdditionalSizesAndVariations(resourceFactory, imageResource, value);
+            extendWithAdditionalSizesAndVariations(resourceFactory, imageResource, value, listings);
         }
         
         if (resource != null) {
@@ -321,8 +346,9 @@ public class FreeColDataFile {
         return (key.endsWith(ending)) ? key.substring(0, key.length() - 3) : key;
     }
     
-    private void extendWithAdditionalSizesAndVariations(ResourceFactory resourceFactory, ImageResource imageResource, String value) {
-        Map<URI, List<URI>> variationsWithAlternateSizes = findVariationsWithAlternateSizes(value);
+    private void extendWithAdditionalSizesAndVariations(ResourceFactory resourceFactory, ImageResource imageResource, String value,
+                                                        Map<Path, List<Path>> listings) {
+        Map<URI, List<URI>> variationsWithAlternateSizes = findVariationsWithAlternateSizes(value, listings);
         imageResource.addAlternativeResourceLocators(variationsWithAlternateSizes.get(null));
         
         variationsWithAlternateSizes.entrySet()
@@ -337,7 +363,7 @@ public class FreeColDataFile {
             });
     }
 
-    private Map<URI, List<URI>> findVariationsWithAlternateSizes(String name) {
+    private Map<URI, List<URI>> findVariationsWithAlternateSizes(String name, Map<Path, List<Path>> listings) {
         if (name.indexOf(".") <= 0) {
             return Map.of();
         }
@@ -360,15 +386,15 @@ public class FreeColDataFile {
              */
             final Map<URI, List<URI>> result = new LinkedHashMap<>();
             if (MemoryManager.isHighQualityGraphicsEnabled()) {
-                result.put(null, findFilesWithVariationOrAlternativeSizeAsUri(filePath, false));
+                result.put(null, findFilesWithVariationOrAlternativeSizeAsUri(filePath, false, listings));
             } else {
                 result.put(null, List.of());
             }
             
-            final List<Path> variations = findFilesWithVariationOrAlternativeSize(filePath, true);
+            final List<Path> variations = findFilesWithVariationOrAlternativeSize(filePath, true, listings);
             for (Path variationPath : variations) {
                 if (MemoryManager.isHighQualityGraphicsEnabled()) {
-                    result.put(variationPath.toUri(), findFilesWithVariationOrAlternativeSizeAsUri(variationPath, false));
+                    result.put(variationPath.toUri(), findFilesWithVariationOrAlternativeSizeAsUri(variationPath, false, listings));
                 } else {
                     result.put(variationPath.toUri(), List.of());
                 }
@@ -387,8 +413,9 @@ public class FreeColDataFile {
         }
     }
 
-    private List<URI> findFilesWithVariationOrAlternativeSizeAsUri(final Path filePath, boolean findVariation) throws IOException {
-        return toUris(findFilesWithVariationOrAlternativeSize(filePath, findVariation));
+    private List<URI> findFilesWithVariationOrAlternativeSizeAsUri(final Path filePath, boolean findVariation,
+                                                                   Map<Path, List<Path>> listings) throws IOException {
+        return toUris(findFilesWithVariationOrAlternativeSize(filePath, findVariation, listings));
     }
     
     private List<URI> toUris(List<Path> paths) {
@@ -397,25 +424,56 @@ public class FreeColDataFile {
                 .collect(Collectors.toList());
     }
     
-    private List<Path> findFilesWithVariationOrAlternativeSize(final Path filePath, boolean findVariation) throws IOException {
+    private List<Path> findFilesWithVariationOrAlternativeSize(final Path filePath, boolean findVariation,
+                                                               Map<Path, List<Path>> listings) throws IOException {
         final String variationFileRegex = "[0-9][0-9]?";
         final String sizeFileRegex = "\\.size[0-9][0-9]*";
-        
-        final String regex = (findVariation) ? variationFileRegex : sizeFileRegex;       
+
+        final String regex = (findVariation) ? variationFileRegex : sizeFileRegex;
         final String resourceFilename = filePath.getFileName().toString();
         String prefix = resourceFilename.substring(0, resourceFilename.lastIndexOf("."));
         if (findVariation) {
             prefix = prefix.replaceAll("[0-9]*$", "");
         }
         final String suffix = resourceFilename.substring(resourceFilename.lastIndexOf("."));
-        final String completeRegex = Pattern.quote(prefix) + regex + Pattern.quote(suffix);
-        
-        try (Stream<Path> pathStream = Files.list(filePath.getParent())) {
-            return pathStream
-                    .sorted()
-                    .filter(p -> p.getFileName().toString().matches(completeRegex) && (!findVariation || !p.equals(filePath)))
-                    .collect(Collectors.toList());
+        // Compiled once per lookup; String.matches compiled it once per FILE.
+        final Pattern complete = Pattern.compile(Pattern.quote(prefix) + regex
+            + Pattern.quote(suffix));
+
+        final List<Path> ret = new ArrayList<>();
+        for (Path p : sortedListing(filePath.getParent(), listings)) {
+            final String n = p.getFileName().toString();
+            // startsWith/endsWith reject almost every file before the regex
+            // runs; the regex alone still decides, so the result is unchanged.
+            if (n.startsWith(prefix) && n.endsWith(suffix)
+                && complete.matcher(n).matches()
+                && (!findVariation || !p.equals(filePath))) {
+                ret.add(p);
+            }
         }
+        return ret;
+    }
+
+    /**
+     * The sorted entries of a directory, listed once per
+     * {@link #getResourceMapping} call (see there for why).
+     *
+     * @param dir The directory.
+     * @param listings The per-call listing cache.
+     * @return The entries, sorted exactly as {@code Files.list} plus
+     *     {@code sorted()} returned them before.
+     * @exception IOException if the directory cannot be listed.
+     */
+    private static List<Path> sortedListing(Path dir,
+        Map<Path, List<Path>> listings) throws IOException {
+        List<Path> l = listings.get(dir);
+        if (l == null) {
+            try (Stream<Path> pathStream = Files.list(dir)) {
+                l = pathStream.sorted().collect(Collectors.toList());
+            }
+            listings.put(dir, l);
+        }
+        return l;
     }
 
     /**

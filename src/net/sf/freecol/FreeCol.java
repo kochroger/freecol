@@ -67,6 +67,7 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import net.sf.freecol.client.ClientOptions;
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.gui.SplashScreen;
+import net.sf.freecol.client.gui.classic.ClassicStartupScreen;
 import net.sf.freecol.common.FreeColException;
 import net.sf.freecol.common.FreeColSeed;
 import net.sf.freecol.common.FreeColUserMessageException;
@@ -1652,22 +1653,35 @@ public final class FreeCol {
 
     /**
      * The start-up screen of the classic UI ({@code --classic} without an
-     * explicit {@code --splash}).
+     * explicit {@code --splash}).  Runs on the EDT, before the client is
+     * constructed (see {@link #startClient}).
      *
      * <p>FreeCol's default splash ({@code splash.jpg}: the FreeCol logo and
      * "an open source Colonization game") sat in a box on the Windows desktop
-     * for the whole ~15 s pack load before the borderless full-screen title
+     * for the whole pack load before the borderless full-screen title
      * appeared, which breaks both "clean full screen like DOSBox" and "you do
      * not notice you are in FreeCol".  Instead:
      * <ul>
-     *   <li>full screen (no positive {@code --windowsize}, the same test as
-     *       {@code ClassicGUI.startGUI}): a black borderless window over the
-     *       whole default monitor -- the monitor the main window opens on --
-     *       which {@code FreeColClient} disposes only <em>after</em> the main
-     *       window is up, so the screen goes black at once and stays black
-     *       until the title picture replaces it;</li>
-     *   <li>{@code --no-splash}, or an explicit window size (a developer
-     *       run): nothing.</li>
+     *   <li><b>The main window itself, at once</b> (the fast start,
+     *       {@code ClassicStartupScreen}): with the {@code classic_original}
+     *       pack present, the real main window opens now -- borderless full
+     *       screen, or decorated at an explicit {@code --windowsize} -- with
+     *       the title and the live menu painted from the pack files, about
+     *       a second after launch instead of ~30 s.  For {@code --fast}, a
+     *       debug start or a save argument (which go straight to a game) it
+     *       shows the passive title picture without a menu.
+     *       {@code ClassicGUI.startGUI} adopts this window later, so there
+     *       is no splash at all: null is returned.</li>
+     *   <li>otherwise, in full screen (no positive {@code --windowsize}, the
+     *       same test as {@code ClassicGUI.startGUI}): a black borderless
+     *       window over the whole default monitor -- the monitor the main
+     *       window opens on -- which {@code FreeColClient} disposes only
+     *       <em>after</em> the main window is up, so the screen goes black
+     *       at once and stays black until the title picture replaces
+     *       it;</li>
+     *   <li>{@code --no-splash} (also the developer's way to switch the
+     *       early window off), or an explicit window size without the
+     *       pack: nothing.</li>
      * </ul>
      * The default picture stream opened at start-up is closed unused.
      *
@@ -1679,6 +1693,12 @@ public final class FreeCol {
             splashStream.close();
         } catch (IOException ioe) {} // Unused, nothing to lose
         splashStream = null;
+        if (!headless) {
+            // The same start decision as startClient makes right after this.
+            final boolean menu = !(debugStart || fastStart
+                || FreeColDirectories.getSavegameFile() != null);
+            if (ClassicStartupScreen.show(windowSize, menu)) return null;
+        }
         if (windowSize != null && windowSize.width > 0
             && windowSize.height > 0) return null;
         try {

@@ -271,7 +271,13 @@ public final class FreeColClient {
             : new SoundController(this, sound);
         
         overrideDefaultUncaughtExceptionHandler();
-        
+
+        if (FreeCol.getClassic() && !FreeCol.getHeadless()) {
+            startClassicGui(splashScreen, windowSize, userMsg,
+                            showOpeningVideo, savedGame, spec);
+            return;
+        }
+
         /*
          * Please do NOT move preloading before mods are loaded -- as that
          * might cause some images to be loaded from base and other images
@@ -317,6 +323,59 @@ public final class FreeColClient {
                 startFirstTaskInGui(userMsg, showOpeningVideo, savedGame, spec);
             });
         });
+    }
+
+    /**
+     * Classic UI start: show the GUI at once and preload in the background.
+     *
+     * WHY: the generic path above only starts the GUI from the completion
+     * callback of {@link ResourceManager#startPreloading}, which first
+     * loads all ~2950 resources (12-15 s measured, much more on a cold
+     * disk cache) -- the owner sat in front of a black screen for that.
+     * The preload is an optimisation, not a precondition:
+     * ImageResource.getImage loads a missing image on demand (and
+     * ImageResource.preload is synchronized, so an EDT request during the
+     * background preload loads or waits for at most that one image).  The
+     * Classic UI's title, menu and new-game chain do not even go through
+     * ResourceManager (ClassicPackFiles), so nothing it shows first waits
+     * for the preload.  A later {@code prepare()} (loading a save, --fast)
+     * stops the background preload cleanly via finishPreloading and the
+     * volatile ResourceManager.preloadThread.
+     *
+     * This constructor already runs on the EDT (FreeCol.startClient), so
+     * the calls below are made directly, in the same order as the
+     * callback does them.  ClassicGUI.startGUI adopts the early start-up
+     * window (ClassicStartupScreen) synchronously when there is one; it
+     * otherwise builds its frame in an invokeLater, so the black splash
+     * dispose, queued after it, still runs only once the frame is up and
+     * the desktop never shows in between.
+     *
+     * @param splashScreen The optional black start-up window.
+     * @param windowSize An optional window size.
+     * @param userMsg An optional message key to be displayed early.
+     * @param showOpeningVideo Display the opening video.
+     * @param savedGame An optional saved game.
+     * @param spec An optional specification for an immediate new game.
+     */
+    private void startClassicGui(final SplashScreen splashScreen,
+                                 final Dimension windowSize,
+                                 final String userMsg,
+                                 final boolean showOpeningVideo,
+                                 final File savedGame,
+                                 final Specification spec) {
+        gui.startGUI(windowSize);
+        if (splashScreen != null) {
+            // Hand-over: dispose only after the frame (queued by startGUI)
+            // is visible, see the generic path above.
+            SwingUtilities.invokeLater(() -> {
+                    splashScreen.setVisible(false);
+                    splashScreen.dispose();
+                });
+        }
+        if (this.actionManager != null) updateActions();
+        startFirstTaskInGui(userMsg, showOpeningVideo, savedGame, spec);
+        ResourceManager.startPreloading(() ->
+            logger.info("Classic UI: background preload done."));
     }
 
     private void startFirstTaskInGui(String userMsg, boolean showOpeningVideo, File savedGame,

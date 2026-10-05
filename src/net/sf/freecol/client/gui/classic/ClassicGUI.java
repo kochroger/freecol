@@ -25,12 +25,8 @@ import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.Frame;
-import java.awt.GraphicsConfiguration;
-import java.awt.Insets;
 import java.awt.KeyEventDispatcher;
 import java.awt.KeyboardFocusManager;
-import java.awt.Rectangle;
-import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
@@ -85,7 +81,10 @@ import net.sf.freecol.common.model.HighScore;
 import net.sf.freecol.common.model.IndianNationType;
 import net.sf.freecol.common.model.ModelMessage;
 import net.sf.freecol.common.model.Monarch.MonarchAction;
+import net.sf.freecol.common.model.Game.LogoutReason;
 import net.sf.freecol.common.model.Nation;
+import net.sf.freecol.common.model.NationOptions;
+import net.sf.freecol.common.model.NationOptions.NationState;
 import net.sf.freecol.common.model.NationSummary;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Specification;
@@ -93,6 +92,7 @@ import net.sf.freecol.common.model.StringTemplate;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.resources.ImageCache;
+import net.sf.freecol.server.FreeColServer;
 
 
 /**
@@ -116,32 +116,15 @@ public class ClassicGUI extends GUI {
 
     private static final Logger logger = Logger.getLogger(ClassicGUI.class.getName());
 
-    /**
-     * The main window's title.  Unchanged on purpose: in full screen it is
-     * never seen (only in the taskbar / Alt+Tab), and the live-test harness
-     * finds the window by it (README "Testing live").
-     */
-    private static final String FRAME_TITLE = "FreeCol — Classic UI (experimental)";
-
-    /** The main application window. */
+    /** The main application window ({@code frameState.frame}). */
     private JFrame frame;
 
     /**
-     * Whether {@link #frame} is in borderless full screen (EDT only); see
-     * {@link #applyFrameMode}.  Sub-windows read the mode off the frame's
-     * decoration instead ({@link #isBorderless}).
+     * The main window with its full-screen / windowed state (EDT only), see
+     * {@link ClassicFrame}: created by {@link #startGUI}, or adopted from
+     * the early start-up window ({@link ClassicStartupScreen}).  Null before.
      */
-    private boolean fullScreen;
-
-    /** The explicit {@code --windowsize}, or null when none was given. */
-    private Dimension explicitWindowSize;
-
-    /**
-     * The decorated window's normal bounds when the player last left it for
-     * full screen, or null before that; and whether it was maximised.
-     */
-    private Rectangle windowedBounds;
-    private int windowedState = Frame.NORMAL;
+    private ClassicFrame frameState;
 
     /** The Alt+Enter / Alt+F4 dispatcher, once installed. */
     private KeyEventDispatcher frameKeys;
@@ -237,194 +220,152 @@ public class ClassicGUI extends GUI {
     /**
      * {@inheritDoc}
      *
-     * Create and show the main window on a <b>passive</b> title backdrop: the
-     * original title picture ({@link ClassicMainMenuPanel} in
-     * {@code PASSIVE} mode) with no menu and no input.  Only
-     * {@link #showMainPanel} makes the menu live, so the {@code --fast} path
-     * (which goes straight to a game and never calls it) is unchanged -- it
-     * merely loads over the clean title picture instead of a placeholder.
+     * Show the main window on a <b>passive</b> title backdrop: the original
+     * title picture ({@link ClassicMainMenuPanel} in {@code PASSIVE} mode)
+     * with no menu and no input.  Only {@link #showMainPanel} makes the menu
+     * live, so the {@code --fast} path (which goes straight to a game and
+     * never calls it) is unchanged -- it merely loads over the clean title
+     * picture instead of a placeholder.
      *
-     * <p>Without an explicit {@code --windowsize} the window opens in
-     * <b>borderless full screen</b>, like the original running full screen
-     * in DOSBox (see {@link #applyFrameMode}); with one, it opens as the
-     * decorated window of that size it always was.  Either way Alt+Enter
-     * toggles between the two ({@link #toggleFullScreen}).
+     * <p><b>Fast start: adopting the early window.</b>  Normally the window
+     * already exists: {@link ClassicStartupScreen} opened it about a second
+     * after launch, before this client was even constructed, with the live
+     * title (or, for {@code --fast} and a save argument, the passive
+     * picture) painted straight from the pack files.  It is taken over here
+     * <em>synchronously</em> -- frame, full-screen state, title panel --
+     * because FreeColClient calls this from its constructor, which runs on
+     * the EDT (FreeCol.startClient): the keys and clicks AWT queued while
+     * the constructor blocked the EDT are dispatched only after this task,
+     * so they reach a menu that already has the real actions
+     * ({@link #menuActions}) and Alt+Enter / Alt+F4.  A menu choice made
+     * before that (the early window's actions only queue it, see
+     * {@link ClassicStartupScreen}) is replayed by {@link #showMainPanel},
+     * after the start-up's own call to it, so it is not undone by it.
+     *
+     * <p>Without an early window (no pack, {@code --no-splash}) the window
+     * is created here as before, in an {@code invokeLater}: without an
+     * explicit {@code --windowsize} in <b>borderless full screen</b>, like
+     * the original running full screen in DOSBox (see
+     * {@link ClassicFrame#applyFrameMode}); with one, as the decorated window
+     * of that size it always was.  Either way Alt+Enter toggles between the
+     * two ({@link #toggleFullScreen}).
      */
     @Override
     public void startGUI(final Dimension desiredWindowSize) {
         logger.info("Starting ClassicGUI.");
-        // FreeCol passes Dimension(-1,-1) (WINDOWSIZE_FALLBACK) when no explicit
-        // --windowsize is given, meaning "use the full screen".  A plain
-        // null-check treats that sentinel as a real size and yields a 1x1 window,
-        // so only honour a size with positive dimensions; otherwise go
-        // borderless full screen.
-        final boolean explicitSize = desiredWindowSize != null
-            && desiredWindowSize.width > 0 && desiredWindowSize.height > 0;
-        this.explicitWindowSize = explicitSize
-            ? new Dimension(desiredWindowSize) : null;
+        if (SwingUtilities.isEventDispatchThread()) {
+            final ClassicStartupScreen.Taken early = ClassicStartupScreen.take();
+            if (early != null) {
+                adoptStartupWindow(early);
+                logger.info("ClassicGUI started.");
+                return;
+            }
+        }
         SwingUtilities.invokeLater(() -> {
-            this.frame = new JFrame(FRAME_TITLE);
-            // Never exit on a bare close: Alt+F4 (FrameKeys synthesises it
-            // for the borderless window), the decorated window's X and a
-            // WM_CLOSE all arrive as WINDOW_CLOSING and go through
-            // closeRequested, which asks first -- see there.
-            this.frame.setDefaultCloseOperation(
-                WindowConstants.DO_NOTHING_ON_CLOSE);
+            this.frameState = new ClassicFrame(desiredWindowSize);
+            this.frame = this.frameState.frame;
             this.frame.addWindowListener(new WindowAdapter() {
                 @Override
                 public void windowClosing(WindowEvent e) {
                     closeRequested();
                 }
             });
-            // Black is the letterbox colour of every 320x200 canvas; making
-            // the frame black too means a toggle or resize never flashes the
-            // default grey around them.
-            this.frame.setBackground(Color.BLACK);
-            this.frame.getRootPane().setBackground(Color.BLACK);
             // The original title picture (OPENMENU.PIK, 1:1 in a letterboxed
             // 320x200 canvas), passive until showMainPanel; without the pack a
             // dark ground.  reconnectGUI replaces it with the in-game view.
             mainMenu().showPassive();
             this.frame.setContentPane(this.mainMenuPanel);
             installFrameKeys();
-            if (explicitSize) {
-                // Today's decorated window, unchanged.
-                this.fullScreen = false;
-                this.frame.setSize(this.explicitWindowSize);
-                this.frame.setLocationByPlatform(true);
-                this.frame.setVisible(true);
-            } else {
-                applyFrameMode(true);
-                // Windows hides the taskbar only behind the FOREGROUND window
-                // that covers its monitor.  The frame appears after the long
-                // pack load, so ask for the foreground explicitly instead of
-                // relying on the OS to hand it over.  The black start-up
-                // screen (FreeCol.createSplashScreen) has kept this process in
-                // front since the double click, which is what lets the
-                // request succeed; it is disposed only after this runs
-                // (FreeColClient, the splash hand-over after startGUI).
-                this.frame.toFront();
-                this.frame.requestFocus();
-            }
+            // The black start-up screen has kept this process in front since
+            // the double click (see ClassicFrame.showFirst); it is disposed
+            // only after this runs (FreeColClient, the splash hand-over).
+            this.frameState.showFirst();
             logger.info("ClassicGUI window shown ("
-                + (this.fullScreen ? "borderless full screen" : "windowed")
+                + (this.frameState.isFullScreen() ? "borderless full screen" : "windowed")
                 + ", " + this.frame.getBounds() + ").");
         });
         logger.info("ClassicGUI started.");
+    }
+
+    /**
+     * A menu choice made in the early window before this GUI existed, to
+     * be replayed by the next {@link #showMainPanel} (EDT only); see
+     * {@link #startGUI}.
+     */
+    private Runnable startupReplay = null;
+
+    /**
+     * True from adopting a live early window until the next
+     * {@link #showMainPanel} (EDT only) -- in practice the start-up's own
+     * call to it, {@code FreeColClient.startFirstTaskInGui}.
+     *
+     * <p>WHY: the early window is shown in the same EDT task that queues the
+     * ~3 s client constructor (FreeCol.startClient), so practically every
+     * key or click the player makes "early" is dispatched only <em>after</em>
+     * the constructor, by the real actions installed in
+     * {@link #adoptStartupWindow} -- not by {@code DeferringActions}.  Those
+     * events sit in the queue in front of the start-up task, so typing ahead
+     * (Enter through the new-game chain, Down x3 + Enter + Enter for a save)
+     * has already started the game or the load, and left the panel frozen in
+     * STARTING / BUSY, by the time the start-up calls {@code showMainPanel}.
+     * Its plain "show the title" must then not reset that frozen panel to a
+     * live title: the audience would be replaced by the menu for the seconds
+     * the server needs, and NEUE WELT clicked there would start a second
+     * game while logged in.  See {@link #showMainPanel}.
+     */
+    private boolean startupTitlePending = false;
+
+    /**
+     * Take over the early start-up window (see {@link #startGUI}).  EDT
+     * only, inside FreeColClient's constructor.
+     *
+     * @param early What {@link ClassicStartupScreen#take} handed over.
+     */
+    private void adoptStartupWindow(ClassicStartupScreen.Taken early) {
+        this.frameState = early.frame;
+        this.frame = early.frame.frame;
+        this.mainMenuPanel = early.panel;
+        final ClassicMainMenuPanel.Actions real = menuActions();
+        this.mainMenuPanel.setActions(real);
+        this.frame.removeWindowListener(early.closeListener);
+        this.frame.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                closeRequested();
+            }
+        });
+        installFrameKeys();
+        if (early.queued != null) {
+            this.startupReplay = () -> early.queued.accept(real);
+        }
+        // A menu run (not --fast / a save argument, whose picture is passive):
+        // the start-up's showMainPanel must not undo what the player types
+        // ahead while the constructor still blocks the EDT.
+        this.startupTitlePending = !this.mainMenuPanel.isPassive();
+        logger.info("Classic start-up: client attached after "
+            + ClassicStartupScreen.sinceLaunchMs() + " ms ("
+            + (this.frameState.isFullScreen() ? "borderless full screen" : "windowed")
+            + ", " + this.frame.getBounds()
+            + ((early.queued != null) ? ", replaying an early menu choice" : "")
+            + ").");
     }
 
 
     // Full screen (borderless) and Alt+Enter
 
     /**
-     * Switch the main window between <b>borderless full screen</b>
-     * ({@code full}) and a normal decorated window.  EDT only.
-     *
-     * <p><b>Borderless, not exclusive.</b>  Full screen here is an
-     * undecorated {@code JFrame} whose bounds are the <em>whole</em> bounds of
-     * the monitor it is on ({@code GraphicsConfiguration.getBounds()}, so it
-     * covers the taskbar too; Windows hides the taskbar behind a focused
-     * window that covers its monitor), not
-     * {@code GraphicsDevice.setFullScreenWindow}.  Exclusive mode is the
-     * wrong tool for this UI: the classic screens are separate top-level
-     * windows (colony, Europe, reports) and modal dialogs, and on Windows an
-     * exclusive full-screen window minimises or flickers out of its mode as
-     * soon as another top-level window takes focus, Alt+Tab behaves badly,
-     * and a modal dialog can end up hidden behind it.  A borderless window is
-     * an ordinary window to the OS, so all of those keep working, and on the
-     * owner's 16:10 1920x1200 monitor the 320x200 canvases still scale by a
-     * whole x6 with no black bars at all (they size themselves from the
-     * content pane, which now is the full monitor).  Exclusive mode would
-     * not even change the resolution usefully: the canvases are drawn at an
-     * integer scale already.
-     *
-     * <p><b>Why dispose.</b>  {@code Frame.setUndecorated} may only be called
-     * while the frame is not displayable, so a switch disposes the frame
-     * (destroying only the native window), flips the decoration, and shows
-     * it again.  The Swing component tree survives a dispose intact -- the
-     * content pane, the {@code JMenuBar}, and every component's key bindings
-     * (they live in the components' {@code InputMap}s, not in the native
-     * window) -- and the frame object stays the same, so every reference to
-     * {@code this.frame} (dialog owners, {@code setContentPane} in
-     * {@link #reconnectGUI}) stays valid.  Only keyboard focus is lost, which
-     * {@link #toggleFullScreen} restores.  {@code dispose} does not post
-     * {@code WINDOW_CLOSING}, so {@link #closeRequested} is not triggered.
-     *
-     * <p>The decorated window gets back the bounds (and maximised state) it
-     * had when the player last left it; the first time it is the largest
-     * whole multiple of 320x200 that fits the monitor's work area (x5 =
-     * 1600x1000 on the owner's screen), centred, or the explicit
-     * {@code --windowsize}.
+     * Switch the main window between borderless full screen and a decorated
+     * window; see {@link ClassicFrame#applyFrameMode} for how and why.
      *
      * @param full True for borderless full screen, false for a window.
      */
     private void applyFrameMode(boolean full) {
-        final JFrame f = this.frame;
-        if (f == null) return;
-        // The monitor the frame is on now (the default screen before the
-        // first show), so the switch stays on the same monitor.
-        final GraphicsConfiguration gc = f.getGraphicsConfiguration();
-        if (f.isDisplayable()) {
-            if (!this.fullScreen) {
-                // Remember the window to come back to.  While maximised,
-                // getBounds() is the maximised size: keep the earlier normal
-                // bounds and just remember the state.
-                this.windowedState = f.getExtendedState() & Frame.MAXIMIZED_BOTH;
-                if (this.windowedState == Frame.NORMAL) {
-                    this.windowedBounds = f.getBounds();
-                }
-            }
-            f.dispose();
-        }
-        this.fullScreen = full;
-        f.setUndecorated(full);
-        // A maximised frame is clipped to the work area by Windows (the
-        // taskbar stays visible): full screen must start from NORMAL.
-        f.setExtendedState(Frame.NORMAL);
-        if (full) {
-            f.setBounds(gc.getBounds());
-        } else {
-            // Create the native peer without showing it, so getInsets()
-            // knows the title bar and border sizes before we size the frame.
-            f.addNotify();
-            f.setBounds((this.windowedBounds != null) ? this.windowedBounds
-                : defaultWindowedBounds(gc, f.getInsets()));
-        }
-        f.setVisible(true);
-        if (!full && this.windowedState != Frame.NORMAL) {
-            f.setExtendedState(this.windowedState);
-        }
+        if (this.frameState != null) this.frameState.applyFrameMode(full);
     }
 
-    /**
-     * The decorated window's first bounds: the explicit {@code --windowsize}
-     * if there was one, else the largest whole multiple of the 320x200
-     * canvas (plus the frame's insets) that fits the monitor's work area --
-     * so even windowed the canvas has no letterbox on the title screen --
-     * centred in that work area.
-     */
-    private Rectangle defaultWindowedBounds(GraphicsConfiguration gc,
-                                            Insets in) {
-        final Rectangle screen = gc.getBounds();
-        final Insets taskbar = Toolkit.getDefaultToolkit().getScreenInsets(gc);
-        final Rectangle work = new Rectangle(screen.x + taskbar.left,
-            screen.y + taskbar.top,
-            screen.width - taskbar.left - taskbar.right,
-            screen.height - taskbar.top - taskbar.bottom);
-        final int w, h;
-        if (this.explicitWindowSize != null) {
-            w = this.explicitWindowSize.width;
-            h = this.explicitWindowSize.height;
-        } else {
-            final int availW = work.width - in.left - in.right;
-            final int availH = work.height - in.top - in.bottom;
-            final int s = Math.max(1, Math.min(availW / ClassicMainMenuPanel.VW,
-                                               availH / ClassicMainMenuPanel.VH));
-            w = ClassicMainMenuPanel.VW * s + in.left + in.right;
-            h = ClassicMainMenuPanel.VH * s + in.top + in.bottom;
-        }
-        return new Rectangle(work.x + Math.max(0, (work.width - w) / 2),
-                             work.y + Math.max(0, (work.height - h) / 2), w, h);
+    /** Whether the main window is in borderless full screen now. */
+    private boolean isFullScreen() {
+        return this.frameState != null && this.frameState.isFullScreen();
     }
 
     /**
@@ -460,7 +401,7 @@ public class ClassicGUI extends GUI {
             .getCurrentKeyboardFocusManager().getActiveWindow();
         final Component focus = (active == null) ? null
             : active.getMostRecentFocusOwner();
-        applyFrameMode(!this.fullScreen);
+        applyFrameMode(!isFullScreen());
         reframeChild(this.colonyFrame, this.frame);
         reframeChild(this.europeFrame, this.frame);
         reframeChild(this.reportFrame, this.frame);
@@ -479,7 +420,7 @@ public class ClassicGUI extends GUI {
             want.requestFocusInWindow();
             SwingUtilities.invokeLater(want::requestFocusInWindow);
         }
-        logger.info("ClassicGUI: " + (this.fullScreen
+        logger.info("ClassicGUI: " + (isFullScreen()
                 ? "borderless full screen" : "windowed")
             + " (" + this.frame.getBounds() + ").");
     }
@@ -621,7 +562,7 @@ public class ClassicGUI extends GUI {
                 if (w == s && s.isShowing()) return s;
             }
             if (w == this.frame) {
-                if (!this.fullScreen) return this.frame;
+                if (!isFullScreen()) return this.frame;
                 break;
             }
         }
@@ -796,7 +737,7 @@ public class ClassicGUI extends GUI {
      */
     @Override
     public boolean isWindowed() {
-        return !this.fullScreen;
+        return !isFullScreen();
     }
 
     /**
@@ -816,9 +757,16 @@ public class ClassicGUI extends GUI {
 
     /**
      * What the original's new-game screens collect before a game in the New
-     * World starts: the difficulty ({@code opening_034}), the European power
-     * ({@code 035}) and the leader's name ({@code 036}).  Null fields mean
-     * "FreeCol's default".
+     * World starts: the difficulty ({@code opening_056..060}), the European
+     * power ({@code 061..064}) and the leader's name ({@code 065}).  Null
+     * fields mean "FreeCol's default".
+     *
+     * <p>The chain ({@link ClassicNewWorldChain#setup}) fills it from two
+     * index tables in the original's order, both in
+     * {@link ClassicNewWorldScreens}: {@code DIFFICULTY_IDS} (the easiest ..
+     * the hardest = {@code model.difficulty.veryEasy .. veryHard}) and
+     * {@code NATION_IDS} (England, France, Spain, Holland =
+     * {@code model.nation.english, french, spanish, dutch}).
      */
     static final class NewWorldSetup {
 
@@ -853,8 +801,8 @@ public class ClassicGUI extends GUI {
     private ClassicMainMenuPanel.Actions menuActions() {
         return new ClassicMainMenuPanel.Actions() {
             @Override
-            public void newWorld() {
-                beginNewWorldSetup();
+            public void newWorld(NewWorldSetup setup) {
+                beginNewWorldSetup((setup == null) ? NewWorldSetup.defaults() : setup);
             }
 
             @Override
@@ -883,14 +831,18 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * THE SEAM for the original's new-game screens.  The difficulty
-     * ({@code opening_034}), nation ({@code 035}) and name ({@code 036})
-     * screens chain in here, painted on the same title canvas, and finish by
-     * calling {@link #startNewWorldGame} with what the player chose.  Until
-     * they exist, the game starts at once with FreeCol's defaults.
+     * THE SEAM between the original's new-game screens and the engine.  The
+     * difficulty, nation, name, nation-page and audience screens run purely
+     * on the title canvas ({@link ClassicMainMenuPanel} mode NEW_WORLD, no
+     * engine state, so going back needs no teardown); when the audience is
+     * dismissed the panel freezes it and lands here with all three choices.
+     * A pack without the original texts skips the chain and arrives with
+     * {@link NewWorldSetup#defaults}.
+     *
+     * @param setup The player's choices.
      */
-    void beginNewWorldSetup() {
-        startNewWorldGame(NewWorldSetup.defaults());
+    void beginNewWorldSetup(NewWorldSetup setup) {
+        startNewWorldGame(setup);
     }
 
     /**
@@ -910,20 +862,55 @@ public class ClassicGUI extends GUI {
      * FreeCol's own {@code NewPanel} guards the same calls the same way
      * (NewPanel.java:613-615).
      *
+     * <p>Where each choice enters the engine (the order is forced by it):
+     * <ol>
+     *   <li>Difficulty -- now, into the fresh Specification
+     *       ({@code FreeCol.loadSpecification} -> {@code Specification.prepare},
+     *       Specification.java:645-669); the server plays on this very object
+     *       (FreeColServer.java:318-329) and the save records it.  An unknown
+     *       id would silently apply nothing, hence the check below.</li>
+     *   <li>Name -- now, before login: the one static {@code FreeCol.setName}
+     *       becomes the login name (ConnectController.java:351), the player's
+     *       name (LoginMessage.java:233) and the save's owner
+     *       (FreeColServer.java:908-909).  There is no pre-game rename.</li>
+     *   <li>Nation -- after login, in {@link #showStartGamePanel}: the server
+     *       ignores the nation at login (LoginMessage.java:214).</li>
+     * </ol>
+     * {@code FreeCol.setDifficulty}, {@code setAdvantages} and
+     * {@code setEuropeanCount} are never called, so {@code --fast} keeps its
+     * defaults.
+     *
      * @param setup The player's choices.
      */
     void startNewWorldGame(final NewWorldSetup setup) {
         SwingUtilities.invokeLater(() -> {
             try {
                 // A fresh Specification per call (FreeCol.java:981-994).
-                final Specification spec = FreeCol.loadSpecification(
+                Specification spec = FreeCol.loadSpecification(
                     FreeCol.getRulesFile(), FreeCol.getAdvantages(),
                     setup.difficultyId);
+                if (spec != null && setup.difficultyId != null
+                    && !setup.difficultyId.equals(spec.getDifficultyLevel())) {
+                    logger.warning("ClassicGUI: difficulty " + setup.difficultyId
+                        + " not applied (got " + spec.getDifficultyLevel()
+                        + "); falling back to " + FreeCol.getDifficulty());
+                    spec = FreeCol.loadSpecification(FreeCol.getRulesFile(),
+                        FreeCol.getAdvantages(), FreeCol.getDifficulty());
+                }
                 if (spec == null) {
                     showMainPanel(Messages.message("classic.mainMenu.startFailed"));
                     return;
                 }
-                if (setup.playerName != null) FreeCol.setName(setup.playerName);
+                if (setup.playerName != null) {
+                    final String name = setup.playerName.trim();
+                    if (!isFreePlayerName(spec, name)) {
+                        logger.info("ClassicGUI: refused player name " + name);
+                        this.pendingNationId = null;
+                        showMainPanel(Messages.message("classic.newWorld.nameTaken"));
+                        return;
+                    }
+                    FreeCol.setName(name);
+                }
                 this.pendingNationId = setup.nationId;
                 if (!getFreeColClient().getConnectController()
                         .startSinglePlayerGame(spec)) {
@@ -941,6 +928,26 @@ public class ClassicGUI extends GUI {
     }
 
     /**
+     * Whether a typed leader name may be used.  Refused: an empty name (the
+     * server rejects it), {@code mapEditor} (refused when a save is loaded)
+     * and any ruler name of the rules -- those are the AI players' names
+     * (ServerPlayer.java:239), and two players with one name break
+     * {@code Game.getPlayerByName} (an exact {@code equals}, first match)
+     * and with it loading the save.
+     *
+     * @param spec The game's rules.
+     * @param name The trimmed name.
+     * @return True if the name is free.
+     */
+    static boolean isFreePlayerName(Specification spec, String name) {
+        if (name == null || name.isEmpty() || "mapEditor".equals(name)) return false;
+        for (Nation n : spec.getNations()) {
+            if (name.equals(Messages.message(n.getRulerNameKey()))) return false;
+        }
+        return true;
+    }
+
+    /**
      * Load a save picked in the title screen's load box.  Runs on the EDT
      * like every FreeCol caller of {@code startSavedGame}
      * (FreeColClient.java:324-337); on failure the engine has already shown
@@ -952,6 +959,8 @@ public class ClassicGUI extends GUI {
      * @param file The save to load.
      */
     void loadSavedGame(final File file) {
+        // A hand-off left by a failed new-game start must never apply here.
+        this.pendingNationId = null;
         SwingUtilities.invokeLater(() -> {
             try {
                 if (!getFreeColClient().getConnectController()
@@ -1007,6 +1016,31 @@ public class ClassicGUI extends GUI {
      * straight to the in-game playlist.  Idempotent: re-showing the title
      * does not restart the piece (see {@link ClassicSoundController}).
      *
+     * <p><b>A menu that is already live is left alone</b> when there is no
+     * notice to show.  With the fast start the title is live in the early
+     * window ({@link ClassicStartupScreen}) seconds before the start-up
+     * reaches this call, and the player may already have moved the bar,
+     * opened the load box or be half-way through the new-game chain;
+     * {@code showTitle} resets the mode and the selection
+     * (ClassicMainMenuPanel.showTitle) and would throw that away.  Only the
+     * live modes are spared ({@link ClassicMainMenuPanel#isLive}): a panel
+     * that is PASSIVE (a game was shown), BUSY or STARTING (a failed load or
+     * start) is still reset to the title, as is any panel that is not the
+     * content pane.  A menu choice the early window queued before this GUI
+     * existed is replayed here, after the title is in place (see
+     * {@link #startGUI}); its BUSY/STARTING screen is left as it is.
+     *
+     * <p><b>The start-up's own call after typing ahead.</b>  Nearly all early
+     * input is dispatched after the client is attached, by the real actions,
+     * yet still before the start-up task that makes this call (see
+     * {@link #startupTitlePending}).  So the first call after adopting a live
+     * early window finds the game start or load the player already chose in
+     * flight -- the panel frozen in STARTING / BUSY (or PASSIVE, or the game
+     * view already up).  That call, without a notice, changes nothing: no
+     * title reset, no teardown; only the title piece starts if no music has
+     * been chosen yet ({@link #playTitleMusicIfSilent}).  Every later call
+     * (a failed start or load, the way back from a game) behaves as above.
+     *
      * @param userMsg An optional notice shown over the menu.
      * @return {@code null} (the classic UI hosts its own panels).
      */
@@ -1014,9 +1048,32 @@ public class ClassicGUI extends GUI {
     public FreeColPanel showMainPanel(final String userMsg) {
         SwingUtilities.invokeLater(() -> {
             if (this.frame == null) return;
+            final Runnable replay = this.startupReplay;
+            this.startupReplay = null;
+            final boolean startupCall = this.startupTitlePending;
+            this.startupTitlePending = false;
+            if (startupCall && userMsg == null && replay == null
+                && this.mainMenuPanel != null
+                && (this.frame.getContentPane() != this.mainMenuPanel
+                    || !this.mainMenuPanel.isLive())) {
+                // Typed ahead: a start or load is already under way (see
+                // startupTitlePending).  Leave its frozen screen -- or the
+                // game view, should it already be up -- exactly as it is.
+                logger.info("Classic start-up: an early menu choice is already"
+                    + " running; the start-up title is skipped.");
+                if (this.frame.getContentPane() == this.mainMenuPanel) {
+                    playTitleMusicIfSilent();
+                    this.mainMenuPanel.requestFocusInWindow();
+                }
+                updateActions();
+                return;
+            }
             playTitleMusic();
             teardownInGame();
-            mainMenu().showTitle(userMsg);
+            final boolean keep = userMsg == null && this.mainMenuPanel != null
+                && this.frame.getContentPane() == this.mainMenuPanel
+                && (replay != null || this.mainMenuPanel.isLive());
+            if (!keep) mainMenu().showTitle(userMsg);
             if (this.frame.getContentPane() != this.mainMenuPanel) {
                 this.frame.setContentPane(this.mainMenuPanel);
             }
@@ -1024,6 +1081,10 @@ public class ClassicGUI extends GUI {
             this.frame.repaint();
             this.mainMenuPanel.requestFocusInWindow();
             updateActions();
+            if (replay != null) {
+                logger.info("Classic start-up: replaying the early menu choice.");
+                replay.run();
+            }
         });
         return null;
     }
@@ -1049,6 +1110,21 @@ public class ClassicGUI extends GUI {
     private void playTitleMusic() {
         final SoundController sc = getFreeColClient().getSoundController();
         if (sc instanceof ClassicSoundController) {
+            ((ClassicSoundController)sc).playTitleMusic();
+        }
+    }
+
+    /**
+     * The title piece, but only while no music has been chosen yet: the
+     * start-up's skipped title ({@link #showMainPanel}) must not switch a
+     * game that has already reached {@code startGameInternal} (the nation
+     * intro, which selects the in-game playlist) back to the title piece.
+     */
+    private void playTitleMusicIfSilent() {
+        final SoundController sc = getFreeColClient().getSoundController();
+        if (sc instanceof ClassicSoundController
+            && ((ClassicSoundController)sc).getMode()
+                == ClassicSoundController.Mode.SILENT) {
             ((ClassicSoundController)sc).playTitleMusic();
         }
     }
@@ -1157,27 +1233,136 @@ public class ClassicGUI extends GUI {
                 + "(no lobby panel in Phase 0).");
             // A nation picked on the title screens (NewWorldSetup) replaces the
             // one the server assigned at login (always the first free one).
-            // Without a pick (--fast, today's defaults) nothing changes.
+            // Without a pick (--fast, defaults) nothing changes.
             final String nid = this.pendingNationId;
             this.pendingNationId = null;
-            if (nid != null && !nid.equals(player.getNationId()) && game != null) {
+            if (nid != null) {
+                boolean ok;
                 try {
-                    final Nation n = game.getSpecification().getNation(nid);
-                    if (n != null) {
-                        final PreGameController pgc
-                            = getFreeColClient().getPreGameController();
-                        pgc.setNation(n);
-                        pgc.setNationType(n.getType());
-                    }
+                    ok = game != null && applyNewWorldNation(game, player, nid);
                 } catch (RuntimeException e) {
                     logger.log(Level.WARNING, "ClassicGUI: cannot select nation "
                         + nid, e);
+                    ok = false;
+                }
+                if (!ok) {
+                    abortNewWorldStart("classic.newWorld.nationFailed");
+                    return null;
                 }
             }
             player.setReady(true);
             getFreeColClient().getPreGameController().requestLaunch();
         }
         return null;
+    }
+
+    /**
+     * Make the logged-in human the chosen original power, with exactly the
+     * other three originals as AI rivals, and verify it on the server.
+     *
+     * <p>Why after login: pre-game login ignores the requested nation and
+     * takes the first AVAILABLE one in HashMap order (LoginMessage.java:214,
+     * NationOptions.java:112).  That is Holland only because Portugal and
+     * Sweden are NOT_AVAILABLE with the default four Europeans, so the usual
+     * Dutch game skips the switch.  Otherwise, in this order:
+     * <ol>
+     *   <li>the target nation is made AVAILABLE if it is not (covers
+     *       {@code --europeans} below 4) -- the server only lets a player
+     *       take an AVAILABLE nation (SetNationMessage.java:116-123);</li>
+     *   <li>{@code setNation} and THEN {@code setNationType}: under FIXED
+     *       advantages the server checks the type against the player's
+     *       current nation (SetNationTypeMessage.java:100-118);</li>
+     *   <li>the line-up: the other original powers become AVAILABLE again if
+     *       they were not, every other European without a player becomes
+     *       NOT_AVAILABLE, so {@code buildGame} (FreeColServer.java:1199-1208)
+     *       makes exactly the other three originals AI whatever
+     *       {@code --europeans} says;</li>
+     *   <li>verification on the in-process server: a server rejection only
+     *       shows an error dialog while the ask still returns true, so the
+     *       server game must show the human (by name) on the nation.</li>
+     * </ol>
+     * The asks are nested synchronous requests on the EDT inside
+     * {@code startSinglePlayerGame}'s login, which the connection allows
+     * (Connection.java:436-441, 558-569).
+     *
+     * @return True if the human now plays {@code nid}.
+     */
+    private boolean applyNewWorldNation(Game game, Player player, String nid) {
+        final Specification spec = game.getSpecification();
+        final Nation n = spec.getNation(nid);
+        if (n == null) {
+            logger.warning("ClassicGUI: unknown nation " + nid);
+            return false;
+        }
+        final NationOptions options = game.getNationOptions();
+        final PreGameController pgc = getFreeColClient().getPreGameController();
+        if (!nid.equals(player.getNationId())) {
+            if (options.getNationState(n) != NationState.AVAILABLE) {
+                pgc.setAvailable(n, NationState.AVAILABLE);
+            }
+            pgc.setNation(n);
+            pgc.setNationType(n.getType());
+        }
+        final List<String> originals
+            = java.util.Arrays.asList(ClassicNewWorldScreens.NATION_IDS);
+        for (String id : originals) {
+            if (id.equals(nid)) continue;
+            final Nation o = spec.getNation(id);
+            if (o != null && options.getNationState(o) == NationState.NOT_AVAILABLE
+                && game.getPlayerByNationId(id) == null) {
+                pgc.setAvailable(o, NationState.AVAILABLE);
+            }
+        }
+        for (Nation e : spec.getEuropeanNations()) {
+            if (originals.contains(e.getId())) continue;
+            final NationState st = options.getNationState(e);
+            if (st != null && st != NationState.NOT_AVAILABLE
+                && game.getPlayerByNationId(e.getId()) == null) {
+                pgc.setAvailable(e, NationState.NOT_AVAILABLE);
+            }
+        }
+        final FreeColServer server = getFreeColClient().getFreeColServer();
+        if (server != null && server.getGame() != null) {
+            final Player p = server.getGame().getPlayerByNationId(nid);
+            final boolean ok = p != null && FreeCol.getName().equals(p.getName());
+            if (!ok) {
+                logger.warning("ClassicGUI: server did not assign " + nid
+                    + " to " + FreeCol.getName() + " (has " + p + ")");
+            }
+            return ok;
+        }
+        return nid.equals(player.getNationId());
+    }
+
+    /**
+     * Give up a new-game start that got as far as login: back to the title
+     * with a notice, log out and stop the in-process server.  Mirrors
+     * {@code ConnectController.mainTitle} (ConnectController.java:547-566)
+     * without its "really stop?" question, as no game has started.  The
+     * game must never launch silently as the wrong power.
+     *
+     * <p>Deferred with {@code invokeLater}: this is called from inside the
+     * login reply ({@code startSinglePlayerGame} -> login ask ->
+     * {@link #showStartGamePanel}), and tearing the connection down while
+     * that call stack is still on it would turn a clean abort into a
+     * "could not log in" error on top.
+     *
+     * @param messageKey The notice's message key.
+     */
+    private void abortNewWorldStart(final String messageKey) {
+        SwingUtilities.invokeLater(() -> {
+            final FreeColClient fcc = getFreeColClient();
+            showMainPanel(Messages.message(messageKey));
+            try {
+                if (fcc.isLoggedIn()) {
+                    fcc.getConnectController().requestLogout(LogoutReason.MAIN_TITLE);
+                } else {
+                    fcc.logout(false);
+                }
+            } finally {
+                fcc.stopServer();
+            }
+        });
     }
 
     // In-game map

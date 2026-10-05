@@ -79,6 +79,44 @@ public final class SsDecoder {
         return frames;
     }
 
+    /**
+     * The per-frame screen anchors that {@link #decode} drops: bytes 8-11
+     * of each 16-byte sprite header hold the position of the sprite's
+     * <em>bottom-centre</em> on the original 320x200 screen, as two
+     * little-endian 16-bit values (read signed, so a sprite hanging off the
+     * left or top edge would come out negative).
+     *
+     * <p>Why export them: the original composes its scenes from a backdrop
+     * {@code .PIK} plus sprites that each know where they stand, so the
+     * classic UI needs these numbers to put e.g. the king and the nation
+     * banner of the audience screen exactly where the game does -- rather
+     * than hard-coding positions measured from captures.  The top-left of a
+     * frame of size {@code w x h} is {@code (ax - w/2, ay - h + 1)}
+     * (integer division).  Verified on the audience captures
+     * {@code opening_068}/{@code 039}: KING1 frame 0 has (ax,ay,w,h) =
+     * (94,198,189,187), i.e. top-left (0,12); DUTCH1 gives (34,0), ENGLND1
+     * (32,0); FRANCE1 (30,0) and SPAIN1 (35,0) follow from the same rule
+     * (no capture shows them).
+     *
+     * @param file The whole {@code .SS} file contents.
+     * @return One {@code {ax, ay, w, h}} per frame, in file order.
+     */
+    public static List<int[]> anchors(byte[] file) {
+        List<byte[]> parts = MadsPack.read(file);
+        int nsprites = Bytes.u16(parts.get(0), NSPRITES_OFFSET);
+        byte[] spriteHeaders = parts.get(1);
+        List<int[]> out = new ArrayList<>(nsprites);
+        for (int i = 0; i < nsprites; i++) {
+            int base = i * SPRITE_HEADER_SIZE;
+            out.add(new int[] {
+                (short) Bytes.u16(spriteHeaders, base + 8),
+                (short) Bytes.u16(spriteHeaders, base + 10),
+                Bytes.u16(spriteHeaders, base + 12),
+                Bytes.u16(spriteHeaders, base + 14) });
+        }
+        return out;
+    }
+
     private static BufferedImage decodeSprite(byte[] pixels, int startOffset,
             int length, int width, int height, Palette pal, int mode) {
         byte[] data = (mode == 0)
