@@ -127,9 +127,12 @@ final class ClassicHud {
      * The nations' fill colours in the original order (England, France,
      * Spain, Holland); -1 = not measured, use FreeCol's nation colour.
      * Measured: England {@code 0xFF0000} (049/052 flags), Holland
-     * {@code 0xFF7100} (083/032).
+     * {@code 0xFF7100} (083/032), France {@code 0x5555FF} and Spain
+     * {@code 0xFFFF55} (palette indices 9 and 14, the turn indicator of
+     * the landfall clip; they match NAMES.TXT {@code @COUNTRY}).
      */
-    private static final int[] NATION_FILL = { 0xFF0000, -1, -1, 0xFF7100 };
+    private static final int[] NATION_FILL
+        = { 0xFF0000, 0x5555FF, 0xFFFF55, 0xFF7100 };
 
 
     /**
@@ -992,8 +995,8 @@ final class ClassicHud {
     // From the game
 
     /**
-     * A nation's colour on the minimap: the measured fill for England and
-     * Holland, else FreeCol's nation colour.
+     * A nation's colour on the minimap: the measured fill for the four
+     * European nations of the original, else FreeCol's nation colour.
      */
     static int nationRgb(Player p) {
         if (p == null) return 0xFFFFFF;

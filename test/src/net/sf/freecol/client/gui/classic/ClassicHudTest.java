@@ -29,6 +29,10 @@ import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
 
+import net.sf.freecol.common.model.Game;
+import net.sf.freecol.common.model.Player;
+import net.sf.freecol.util.test.FreeColTestCase;
+
 import junit.framework.TestCase;
 
 
@@ -326,6 +330,23 @@ public class ClassicHudTest extends TestCase {
         assertEquals(ClassicHud.QUAL_EXPERT, ClassicHud.qualifier("hardyPioneer", "pioneer"));
         assertEquals(ClassicHud.QUAL_NONE, ClassicHud.qualifier("freeColonist", "pioneer"));
         assertEquals(ClassicHud.QUAL_NONE, ClassicHud.qualifier("veteranSoldier", null));
+    }
+
+    /**
+     * The four European nations fill with the original's colours (build
+     * spec W0d): England and Holland from 049/052/083/032, France and
+     * Spain from the landfall clip's turn indicator.
+     */
+    public void testNationFill() {
+        final Game game = FreeColTestCase.getStandardGame();
+        final int[] fill = { 0xFF0000, 0x5555FF, 0xFFFF55, 0xFF7100 };
+        for (int i = 0; i < fill.length; i++) {
+            final String id = ClassicNewWorldScreens.NATION_IDS[i];
+            final Player player = game.getPlayerByNationId(id);
+            assertNotNull(id, player);
+            assertEquals(id, fill[i], ClassicHud.nationRgb(player));
+        }
+        assertEquals(0xFFFFFF, ClassicHud.nationRgb(null));
     }
 
     /** The HUD canvas at 1920x1080: scale 5, strip/map/panel on one grid. */

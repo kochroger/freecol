@@ -71,12 +71,17 @@ import java.util.Map;
  * fixed offset from the box that depends on the advisor -- MSS0 (admiral)
  * at box + (-4, -71); MSS2 (trade advisor, Europe 011/013) at box + (57,
  * -78), centred over its box.  The UNION of portrait and box is centred on
- * the 320x200 screen: {@code x = (320 - w) / 2}, {@code y = (200 - h + 1) /
- * 2}.  For MSS0 that is a 240x119 union at (40,41): portrait (40,41), box
- * (44,112,236,48).  The portraits' SS header anchors are degenerate (1,1),
- * so the anchor cannot place them.  TUTORIAL1's {@code @x=10} and
- * {@code @y=40} are NOT used: they are neither the text position (49,121),
- * the box (44,112) nor the portrait (40,41), and their meaning is unknown.
+ * the 320x200 screen: {@code x = (320 - w + 1) / 2}, {@code y = (200 - h +
+ * 1) / 2}, the original's {@code (321 - w) div 2} and {@code (201 - h) div
+ * 2}.  The union's height runs from the top of box or portrait to the box
+ * BOTTOM: a portrait part below the box does not count (the soldier MSS1,
+ * 139 tall at -77, below the 40-high box of {@code @WHACKINDIANS}: box
+ * (34,119), not (34,108)).  For MSS0 that is a 240x119 union at (40,41):
+ * portrait (40,41), box (44,112,236,48).  The portraits' SS header anchors are
+ * degenerate (1,1), so the anchor cannot place them.  TUTORIAL1's
+ * {@code @x=10} and {@code @y=40} are NOT used: they are neither the text
+ * position (49,121), the box (44,112) nor the portrait (40,41), and their
+ * meaning is unknown.
  */
 final class ClassicFirstScene {
 
@@ -207,9 +212,11 @@ final class ClassicFirstScene {
      */
     static Point[] place(int boxW, int boxH, int pw, int ph, int offX, int offY) {
         final int ux0 = Math.min(0, offX), uy0 = Math.min(0, offY);
-        final int ux1 = Math.max(boxW, offX + pw), uy1 = Math.max(boxH, offY + ph);
+        // Vertically the union ends at the box bottom: a portrait part
+        // below the box (the soldier under a short box) does not count.
+        final int ux1 = Math.max(boxW, offX + pw), uy1 = boxH;
         final int uw = ux1 - ux0, uh = uy1 - uy0;
-        final int left = (ClassicMenuBox.VW - uw) / 2;
+        final int left = (ClassicMenuBox.VW - uw + 1) / 2;
         final int top = (ClassicMenuBox.VH - uh + 1) / 2;
         final Point box = new Point(left - ux0, top - uy0);
         return new Point[] { box, new Point(box.x + offX, box.y + offY) };

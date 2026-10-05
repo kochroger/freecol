@@ -105,6 +105,30 @@ public class ClassicFirstSceneTest extends TestCase {
         assertEquals(new Point(99, 15), at[1]);
     }
 
+    /**
+     * MSS1 (soldier, 72x139) at box + (w - 55, -77), box 226x78, as in
+     * {@code @TUTORIAL14} (#17076).  The union is 243 wide, odd: the original's
+     * {@code (321 - w) div 2} puts the box at x 39, not 38.
+     */
+    public void testPlaceSoldierOddWidth() {
+        final Point[] at = ClassicFirstScene.place(226, 78, 72, 139,
+            226 - 55, -77);
+        assertEquals(new Point(39, 100), at[0]);
+        assertEquals(new Point(210, 23), at[1]);
+    }
+
+    /**
+     * MSS1 below a short box, 236x40, as in {@code @WHACKINDIANS} (#24800).
+     * Only the part from the portrait top to the box bottom is centred; the
+     * full union would put the box at y 108.
+     */
+    public void testPlaceSoldierBelowBox() {
+        final Point[] at = ClassicFirstScene.place(236, 40, 72, 139,
+            236 - 55, -77);
+        assertEquals(new Point(34, 119), at[0]);
+        assertEquals(new Point(215, 42), at[1]);
+    }
+
     /** A box alone (no portrait overhang) is simply centred. */
     public void testPlaceBoxOnly() {
         final Point[] at = ClassicFirstScene.place(100, 50, 10, 10, 0, 0);
