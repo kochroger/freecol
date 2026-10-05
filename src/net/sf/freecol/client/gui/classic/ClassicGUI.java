@@ -70,6 +70,7 @@ import net.sf.freecol.client.gui.panel.FreeColPanel;
 import net.sf.freecol.common.FreeColException;
 import net.sf.freecol.common.i18n.Messages;
 import net.sf.freecol.common.model.Colony;
+import net.sf.freecol.common.model.FreeColGameObject;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.GoodsType;
 import net.sf.freecol.common.model.HighScore;
@@ -2643,6 +2644,70 @@ public class ClassicGUI extends GUI {
             if (player.getSettlementByName(name) == null) return name;
         }
         return suggested;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * A placeholder until the original's KAMPFANALYSE box (build spec
+     * W12): attack at once.  {@code GUI.confirmPreCombat} asks here
+     * whenever the client option {@code guiShowPreCombat} is on, which it
+     * is by default (client-options.xml), and the base {@code GUI} answers
+     * false -- so every attack ({@code InGameController.moveAttack}, the
+     * ranged path and {@code moveAttackSettlement}) was cancelled before
+     * it reached the server.
+     */
+    @Override
+    public boolean showPreCombatDialog(Unit attacker,
+                                       FreeColGameObject defender,
+                                       Tile tile) {
+        return true;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * The original has no event pictures (first landing, the Pacific), so
+     * nothing is shown.  The callers still need a panel:
+     * {@code InGameController.newLandName} adds a closing callback to the
+     * result (the build-colony tip and the next message), and the base
+     * {@code GUI}'s null would throw there.  The returned stand-in is
+     * never shown and counts as already closed, so it runs each closing
+     * callback at once.  The other caller (the Pacific discovery) ignores
+     * the result.
+     */
+    @Override
+    public FreeColPanel showEventPanel(String header, String image,
+                                       String footer) {
+        return new ClosedPanel(getFreeColClient());
+    }
+
+    /**
+     * The panel {@link #showEventPanel} hands out in place of one it does
+     * not show: closed from the start, so closing callbacks run at once.
+     */
+    private static final class ClosedPanel extends FreeColPanel {
+
+        /**
+         * Create the stand-in.
+         *
+         * @param freeColClient The {@code FreeColClient} for the game.
+         */
+        ClosedPanel(FreeColClient freeColClient) {
+            super(freeColClient);
+        }
+
+        /**
+         * {@inheritDoc}
+         *
+         * Runs the callback now: this panel never opens, so it never
+         * closes later.
+         */
+        @Override
+        public FreeColPanel addClosingCallback(Runnable runnable) {
+            if (runnable != null) runnable.run();
+            return this;
+        }
     }
 
     /**

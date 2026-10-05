@@ -1586,8 +1586,18 @@ otherwise a reassuring picture:
 - **Most confirms already work.** `confirmHostileAction` / `confirmLeaveColony`
   / `confirmStopGame` / `confirmClearTradeRoute` all delegate to
   `modalConfirmDialog`, which we override — so e.g. attacking an ally now
-  prompts. `confirmPreCombat` hits a Phase-3 dialog no-op but is gated behind a
-  client option that is off by default, so it degrades to "proceed".
+  prompts. `confirmPreCombat` was the exception. It is gated behind the client
+  option `guiShowPreCombat`, which is **on** by default
+  (`client-options.xml`), so it reached the base `showPreCombatDialog`, whose
+  `false` cancelled every attack before it reached the server. (An earlier
+  version of this note said the option was off by default; that was wrong.)
+  `ClassicGUI.showPreCombatDialog` now answers `true` (attack at once) until the
+  original KAMPFANALYSE box replaces it (build spec W12).
+- **`showEventPanel` must not return null.** `InGameController.newLandName`
+  adds a closing callback to the panel it gets back, so the base `null` would
+  throw once new-land naming is wired. The original shows no event pictures,
+  so `ClassicGUI.showEventPanel` returns a stand-in that is never shown and
+  runs its closing callbacks at once.
 - **Event dialogs are a genuine open sub-audit, deferred to Phase 3.**
   the event dialogs (monarch, emigration, naming, first-contact, native-demand)
   no-op'd today, and some *return a value that gates flow*. **Chasing this down
