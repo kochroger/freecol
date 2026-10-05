@@ -55,6 +55,7 @@ import javax.swing.UIManager;
 import javax.swing.WindowConstants;
 
 import net.sf.freecol.FreeCol;
+import net.sf.freecol.client.ClientOptions;
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.control.PreGameController;
 import net.sf.freecol.client.control.SoundController;
@@ -88,6 +89,7 @@ import net.sf.freecol.common.model.StringTemplate;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
+import net.sf.freecol.common.option.BooleanOption;
 import net.sf.freecol.common.option.MapGeneratorOptions;
 import net.sf.freecol.common.resources.ImageCache;
 import net.sf.freecol.server.FreeColServer;
@@ -1093,6 +1095,7 @@ public class ClassicGUI extends GUI {
         if (this.mapViewer != null) this.mapViewer.dispose();
         if (this.menuStrip != null) this.menuStrip.closeMenu();
         if (this.frame != null) this.frame.setJMenuBar(null);
+        restoreSessionOptions();
         this.mapViewer = null;
         this.infoPanel = null;
         this.menuStrip = null;
@@ -1571,6 +1574,8 @@ public class ClassicGUI extends GUI {
             : pack.image(ClassicMenuBar.WOOD_KEY);
         this.infoPanel = new ClassicInfoPanel(getFreeColClient(), this.mapViewer,
             this.imageLibrary, text, tiny, wood);
+        this.mapViewer.setIconArt(tiny, text);
+        applySessionOptions();
         final ActionManager am = getFreeColClient().getActionManager();
         this.menuStrip = new ClassicMenuStrip(new ClassicMenuStrip.Host() {
                 @Override
@@ -1693,9 +1698,86 @@ public class ClassicGUI extends GUI {
      */
     @Override
     public void animateUnitMove(Unit unit, Tile srcTile, Tile dstTile) {
-        if (this.mapViewer != null) {
-            this.mapViewer.animateMove(unit, srcTile, dstTile);
+        if (this.mapViewer == null) return;
+        final String pref = movesPref(unit, getMyPlayer());
+        if (pref != null && !ClassicPrefs.get().is(pref)) {
+            if (ClassicFrameRecorder.on()) {
+                ClassicFrameRecorder.event("slide-skip", "unit=" + unit.getId()
+                    + " " + pref + "=false");
+            }
+            return;
         }
+        this.mapViewer.animateMove(unit, srcTile, dstTile);
+    }
+
+    /**
+     * The classic pref that decides whether a unit's moves are shown (the
+     * original's "Bewegungen der Indianer zeigen" and "... der anderen
+     * Europäer zeigen" rows, read live): the natives' row for native
+     * units, the Europeans' for any other foreign unit.  FreeCol's
+     * {@code enemyMoveAnimationSpeed} is not consulted; the HUD ignores it
+     * (spec delta section 2).
+     *
+     * @param unit The moving unit.
+     * @param me The client's player, or null.
+     * @return {@link ClassicPrefs#SHOW_NATIVE_MOVES},
+     *     {@link ClassicPrefs#SHOW_EUROPEAN_MOVES}, or null for the
+     *     player's own units (always shown).
+     */
+    static String movesPref(Unit unit, Player me) {
+        final Player owner = (unit == null) ? null : unit.getOwner();
+        if (owner == null || owner == me) return null;
+        return owner.isIndian() ? ClassicPrefs.SHOW_NATIVE_MOVES
+            : ClassicPrefs.SHOW_EUROPEAN_MOVES;
+    }
+
+    /**
+     * FreeCol client options the in-game Classic UI sets for its session,
+     * restored by {@link #teardownInGame}: option id to the classic value.
+     * <ul>
+     *   <li>{@code unitLastMoveDelay} off: FreeCol sleeps 300 ms on the EDT
+     *   after a unit's last move, before the move returns, which held the
+     *   slide at offset 15 for 300 ms more (build spec W2: the final draw
+     *   comes 72 ms after offset 15).  The pause before the next unit or the
+     *   end of turn is the Classic UI's own (W5).</li>
+     * </ul>
+     */
+    static final Map<String, Boolean> SESSION_OPTIONS
+        = Map.of(ClientOptions.UNIT_LAST_MOVE_DELAY, Boolean.FALSE);
+
+    /** The values {@link #applySessionOptions} replaced, by option id. */
+    private final Map<String, Boolean> replacedOptions = new HashMap<>();
+
+    /** Set {@link #SESSION_OPTIONS}, remembering the values they replace. */
+    private void applySessionOptions() {
+        final FreeColClient fcc = getFreeColClient();
+        final ClientOptions co = (fcc == null) ? null : fcc.getClientOptions();
+        if (co == null) return;
+        for (Map.Entry<String, Boolean> e : SESSION_OPTIONS.entrySet()) {
+            try {
+                final BooleanOption o = co.getOption(e.getKey(), BooleanOption.class);
+                this.replacedOptions.putIfAbsent(e.getKey(), o.getValue());
+                o.setValue(e.getValue());
+            } catch (RuntimeException ex) {
+                logger.log(Level.WARNING, "ClassicGUI: no option " + e.getKey(), ex);
+            }
+        }
+    }
+
+    /** Put back the values {@link #applySessionOptions} replaced. */
+    private void restoreSessionOptions() {
+        final FreeColClient fcc = getFreeColClient();
+        final ClientOptions co = (fcc == null) ? null : fcc.getClientOptions();
+        if (co != null) {
+            for (Map.Entry<String, Boolean> e : this.replacedOptions.entrySet()) {
+                try {
+                    co.getOption(e.getKey(), BooleanOption.class).setValue(e.getValue());
+                } catch (RuntimeException ex) {
+                    logger.log(Level.WARNING, "ClassicGUI: no option " + e.getKey(), ex);
+                }
+            }
+        }
+        this.replacedOptions.clear();
     }
 
     /**

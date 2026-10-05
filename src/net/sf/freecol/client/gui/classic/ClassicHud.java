@@ -506,6 +506,24 @@ final class ClassicHud {
     /** The order flag: a black ring around a nation-coloured fill. */
     static final int FLAG_W = 7, FLAG_H = 9;
 
+    /** No second flag behind the flag ({@link #paintIcon}). */
+    static final int[] NO_MARKER = { 0, 0 };
+
+    /**
+     * The cargo marker of a ship with at least one passenger: a second
+     * flag 2 px below and right of the flag, whose free edge shows at cell
+     * pixels x 2-6, y 8-10 (spec delta W2.3; clip007 #2374/#3072/#4280,
+     * missing on the empty ship #3697: 7 px).
+     */
+    static final int[] CARGO_MARKER = { 2, 2 };
+
+    /**
+     * The stack marker of a land unit drawn over others: a second flag
+     * 2 px up and left of the flag (I, base spec W2.4: the soldier active
+     * aboard at (6,5), landfall #13118, rows 5-6, x 8-12).
+     */
+    static final int[] STACK_MARKER = { -2, -2 };
+
     /** LABELS.TXT {@code @INFO} indices of the moves and position labels (:9-10). */
     static final int INFO_MOVES = 0, INFO_PLACE = 1;
 
@@ -862,7 +880,32 @@ final class ClassicHud {
      */
     static void paintIcon(Graphics2D g, ClassicFont font, String letter,
                           UnitFacts f, int cellX, int cellY) {
-        final BufferedImage sp = f.sprite;
+        paintIcon(g, font, letter, f.sprite, f.fill, f.dark, cellX, cellY,
+                  NO_MARKER);
+    }
+
+    /**
+     * One unit icon as {@link #paintIcon(Graphics2D, ClassicFont, String,
+     * UnitFacts, int, int)}, optionally with a second flag behind the flag
+     * ({@link #CARGO_MARKER}, {@link #STACK_MARKER}): it is drawn after the
+     * shadow and before the flag, ring and fill without a letter, so only
+     * the edge the flag and the sprite leave free shows.  The map draws
+     * icons through here, 1:1 in native pixels (build spec W2).
+     *
+     * @param g The graphics, in native pixels.
+     * @param font FONTTINY, or null (no letter).
+     * @param letter The flag letter.
+     * @param sp The sprite, at most 16x16, or null.
+     * @param fill The flag fill.
+     * @param dark The letter shade for letters other than '-'.
+     * @param cellX The cell's left edge.
+     * @param cellY The cell's top edge.
+     * @param marker The second flag's offset from the flag {dx, dy}, or
+     *     {@link #NO_MARKER}.
+     */
+    static void paintIcon(Graphics2D g, ClassicFont font, String letter,
+                          BufferedImage sp, int fill, int dark,
+                          int cellX, int cellY, int[] marker) {
         final int w = (sp == null) ? 16 : sp.getWidth();
         final int sx = cellX + spriteOffset(w);
         if (sp != null) {
@@ -875,15 +918,32 @@ final class ClassicHud {
             }
         }
         final Rectangle r = flagRing(cellX, cellY, w);
+        final Color fillColour = new Color(fill & 0xFFFFFF);
+        if (marker != null && (marker[0] != 0 || marker[1] != 0)) {
+            g.setColor(Color.BLACK);
+            ring(g, r.x + marker[0], r.y + marker[1], r.width, r.height);
+            g.setColor(fillColour);
+            g.fillRect(r.x + marker[0] + 1, r.y + marker[1] + 1,
+                       r.width - 2, r.height - 2);
+        }
         g.setColor(Color.BLACK);
         ring(g, r.x, r.y, r.width, r.height);
-        g.setColor(new Color(f.fill & 0xFFFFFF));
+        g.setColor(fillColour);
         g.fillRect(r.x + 1, r.y + 1, r.width - 2, r.height - 2);
         if (font != null && letter != null && !letter.isEmpty()) {
-            final int ink = "-".equals(letter) ? 0x000000 : (f.dark & 0xFFFFFF);
+            final int ink = "-".equals(letter) ? 0x000000 : (dark & 0xFFFFFF);
             font.draw(g, letter, r.x + 2, r.y + 2, ClassicFont.colours(ink));
         }
         if (sp != null) g.drawImage(sp, sx, cellY, null);
+    }
+
+    /**
+     * Where a settlement sprite sits in its 16-px cell: centred, and a
+     * wider one overhangs both sides (the landfall clip, #13302: the
+     * 21-px village ICONS 011 at cell x - 2).
+     */
+    static int settlementOffset(int w) {
+        return (16 - w) / 2;
     }
 
     /** Draw panel text lines (green or gold). */
@@ -904,7 +964,18 @@ final class ClassicHud {
 
     /** The {@code @ORDERS} flag letter of a unit, '-' without texts. */
     private static String letter(ClassicText t, UnitFacts f) {
-        final String l = (t == null) ? null : cell(t, "ORDERS", f.ordersRow, 1);
+        return orderLetter(t, f.ordersRow);
+    }
+
+    /**
+     * The flag letter of an {@code @ORDERS} row.
+     *
+     * @param t The pack's texts, or null.
+     * @param ordersRow The row ({@link #ordersRow}).
+     * @return The letter, '-' without texts.
+     */
+    static String orderLetter(ClassicText t, int ordersRow) {
+        final String l = (t == null) ? null : cell(t, "ORDERS", ordersRow, 1);
         return (l == null || l.isEmpty()) ? "-" : l.substring(0, 1);
     }
 

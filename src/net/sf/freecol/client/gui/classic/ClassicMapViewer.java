@@ -26,6 +26,7 @@ import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Stroke;
 import java.awt.event.ActionEvent;
@@ -34,6 +35,7 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
 import java.awt.image.BufferedImage;
 import java.util.List;
+import java.util.WeakHashMap;
 
 import javax.swing.AbstractAction;
 import javax.swing.ActionMap;
@@ -177,23 +179,23 @@ final class ClassicMapViewer extends JPanel {
     private static final int[][] BORDER_EDGES = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };
 
     /**
-     * Fraction of the cell an up-scaled classic unit/settlement sprite fills.
-     * The original ICONS.SS sprites are ~16&times;16; drawn at a fraction just
-     * under 1 they read clearly while leaving a small margin so they do not
-     * bleed into neighbouring cells.
+     * Fraction of the cell an up-scaled classic unit/settlement sprite fills
+     * in the adaptive (non-HUD) layout only.  On the HUD grid
+     * ({@link #setFixedScale}) sprites are drawn 1:1 in native pixels, as
+     * the original does (build spec W2).
      */
     private static final double UNIT_CELL_FRACTION = 0.9;
 
+    /**
+     * Native pixels a cell's settlement or unit icon may reach past the
+     * cell: the shadow 2 px left, the stack marker 2 px up, a 21-px
+     * settlement 2 px left and 3 px right ({@link ClassicHud#paintIcon},
+     * {@link ClassicHud#settlementOffset}).
+     */
+    private static final int ICON_MARGIN = 3;
+
     /** Interval (ms) between successive edge-scroll steps while at an edge. */
     private static final int EDGE_SCROLL_INTERVAL_MS = 110;
-
-    /**
-     * Frames painted for a one-tile unit slide (see {@link #animateMove}) and
-     * the delay between them: ~120ms per tile, matching the original's brisk
-     * but visibly fluid step.
-     */
-    private static final int ANIM_STEPS = 6;
-    private static final int ANIM_STEP_MS = 20;
 
     private final FreeColClient freeColClient;
 
@@ -217,18 +219,55 @@ final class ClassicMapViewer extends JPanel {
     private Tile selectedTile;
     private Unit activeUnit;
 
-    // In-progress unit-slide animation (see animateMove): the unit whose
-    // sprite is being interpolated between two tiles, or null when idle.
+    // In-progress unit slide (see animateMove): the unit drawn animOffset
+    // native pixels from animFrom toward animTo, or null when idle.
     private Unit animUnit;
     private Tile animFrom;
     private Tile animTo;
-    private float animFraction;
+
+    /** The slide's native offset, 0..15 ({@link ClassicSlide}). */
+    private int animOffset;
+
+    /** The slide's raw-grid step per axis (the destination minus the source). */
+    private int animDx, animDy;
 
     /**
-     * Recording only: a slide ended, so the next paint is its final draw
-     * (logged as {@code final-draw}, see {@link ClassicFrameRecorder}).
+     * Offset 0 of a foreign unit that was not on screen: the frame shows
+     * the view, not yet the unit (a brave out of the fog appears at
+     * offset 1).
+     */
+    private boolean animHidden = false;
+
+    /**
+     * The unit a movement key is moving right now ({@link #handleMoveKey}),
+     * else null: its slide follows the key, not a previous slide, so it
+     * keeps no pause after the last final draw.
+     */
+    private Unit keyMoveUnit = null;
+
+    /**
+     * A slide ended, so the next paint is its final draw: offset 16,
+     * together with the tiles the move revealed (logged as
+     * {@code final-draw}, see {@link ClassicFrameRecorder}).
      */
     private boolean finalDrawPending = false;
+
+    /** {@code System.nanoTime} of the last final draw; 0 before the first. */
+    private long lastFinalNanos = 0L;
+
+    /**
+     * The active unit's blink is OFF: its tile is drawn bare, with no unit
+     * at all, carrier and stack included (build spec W3, which drives it).
+     */
+    private boolean blinkOff = false;
+
+    /** FONTTINY and the pack's texts for the flag letters; null without the pack. */
+    private ClassicFont iconFont;
+    private ClassicText iconText;
+
+    /** Sprites scaled to 16x16 (only the large fallback art without the pack). */
+    private final WeakHashMap<BufferedImage, BufferedImage> fitted
+        = new WeakHashMap<>();
 
     /** Cached spec lookup for plain ocean (unexplored-area art), lazy. */
     private TileType oceanType;
@@ -552,15 +591,24 @@ final class ClassicMapViewer extends JPanel {
                         + " unit=" + u.getId() + " at=" + xy(u.getTile())
                         + " moves=" + u.getMovesLeft());
                 }
-                this.freeColClient.getInGameController().moveUnit(u, d);
+                this.keyMoveUnit = u;
+                try {
+                    this.freeColClient.getInGameController().moveUnit(u, d);
+                } finally {
+                    this.keyMoveUnit = null;
+                }
                 if (ClassicFrameRecorder.on()) {
                     ClassicFrameRecorder.event("move-done", "unit=" + u.getId()
                         + " at=" + xy(u.getTile()) + " moves=" + u.getMovesLeft());
                 }
                 // Focus follows the (possibly moved) unit — but only jumps
                 // when it nears the view edge (view-follows-the-action).
-                if (u.getTile() != null) {
-                    ensureTileVisible(u.getTile());
+                if (u.getTile() != null) ensureTileVisible(u.getTile());
+                // The slide's final draw now that the model has the move
+                // and its reveal, not when the event queue gets to it.
+                if (this.finalDrawPending) {
+                    paintNow(null);
+                } else if (u.getTile() != null) {
                     repaint();
                 }
             }
@@ -704,18 +752,36 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
-     * Slide {@code unit}'s sprite from {@code srcTile} to {@code dstTile} —
-     * the original's fluid per-tile movement, replacing the teleport the
-     * no-op base {@code GUI.animateUnitMove} seam produced.
+     * Slide {@code unit}'s sprite from {@code srcTile} to {@code dstTile}:
+     * the original's slide ({@link ClassicSlide}, build spec W2).
      *
-     * <p>The controller delivers the animation hook on the EDT (via
-     * {@code invokeLater} in {@code InGameController.animateMoveHandler}), so
-     * the frames are pushed with {@code paintImmediately} — the same
-     * blocking-EDT approach FreeCol's own {@code UnitMoveAnimation} uses —
-     * with a plain {@code repaint()} fallback should it ever be called from
-     * another thread.  The model has already moved when this runs; painting
-     * suppresses the unit at its (new) tile and draws the interpolated sprite
-     * instead (see {@link #paintTile} / {@link #paintAnimatedUnit}).
+     * <ul>
+     *   <li>One native pixel per step, offsets 1..15 on an absolute
+     *   schedule (16.43 ms per step, 13.25 ms with the classic pref
+     *   {@code moveAccelerator}, read now), straight or diagonal
+     *   ({@code (+-1,+-1)}), never mirrored; the source tile is restored on
+     *   every step because every step repaints it.</li>
+     *   <li>Then the hold at offset 15 (72 ms) and the return: offset 16 is
+     *   the final draw, the next paint, which shows the unit on its new tile
+     *   together with what the move revealed ({@link #handleMoveKey} paints
+     *   it at once for a key move).</li>
+     *   <li>Offset 0 first, one step before offset 1, when the view jumps
+     *   for the move or the player's unit is not on screen at its source
+     *   (blink OFF, a passenger leaving its ship).</li>
+     *   <li>A slide that follows another one without a key (goto steps, AI
+     *   moves) first paints the other's final draw if no paint has yet, and
+     *   starts {@link ClassicSlide#gapNanos} after it.</li>
+     * </ul>
+     *
+     * <p>The controller delivers the hook on the EDT (an own move from
+     * inside {@code moveUnit}, an AI move via {@code invokeLater} in
+     * {@code InGameController.animateMoveHandler}), so the steps are pushed
+     * with {@code paintImmediately} over the cells the sprite crosses --
+     * the same blocking-EDT approach FreeCol's own {@code UnitMoveAnimation}
+     * uses -- with a plain {@code repaint()} fallback should it ever be
+     * called from another thread.  Painting suppresses the unit at its model
+     * tile and draws the sliding icon instead (see {@link #paintOccupant} /
+     * {@link #paintAnimatedUnit}).
      */
     void animateMove(Unit unit, Tile srcTile, Tile dstTile) {
         final boolean rec = ClassicFrameRecorder.on();
@@ -730,49 +796,180 @@ final class ClassicMapViewer extends JPanel {
             }
             return;
         }
-        // The original scrolls the view along with the action.
+        final boolean own = isOwn(unit);
+        // A chained slide: draw the previous slide's final frame if no
+        // paint has yet, then keep the pause after it.
+        if (this.finalDrawPending) paintNow(null);
+        if (unit != this.keyMoveUnit && this.lastFinalNanos != 0L) {
+            try {
+                ClassicSlide.waitUntil(this.lastFinalNanos
+                                       + ClassicSlide.gapNanos(own));
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        final boolean shown = isShownAt(unit, srcTile);
+        // The original moves the view on the key press, before the first
+        // step (the jump frame, then offset 1).
+        final int[] before = viewOrigin();
         ensureTileVisible(dstTile);
+        final int[] v = viewOrigin();
+        final boolean jumped = before != null && v != null
+            && (before[0] != v[0] || before[1] != v[1]);
+        final boolean redraw = startsAtOffsetZero(jumped, own, shown);
+        final boolean fast = ClassicPrefs.get().is(ClassicPrefs.MOVE_ACCELERATOR);
+        final long step = ClassicSlide.stepNanos(fast);
         if (rec) {
-            final int[] v = viewOrigin();
             ClassicFrameRecorder.event("slide-start", "unit=" + unit.getId()
                 + " owner=" + unit.getOwner().getNationId()
                 + " from=" + xy(srcTile) + " to=" + xy(dstTile)
                 + ((v == null) ? "" : " view=" + v[0] + "," + v[1]
                     + " cell=" + (srcTile.getX() - v[0]) + ","
                     + (srcTile.getY() - v[1]))
-                + " steps=" + ANIM_STEPS + "x" + ANIM_STEP_MS + "ms");
+                + " steps=" + ClassicSlide.LAST_STEP + "x"
+                + (fast ? ClassicSlide.FAST_STEP_MS : ClassicSlide.STEP_MS)
+                + "ms hold=" + ClassicSlide.HOLD_MS + "ms"
+                + (redraw ? " redraw" + (jumped ? "=jump" : "=hidden") : ""));
         }
+        // The slide shows the unit ON (W3 suspends the blink for it).
+        this.blinkOff = false;
         this.animUnit = unit;
         this.animFrom = srcTile;
         this.animTo = dstTile;
+        this.animDx = dstTile.getX() - srcTile.getX();
+        this.animDy = dstTile.getY() - srcTile.getY();
         try {
-            for (int i = 1; i <= ANIM_STEPS; i++) {
-                this.animFraction = (float) i / ANIM_STEPS;
-                if (SwingUtilities.isEventDispatchThread()) {
-                    paintImmediately(0, 0, getWidth(), getHeight());
-                } else {
-                    repaint();
-                }
-                if (rec) {
-                    ClassicFrameRecorder.event("slide-step", i + "/" + ANIM_STEPS);
-                }
-                try {
-                    Thread.sleep(ANIM_STEP_MS);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
+            ClassicSlide.run(ClassicSlide.SYSTEM, step, redraw, k -> {
+                    this.animOffset = k;
+                    this.animHidden = k == 0 && !own && !shown;
+                    // Offset 0 may come with a view jump: the whole map.
+                    paintNow((k == 0) ? null : slideBounds());
+                    if (rec) {
+                        ClassicFrameRecorder.event("slide-step", k + "/"
+                            + ClassicSlide.CELL);
+                    }
+                });
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
         } finally {
             this.animUnit = null;
             this.animFrom = null;
             this.animTo = null;
+            this.animOffset = 0;
+            this.animHidden = false;
+            this.finalDrawPending = true;
             if (rec) {
                 ClassicFrameRecorder.event("slide-end", "unit=" + unit.getId());
-                this.finalDrawPending = true;
             }
             repaint();
         }
+    }
+
+    /**
+     * Paint now on the EDT ({@code paintImmediately}), else ask for a
+     * repaint.
+     *
+     * @param r The area, or null for the whole map.
+     */
+    private void paintNow(Rectangle r) {
+        final Rectangle a = (r == null) ? new Rectangle(0, 0, getWidth(), getHeight()) : r;
+        if (SwingUtilities.isEventDispatchThread()) {
+            paintImmediately(a);
+        } else {
+            repaint(a);
+        }
+    }
+
+    /**
+     * The screen area a slide changes: its source and destination cells
+     * (and every cell between, for the isometric model's two-row steps),
+     * plus the icon's reach past them ({@link #ICON_MARGIN}).
+     *
+     * @return The area, or null (the whole map) without a focus.
+     */
+    private Rectangle slideBounds() {
+        final Tile f = getFocus();
+        final Tile a = this.animFrom, b = this.animTo;
+        if (f == null || a == null || b == null) return null;
+        final Rectangle r = new Rectangle(screenX(a.getX(), f.getX()),
+            screenY(a.getY(), f.getY()), tileW(), tileH());
+        r.add(new Rectangle(screenX(b.getX(), f.getX()),
+            screenY(b.getY(), f.getY()), tileW(), tileH()));
+        final int m = ICON_MARGIN * scale();
+        r.grow(m, m);
+        return r;
+    }
+
+    /**
+     * Whether a slide paints offset 0 first, one step before offset 1: when
+     * the view jumps for it (the jump frame, then offset 1; landfall #10269
+     * -&gt; #10270), or when the player's own unit is not on screen at its
+     * source (a key while the blink is OFF, #5112 -&gt; #5115 -&gt; #5117; a
+     * passenger drawn over its ship as it leaves, #11577).  A foreign unit
+     * that was not on screen appears at offset 1 (#9594).
+     *
+     * @param jumped The view jumps for the slide.
+     * @param own The unit is the player's.
+     * @param shown The unit is on screen at its source.
+     * @return True for offset 0 first.
+     */
+    static boolean startsAtOffsetZero(boolean jumped, boolean own, boolean shown) {
+        return jumped || (own && !shown);
+    }
+
+    /** Whether a unit is the player's own. */
+    private boolean isOwn(Unit unit) {
+        final Player me = this.freeColClient.getMyPlayer();
+        return me != null && unit.getOwner() == me;
+    }
+
+    /**
+     * Whether the map shows {@code unit} on {@code tile} now: its icon is
+     * the one drawn there and its tile is not blinked off.
+     *
+     * @param unit The unit.
+     * @param tile The tile.
+     * @return True if the unit's icon is on screen there.
+     */
+    boolean isShownAt(Unit unit, Tile tile) {
+        if (tile.getSettlement() != null || !tile.isExplored()) return false;
+        if (this.blinkOff && this.activeUnit != null
+            && this.activeUnit.getTile() == tile) return false;
+        return displayUnit(tile) == unit;
+    }
+
+    /**
+     * Set the active unit's blink state (build spec W3 drives it; a slide
+     * clears it).
+     *
+     * @param off True to show the active unit's tile bare.
+     */
+    void setBlinkOff(boolean off) {
+        if (off == this.blinkOff) return;
+        this.blinkOff = off;
+        repaint();
+    }
+
+    /**
+     * Whether the active unit's blink is OFF.
+     *
+     * @return True while its tile is drawn bare.
+     */
+    boolean isBlinkOff() {
+        return this.blinkOff;
+    }
+
+    /**
+     * The pack's art for the flags on the map's unit icons
+     * ({@link ClassicHud#paintIcon}).
+     *
+     * @param font FONTTINY, or null (flags without letters).
+     * @param text The pack's texts, or null (the letter '-').
+     */
+    void setIconArt(ClassicFont font, ClassicText text) {
+        this.iconFont = font;
+        this.iconText = text;
+        repaint();
     }
 
     /**
@@ -1037,52 +1234,193 @@ final class ClassicMapViewer extends JPanel {
         final int focusY = f.getY();
         final int cols = getWidth() / tileW() + 2;
         final int rows = getHeight() / tileH() + 2;
+        // A slide step repaints only the cells it crosses: skip the cells
+        // whose terrain and icon cannot reach the clip.
+        final Rectangle clip = g.getClipBounds();
+        final int m = ICON_MARGIN * scale();
 
-        for (int dy = -rows; dy <= rows; dy++) {
-            for (int dx = -cols; dx <= cols; dx++) {
-                final int tx = focusX + dx;
-                final int ty = focusY + dy;
-                final Tile tile = map.getTile(tx, ty);
-                if (tile == null) {
-                    // Beyond the map edge: endless open sea, as the original
-                    // reads — never a black band against the last column.
-                    paintOpenSea(g, tx, ty, screenX(tx, focusX),
-                                 screenY(ty, focusY));
-                    continue;
+        // Two passes: every cell's terrain first, then settlements and
+        // units, so an icon's shadow or overhang lies on its neighbour's
+        // terrain (the original: the 21-px village 1 px into the next cell).
+        for (int pass = 0; pass < 2; pass++) {
+            for (int dy = -rows; dy <= rows; dy++) {
+                for (int dx = -cols; dx <= cols; dx++) {
+                    final int tx = focusX + dx;
+                    final int ty = focusY + dy;
+                    final int sx = screenX(tx, focusX);
+                    final int sy = screenY(ty, focusY);
+                    if (clip != null && !clip.intersects(sx - m, sy - m,
+                            tileW() + 2 * m, tileH() + 2 * m)) continue;
+                    final Tile tile = map.getTile(tx, ty);
+                    if (pass == 1) {
+                        if (tile != null) paintOccupant(g, tile, sx, sy);
+                    } else if (tile == null) {
+                        // Beyond the map edge: endless open sea, as the
+                        // original reads — never a black band against the
+                        // last column.
+                        paintOpenSea(g, tx, ty, sx, sy);
+                    } else {
+                        paintTile(g, map, tile, sx, sy);
+                    }
                 }
-                paintTile(g, map, tile, screenX(tile.getX(), focusX),
-                          screenY(tile.getY(), focusY));
             }
         }
 
         paintAnimatedUnit(g, focusX, focusY);
-        paintCursor(g, focusX, focusY);
+        // The original draws no box around the active unit; the cursor
+        // marks only a selected tile (TERRAIN).
+        if (this.viewMode == GUI.ViewMode.TERRAIN) paintCursor(g, focusX, focusY);
         if (this.finalDrawPending && this.animUnit == null) {
             this.finalDrawPending = false;
+            this.lastFinalNanos = System.nanoTime();
             ClassicFrameRecorder.event("final-draw", "");
         }
     }
 
-    /** Paint the sliding sprite of an in-progress move (see {@link #animateMove}). */
+    /**
+     * Paint the sliding icon of an in-progress move (see
+     * {@link #animateMove}): {@link #animOffset} native pixels from the
+     * source cell toward the destination, on top of everything.
+     */
     private void paintAnimatedUnit(Graphics2D g, int focusX, int focusY) {
         final Unit u = this.animUnit;
         final Tile from = this.animFrom;
         final Tile to = this.animTo;
-        if (u == null || from == null || to == null) return;
-        final float t = this.animFraction;
-        final int sx = Math.round(
-            screenX(from.getX(), focusX) * (1f - t)
-            + screenX(to.getX(), focusX) * t);
-        final int sy = Math.round(
-            screenY(from.getY(), focusY) * (1f - t)
-            + screenY(to.getY(), focusY) * t);
-        drawCentered(g, this.lib.getScaledUnitImage(u), sx, sy);
+        if (u == null || from == null || to == null || this.animHidden) return;
+        final int s = scale();
+        final int sx = screenX(from.getX(), focusX)
+            + ClassicSlide.screenOffset(this.animOffset, s, this.animDx);
+        final int sy = screenY(from.getY(), focusY)
+            + ClassicSlide.screenOffset(this.animOffset, s, this.animDy);
+        paintUnit(g, u, sx, sy, carriesUnits(u)
+                  ? ClassicHud.CARGO_MARKER : ClassicHud.NO_MARKER);
     }
 
     /**
-     * Paint one tile: base terrain, then the terrain-feature overlays (forest /
-     * hills / mountains / river / road / plow / resource / lost-city — item (e),
-     * composited by {@link ClassicTileArt}), then any settlement or unit on top.
+     * Paint what stands on a tile, over every cell's terrain: the
+     * settlement, else the unit in front (none while the active unit's
+     * blink is OFF on this tile).
+     */
+    private void paintOccupant(Graphics2D g, Tile tile, int sx, int sy) {
+        if (!tile.isExplored()) return;
+        final Settlement settlement = tile.getSettlement();
+        if (settlement != null) {
+            paintSettlement(g, settlement, sx, sy);
+            return;
+        }
+        if (this.blinkOff && this.activeUnit != null
+            && this.activeUnit.getTile() == tile) return;
+        // A unit mid-slide is painted by paintAnimatedUnit instead.
+        final Unit unit = displayUnit(tile);
+        if (unit != null) paintUnit(g, unit, sx, sy, markerOf(unit, tile));
+    }
+
+    /**
+     * The unit drawn on a tile: the active unit when it is there (also a
+     * passenger: it is drawn instead of its ship), else the first unit,
+     * never the one mid-slide.
+     *
+     * @param tile The tile.
+     * @return The unit, or null.
+     */
+    Unit displayUnit(Tile tile) {
+        final Unit a = this.activeUnit;
+        if (a != null && a != this.animUnit && a.getTile() == tile) return a;
+        for (Unit u : tile.getUnitList()) {
+            if (u != this.animUnit) return u;
+        }
+        return null;
+    }
+
+    /** Whether a unit carries at least one unit (not counting one mid-slide). */
+    private boolean carriesUnits(Unit unit) {
+        if (!unit.isNaval()) return false;
+        for (Unit u : unit.getUnitList()) {
+            if (u != this.animUnit) return true;
+        }
+        return false;
+    }
+
+    /**
+     * The second flag of a unit drawn on a tile: the cargo marker of a laden
+     * ship, the stack marker of a land unit that stands over others or over
+     * its carrier, else none.
+     */
+    int[] markerOf(Unit unit, Tile tile) {
+        if (unit.isNaval()) {
+            return carriesUnits(unit) ? ClassicHud.CARGO_MARKER
+                : ClassicHud.NO_MARKER;
+        }
+        if (unit.getLocation() instanceof Unit) return ClassicHud.STACK_MARKER;
+        for (Unit u : tile.getUnitList()) {
+            if (u != unit && u != this.animUnit) return ClassicHud.STACK_MARKER;
+        }
+        return ClassicHud.NO_MARKER;
+    }
+
+    /**
+     * Paint a unit's icon in the cell at {@code (sx, sy)}: on the HUD grid
+     * 1:1 in native pixels with its shadow and flag, as the panel and the
+     * original draw it ({@link ClassicHud#paintIcon}); in the adaptive
+     * layout the bare sprite fitted to the cell.
+     */
+    private void paintUnit(Graphics2D g, Unit unit, int sx, int sy,
+                           int[] marker) {
+        final BufferedImage img = this.lib.getScaledUnitImage(unit);
+        if (this.fixedScale <= 0) {
+            drawCentered(g, img, sx, sy);
+            return;
+        }
+        final Player owner = unit.getOwner();
+        final int s = scale();
+        final Graphics2D gg = (Graphics2D) g.create();
+        try {
+            gg.translate(sx, sy);
+            gg.scale(s, s);
+            ClassicHud.paintIcon(gg, this.iconFont,
+                ClassicHud.orderLetter(this.iconText, ClassicHud.ordersRow(unit)),
+                fit16(img), ClassicHud.nationRgb(owner),
+                ClassicHud.nationDark(owner), 0, 0, marker);
+        } finally {
+            gg.dispose();
+        }
+    }
+
+    /**
+     * Paint a settlement in the cell at {@code (sx, sy)}: on the HUD grid
+     * 1:1 in native pixels, centred, a wider sprite overhanging both sides
+     * ({@link ClassicHud#settlementOffset}); in the adaptive layout fitted
+     * to the cell.
+     */
+    private void paintSettlement(Graphics2D g, Settlement settlement,
+                                 int sx, int sy) {
+        final BufferedImage img = this.lib.getScaledSettlementImage(settlement);
+        if (img == null) return;
+        if (this.fixedScale <= 0) {
+            drawCentered(g, img, sx, sy);
+            return;
+        }
+        // The classic pack's settlements are up to 21x16; larger art is
+        // FreeCol's fallback, fitted to the cell.
+        final BufferedImage sp = (img.getWidth() <= TILE_SRC + 2 * ICON_MARGIN
+            && img.getHeight() <= TILE_SRC) ? img : fit16(img);
+        final int s = scale();
+        g.drawImage(sp, sx + ClassicHud.settlementOffset(sp.getWidth()) * s, sy,
+                    sp.getWidth() * s, sp.getHeight() * s, null);
+    }
+
+    /** A sprite fitted to 16x16 (cached; the pack's sprites as they are). */
+    private BufferedImage fit16(BufferedImage img) {
+        if (img == null || (img.getWidth() <= TILE_SRC
+                            && img.getHeight() <= TILE_SRC)) return img;
+        return this.fitted.computeIfAbsent(img, ClassicHud::fit16);
+    }
+
+    /**
+     * Paint one tile's ground: base terrain, then the terrain-feature
+     * overlays (forest / hills / mountains / river / road / plow / resource
+     * / lost-city — item (e), composited by {@link ClassicTileArt}).  What
+     * stands on it comes in the second pass ({@link #paintOccupant}).
      */
     private void paintTile(Graphics2D g, Map map, Tile tile, int sx, int sy) {
         if (!tile.isExplored()) {
@@ -1107,19 +1445,6 @@ final class ClassicMapViewer extends JPanel {
 
         // Composite the physical-feature overlays on top of the base terrain.
         this.tileArt.paintOverlays(g, map, tile, sx, sy, tileW(), tileH());
-
-        final Settlement settlement = tile.getSettlement();
-        if (settlement != null) {
-            drawCentered(g, this.lib.getScaledSettlementImage(settlement),
-                    sx, sy);
-        } else {
-            final Unit unit = tile.getFirstUnit();
-            // A unit mid-slide is painted by paintAnimatedUnit instead of at
-            // its (already-updated) model tile.
-            if (unit != null && unit != this.animUnit) {
-                drawCentered(g, this.lib.getScaledUnitImage(unit), sx, sy);
-            }
-        }
     }
 
     /**
@@ -1395,7 +1720,9 @@ final class ClassicMapViewer extends JPanel {
 
     /**
      * Draw a unit/settlement sprite centred within the tile cell at
-     * {@code (sx, sy)}, sized to the cell (preserving aspect).
+     * {@code (sx, sy)}, sized to the cell (preserving aspect).  The
+     * adaptive layout only; the HUD grid draws icons 1:1
+     * ({@link #paintUnit}, {@link #paintSettlement}).
      *
      * <p>Two cases, distinguished by source size (which doubles as pack
      * detection):
@@ -1428,11 +1755,12 @@ final class ClassicMapViewer extends JPanel {
         g.drawImage(img, x, y, w, h, null);
     }
 
-    /** Highlight the active-unit tile (or the selected tile) with a cursor. */
+    /**
+     * Highlight the selected tile (TERRAIN mode) with a cursor.  Not the
+     * active unit: the original draws no box around it (build spec W2).
+     */
     private void paintCursor(Graphics2D g, int focusX, int focusY) {
-        final Tile cursor =
-            (this.activeUnit != null && this.activeUnit.getTile() != null)
-            ? this.activeUnit.getTile() : this.selectedTile;
+        final Tile cursor = this.selectedTile;
         if (cursor == null) return;
         final int sx = screenX(cursor.getX(), focusX);
         final int sy = screenY(cursor.getY(), focusY);

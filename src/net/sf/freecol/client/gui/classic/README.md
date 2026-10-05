@@ -140,7 +140,8 @@ artillery / treasure / brave / regular. The full frame table is documented in th
 "Units & goods" block of `aliases.properties`. Goods icons only surface on the
 Phase-2 colony/Europe screens; the unit sprites render on the map immediately.
 
-**`drawCentered` — cell-fit for both art styles.** `paintTile` draws the
+**`drawCentered` — cell-fit for both art styles (adaptive layout only; the
+HUD grid draws icons 1:1, see "Unit icons and the slide").** The map draws the
 settlement/unit sprite through `drawCentered`, which sizes it to the cell
 (preserving aspect) by branching on source size — which doubles as pack
 detection. The original `ICONS.SS` sprites are ~16px, so they fit *inside* the
@@ -437,6 +438,68 @@ water-side foam line reads clean with no green fleck, and
 the full history (including the round-by-round expert feedback that produced the
 split-mechanism design and the coast-frame removal) and
 [Q7, Resolved](../../../../../../../classic_ui_plan/ui-phases.md#open-questions-for-the-expert).
+
+### Unit icons and the slide (`ClassicSlide`; build spec W2, spec delta W2)
+
+On the HUD grid (`setFixedScale` > 0) the map draws what the original draws,
+in native pixels times the HUD scale s; the adaptive layout keeps the old
+cell-fitted sprites (`drawCentered`, `UNIT_CELL_FRACTION`).
+
+- **Icons 1:1.** A unit is `ClassicHud.paintIcon` -- the panel's proved
+  painter -- at the cell origin: the sprite's black silhouette 2 px left, the
+  7x9 flag (nation fill, `@ORDERS` letter in FONTTINY), the sprite at its
+  measured offset (`spriteOffset`). The ship's flag is at the cell's top-left,
+  a land unit's at the sprite's lower right. Checked pixel class by pixel
+  class against the clips (`ClassicUnitIconTest`: landfall #343, clip007
+  #2374/#3697).
+- **Second flag.** A ship with a passenger draws the cargo marker, a second
+  flag 2 px down-right behind the flag (spec delta W2.3, V: the 7-px edge at
+  x 2-6, y 8-10). A land unit standing over others, or a passenger drawn over
+  its ship, draws the stack marker 2 px up-left (base spec W2.4, **I**).
+- **Settlements 1:1**, centred, the 21-px frames 2 px over the left edge
+  (landfall #13302). The map paints in two passes, terrain then
+  settlements/units, so a shadow or an overhang lies on the neighbour's
+  terrain.
+- **Which unit.** The active unit when it is on the tile (a passenger is drawn
+  instead of its ship, W18), else the first unit, never the one mid-slide.
+- **No cursor box** in MOVE_UNITS (the original has none); TERRAIN keeps the
+  selected-tile box.
+- **Blink hook.** `setBlinkOff` draws the active unit's tile bare (no unit,
+  carrier or stack); W3 drives it, a slide clears it.
+
+**The slide** (`animateMove` on `ClassicSlide`): offsets 1..15 one native
+pixel per step on an absolute schedule `t_k = t1 + (k-1)S` with S = 16.43 ms,
+13.25 ms while the classic pref `moveAccelerator` is on (read at each slide
+start); a 72-ms hold at 15; offset 16 is the final draw, the first ordinary
+paint after the slide, so it comes together with the tiles the move revealed
+(`handleMoveKey` paints it as soon as `moveUnit` returns). Steps repaint only
+the cells the sprite crosses (`slideBounds`); every step restores the source
+tile; diagonals step (+-1,+-1); nothing is mirrored. Offset 0 is painted first,
+one step before offset 1, when the view jumps for the move or the player's own
+unit is not on screen at its source (blink OFF, a passenger leaving its ship);
+a foreign unit not on screen appears at offset 1. A slide without a key (goto
+steps, AI moves) first paints the previous slide's final draw if the queue has
+not, then starts 100 ms (own goto) or 60 ms (foreign) after it. Waits are
+`Thread.sleep` plus a spin, never `parkNanos` (W1). `ClassicSlideTest` checks
+the schedule on a fake clock, including what a 70.0863 Hz capture shows: OFF
+16 (sometimes 17) frames from offset 1 to 15 with repeats, ON 13 frames with
+exactly one 2-px advance.
+
+**Session option.** While the in-game map is up, `ClassicGUI` sets FreeCol's
+`unitLastMoveDelay` to false and restores it in `teardownInGame`
+(`SESSION_OPTIONS`): FreeCol's 300-ms EDT sleep after a unit's last move held
+the slide at offset 15 for 300 ms more. The pause after the last move belongs
+to the Classic UI's end of turn and hand-over (W5).
+
+**Foreign moves** obey the classic prefs `showNativeMoves` (native units) and
+`showEuropeanMoves` (other foreign units), read in `ClassicGUI.animateUnitMove`
+(`movesPref`); FreeCol's `enemyMoveAnimationSpeed` is not consulted.
+
+**Known limit (AI phases).** FreeCol queues AI animations on the EDT with
+`invokeLater` while the network thread applies the moves at once, so during an
+AI phase the model can be ahead of the slides (a unit can show at its later
+tile between two of its slides). The original plays them strictly in turn;
+W19 (native-phase cues) is where that belongs.
 
 ## In-game HUD (menu strip, dropdowns, right panel)
 
@@ -3083,7 +3146,9 @@ paints as before). `ClassicTestHarness.install` (from `startGUI`) binds both.
   turn, current player, view mode, active unit and moves, view origin, open
   dialogs; logged when it changes), `script*`, `key-post/press/release`,
   `click`, `move-key`, `move-done`, `pan`, `slide-start` (unit, tiles, view,
-  cell), `slide-step`, `slide-end`, `slide-skip`, `final-draw`, `end-turn`,
+  cell, step and hold, `redraw=jump|hidden` when offset 0 comes first),
+  `slide-step k/16` (offset k painted), `slide-end` (the hold is over),
+  `slide-skip` (fog, or a classic pref), `final-draw`, `end-turn`,
   `dialog-open/close`, `music-request`, `music-mode`, `pref`, `late`. Reserved
   for the M1 items: `blink` (W3), `endturn-timer-start/fire` (W5),
   `palette-step` (W6c), `music-fade`. Add a hook with
@@ -3131,8 +3196,9 @@ config directory, build spec section 2): `showNativeMoves` on,
 `showEuropeanMoves` on, `moveAccelerator` off, `endTurnPrompt` off,
 `waterCycling` on (the original's state A). Autom. Sichern, Kampfanalyse and
 Tutortips are FreeCol options (`autosavePeriod`, `guiShowPreCombat`,
-`guiShowTutorial`). Read a pref where it is used, not once at start. Nothing
-reads the prefs yet; W2/W5/W14/W17 will.
+`guiShowTutorial`). Read a pref where it is used, not once at start. Read so
+far: `moveAccelerator` (each slide start), `showNativeMoves` and
+`showEuropeanMoves` (each foreign move, W2); W5/W14/W17 add the rest.
 
 The sandbox launcher, the copied tools and today's baseline are outside the
 repo, in `C:\Users\koch_\freecol-spike-results\m1` (`W1.md`).
