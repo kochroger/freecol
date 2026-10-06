@@ -1102,7 +1102,7 @@ final class ClassicTurnFlow {
                 } else {
                     this.pending = null;
                     this.timer.cancel();
-                    this.host.nextActiveUnit();
+                    nextUnitOrIdle("unit gone");
                 }
                 break;
             case GOTO:
@@ -1184,7 +1184,8 @@ final class ClassicTurnFlow {
      * after the orders and brings no unit then when the orders stopped
      * early (a goto unit with no path, which it skips): if that call chose
      * nothing, it is asked once more, so a unit always comes up (FINAL
-     * "Open" item 8).  Nothing once the flow is disposed (item 11).
+     * "Open" item 8), or the idle end ({@link #nextUnitOrIdle}).  Nothing
+     * once the flow is disposed (item 11).
      */
     private void gotosDone() {
         this.gotoRuns--;
@@ -1198,9 +1199,33 @@ final class ClassicTurnFlow {
             // Once: a unit that can move, or the controller's end view
             // (and so the automatic end).
             ClassicFrameRecorder.event("handover", "goto orders: no unit came, next unit again");
-            this.host.nextActiveUnit();
+            nextUnitOrIdle("goto orders");
         }
         updateProbe();
+    }
+
+    /**
+     * Ask the controller for the next unit; if it chose none (neither a
+     * unit nor its end view) while our turn is shown and nothing can move
+     * or go to its destination, arm the idle end here, as its end view
+     * would ({@link #noUnitLeft}).  FreeCol's controller stays in its goto
+     * mode when goto orders took a unit off the map (a ship sailing for
+     * Europe) and no unit is active: its {@code nextActiveUnit} then
+     * changes nothing, and the turn never ended (D acceptance D1, the
+     * turn start's goto orders).
+     *
+     * @param why What asks (for the recorder).
+     */
+    private void nextUnitOrIdle(String why) {
+        final int before = this.choices;
+        this.host.nextActiveUnit();
+        if (this.choices != before || this.disposed || this.pending != null
+            || !this.turnStarted || this.ending || !this.host.myTurn()
+            || this.host.hasNextActiveUnit() || this.host.hasNextGoingToUnit()) {
+            return;
+        }
+        ClassicFrameRecorder.event("handover", why + ": no unit came, idle end");
+        noUnitLeft();
     }
 
     private void updateProbe() {

@@ -452,7 +452,9 @@ public class ClassicGUISeamTest extends FreeColTestCase {
      * refuse, FreeCol's default, which is also the original's first row
      * (GAME.TXT @INDIANGOLD, @WANTSTUFF, @INDIANBEGFOOD list the refusal
      * first and give no @default); only the "yes" row pays.  The first
-     * contact box, through the same code, keeps Enter on "no".
+     * contact box, through the same code, takes "Ja" (the peace) on Enter
+     * (GAME.TXT @INDIANWELCOME lists "Ja" first, no @default; FreeCol's
+     * own default), and Escape still answers "no" (D acceptance review).
      */
     public void testNativeDemandEnterRefuses() {
         final Game game = getStandardGame();
@@ -499,11 +501,20 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             assertEquals("yes, " + what, Boolean.TRUE, last(answers));
         }
         final Player dutch = colony.getOwner();
-        fake.answer = -1;
+        fake.answer = 0;                   // Enter: its row 0, "Ja"
         gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
-        assertEquals(Integer.valueOf(1), last(fake.defaults));
+        assertEquals(Messages.message("yes"), last(fake.asked)[0]);
+        assertEquals(Messages.message("no"), last(fake.asked)[1]);
+        assertEquals("Enter's row, first contact", Integer.valueOf(0),
+                     last(fake.defaults));
+        assertEquals(Boolean.TRUE, last(answers));
+        fake.answer = -1;                  // Escape: no
+        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
+        assertEquals("Escape, first contact", Boolean.FALSE, last(answers));
+        fake.answer = 1;
+        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
         assertEquals(Boolean.FALSE, last(answers));
-        assertEquals(3 * demands.length + 1, answers.size());
+        assertEquals(3 * demands.length + 3, answers.size());
     }
 
     /**
@@ -565,6 +576,60 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             id -> id.equals(ReturnToEuropeAction.id)));
         assertEquals("roadAction", ClassicKeyMap.pick(r, id -> true));
         assertNull(ClassicKeyMap.pick(r, id -> false));
+    }
+
+    /**
+     * D acceptance D1: a ship that has sailed for Europe ("Zurück nach
+     * Europa"), re-selected by the controller after its last move, is no
+     * unit to show while nothing else can move: the end view (in the game
+     * the turn flow then ends the turn by itself).  With a unit left to
+     * move the choice is made as before (a hand-over from the ship).
+     */
+    public void testShipAtSeaGivesTheEndView() {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile sea = map.getTile(15, 7);
+        final Tile land = map.getTile(5, 7);
+        assertTrue(!sea.isLand() && land.isLand());
+        final Unit ship = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final ClassicGUI gui = new ClassicGUI(null);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        try {
+            mv.setFocus(sea);
+            gui.changeView(ship, false);            // on the map: it is up
+            assertSame(ship, mv.getActiveUnit());
+            assertEquals(net.sf.freecol.client.gui.GUI.ViewMode.MOVE_UNITS,
+                         mv.getViewMode());
+            assertFalse(ClassicGUI.goneWithNothingLeft(ship));
+
+            // It sails for Europe: off the map, nothing else to move.
+            assertNotNull(dutch.getHighSeas());
+            ship.setLocation(dutch.getHighSeas());
+            assertFalse(ship.hasTile());
+            assertTrue(ClassicGUI.goneWithNothingLeft(ship));
+            gui.changeView(ship, true);             // the controller's redisplay
+            assertNull(mv.getActiveUnit());
+            assertEquals(net.sf.freecol.client.gui.GUI.ViewMode.END_TURN,
+                         mv.getViewMode());
+
+            // A colonist that can still move: the choice goes on as before.
+            final Unit colonist = new ServerUnit(game, land, dutch,
+                spec().getUnitType("model.unit.freeColonist"));
+            assertTrue(colonist.getMovesLeft() > 0);
+            assertFalse(ClassicGUI.goneWithNothingLeft(ship));
+            gui.changeView(ship, true);
+            assertSame(ship, mv.getActiveUnit());
+            assertEquals(net.sf.freecol.client.gui.GUI.ViewMode.MOVE_UNITS,
+                         mv.getViewMode());
+            assertFalse(ClassicGUI.goneWithNothingLeft(null));
+            assertFalse(ClassicGUI.goneWithNothingLeft(colonist));
+        } finally {
+            mv.dispose();
+        }
     }
 
     private static <T> T last(List<T> l) {

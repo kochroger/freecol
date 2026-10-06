@@ -418,14 +418,16 @@ minimap box.
     `ClassicTurnFlow.endTurnNow`, which lights the turn indicator first (W5c).
     Without a key the turn ends by itself 485 ms after the last change once
     nothing can move (W5a). Since W17 only in the Spielzugende mode (or with no
-    unit up and none left that can move, `ClassicGUI.mayEndTurnByKey`): the
+    unit up and none left that can move, `ClassicGUI.mayEndTurnByKey`; a unit
+    off the map, a ship that has sailed for Europe, counts as none): the
     original has no other end of turn, with units left it ends by itself once
     none can move (spec delta W17 item 7); otherwise the key is logged
     `key-ignored end-turn`.
   - **Space** → "no orders": skip the active unit for this turn, mirroring
     `SkipUnitAction` (`changeState(unit, SKIPPED)` then `nextActiveUnit()`). With no
-    active unit, Space ends the turn instead, under Enter's condition (as in the
-    original, where Space advances the turn once every unit is done).
+    active unit (or one off the map), Space ends the turn instead, under Enter's
+    condition (as in the original, where Space advances the turn once every unit
+    is done).
   - **W** → wait: `InGameController.waitUnit()` — cycle to the other units needing
     orders and return to this one.
   - **B** → build colony: `InGameController.buildColony(activeUnit)`, mirroring
@@ -923,6 +925,19 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   skips), the controller's first `nextActiveUnit` only leaves its goto mode
   and brings nothing; the marker then asks once more (`gotosDone`), so a unit,
   or the end view and the automatic end, always comes (FINAL "Open" item 8).
+- **A unit gone, and no choice (D acceptance D1).** When goto orders took a
+  ship off the map (sailing for Europe) and no unit is active, FreeCol's
+  controller stays in its goto mode and its `nextActiveUnit` changes
+  nothing. Where the flow asks it -- a block whose unit is gone (`usable`:
+  off the map, disposed, not ours), the goto marker's second call -- and
+  nothing came (`nextUnitOrIdle`: no `unitChosen`, no `noUnitLeft`), the
+  flow arms the automatic end itself if nothing can move or go to its
+  destination. A unit off the map that the controller re-selects
+  (`moveDirection`'s redisplay of the ship after its last move,
+  `doExecuteGotoOrders`' restore of the active unit) is no unit to show
+  when nothing else can move (`ClassicGUI.goneWithNothingLeft`): the end
+  view and `noUnitLeft`, as `changeView()`; with a unit left to move it is
+  chosen as before, and the next unit comes as a hand-over from the ship.
 - **Robust stages.** A stage's host call that throws no longer leaves the
   pause pending with no timer and the input blocked: the next stage is
   scheduled in a `finally` (`fire`, FINAL item 6). Once the game view goes
@@ -945,7 +960,8 @@ stages, the 485-ms end and its re-basing, the conditions, a box holding it,
 the village pause, the Spielzugende hand-off, the hand-over with and without
 its jump, the turn start (with a box, with a jump, without units, after an
 AI phase no poll saw, after a refusal), our colour's tick before the wipe and
-with a box up, goto units first and a goto unit with no path, a refusal not
+with a box up, goto units first and a goto unit with no path, a goto ship
+gone off the map with no choice from the controller, a refusal not
 sent and a slow answer, a stage that throws, a disposed flow, a screen behind
 the map, the indicator's colours and its poll, and `ClassicOneShot` (replace,
 cancel, stale posts, the thread on the real clock: never early, the best of
@@ -1040,7 +1056,16 @@ testArmDelayed`.
   natives' demands (`showNativeDemandDialog`) keep Enter and Escape on the
   refusal: FreeCol's default, and the original's first row (`@INDIANGOLD`,
   `@WANTSTUFF`, `@INDIANBEGFOOD` list the refusal first; I, no clip shows
-  one). `askEvent` takes the row Enter picks from its caller.
+  one). The first contact with a native nation (`showFirstContactDialog`)
+  takes "Ja", the peace, on Enter: `@INDIANWELCOME` lists "Ja" first and
+  has no `@default`, and FreeCol's `FirstContactDialog` defaults to "yes"
+  (D acceptance review). A refusal costs dearly -- the server adds major
+  tension and bans missions for that nation (`nativeFirstContact`), the
+  land on offer is lost, and the original answers with `@INDIANSHUN` ("Das
+  bedeutet KRIEG!") -- and several such boxes can come at one turn start.
+  Escape still refuses (W0e, Roger's rule; an open question for him, next
+  to Escape at the king's tax). `askEvent` takes the row Enter picks from
+  its caller.
 - **Back to Europe from anywhere (C trap 2).** BEFEHLE row 16 "Zurück nach
   Europa" (ships only) and its gold letter R fire FreeCol's new
   `ReturnToEuropeAction` (`returnToEuropeAction`), which calls
@@ -1056,7 +1081,9 @@ testArmDelayed`.
   Europe; otherwise the row is grey. R stays the road order for land units
   (the road action is disabled on water, the Europe action for land units).
   No question is asked (I: the original's behaviour on this order was not
-  recorded).
+  recorded). Once the ship has left the map with other units of ours still
+  on it (sentried, fortified), the turn ends by itself as after any last
+  move; before, it hung (D acceptance D1, see "A unit gone, and no choice").
 - **FreeCol's high-seas question is never shown (W0f).**
   `InGameController.moveHighSeas` asks `highseas.text` when a ship sails from
   coastal water onto the high seas; `modalConfirmDialog` answers it "no" at
@@ -1101,7 +1128,8 @@ Tests: `ClassicGUISeamTest` (`testEscapeAnswersNo`, `testEscapeCancelsAChoice`,
 `testHighSeasQuestionIsSilent`, `testEastPastView`,
 `testEuropeQuestionAtTheEastEdge`, `testSailHomeText`,
 `testKingsBoxEnterKissesTheRing`, `testNativeDemandEnterRefuses`,
-`testReturnToEuropeOrder`), `ClassicMenuBarTest.testActionMap`,
+`testReturnToEuropeOrder`, `testShipAtSeaGivesTheEndView`),
+`ClassicMenuBarTest.testActionMap`,
 `ClassicTurnFlowTest.testCancelKeepsTheUnitUp`,
 `InGameControllerTest.testLearnSkillQuestionKeepsTheMove` (server).
 

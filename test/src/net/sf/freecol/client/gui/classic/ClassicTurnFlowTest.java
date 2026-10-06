@@ -816,6 +816,85 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     }
 
     /**
+     * D acceptance D1: goto orders took the goto ship off the map (a ship
+     * sailing for Europe).  At the turn start the controller ran them
+     * itself before the ship's block, and FreeCol's controller, left in
+     * its goto mode with no active unit, chooses nothing on
+     * nextActiveUnit: with nothing left to move the flow arms the
+     * automatic end itself, and the turn ends.  The same after the flow's
+     * own goto orders when both of its calls bring nothing.  With a unit
+     * left to move nothing is armed (the flow never ends a turn then).
+     */
+    public void testUnitGoneAndNoChoiceStillEnds() {
+        final Player dutch = this.game.getPlayerByNationId("model.nation.dutch");
+        assertNotNull(dutch.getHighSeas());
+        final Unit g = ship(5, 5);
+        final Rig r = new Rig(this.game);
+        r.flow.endTurnNow("key");
+        r.host.turn = 2;
+        r.host.myTurn = true;
+        r.host.current = r.host.me;
+        r.host.nextGoingTo = true;
+        r.host.firstGoingTo = g;
+        assertTrue(r.flow.unitChosen(g, null));
+        assertEquals(ClassicTurnFlow.Kind.TURN_START, r.flow.pending().kind);
+        g.setLocation(dutch.getHighSeas());     // sailed off before its block
+        r.host.nextGoingTo = false;
+        r.advanceMs(300);                       // the block: gone, nothing chosen
+        assertEquals(0, r.count("activate " + g.getId()));
+        assertEquals(1, r.count("next"));
+        assertNotNull(r.flow.pending());
+        assertEquals(ClassicTurnFlow.Kind.END_TURN, r.flow.pending().kind);
+        r.advanceMs(484.9);
+        assertEquals(1, r.count("endTurn"));
+        r.advanceMs(0.2);
+        assertEquals(2, r.count("endTurn"));
+
+        // The flow's own goto orders take it off; both calls bring nothing.
+        final Unit h = ship(7, 5);
+        final Rig n = new Rig(this.game);
+        n.flow.endTurnNow("key");
+        n.host.turn = 2;
+        n.host.myTurn = true;
+        n.host.current = n.host.me;
+        n.host.nextGoingTo = true;
+        n.host.firstGoingTo = h;
+        assertTrue(n.flow.unitChosen(h, null));
+        n.advanceMs(300);
+        assertEquals(1, n.count("activate " + h.getId()));
+        n.clock.advanceMs(100);
+        n.flow.runDue();
+        h.setLocation(dutch.getHighSeas());
+        n.host.nextGoingTo = false;
+        n.edt.remove(0).run();                  // the goto orders
+        assertEquals(1, n.count("gotos"));
+        n.run();                                // their marker
+        assertEquals(2, n.count("next"));
+        assertEquals(ClassicTurnFlow.Kind.END_TURN, n.flow.pending().kind);
+        n.advanceMs(485);
+        assertEquals(2, n.count("endTurn"));
+
+        // A unit left to move: no end armed.
+        final Unit k = ship(9, 5);
+        final Rig m = new Rig(this.game);
+        m.flow.endTurnNow("key");
+        m.host.turn = 2;
+        m.host.myTurn = true;
+        m.host.current = m.host.me;
+        m.host.nextGoingTo = true;
+        m.host.firstGoingTo = k;
+        assertTrue(m.flow.unitChosen(k, null));
+        k.setLocation(dutch.getHighSeas());
+        m.host.nextGoingTo = false;
+        m.host.nextActive = true;
+        m.advanceMs(300);
+        assertEquals(1, m.count("next"));
+        assertNull(m.flow.pending());
+        m.advanceMs(1000);
+        assertEquals(1, m.count("endTurn"));
+    }
+
+    /**
      * Our end goes through without a poll seeing another player: the
      * event thread plays queued native slides while the AI phase runs,
      * and our next turn is current again when it gets to the queue.  The

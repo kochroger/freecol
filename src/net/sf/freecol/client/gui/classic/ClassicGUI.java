@@ -163,8 +163,9 @@ public class ClassicGUI extends GUI {
      * {@link #reconnectGUI}).  Null before then (title-screen placeholder).
      * Owns the classic view state (view mode, focus, selected tile, active
      * unit); this class delegates the corresponding {@code GUI} methods to it.
+     * A test puts its own in (the view changes, {@code ClassicGUISeamTest}).
      */
-    private ClassicMapViewer mapViewer;
+    ClassicMapViewer mapViewer;
 
     /**
      * The true terrain of the fog ring (M1c design 10 §5, W6d): in single
@@ -1867,19 +1868,47 @@ public class ClassicGUI extends GUI {
      * <p>A different unit after the previous one ran out of moves, and the
      * first unit of our turn, come up after the original's pause (build
      * spec W5e): the turn flow takes them over and activates them later.
+     * A unit off the map with nothing left to move is no unit: the end
+     * view, as {@link #changeView()} ({@link #goneWithNothingLeft}).
      */
     @Override
     public void changeView(Unit unit, boolean force) {
         if (this.mapViewer != null) {
             if (droppedViewChange("unit")) return;
             final Unit previous = this.mapViewer.getActiveUnit();
-            if (this.turnFlow == null
+            if (goneWithNothingLeft(unit)) {
+                ClassicFrameRecorder.event("handover", "off the map "
+                    + unit.getId() + ": no unit left");
+                this.mapViewer.changeToEndTurn();
+                if (this.turnFlow != null) this.turnFlow.noUnitLeft();
+            } else if (this.turnFlow == null
                 || !this.turnFlow.unitChosen(unit, previous)) {
                 this.mapViewer.changeToMoveUnits(unit);
             }
         }
         repaintInfo();
         updateActions();
+    }
+
+    /**
+     * Whether a unit the controller chose is off the map (a ship that has
+     * sailed for Europe, a unit in Europe, a unit gone) while none of its
+     * owner's units can move or go to its destination (D acceptance D1).
+     * The controller re-selects such a ship after its last move
+     * ({@code moveDirection}'s redisplay, {@code doExecuteGotoOrders}'
+     * restore of the active unit); after the order "Zurück nach Europa"
+     * its end view did not follow (its goto mode left over), so the ship
+     * stayed the active unit and the turn never ended (5 of 5 runs).  With
+     * a unit left to move the controller still brings it, as a hand-over
+     * from the ship.
+     *
+     * @param unit The unit chosen, or null.
+     * @return True if it is no unit to show.
+     */
+    static boolean goneWithNothingLeft(Unit unit) {
+        if (unit == null || unit.hasTile()) return false;
+        final Player p = unit.getOwner();
+        return p == null || (!p.hasNextActiveUnit() && !p.hasNextGoingToUnit());
     }
 
     /**
@@ -1981,15 +2010,18 @@ public class ClassicGUI extends GUI {
 
     /**
      * Whether Enter (or Space with no unit) may end the turn now: in the
-     * Spielzugende mode, or with no unit up and none left that can move
-     * (spec delta W17 item 7).  Without the turn flow, always.
+     * Spielzugende mode, or with no unit up (none, or one off the map: a
+     * ship that has sailed for Europe, D acceptance D1) and none left that
+     * can move (spec delta W17 item 7).  Without the turn flow, always.
      *
      * @return True if the key ends the turn.
      */
     boolean mayEndTurnByKey() {
         if (this.turnFlow == null || this.turnFlow.isPrompt()) return true;
         final Player p = getMyPlayer();
-        return this.mapViewer != null && this.mapViewer.getActiveUnit() == null
+        final Unit active = (this.mapViewer == null) ? null
+            : this.mapViewer.getActiveUnit();
+        return this.mapViewer != null && (active == null || !active.hasTile())
             && p != null && !p.hasNextActiveUnit() && !p.hasNextGoingToUnit();
     }
 
@@ -3236,7 +3268,12 @@ public class ClassicGUI extends GUI {
      * demand dialogs — a no-op dropped the exchange.  Mirrors
      * {@code FirstContactDialog}: the welcome text (offer variant when a
      * {@code tile} is on the table), a per-nation meeting header, over the
-     * meeting illustration.
+     * meeting illustration.  Enter takes "Ja", the peace: the original's
+     * {@code @INDIANWELCOME} has no {@code @default}, so its bar opens on
+     * row 1 "Ja", and FreeCol's own box defaults to "yes".  A refusal costs
+     * dearly (major tension, a mission ban for that nation, the offered
+     * land; the original's {@code @INDIANSHUN}: war).  Escape still answers
+     * "no" (W0e, Roger's rule; an open question for him).
      */
     @Override
     public void showFirstContactDialog(Player player, Player other, Tile tile,
@@ -3257,7 +3294,7 @@ public class ClassicGUI extends GUI {
             hdrKey = "firstContactDialog.meeting.natives";
         }
         askEvent(ImageLibrary.getMeetingImage(other), Messages.message(hdrKey),
-                 msg, "yes", "no", false, handler);
+                 msg, "yes", "no", true, handler);
     }
 
     /**

@@ -599,11 +599,12 @@ final class ClassicMapViewer extends JPanel {
      * The classic Space key: give the active unit "no orders" this turn (skip it
      * and advance to the next unit needing orders), mirroring
      * {@code SkipUnitAction}.  With no active unit there is nothing to skip, so —
-     * as in the original game — Space ends the turn instead.
+     * as in the original game — Space ends the turn instead; a unit off the
+     * map (a ship that has sailed for Europe) counts as none.
      */
     private void skipActiveUnitOrEndTurn() {
         final Unit unit = this.activeUnit;
-        if (unit == null) {
+        if (unit == null || !unit.hasTile()) {
             endTurn();
             return;
         }
