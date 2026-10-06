@@ -31,11 +31,14 @@ import net.sf.freecol.common.model.GoodsType;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Market;
 import net.sf.freecol.common.model.Modifier;
+import net.sf.freecol.common.model.Player;
+import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Turn;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.common.networking.ChangeSet;
+import net.sf.freecol.common.option.GameOptions;
 import net.sf.freecol.server.ServerTestHelper;
 import net.sf.freecol.server.control.InGameController;
 import net.sf.freecol.util.test.FreeColTestCase;
@@ -348,6 +351,77 @@ public class ServerPlayerTest extends FreeColTestCase {
         assertEquals("Should not be alive, no new world presence >= 1600",
                      ServerPlayer.DeadCheck.IS_DEAD,
                      dutch.checkForDeath());
+    }
+
+    /**
+     * House rule {@code model.option.lastColonyDefeat} (the levi rules):
+     * from the mandatory colony year on, a colonial European without a
+     * colony is defeated whatever units he still has; before it he may be
+     * without one, as before.
+     */
+    public void testLastColonyDefeatColonial() {
+        Game game = ServerTestHelper.startServerGame(getTestMap());
+        Map map = game.getMap();
+        final Specification spec = game.getSpecification();
+        ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+        dutch.setGold(0);
+        new ServerUnit(game, map.getTile(4, 7), dutch, colonistType);
+        assertFalse("off in the freecol rules",
+                    spec.getBoolean(GameOptions.LAST_COLONY_DEFEAT));
+        assertTrue("on in the levi rules",
+                   spec("levi").getBoolean(GameOptions.LAST_COLONY_DEFEAT));
+
+        game.setTurn(new Turn(1600));
+        assertEquals("FreeCol: a colonist on the map keeps him alive",
+                     ServerPlayer.DeadCheck.IS_ALIVE, dutch.checkForDeath());
+        spec.setBoolean(GameOptions.LAST_COLONY_DEFEAT, true);
+        try {
+            assertEquals("No colony from the mandatory year on",
+                         ServerPlayer.DeadCheck.IS_DEAD, dutch.checkForDeath());
+            game.setTurn(new Turn(1));
+            assertEquals("Before it no colony is needed",
+                         ServerPlayer.DeadCheck.IS_ALIVE, dutch.checkForDeath());
+            game.setTurn(new Turn(1600));
+            createStandardColony();
+            assertEquals("A colony keeps him alive",
+                         ServerPlayer.DeadCheck.IS_ALIVE, dutch.checkForDeath());
+        } finally {
+            spec.setBoolean(GameOptions.LAST_COLONY_DEFEAT, false);
+        }
+    }
+
+    /**
+     * House rule {@code model.option.lastColonyDefeat}: after the
+     * declaration any colony keeps a European alive, not only a coastal
+     * one; losing the last colony is the defeat.
+     */
+    public void testLastColonyDefeatRebel() {
+        Game game = ServerTestHelper.startServerGame(getTestMap());
+        Map map = game.getMap();
+        final Specification spec = game.getSpecification();
+        ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+        createStandardColony();  // on the all-land map: not a port
+        dutch.changePlayerType(Player.PlayerType.REBEL);
+        assertEquals(1, dutch.getColonyList().size());
+        assertEquals(0, dutch.getNumberOfPorts());
+        assertEquals("FreeCol: a rebel needs a coastal colony",
+                     ServerPlayer.DeadCheck.IS_DEAD, dutch.checkForDeath());
+
+        ServerPlayer french = getServerPlayer(game, "model.nation.french");
+        new ServerUnit(game, map.getTile(4, 7), french, colonistType);
+        french.changePlayerType(Player.PlayerType.INDEPENDENT);
+        spec.setBoolean(GameOptions.LAST_COLONY_DEFEAT, true);
+        try {
+            assertEquals("Any colony will do",
+                         ServerPlayer.DeadCheck.IS_ALIVE, dutch.checkForDeath());
+            dutch.changePlayerType(Player.PlayerType.INDEPENDENT);
+            assertEquals("Also after independence",
+                         ServerPlayer.DeadCheck.IS_ALIVE, dutch.checkForDeath());
+            assertEquals("No colony left is the defeat, units or not",
+                         ServerPlayer.DeadCheck.IS_DEAD, french.checkForDeath());
+        } finally {
+            spec.setBoolean(GameOptions.LAST_COLONY_DEFEAT, false);
+        }
     }
 
     public void testSellingMakesPricesFall() {

@@ -2166,6 +2166,18 @@ public class GUI extends FreeColClientHolder {
     public void showGameOptionsDialog(boolean editable, DialogHandler<OptionGroup> dialogHandler) { }
 
     /**
+     * Tell a defeated single player that the game is over: the rules
+     * offer no revenge mode ({@code GameOptions.REVENGE_MODE}).  The
+     * caller logs out when this returns.  The base shows the message in
+     * the information panel.
+     *
+     * @param template The message.
+     */
+    public void showGameOverPanel(StringTemplate template) {
+        showInformationPanel(template);
+    }
+
+    /**
      * Show the high scores panel.
      *
      * @param messageId The message identifier.

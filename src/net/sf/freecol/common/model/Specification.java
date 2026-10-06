@@ -3082,12 +3082,19 @@ public final class Specification implements OptionContainer {
                 Boolean.TRUE, BooleanOption.class);        
         // end @compat 1.1.0
 
-        // House rule: a save made before it existed gets it on, as a new
-        // game does.
+        // House rules of the "levi" rules: rules and saves without them
+        // play as FreeCol does (the question spends the move, revenge
+        // mode is offered, a rebel needs a coastal colony).
         ret |= checkOp(GameOptions.CANCEL_KEEPS_MOVE,
                        GameOptions.GAMEOPTIONS_MAP,
+                       Boolean.FALSE, BooleanOption.class);
+        ret |= checkOp(GameOptions.REVENGE_MODE,
+                       GameOptions.GAMEOPTIONS_VICTORY_CONDITIONS,
                        Boolean.TRUE, BooleanOption.class);
-        
+        ret |= checkOp(GameOptions.LAST_COLONY_DEFEAT,
+                       GameOptions.GAMEOPTIONS_VICTORY_CONDITIONS,
+                       Boolean.FALSE, BooleanOption.class);
+
         // SAVEGAME_VERSION == 14
         return ret;
     }

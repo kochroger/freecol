@@ -27,10 +27,12 @@ import java.util.List;
 
 import javax.swing.ImageIcon;
 
+import net.sf.freecol.FreeCol;
 import net.sf.freecol.client.gui.ChoiceItem;
 import net.sf.freecol.client.gui.action.ReturnToEuropeAction;
 import net.sf.freecol.client.gui.panel.FreeColPanel;
 import net.sf.freecol.common.i18n.Messages;
+import net.sf.freecol.common.io.FreeColRules;
 import net.sf.freecol.common.model.Colony;
 import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.Game;
@@ -38,11 +40,13 @@ import net.sf.freecol.common.model.GoodsType;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Monarch.MonarchAction;
 import net.sf.freecol.common.model.Player;
+import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.StringTemplate;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileType;
 import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
+import net.sf.freecol.common.option.GameOptions;
 import net.sf.freecol.server.model.ServerUnit;
 import net.sf.freecol.util.test.FreeColTestCase;
 
@@ -922,6 +926,75 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             assertEquals(String.join(" ", (String[]) c[0]), c[1], gui.sailed.size());
             assertSame(ClassicAdvisorBox.Portrait.ADMIRAL, last(keys.boxes).portrait);
         }
+    }
+
+    /**
+     * E3 (house rule, levi): a defeat ends the game.  The controller asks
+     * no revenge question; it shows FreeCol's game-over words in a notice
+     * box (any key closes it) and then logs out.
+     */
+    public void testGameOverNotice() {
+        final ClassicGUI gui = new ClassicGUI(null);
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        gui.showGameOverPanel(StringTemplate.template("defeatedGameOver.text"));
+        assertEquals(1, fake.boxes.size());
+        assertTrue(last(fake.boxes).isNotice());
+        assertEquals("game-over", last(fake.boxes).id);
+        assertEquals(Messages.message("defeatedGameOver.text"), last(fake.texts));
+        assertFalse(Messages.message("defeatedGameOver.text")
+                    .equals("defeatedGameOver.text"));
+    }
+
+    /**
+     * E3 (R1a): the Classic UI's new games play the "levi" rules, unless
+     * {@code --rules} names others; the default rules, which name the
+     * options folder, stay "freecol".  NEUE WELT loads them with the
+     * chosen difficulty.
+     */
+    public void testNewGamesPlayLevi() throws Exception {
+        assertEquals("levi", FreeCol.CLASSIC_RULES);
+        assertEquals("levi", FreeCol.newGameRules(true, null));
+        assertEquals("freecol", FreeCol.newGameRules(false, null));
+        assertEquals("classic", FreeCol.newGameRules(true, "classic"));
+        assertEquals("the options folder does not move",
+                     "freecol", FreeCol.getRules());
+        final Specification spec = FreeCol.loadSpecification(
+            FreeColRules.getFreeColRulesFile(FreeCol.newGameRules(true, null)),
+            null, "model.difficulty.veryHard");
+        assertNotNull(spec);
+        assertEquals("levi", spec.getId());
+        assertEquals("model.difficulty.veryHard", spec.getDifficultyLevel());
+        assertFalse(spec.getBoolean(GameOptions.REVENGE_MODE));
+    }
+
+    /**
+     * E3: the name screen's leader may not be another nation's player's
+     * name.  In levi the AI players are the original's leaders, so the
+     * player's own leader (the name screen's default) is free, the others
+     * are not; the rulers are free there.  In freecol the AIs are the
+     * rulers.
+     */
+    public void testFreePlayerNames() {
+        final Specification levi = spec("levi");
+        final String dutch = "model.nation.dutch";
+        final String english = "model.nation.english";
+        assertTrue(ClassicGUI.isFreePlayerName(levi, "Michiel De Ruyter", dutch));
+        assertFalse(ClassicGUI.isFreePlayerName(levi, "Walter Raleigh", dutch));
+        assertTrue(ClassicGUI.isFreePlayerName(levi, "Walter Raleigh", english));
+        assertFalse(ClassicGUI.isFreePlayerName(levi, "Michiel De Ruyter", english));
+        assertTrue(ClassicGUI.isFreePlayerName(levi, "Elizabeth I", dutch));
+        assertTrue(ClassicGUI.isFreePlayerName(levi, "Roger", dutch));
+        assertFalse(ClassicGUI.isFreePlayerName(levi, "", dutch));
+        assertFalse(ClassicGUI.isFreePlayerName(levi, "mapEditor", dutch));
+        // A REF player keeps the REF's ruler.
+        assertFalse(ClassicGUI.isFreePlayerName(levi, Messages.message(
+            levi.getNation("model.nation.dutchREF").getRulerNameKey()), dutch));
+
+        final Specification freecol = spec("freecol");
+        assertFalse(ClassicGUI.isFreePlayerName(freecol, "Elizabeth I", dutch));
+        assertTrue(ClassicGUI.isFreePlayerName(freecol, "Walter Raleigh", dutch));
+        assertTrue(ClassicGUI.isFreePlayerName(freecol, "William I", dutch));
     }
 
     /**

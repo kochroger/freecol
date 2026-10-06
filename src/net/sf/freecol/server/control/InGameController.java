@@ -2235,6 +2235,10 @@ public final class InGameController extends Controller {
                 + " as this is not a single player game.");
         }
         Game game = getGame();
+        if (!game.getSpecification().getBoolean(GameOptions.REVENGE_MODE)) {
+            return serverPlayer.clientError("Can not enter revenge mode,"
+                + " as the rules do not allow it.");
+        }
         List<UnitType> undeads = game.getSpecification()
             .getUnitTypesWithAbility(Ability.UNDEAD);
         List<UnitType> navalUnits = new ArrayList<>();

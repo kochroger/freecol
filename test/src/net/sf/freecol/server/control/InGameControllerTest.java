@@ -228,18 +228,30 @@ public class InGameControllerTest extends FreeColTestCase {
     }
 
     /**
-     * The house rule {@code model.option.cancelKeepsMove} (on by default):
-     * asking about a native settlement's skill costs a human player's
-     * unit no move, so declining, or finding nothing to learn, keeps it;
-     * learning spends it.  With the rule off, and always for the AI, the
-     * question spends the move, as before.
+     * The house rule {@code model.option.cancelKeepsMove} (on in the
+     * "levi" rules, off elsewhere): asking about a native settlement's
+     * skill costs a human player's unit no move, so declining, or finding
+     * nothing to learn, keeps it; learning spends it.  With the rule off,
+     * and always for the AI, the question spends the move, as before.
      */
     public void testLearnSkillQuestionKeepsTheMove() {
+        assertTrue("The house rule is on in the levi rules",
+                   spec("levi").getBoolean(GameOptions.CANCEL_KEEPS_MOVE));
         final Game game = ServerTestHelper.startServerGame(getTestMap());
         final InGameController igc = ServerTestHelper.getInGameController();
         final Specification spec = game.getSpecification();
-        assertTrue("The house rule is on by default",
-                   spec.getBoolean(GameOptions.CANCEL_KEEPS_MOVE));
+        assertFalse("The house rule is off in the freecol rules",
+                    spec.getBoolean(GameOptions.CANCEL_KEEPS_MOVE));
+        spec.setBoolean(GameOptions.CANCEL_KEEPS_MOVE, true);
+        try {
+            learnSkillQuestion(game, igc, spec);
+        } finally {
+            spec.setBoolean(GameOptions.CANCEL_KEEPS_MOVE, false);
+        }
+    }
+
+    private void learnSkillQuestion(Game game, InGameController igc,
+                                    Specification spec) {
 
         ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
         dutch.setAI(false);   // a human player (the test server has only AIs)
@@ -290,25 +302,46 @@ public class InGameControllerTest extends FreeColTestCase {
 
         // The rule off: the question spends the move, as the original.
         spec.setBoolean(GameOptions.CANCEL_KEEPS_MOVE, false);
-        try {
-            ServerUnit third = new ServerUnit(game, tile, dutch, colonistType);
-            igc.askLearnSkill(dutch, third, camp);
-            assertEquals("Without the rule asking spends the moves",
-                         0, third.getMovesLeft());
+        ServerUnit third = new ServerUnit(game, tile, dutch, colonistType);
+        igc.askLearnSkill(dutch, third, camp);
+        assertEquals("Without the rule asking spends the moves",
+                     0, third.getMovesLeft());
 
-            // The scout's box (the only other village box the server
-            // sees before the choice) never costs a move: its cancel
-            // keeps it, rule or not.  The armed unit's and the
-            // missionary's boxes ask the server only after the choice.
-            ServerUnit scout = new ServerUnit(game, tile, dutch, colonistType,
-                                              scoutRole);
-            final int scoutMoves = scout.getMovesLeft();
-            assertTrue(scoutMoves > 0);
-            igc.scoutIndianSettlement(dutch, scout, camp);
-            assertEquals("The scout's question keeps the moves",
-                         scoutMoves, scout.getMovesLeft());
+        // The scout's box (the only other village box the server
+        // sees before the choice) never costs a move: its cancel
+        // keeps it, rule or not.  The armed unit's and the
+        // missionary's boxes ask the server only after the choice.
+        ServerUnit scout = new ServerUnit(game, tile, dutch, colonistType,
+                                          scoutRole);
+        final int scoutMoves = scout.getMovesLeft();
+        assertTrue(scoutMoves > 0);
+        igc.scoutIndianSettlement(dutch, scout, camp);
+        assertEquals("The scout's question keeps the moves",
+                     scoutMoves, scout.getMovesLeft());
+    }
+
+    /**
+     * House rule {@code model.option.revengeMode} off (the levi rules): a
+     * defeated player can not rise as the undead, even if a client asks.
+     */
+    public void testNoRevengeModeWithoutTheRule() {
+        assertFalse("off in the levi rules",
+                    spec("levi").getBoolean(GameOptions.REVENGE_MODE));
+        final Game game = ServerTestHelper.startServerGame(getTestMap());
+        final InGameController igc = ServerTestHelper.getInGameController();
+        final Specification spec = game.getSpecification();
+        assertTrue("FreeCol offers it",
+                   spec.getBoolean(GameOptions.REVENGE_MODE));
+        ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+        assertEquals(0, dutch.getUnitCount());
+        spec.setBoolean(GameOptions.REVENGE_MODE, false);
+        try {
+            igc.enterRevengeMode(dutch);
+            assertEquals("Still colonial", PlayerType.COLONIAL,
+                         dutch.getPlayerType());
+            assertEquals("No undead units", 0, dutch.getUnitCount());
         } finally {
-            spec.setBoolean(GameOptions.CANCEL_KEEPS_MOVE, true);
+            spec.setBoolean(GameOptions.REVENGE_MODE, true);
         }
     }
 

@@ -32,6 +32,64 @@ java -Xmx2G -cp "build;jars/*" net.sf.freecol.FreeCol --classic --fast --no-intr
 `--fast --no-intro` auto-starts a single-player game with no GUI clicks — the
 fastest way to the in-game view. It starts at sea: the ship on an ocean patch.
 
+## The rules (`data/rules/levi`; master plan R1a, R1c, R2)
+
+The Classic UI's new games play the ruleset **"levi"**: the `classic` rules
+(the original's) with Roger's choices from `Regeln-Auswahl.md` ("Rogers Wahl",
+2026-10-06) and his house rules. Both new-game paths take it,
+`ClassicGUI.startNewWorldGame` (NEUE WELT) and `--classic --fast`/`--debug`
+(`FreeCol.getRulesSpecification`), through `FreeCol.getNewGameRules`:
+`--rules` if given, else `FreeCol.CLASSIC_RULES` under `--classic`, else
+`freecol`. It is **not** the default rules (`FreeCol.getRules`, still
+`freecol`), because those also name the user's options folder
+(`FreeColDirectories.getOptionsDirectory`, `<config>/freecol`), which must not
+move. A save keeps its own rules, so only new games change; an old `freecol`
+save plays on as it was (R1b re-applies the rules on load, later).
+
+- `mod.xml` names the parent (`parent="classic"`), the specification
+  `extends="classic"`; `ant validate` checks it against the schema.
+- **Rows that play as `freecol`** (each is a copy of the freecol rules'
+  data): 1 no stockade lock (the three `minimumColonySize` deletes, stockade,
+  fort and fortress: the fort and the fortress copy the stockade's modifier),
+  5 `enhancedMissionaries`, 8 `captureUnitsUnderRepair`, 11
+  `foundColonyDuringRebellion`, 12 `saveProductionOverflow` off, 13
+  `allowStudentSelection`, 17 Pocahontas also lifts the mission bans
+  (`model.event.resetBannedMissions`). Every other row, and every other
+  option and difficulty value, is classic's (`LeviRulesTest`).
+- **House rules** (game options; rules and saves without them get FreeCol's
+  behaviour from `Specification.fixGameOptions`):
+  - `model.option.cancelKeepsMove` on (D1, moved here from the classic
+    rules; elsewhere off now).
+  - `model.option.revengeMode` off: a defeat ends the game. The client's
+    `setDead` asks no revenge question and shows `defeatedGameOver.text`
+    (`GUI.showGameOverPanel`, in the Classic UI a notice box), then logs out
+    to the title. It comes only on the server's verdict (`setDeadHandler`):
+    disbanding the last unit no longer calls it, as before 1600 the server
+    may keep a player without units alive. The server refuses
+    `enterRevengeMode` too.
+  - `model.option.lastColonyDefeat` on: a European is defeated when his last
+    colony is lost, not when a rebel loses his last coastal colony
+    (`ServerPlayer.checkForDeath`): rebels and independents need any
+    colony; a colonial player needs one from `mandatoryColonyYear` (1600) on,
+    whatever units he still has, and before it may be without one as in the
+    original. The debug-run observer is spared as before.
+  - Open end after independence: `victoryDefeatREF` and
+    `victoryDefeatEuropeans` off, so no victory and no per-turn high-score
+    loop. No founding fathers after the declaration
+    (`continueFoundingFatherRecruitment` stays off, FreeCol's default).
+- **Names** (`NameCache`): colony names fall back to the parent rules'
+  (`getParentRules`: the mod descriptor's `parent`, found by the rules id,
+  so it works for a save too), so the levi Dutch found "Neu-Amsterdam", the
+  original's names, not freecol's. A name a ruleset may change has a key
+  `<key>.<rules>` (`NameCache.getRulesKey`, nearest rules first): the AI
+  Europeans are the original's leaders (`model.nation.*.leader.levi`, NAMES.TXT
+  `@LEADERNAME`: Walter Raleigh, Jacques Cartier, Christoph Columbus,
+  Michiel De Ruyter; `NameCache.getLeaderName`, `ServerPlayer.initialize`)
+  while their kings keep the ruler names, and Spain's Europe is Sevilla
+  (`model.nation.spanish.europe.levi`, `Player.getEuropeNameKey`).
+  `ClassicGUI.isFreePlayerName` refuses the name another nation's player
+  gets; the player's own leader, the name screen's default, is free.
+
 ## `ClassicGUI` — the view facade
 
 `ClassicGUI extends GUI` and overrides only the methods it implements:
@@ -1130,8 +1188,9 @@ testArmDelayed`.
   point 4); the rule is Roger's. A ship that sails home from the west edge
   comes back there: FreeCol keeps the tile it left as its entry location.
 - **"Handlung abbrechen" keeps the move (house rule D1).** The game option
-  `model.option.cancelKeepsMove` (classic spec, `gameOptions.map`, default
-  **on**; older saves get it on, `Specification.fixGameOptions`): the server's
+  `model.option.cancelKeepsMove` (levi rules, `gameOptions.map`, **on**; the
+  other rules and saves without it get it off, `Specification.fixGameOptions`,
+  see "The rules" above): the server's
   `askLearnSkill` no longer spends a human player's moves before the learn
   question. Accepting spends them as before (`learnFromIndianSettlement`);
   declining (or Escape) and a settlement with nothing (more) to teach
@@ -3042,12 +3101,10 @@ game opens on the original's first scene with the admiral (083/049, see
   (160,100), diffs against the 19 captures, writes renders and ×4 residual
   maps, renders France/Spain pages and audience for review, asserts the
   sprite anchors, and exits 1 on any difference.
-- **Open items** (product questions, out of this step): FreeCol names the AI
-  Europeans after their monarchs, the original perhaps after the NAMES.TXT
-  leaders; NEUE WELT uses the `freecol` rules (FreeCol.java:172), not
-  `classic`; Spain's home port is Cádiz in FreeCol, Sevilla in the original.
-  The France/Spain banner positions come from the sprite headers, not from
-  captures.
+- **Open items** (product questions, out of this step): the France/Spain
+  banner positions come from the sprite headers, not from captures. Settled
+  since (E3, "The rules" above): NEUE WELT plays the `levi` rules, the AI
+  Europeans are the NAMES.TXT leaders, Spain's home port is Sevilla.
 
 ## Departure (LEVN0001-0010, @BUILD1-10) (`ClassicDeparture`, `ClassicDepartureTimeline`)
 
@@ -3886,7 +3943,12 @@ Hard-won details, each of which silently wastes a run:
   not on a profile without saves. It holds the focus and swallows every key
   and click until it is dismissed: press one fresh key (not one held since
   before it appeared) or click once, then wait for `Classic first scene
-  dismissed.` in the log. Notices held meanwhile appear right after. A
+  dismissed.` in the log. The script's `key` reaches the scene while it is
+  up (`ClassicTestHarness.keyTarget`, `ClassicGUI.sceneOverlay`), also in a
+  window minimized without activation, which has no focus owner; its
+  `click` does not (it lands on the map viewer). Without a focus owner the
+  title screens (the menu, the NEUE WELT chain) get the keys too
+  (`ClassicGUI.currentTitlePanel`). Notices held meanwhile appear right after. A
   loaded save never shows the scene.
 - **The original arrow is drawn in game** (first scene at (160,100) until
   the mouse moves, then HUD and dropdowns); the system cursor is hidden over

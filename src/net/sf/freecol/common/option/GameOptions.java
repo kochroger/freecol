@@ -65,7 +65,8 @@ public class GameOptions {
     /**
      * House rule: a human player's unit asked whether to learn at a
      * native settlement keeps its moves until it accepts, so declining
-     * (or a settlement with nothing to teach) costs no move.
+     * (or a settlement with nothing to teach) costs no move.  On in the
+     * "levi" rules; rules and saves without it spend the move.
      */
     public static final String CANCEL_KEEPS_MOVE
         = "model.option.cancelKeepsMove";
@@ -255,6 +256,25 @@ public class GameOptions {
      */
     public static final String VICTORY_DEFEAT_HUMANS
         = "model.option.victoryDefeatHumans";
+
+    /**
+     * May a single player who has been defeated play on in revenge mode
+     * (undead units)?  Off in the "levi" rules (house rule): a defeat
+     * ends the game, and only the server decides on it.  Rules and saves
+     * without it ask, as FreeCol does.
+     */
+    public static final String REVENGE_MODE
+        = "model.option.revengeMode";
+
+    /**
+     * House rule ("levi"): a European player is defeated when he has no
+     * colony left -- from the mandatory colony year on, and at once
+     * after declaring independence -- not only when a rebel has lost
+     * his last coastal colony.  Rules and saves without it keep
+     * FreeCol's checks.
+     */
+    public static final String LAST_COLONY_DEFEAT
+        = "model.option.lastColonyDefeat";
 
 
     /** Years game option group. */

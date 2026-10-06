@@ -478,12 +478,16 @@ public class Player extends FreeColGameObject implements Nameable {
     }
 
     /**
-     * Get a name key for the player Europe.
+     * Get a name key for the player Europe, as the rules name it
+     * ({@link NameCache#getRulesKey}: Spain sails to Sevilla in the
+     * "levi" rules, as in the original, and to Cadiz in FreeCol's).
      *
      * @return A name key, or null if Europe is null.
      */
     public String getEuropeNameKey() {
-        return (europe == null) ? null : this.nationId + ".europe";
+        return (europe == null) ? null
+            : NameCache.getRulesKey(getSpecification(),
+                                    this.nationId + ".europe");
     }
 
     /**

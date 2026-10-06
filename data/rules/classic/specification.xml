@@ -4652,12 +4652,6 @@
              chief and thus consume the scouting bonus -->
         <booleanOption id="model.option.settlementActionsContactChief"
                        defaultValue="false"/>
-        <!-- House rule: a human player's unit asked whether to learn at a
-             native settlement keeps its moves until it accepts, so
-             declining ("Handlung abbrechen") or a settlement with nothing
-             to teach costs no move.  The original spends the move. -->
-        <booleanOption id="model.option.cancelKeepsMove"
-                       defaultValue="true"/>
         <!-- Missionaries grant visibility and enhance trade and training -->
         <booleanOption id="model.option.enhancedMissionaries"
                        defaultValue="false"/>

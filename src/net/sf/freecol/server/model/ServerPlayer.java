@@ -236,7 +236,9 @@ public class ServerPlayer extends Player implements TurnTaker {
             throw new RuntimeException("Null nation: " + this);
         }
 
-        this.name = nation.getRulerName();
+        // The ruler, or the leader the rules name (the original's
+        // leaders in the "levi" rules); a human's login name replaces it.
+        this.name = NameCache.getLeaderName(game.getSpecification(), nation);
         this.admin = admin;
         this.nationId = nation.getId();
         this.immigration = 0;
@@ -442,6 +444,9 @@ public class ServerPlayer extends Player implements TurnTaker {
          *      || (isREF && !(rebel nation left) && (all units in Europe))
          *      || ((no units in New World)
          *         && ((year > 1600) || (cannot get a unit from Europe)))
+         * With GameOptions.LAST_COLONY_DEFEAT (house rule) a European
+         * dies with no colony at all, rebel or independent at once,
+         * colonial from the mandatory colony year on.
          */
         switch (getPlayerType()) {
         case NATIVE: case UNDEAD: // All native and undead units are viable
@@ -453,7 +458,13 @@ public class ServerPlayer extends Player implements TurnTaker {
 
         case REBEL: case INDEPENDENT:
             // Post-declaration European player needs a coastal colony
-            // and can not hope for resupply from Europe.
+            // and can not hope for resupply from Europe.  With the
+            // house rule any colony will do: only losing the last
+            // one is a defeat.
+            if (spec.getBoolean(GameOptions.LAST_COLONY_DEFEAT)) {
+                return (any(getColonies())) ? DeadCheck.IS_ALIVE
+                    : DeadCheck.IS_DEAD;
+            }
             return (getNumberOfPorts() > 0) ? DeadCheck.IS_ALIVE
                 : DeadCheck.IS_DEAD;
 
@@ -472,6 +483,17 @@ public class ServerPlayer extends Player implements TurnTaker {
         // Do not kill the observing player during a debug run.
         if (!isAI() && FreeColDebugger.getDebugRunTurns() >= 0)
             return DeadCheck.IS_ALIVE;
+
+        // House rule: from the mandatory colony year on, a European
+        // without a colony is defeated whatever units he still has (the
+        // original relieves him of his post).  Before it, the checks
+        // below.
+        final int mandatory = spec.getInteger(GameOptions.MANDATORY_COLONY_YEAR);
+        if (spec.getBoolean(GameOptions.LAST_COLONY_DEFEAT)
+            && getGame().getTurn().getYear() >= mandatory) {
+            logger.info(getName() + " dead, no colony >= " + mandatory);
+            return DeadCheck.IS_DEAD;
+        }
 
         // Traverse player units, look for valid carriers, colonists,
         // carriers with units, carriers with goods.
@@ -506,7 +528,6 @@ public class ServerPlayer extends Player implements TurnTaker {
         }
         // The player does not have any valid units or settlements on the map.
 
-        int mandatory = spec.getInteger(GameOptions.MANDATORY_COLONY_YEAR);
         if (getGame().getTurn().getYear() >= mandatory) {
             // After the season cutover year there must be a presence
             // in the New World.

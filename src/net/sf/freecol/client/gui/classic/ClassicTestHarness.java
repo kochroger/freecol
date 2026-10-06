@@ -209,6 +209,11 @@ final class ClassicTestHarness {
         // An advisor box takes the keys while it is up or due (W7).
         final ClassicAdvisorLayer boxes = this.gui.boxLayer();
         if (boxes != null && boxes.isBusy() && boxes.isShowing()) return boxes;
+        // So does the first scene: it holds the focus in a real game, but
+        // a window minimized without activation has no focus owner, and
+        // the keys would reach the map viewer behind it.
+        final Component scene = this.gui.sceneOverlay();
+        if (scene != null && scene.isShowing()) return scene;
         final Component owner = KeyboardFocusManager
             .getCurrentKeyboardFocusManager().getFocusOwner();
         if (owner != null && owner.isShowing()) return owner;
@@ -224,6 +229,10 @@ final class ClassicTestHarness {
         }
         final ClassicMapViewer mv = this.gui.currentMapViewer();
         if (mv != null && mv.isShowing()) return mv;
+        // The title screens, when the window was minimized before the
+        // title panel ever had the focus.
+        final ClassicMainMenuPanel title = this.gui.currentTitlePanel();
+        if (title != null && title.isShowing()) return title;
         return f;
     }
 

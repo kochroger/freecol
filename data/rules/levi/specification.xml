@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    *  Copyright (C) 2002-2024  The FreeCol Team
+    *
+    *  This file is part of FreeCol.
+    *
+    *  FreeCol is free software: you can redistribute it and/or modify
+    *  it under the terms of the GNU General Public License as published by
+    *  the Free Software Foundation, either version 2 of the License, or
+    *  (at your option) any later version.
+    *
+    *  FreeCol is distributed in the hope that it will be useful,
+    *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+    *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    *  GNU General Public License for more details.
+    *
+    *  You should have received a copy of the GNU General Public License
+    *  along with FreeCol.  If not, see <http://www.gnu.org/licenses/>.
+
+    The rules of Levi's Colonization 2026, played by the Classic UI's
+    new games: the "classic" rules (the original's) with Roger's
+    choices from the rules table (Regeln-Auswahl, "Rogers Wahl" of
+    2026-10-06) and his house rules.  A row of the table that is not
+    named here plays as "classic".  Rows that play as "freecol":
+      1  stockade lock off (the three deletes of the freecol rules)
+      5  enhanced missionaries
+      8  ships under repair are captured with a colony
+     11  colonies may be founded during the war of independence
+     12  overflow hammers, crosses and bells are not saved
+     13  the player chooses which colonist the school teaches
+     17  Pocahontas also lifts the natives' mission bans
+    House rules: cancelling a native settlement's question keeps the
+    move; no revenge mode (a defeat ends the game); a European is
+    defeated when his last colony is lost (from the mandatory colony
+    year on, and at once after the declaration), not when his last
+    coastal colony is lost; the game goes on open-ended after
+    independence (no victory).  The original's colony names, leader
+    names and Spain's home port come with the names (NameCache), keyed
+    by the parent "classic" (mod.xml) and by "levi".
+
+    In case of incompatible changes, please update version number and
+    XSD schema for validation.
+-->
+<freecol-specification id="levi" version="0.120" extends="classic">
+
+  <building-types>
+    <!-- Row 1: no stockade lock.  Every colony may be reduced or
+         abandoned, whatever its walls, captured ones too.  The fort and
+         the fortress copied the stockade's modifier when "classic" was
+         read, so all three deletes are needed. -->
+    <building-type id="model.building.stockade" preserve="true">
+      <modifier id="model.modifier.minimumColonySize" delete="true" />
+    </building-type>
+    <building-type id="model.building.fort" preserve="true">
+      <modifier id="model.modifier.minimumColonySize" delete="true" />
+    </building-type>
+    <building-type id="model.building.fortress" preserve="true">
+      <modifier id="model.modifier.minimumColonySize" delete="true" />
+    </building-type>
+  </building-types>
+
+  <founding-fathers>
+    <!-- Row 17, as the freecol rules. -->
+    <founding-father id="model.foundingFather.pocahontas" type="political"
+                     weight1="7" weight2="5" weight3="3">
+      <modifier id="model.modifier.nativeAlarmModifier"
+                type="percentage" value="-50"/>
+      <event id="model.event.resetNativeAlarm"/>
+      <!-- In Col1 bans on missionaries persist forever.  Allow
+           Pocahontas to clear them as a FreeCol extension. -->
+      <event id="model.event.resetBannedMissions"/>
+    </founding-father>
+  </founding-fathers>
+
+  <options>
+    <optionGroup id="gameOptions">
+      <optionGroup id="gameOptions.map">
+        <!-- Row 5: missionaries grant visibility and enhance trade and
+             training. -->
+        <booleanOption id="model.option.enhancedMissionaries"
+                       defaultValue="true"/>
+        <!-- House rule: a human player's unit asked whether to learn at
+             a native settlement keeps its moves until it accepts, so
+             declining ("Handlung abbrechen") or a settlement with
+             nothing to teach costs no move.  The original spends the
+             move. -->
+        <booleanOption id="model.option.cancelKeepsMove"
+                       defaultValue="true"/>
+      </optionGroup>
+      <optionGroup id="gameOptions.colony">
+        <!-- Row 8: capture units under repair when a colony is
+             captured. -->
+        <booleanOption id="model.option.captureUnitsUnderRepair"
+                       defaultValue="true"/>
+        <!-- Row 11: colonies can be founded during the war of
+             independence. -->
+        <booleanOption id="model.option.foundColonyDuringRebellion"
+                       defaultValue="true"/>
+        <!-- Row 12: overflow hammer and cross production is lost. -->
+        <booleanOption id="model.option.saveProductionOverflow"
+                       defaultValue="false"/>
+        <!-- Row 13: the player chooses whom a school teaches. -->
+        <booleanOption id="model.option.allowStudentSelection"
+                       defaultValue="true"/>
+      </optionGroup>
+      <optionGroup id="gameOptions.victoryConditions">
+        <!-- House rule: after independence the game goes on with no end,
+             so neither defeating the REF nor being the last European
+             wins it. -->
+        <booleanOption id="model.option.victoryDefeatREF"
+                       defaultValue="false"/>
+        <booleanOption id="model.option.victoryDefeatEuropeans"
+                       defaultValue="false"/>
+        <!-- House rule: no revenge mode.  A defeat ends the game; it is
+             decided by the server alone. -->
+        <booleanOption id="model.option.revengeMode"
+                       defaultValue="false"/>
+        <!-- House rule: a European is defeated when he has no colony
+             left: from the mandatory colony year on, and at once after
+             declaring independence (not only when his last coastal
+             colony is lost).  Before that year he may be without one,
+             as in the original. -->
+        <booleanOption id="model.option.lastColonyDefeat"
+                       defaultValue="true"/>
+      </optionGroup>
+    </optionGroup>
+  </options>
+</freecol-specification>

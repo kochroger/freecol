@@ -70,6 +70,8 @@ import net.sf.freecol.client.gui.panel.FreeColImageBorder;
 import net.sf.freecol.client.gui.panel.FreeColPanel;
 import net.sf.freecol.common.FreeColException;
 import net.sf.freecol.common.i18n.Messages;
+import net.sf.freecol.common.i18n.NameCache;
+import net.sf.freecol.common.io.FreeColModFile;
 import net.sf.freecol.common.model.Colony;
 import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.FreeColGameObject;
@@ -1018,22 +1020,28 @@ public class ClassicGUI extends GUI {
     void startNewWorldGame(final NewWorldSetup setup) {
         SwingUtilities.invokeLater(() -> {
             try {
-                // A fresh Specification per call (FreeCol.java:981-994).
+                // A fresh Specification per call (FreeCol.java:981-994),
+                // of the Classic UI's rules, "levi"
+                // (FreeCol.getNewGameRules).
+                final FreeColModFile rules = FreeCol.getNewGameRulesFile();
                 Specification spec = FreeCol.loadSpecification(
-                    FreeCol.getRulesFile(), FreeCol.getAdvantages(),
-                    setup.difficultyId);
+                    rules, FreeCol.getAdvantages(), setup.difficultyId);
                 if (spec != null && setup.difficultyId != null
                     && !setup.difficultyId.equals(spec.getDifficultyLevel())) {
                     logger.warning("ClassicGUI: difficulty " + setup.difficultyId
                         + " not applied (got " + spec.getDifficultyLevel()
                         + "); falling back to " + FreeCol.getDifficulty());
-                    spec = FreeCol.loadSpecification(FreeCol.getRulesFile(),
+                    spec = FreeCol.loadSpecification(rules,
                         FreeCol.getAdvantages(), FreeCol.getDifficulty());
                 }
                 if (spec == null) {
+                    logger.warning("ClassicGUI: no rules "
+                        + FreeCol.getNewGameRules() + " for a new game.");
                     showMainPanel(Messages.message("classic.mainMenu.startFailed"));
                     return;
                 }
+                logger.info("ClassicGUI: new game on the rules " + spec.getId()
+                    + ", difficulty " + spec.getDifficultyLevel());
                 // A new game is played on the original's square map, with
                 // its map size and land shares, unless -Dfreecol.topology
                 // says otherwise.  The server's new map takes the topology
@@ -1043,7 +1051,7 @@ public class ClassicGUI extends GUI {
                     spec.getMapGeneratorOptions());
                 if (setup.playerName != null) {
                     final String name = setup.playerName.trim();
-                    if (!isFreePlayerName(spec, name)) {
+                    if (!isFreePlayerName(spec, name, setup.nationId)) {
                         logger.info("ClassicGUI: refused player name " + name);
                         this.pendingNationId = null;
                         showMainPanel(Messages.message("classic.newWorld.nameTaken"));
@@ -1073,19 +1081,25 @@ public class ClassicGUI extends GUI {
     /**
      * Whether a typed leader name may be used.  Refused: an empty name (the
      * server rejects it), {@code mapEditor} (refused when a save is loaded)
-     * and any ruler name of the rules -- those are the AI players' names
-     * (ServerPlayer.java:239), and two players with one name break
-     * {@code Game.getPlayerByName} (an exact {@code equals}, first match)
-     * and with it loading the save.
+     * and the name of any other nation's player -- the AI players keep the
+     * name the rules give them ({@code NameCache.getLeaderName}: the
+     * original's leaders in the "levi" rules, else the ruler), and two
+     * players with one name break {@code Game.getPlayerByName} (an exact
+     * {@code equals}, first match) and with it loading the save.  The
+     * player's own nation has no AI player, so its leader, the name the
+     * name screen offers (NAMES.TXT {@code @LEADERNAME}), is free.
      *
      * @param spec The game's rules.
      * @param name The trimmed name.
+     * @param nationId The player's nation, or null if not known.
      * @return True if the name is free.
      */
-    static boolean isFreePlayerName(Specification spec, String name) {
+    static boolean isFreePlayerName(Specification spec, String name,
+                                    String nationId) {
         if (name == null || name.isEmpty() || "mapEditor".equals(name)) return false;
         for (Nation n : spec.getNations()) {
-            if (name.equals(Messages.message(n.getRulerNameKey()))) return false;
+            if (n.getId().equals(nationId)) continue;
+            if (name.equals(NameCache.getLeaderName(spec, n))) return false;
         }
         return true;
     }
@@ -1835,6 +1849,14 @@ public class ClassicGUI extends GUI {
     /** @return The advisor boxes' layer, or null (the harness, tests). */
     ClassicAdvisorLayer boxLayer() {
         return this.boxLayer;
+    }
+
+    /**
+     * @return The overlay showing the first scene while it is up, else null
+     *     (the harness: the scene takes the keys).  EDT only.
+     */
+    Component sceneOverlay() {
+        return (this.sceneShowing) ? this.hudOverlay : null;
     }
 
     /**
@@ -3147,6 +3169,11 @@ public class ClassicGUI extends GUI {
         return this.mapViewer;
     }
 
+    /** @return The title panel, or null before it exists. */
+    ClassicMainMenuPanel currentTitlePanel() {
+        return this.mainMenuPanel;
+    }
+
     /** @return The in-game HUD, or null outside a game. */
     ClassicHudPane currentHudPane() {
         return this.hudPane;
@@ -3304,6 +3331,25 @@ public class ClassicGUI extends GUI {
                 return null;
             }, null);
         return null;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * A notice box (build spec W7): any key or a click closes it, then the
+     * controller logs out and the title comes back.  It comes only on the
+     * server's verdict ({@code InGameController.setDeadHandler}), in the
+     * "levi" rules (Roger's house rule: no revenge mode, a defeat ends the
+     * game).  FreeCol's words for now; the original's own text (GAME.TXT
+     * {@code @LOSENOCOLONIES}) belongs to the words items (W8, N1).
+     */
+    @Override
+    public void showGameOverPanel(StringTemplate template) {
+        final String text = Messages.message(template);
+        ClassicFrameRecorder.event("game-over", template.getId());
+        onEventThread(() -> this.prompter.ask(notice("game-over", text,
+                          Messages.message("classic.dialog.messages"), null)),
+                      ClassicAdvisorBox.Bar.DISMISSED);
     }
 
     // Event confirm dialogs (async Boolean handlers)

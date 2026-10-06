@@ -27,10 +27,14 @@ import java.util.Map;
 import java.util.Random;
 import java.util.logging.Logger;
 
+import net.sf.freecol.common.io.FreeColModFile;
+import net.sf.freecol.common.io.FreeColRules;
 import net.sf.freecol.common.model.Game;
+import net.sf.freecol.common.model.Nation;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Region;
 import net.sf.freecol.common.model.Region.RegionType;
+import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.StringTemplate;
 import net.sf.freecol.common.model.UnitType;
 
@@ -57,6 +61,9 @@ public class NameCache {
     
     private final static String CIBOLA_PREFIX
         = "nameCache.lostCityRumour.cityName.";
+
+    /** The suffix of a nation's leader key, see {@link #getLeaderName}. */
+    private static final String LEADER_SUFFIX = ".leader";
 
     /** Cities of Cibola. */
     private static List<String> cibolaKeys = null;
@@ -263,6 +270,67 @@ public class NameCache {
     }
     
     /**
+     * Get the rules a ruleset is built on, nearest first: the
+     * {@code parent} of each one's mod descriptor ("levi" names
+     * "classic").  The rules of a save are found by their identifier
+     * too, as a save keeps only that, not the {@code extends}.
+     *
+     * @param rulesId The rules identifier.
+     * @return The identifiers of the parent rules, empty if none.
+     */
+    private static List<String> getParentRules(String rulesId) {
+        final List<String> ret = new ArrayList<>();
+        String id = rulesId;
+        while (id != null) {
+            final FreeColModFile rules = FreeColRules.getFreeColRulesFile(id);
+            id = (rules == null) ? null : rules.getParent();
+            if (id == null || id.equals(rulesId) || ret.contains(id)) break;
+            ret.add(id);
+        }
+        return ret;
+    }
+
+    /**
+     * Get the key of a name that a ruleset may change.  The key
+     * {@code <key>.<rules>} of the game's rules, or else of the
+     * nearest rules they are built on, wins over the plain key: the
+     * "levi" rules name Spain's Europe as the original does.
+     *
+     * @param spec The {@code Specification} of the game.
+     * @param key The plain message key.
+     * @return The message key to use.
+     */
+    public static String getRulesKey(Specification spec, String key) {
+        if (spec != null && spec.getId() != null) {
+            final List<String> ids = getParentRules(spec.getId());
+            ids.add(0, spec.getId());
+            for (String id : ids) {
+                final String k = key + "." + id;
+                if (Messages.containsKey(k)) return k;
+            }
+        }
+        return key;
+    }
+
+    /**
+     * Get the name the players of a nation are given (an AI player keeps
+     * it): the nation's leader of the rules ({@code <nation>.leader}
+     * qualified as by {@link #getRulesKey}), else the nation's ruler.
+     * The "levi" rules name the original's leaders (NAMES.TXT
+     * {@code @LEADERNAME}): the English AI is Walter Raleigh, while the
+     * English king stays the ruler.
+     *
+     * @param spec The {@code Specification} of the game.
+     * @param nation The {@code Nation}.
+     * @return The player name.
+     */
+    public static String getLeaderName(Specification spec, Nation nation) {
+        final String key = getRulesKey(spec, nation.getId() + LEADER_SUFFIX);
+        return (Messages.containsKey(key)) ? Messages.message(key)
+            : nation.getRulerName();
+    }
+
+    /**
      * Initialize the settlement names for a player.
      *
      * @param player The {@code Player} to install names for.
@@ -283,7 +351,17 @@ public class NameCache {
                     // Newer European settlement names are not spec-qualified
                     cacheId = player.getNationId() + ".settlementName.";
                     collectNames(cacheId, names);
-                    
+
+                    // Then the names of the rules these are built on,
+                    // nearest first: the "levi" rules play the "classic"
+                    // (the original's) names
+                    for (String id : getParentRules(specId)) {
+                        if (!names.isEmpty()) break;
+                        cacheId = player.getNationId() + ".settlementName."
+                            + id + ".";
+                        collectNames(cacheId, names);
+                    }
+
                     // If still none found fall back to the "freecol" names
                     if (names.isEmpty() && !"freecol".equals(specId)) {
                         cacheId = player.getNationId() + ".settlementName.freecol.";

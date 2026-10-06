@@ -174,6 +174,8 @@ public final class FreeCol {
     private static final String SPLASH_DEFAULT = "splash.jpg";
     private static final String TC_DEFAULT = "default";
     private static final String RULES_DEFAULT = "freecol";
+    /** The rules of the Classic UI's new games, see getNewGameRules. */
+    public static final String  CLASSIC_RULES = "levi";
     public static final long    TIMEOUT_DEFAULT = 60L; // 1 minute
     public static final long    TIMEOUT_MIN = 10L; // 10s
     public static final long    TIMEOUT_MAX = 3600000L; // 1000hours:-)
@@ -1005,7 +1007,8 @@ public final class FreeCol {
     }
 
     /**
-     * Get the specification from the currently selected rules.
+     * Get the specification from the rules of a new game
+     * ({@link #getNewGameRules}: the Classic UI plays "levi").
      * Used for new games only (fast, debug and stand-alone server
      * starts), so it also sets the map topology of the new game and
      * adjusts the map options to it: the Classic UI plays the
@@ -1015,12 +1018,15 @@ public final class FreeCol {
      * @return A {@code Specification}, quits on error.
      */
     private static Specification getRulesSpecification() {
-        Specification spec = loadSpecification(getRulesFile(), getAdvantages(),
+        Specification spec = loadSpecification(getNewGameRulesFile(),
+                                               getAdvantages(),
                                                getDifficulty());
         if (spec == null) {
             fatal(StringTemplate.template("cli.error.badTC")
-                .addName("%tc%", getRules()));
+                .addName("%tc%", getNewGameRules()));
         }
+        logger.info("New game on the rules " + spec.getId()
+            + ", difficulty " + spec.getDifficultyLevel());
         Topology.setCurrent(Topology.forNewGame((classic) ? Topology.SQUARE
                                                 : Topology.ISOMETRIC));
         MapGeneratorOptions.applyTopologyDefaults(spec.getMapGeneratorOptions());
@@ -1439,6 +1445,45 @@ public final class FreeCol {
      */
     public static FreeColModFile getRulesFile() {
         return FreeColRules.getFreeColRulesFile(getRules());
+    }
+
+    /**
+     * Gets the rules a new game is played on: those given with
+     * {@code --rules}, else {@link #CLASSIC_RULES} ("levi", the classic
+     * rules with the house rules of Levi's Colonization) in the Classic
+     * UI, else the default rules.  The Classic UI's rules are not the
+     * default rules ({@link #getRules}), as those also name the user's
+     * options folder ({@code FreeColDirectories.getOptionsDirectory}),
+     * which stays where it is.
+     *
+     * @return The identifier of the rules for a new game.
+     */
+    public static String getNewGameRules() {
+        return newGameRules(classic, rules);
+    }
+
+    /**
+     * The choice of {@link #getNewGameRules}.
+     *
+     * Public for the test suite.
+     *
+     * @param classic True in the Classic UI.
+     * @param rules The rules given with {@code --rules}, or null.
+     * @return The identifier of the rules for a new game.
+     */
+    public static String newGameRules(boolean classic, String rules) {
+        return (rules != null) ? rules
+            : (classic) ? CLASSIC_RULES
+            : RULES_DEFAULT;
+    }
+
+    /**
+     * Gets the FreeColModFile of the rules for a new game.
+     *
+     * @return The {@code FreeColModFile}, or null if not present.
+     */
+    public static FreeColModFile getNewGameRulesFile() {
+        return FreeColRules.getFreeColRulesFile(getNewGameRules());
     }
 
     /**

@@ -847,6 +847,10 @@
         <schemavalidate noNamespaceFile="schema/specification-schema.xsd"
                         file="${freecol.rules.dir}/testing/specification.xml">
         </schemavalidate>
+        <echo message="Validating levi/specification.xml."/>
+        <schemavalidate noNamespaceFile="schema/specification-schema.xsd"
+                        file="${freecol.rules.dir}/levi/specification.xml">
+        </schemavalidate>
     </target>
 
     <target name="print-manual" unless="print.manual.is.up.to.date"

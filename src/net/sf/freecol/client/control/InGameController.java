@@ -3373,8 +3373,13 @@ public final class InGameController extends FreeColClientHolder {
         if (ret) {
             updateGUI(tile, false);
         }
-        // Special case if no units left, might end up undead
-        if (getMyPlayer().getUnitCount() == 0 && setDead()) {
+        // Special case if no units left, might end up undead.  Without
+        // revenge mode only the server decides on a defeat
+        // (setDeadHandler): before the mandatory colony year a player
+        // without units may still buy one or be given one.
+        if (getMyPlayer().getUnitCount() == 0
+            && getSpecification().getBoolean(GameOptions.REVENGE_MODE)
+            && setDead()) {
             updateGUI(null, true);
         }
 
@@ -5055,7 +5060,9 @@ public final class InGameController extends FreeColClientHolder {
     }
 
     /**
-     * This player has died.
+     * This player has died.  A single player is offered revenge mode if
+     * the rules have it ({@code GameOptions.REVENGE_MODE}); without it
+     * he is told that the game is over, and logs out.
      *
      * @return True if the player has risen as the undead.
      */
@@ -5067,11 +5074,16 @@ public final class InGameController extends FreeColClientHolder {
             if (player.getPlayerType() == Player.PlayerType.RETIRED) {
                 ; // Do nothing, retire routine will quit
             } else {
-                if (player.getPlayerType() != Player.PlayerType.UNDEAD
-                    && getGUI().modalConfirmDialog("defeatedSinglePlayer.text",
+                if (player.getPlayerType() != Player.PlayerType.UNDEAD) {
+                    if (!getSpecification()
+                        .getBoolean(GameOptions.REVENGE_MODE)) {
+                        getGUI().showGameOverPanel(StringTemplate
+                            .template("defeatedGameOver.text"));
+                    } else if (getGUI().modalConfirmDialog("defeatedSinglePlayer.text",
                                         "defeatedSinglePlayer.yes", "quit", true)) {
-                    askServer().enterRevengeMode();
-                    return true;
+                        askServer().enterRevengeMode();
+                        return true;
+                    }
                 }
                 reason = LogoutReason.DEFEATED;
             }
