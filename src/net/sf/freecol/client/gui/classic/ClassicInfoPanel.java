@@ -31,6 +31,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.swing.JComponent;
+import javax.swing.SwingUtilities;
 
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.gui.ImageLibrary;
@@ -56,6 +57,11 @@ import net.sf.freecol.common.model.Unit;
  * through the BEFEHLE menu and the keys ({@link ClassicKeyMap}).  A click in
  * the minimap recentres the map there.  {@code ClassicGUI.repaintInfo}
  * repaints it whenever the view or the model changes.
+ *
+ * <p>The active unit's minimap pixel blinks with the unit (build spec W3,
+ * {@link #blinkDot}): nation colour while ON, white while OFF.  Its paints
+ * also tell the map's blink clock when the panel refresh after a
+ * (re)activation comes, from which the first OFF is timed.
  *
  * <p>In <em>scene mode</em> ({@link #setSceneMode}, the first game scene)
  * the unit block is hidden.
@@ -130,7 +136,11 @@ final class ClassicInfoPanel extends JComponent {
         String season = null, gold = null;
         if (game != null && game.getMap() != null) {
             final int[] o = this.mapViewer.viewOrigin();
-            if (o != null) mm = ClassicHud.minimapOf(game.getMap(), o[0], o[1]);
+            if (o != null) {
+                mm = blinkDot(ClassicHud.minimapOf(game.getMap(), o[0], o[1]),
+                              this.mapViewer.getActiveUnit(),
+                              this.mapViewer.isBlinkOff());
+            }
         }
         if (game != null && game.getTurn() != null) {
             season = ClassicHud.seasonLine(this.text, game.getTurn().getSeason(),
@@ -166,6 +176,42 @@ final class ClassicInfoPanel extends JComponent {
         return new ClassicHud.PanelModel(mm, season, gold, this.scene, active, list);
     }
 
+    /**
+     * The active unit's minimap dot (build spec W3): its nation colour
+     * while the blink is ON, white ({@link ClassicHud#BLINK_DOT_RGB}) while
+     * it is OFF.  The viewport ring is still drawn over it.
+     *
+     * @param mm The minimap, or null.
+     * @param active The active unit, or null.
+     * @param off The blink is OFF.
+     * @return The minimap with the dot, or {@code mm} without an active
+     *     unit on the map.
+     */
+    static ClassicHud.MinimapModel blinkDot(ClassicHud.MinimapModel mm,
+                                            Unit active, boolean off) {
+        if (mm == null || active == null || !active.hasTile()) return mm;
+        final Tile t = active.getTile();
+        return mm.with(t.getX(), t.getY(), off ? ClassicHud.BLINK_DOT_RGB
+            : ClassicHud.nationRgb(active.getOwner()));
+    }
+
+    /**
+     * Paint the minimap at once (a blink toggle changed the active unit's
+     * dot), else ask for a repaint off the event thread.
+     */
+    void paintMinimapNow() {
+        final int s = scale();
+        final Rectangle r = new Rectangle(
+            (ClassicHud.MINIMAP.x - ClassicHud.PANEL_X) * s,
+            (ClassicHud.MINIMAP.y - ClassicHud.PANEL_Y) * s,
+            ClassicHud.MINIMAP.width * s, ClassicHud.MINIMAP.height * s);
+        if (SwingUtilities.isEventDispatchThread()) {
+            paintImmediately(r);
+        } else {
+            repaint(r);
+        }
+    }
+
     private ClassicHud.UnitFacts facts(Unit u) {
         BufferedImage sprite = null;
         try {
@@ -195,6 +241,9 @@ final class ClassicInfoPanel extends JComponent {
             ig.dispose();
         }
         ClassicMenuStrip.blit(g, img, 0, 0, scale());
+        // The panel refresh after a (re)activation starts the blink's
+        // phase: now, as its pixels are on the screen.
+        this.mapViewer.blinkPanelPainted();
     }
 
     /** A click in the minimap's interior recentres the map on that tile. */

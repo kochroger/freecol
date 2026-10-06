@@ -35,6 +35,7 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
 import java.awt.image.BufferedImage;
 import java.util.List;
+import java.util.Locale;
 import java.util.WeakHashMap;
 
 import javax.swing.AbstractAction;
@@ -257,9 +258,23 @@ final class ClassicMapViewer extends JPanel {
 
     /**
      * The active unit's blink is OFF: its tile is drawn bare, with no unit
-     * at all, carrier and stack included (build spec W3, which drives it).
+     * at all, carrier and stack included (build spec W3).
      */
     private boolean blinkOff = false;
+
+    /**
+     * The blink clock (build spec W3): armed ON on every activation, at the
+     * end of every slide and when a box closes; its toggles come through
+     * {@link #blinkToggle}.
+     */
+    private final ClassicBlink blink;
+
+    /**
+     * The blink is held ON: a slide, a dialog, a menu, the first scene or
+     * the AI phase is on ({@link #blinkHoldReason}).  The hold's end
+     * re-arms the clock ({@link #resumeBlink}, else the next toggle).
+     */
+    private boolean blinkHeld = false;
 
     /** FONTTINY and the pack's texts for the flag letters; null without the pack. */
     private ClassicFont iconFont;
@@ -310,10 +325,22 @@ final class ClassicMapViewer extends JPanel {
 
     ClassicMapViewer(FreeColClient freeColClient, ClassicGUI gui,
                      ImageLibrary lib) {
+        this(freeColClient, gui, lib, true);
+    }
+
+    /**
+     * @param blinkThread Whether the blink clock runs a thread of its own,
+     *     which posts its toggles to the event thread; false for tests,
+     *     which call {@link #blinkToggle} themselves.
+     */
+    ClassicMapViewer(FreeColClient freeColClient, ClassicGUI gui,
+                     ImageLibrary lib, boolean blinkThread) {
         this.freeColClient = freeColClient;
         this.gui = gui;
         this.lib = lib;
         this.tileArt = new ClassicTileArt(lib);
+        this.blink = new ClassicBlink(ClassicSlide.SYSTEM,
+            SwingUtilities::invokeLater, this::blinkToggle, blinkThread);
         setBackground(Color.BLACK);
         setOpaque(true);
         setFocusable(true);
@@ -719,10 +746,15 @@ final class ClassicMapViewer extends JPanel {
         this.selectedTile = tile;
         this.activeUnit = null;
         if (tile != null) this.focus = tile;
+        rearmBlink("terrain");
         repaint();
     }
 
-    /** MOVE_UNITS mode: an active unit is selected (make sure it is visible). */
+    /**
+     * MOVE_UNITS mode: an active unit is selected (make sure it is
+     * visible).  Its blink starts ON, the first OFF one half-period after
+     * the panel refresh (build spec W3).
+     */
     void changeToMoveUnits(Unit unit) {
         this.viewMode = GUI.ViewMode.MOVE_UNITS;
         this.activeUnit = unit;
@@ -730,6 +762,7 @@ final class ClassicMapViewer extends JPanel {
             this.selectedTile = unit.getTile();
             ensureTileVisible(unit.getTile());
         }
+        rearmBlink("activate");
         repaint();
     }
 
@@ -831,8 +864,12 @@ final class ClassicMapViewer extends JPanel {
                 + "ms hold=" + ClassicSlide.HOLD_MS + "ms"
                 + (redraw ? " redraw" + (jumped ? "=jump" : "=hidden") : ""));
         }
-        // The slide shows the unit ON (W3 suspends the blink for it).
+        // The slide shows the unit ON: the blink holds until it ends.  A key
+        // that came while OFF gets offset 0 at once (the slide's own paint),
+        // and the minimap dot turns back to the nation colour right after it.
+        final boolean dotOff = this.blinkOff;
         this.blinkOff = false;
+        final int dotStep = redraw ? 0 : 1;
         this.animUnit = unit;
         this.animFrom = srcTile;
         this.animTo = dstTile;
@@ -844,6 +881,9 @@ final class ClassicMapViewer extends JPanel {
                     this.animHidden = k == 0 && !own && !shown;
                     // Offset 0 may come with a view jump: the whole map.
                     paintNow((k == 0) ? null : slideBounds());
+                    if (dotOff && k == dotStep && this.gui != null) {
+                        this.gui.paintBlinkDot();
+                    }
                     if (rec) {
                         ClassicFrameRecorder.event("slide-step", k + "/"
                             + ClassicSlide.CELL);
@@ -861,6 +901,9 @@ final class ClassicMapViewer extends JPanel {
             if (rec) {
                 ClassicFrameRecorder.event("slide-end", "unit=" + unit.getId());
             }
+            // The blink restarts ON at the end of every slide; the panel
+            // refresh after the final draw re-bases it (build spec W3).
+            rearmBlink("slide");
             repaint();
         }
     }
@@ -939,15 +982,18 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
-     * Set the active unit's blink state (build spec W3 drives it; a slide
-     * clears it).
+     * Set the active unit's blink state and paint it at once: its tile
+     * (bare while OFF), and the panel's minimap dot
+     * ({@link ClassicGUI#paintBlinkDot}).  The clock drives it
+     * ({@link #blinkToggle}); a slide, a hold and every re-arm set it ON.
      *
      * @param off True to show the active unit's tile bare.
      */
     void setBlinkOff(boolean off) {
         if (off == this.blinkOff) return;
         this.blinkOff = off;
-        repaint();
+        paintBlinkCell();
+        if (this.gui != null) this.gui.paintBlinkDot();
     }
 
     /**
@@ -957,6 +1003,164 @@ final class ClassicMapViewer extends JPanel {
      */
     boolean isBlinkOff() {
         return this.blinkOff;
+    }
+
+    /**
+     * Whether the blink clock runs (an active unit in MOVE_UNITS).
+     *
+     * @return True while armed.
+     */
+    boolean isBlinkArmed() {
+        return this.blink.isArmed();
+    }
+
+    /**
+     * Whether the blink is held ON ({@link #holdBlink}, or a toggle found
+     * a hold).
+     *
+     * @return True while held.
+     */
+    boolean isBlinkHeld() {
+        return this.blinkHeld;
+    }
+
+    /**
+     * Restart the blink: ON now, the first OFF one half-period later (or
+     * after the panel refresh that follows, {@link #blinkPanelPainted}).
+     * The counter is reset, not resumed (landfall #7703 / #8163 / #8187).
+     * Without an active unit in MOVE_UNITS the clock stops instead.
+     *
+     * @param reason What re-arms it (for the recorder's events).
+     */
+    void rearmBlink(String reason) {
+        this.blinkHeld = false;
+        setBlinkOff(false);
+        final Unit u = this.activeUnit;
+        if (this.viewMode == GUI.ViewMode.MOVE_UNITS && u != null
+            && u.getTile() != null) {
+            this.blink.arm();
+            if (ClassicFrameRecorder.on()) {
+                ClassicFrameRecorder.event("blink", "arm " + reason + " unit="
+                    + u.getId() + " at=" + xy(u.getTile()));
+            }
+        } else if (this.blink.isArmed()) {
+            this.blink.stop();
+            ClassicFrameRecorder.event("blink", "stop " + reason);
+        }
+    }
+
+    /**
+     * Hold the blink ON from now: a dialog, a menu or the first scene
+     * opens over the map (a key while OFF opening a box first redraws the
+     * unit ON, landfall #11146 -&gt; #11151 -&gt; #11154).  EDT only.
+     *
+     * @param reason What holds it.
+     */
+    void holdBlink(String reason) {
+        if (!this.blinkHeld) {
+            this.blinkHeld = true;
+            ClassicFrameRecorder.event("blink", "hold " + reason);
+        }
+        setBlinkOff(false);
+    }
+
+    /**
+     * A box that held the blink has closed: re-arm it now, ON, unless
+     * something else still holds it (then the first toggle after that
+     * hold re-arms it).  EDT only.
+     *
+     * @param reason What closed.
+     */
+    void resumeBlink(String reason) {
+        if (blinkHoldReason() == null) {
+            rearmBlink(reason);
+        } else {
+            this.blinkHeld = true;
+        }
+    }
+
+    /**
+     * The panel was painted: the panel refresh after an arm re-bases the
+     * blink's phase (the original's first OFF comes one half-period after
+     * it).  Called by {@link ClassicInfoPanel} on every paint.
+     */
+    void blinkPanelPainted() {
+        if (this.blink.panelPainted() && ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("blink", "rebase panel");
+        }
+    }
+
+    /**
+     * Why the blink must show the unit ON now, or null to let it blink:
+     * the map is not on screen, a slide runs, or the GUI has a box, a
+     * menu, the first scene or the AI phase up
+     * ({@link ClassicGUI#blinkHoldReason}).
+     *
+     * @return The reason, or null.
+     */
+    String blinkHoldReason() {
+        if (this.animUnit != null) return "slide";
+        if (this.gui != null) {
+            if (!isShowing()) return "hidden";
+            final String r = this.gui.blinkHoldReason();
+            if (r != null) return r;
+        }
+        return null;
+    }
+
+    /**
+     * A toggle of the blink clock is due (the event thread; the clock has
+     * dropped toggles of an older phase).  Held: show the unit ON and wait
+     * for the hold to end, which re-arms.
+     *
+     * @param n The toggle: OFF for odd, ON for even.
+     */
+    void blinkToggle(int n) {
+        final Unit u = this.activeUnit;
+        if (this.viewMode != GUI.ViewMode.MOVE_UNITS || u == null
+            || u.getTile() == null) {
+            rearmBlink("none");
+            return;
+        }
+        final String hold = blinkHoldReason();
+        if (hold != null) {
+            holdBlink(hold);
+            return;
+        }
+        if (this.blinkHeld) {
+            rearmBlink("resume");
+            return;
+        }
+        final boolean off = ClassicBlink.isOff(n);
+        // How late the toggle runs, before its paint (the recorder's detail).
+        final long late = System.nanoTime()
+            - ClassicBlink.dueNanos(this.blink.phaseStart(), n);
+        setBlinkOff(off);
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("blink", (off ? "off" : "on")
+                + " n=" + n + " unit=" + u.getId() + " at=" + xy(u.getTile())
+                + String.format(Locale.ROOT, " late=%.2fms", late / 1e6));
+        }
+    }
+
+    /**
+     * Paint the active unit's cell now (and the icon's reach past it), for
+     * a blink toggle.  A pending final draw paints the whole map instead.
+     */
+    private void paintBlinkCell() {
+        final Unit u = this.activeUnit;
+        final Tile f = this.focus;
+        if (this.finalDrawPending || u == null || u.getTile() == null
+            || f == null) {
+            repaint();
+            return;
+        }
+        final Tile t = u.getTile();
+        final Rectangle r = new Rectangle(screenX(t.getX(), f.getX()),
+            screenY(t.getY(), f.getY()), tileW(), tileH());
+        final int m = ICON_MARGIN * scale();
+        r.grow(m, m);
+        paintNow(r);
     }
 
     /**
@@ -981,11 +1185,12 @@ final class ClassicMapViewer extends JPanel {
         return this.animUnit != null;
     }
 
-    /** END_TURN mode: clear active unit and selected tile. */
+    /** END_TURN mode: clear active unit and selected tile (no blink). */
     void changeToEndTurn() {
         this.viewMode = GUI.ViewMode.END_TURN;
         this.activeUnit = null;
         this.selectedTile = null;
+        rearmBlink("end-turn");
         repaint();
     }
 
@@ -1155,12 +1360,13 @@ final class ClassicMapViewer extends JPanel {
     /**
      * Release this viewer for good.  Called by {@code ClassicGUI.teardownInGame}
      * when the game is left for the title screen: the edge-scroll Swing
-     * {@code Timer} (the only one in this class) would otherwise keep firing
-     * against a game that no longer exists.
+     * {@code Timer} and the blink clock's thread would otherwise keep
+     * firing against a game that no longer exists.
      */
     void dispose() {
         this.disposed = true;
         stopEdgeScroll();
+        this.blink.close();
     }
 
     /** Resolve the map {@link Tile} under a screen point, or null if off-map. */

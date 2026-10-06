@@ -464,8 +464,8 @@ cell-fitted sprites (`drawCentered`, `UNIT_CELL_FRACTION`).
   instead of its ship, W18), else the first unit, never the one mid-slide.
 - **No cursor box** in MOVE_UNITS (the original has none); TERRAIN keeps the
   selected-tile box.
-- **Blink hook.** `setBlinkOff` draws the active unit's tile bare (no unit,
-  carrier or stack); W3 drives it, a slide clears it.
+- **Blink.** `setBlinkOff` draws the active unit's tile bare (no unit,
+  carrier or stack); the blink clock drives it (next section), a slide clears it.
 
 **The slide** (`animateMove` on `ClassicSlide`): offsets 1..15 one native
 pixel per step on an absolute schedule `t_k = t1 + (k-1)S` with S = 16.43 ms,
@@ -500,6 +500,51 @@ to the Classic UI's end of turn and hand-over (W5).
 AI phase the model can be ahead of the slides (a unit can show at its later
 tile between two of its slides). The original plays them strictly in turn;
 W19 (native-phase cues) is where that belongs.
+
+### The blink and the minimap dot (`ClassicBlink`; build spec W3)
+
+The active unit blinks as in the original: one clock with a half-period of
+**328.5 ms** (20 ticks of 16.43 ms), 50 % duty, **ON first**. `ClassicBlink`
+keeps the phase: toggle n is due at `t0 + n * 328.5 ms` on the absolute clock
+(odd n OFF, even n ON), waited for by a daemon thread of its own (the
+recorder's `Thread.sleep` plus spin, never `parkNanos`) and run on the EDT
+(`ClassicMapViewer.blinkToggle`).
+
+- **(Re)arm, reset not pause.** `rearmBlink` sets ON and starts a new phase on
+  every activation (`changeToMoveUnits`, which also covers the turn start), at
+  the end of every slide (`animateMove`), and when a box closes (every
+  `ClassicDialog` and the `chooseFromList` list through `ClassicDialog.Watcher`,
+  the first scene, a menu of the strip through `ClassicMenuStrip.Host`). The
+  original measures its first OFF from the **panel refresh** that follows
+  (57 episodes); so every panel paint within 100 ms of an arm re-bases the
+  phase (`ClassicInfoPanel.paintComponent` -> `blinkPanelPainted`), and without
+  one it stays at the arm. Each arm is a new generation; a toggle of an older
+  one (queued behind a slide or a box) is dropped.
+- **Held ON** while a slide runs, a menu, a modal box, the first scene or a
+  classic screen is up, or it is not our turn (`ClassicGUI.blinkHoldReason`).
+  A box that opens while OFF redraws the unit ON first (`holdBlink`, landfall
+  #11146 -> #11151 -> #11154). Goto steps never blink: each step's slide ends
+  with a re-arm and the next one starts 100 ms later. A hold without a close
+  hook (a screen closed by its window's close box) ends at the next toggle,
+  which re-arms instead of toggling.
+- **Stopped** without an active unit in MOVE_UNITS (TERRAIN, END_TURN).
+- **OFF paint** = the bare tile: terrain and overlays, no unit at all, carrier
+  and stack included (`paintOccupant`); a settlement stays (I). A toggle paints
+  only the unit's cell plus the icon's reach (`paintBlinkCell`).
+- **Minimap dot.** The active unit's pixel is its nation colour while ON and
+  white (`BLINK_DOT_RGB`, index 15) while OFF (`ClassicInfoPanel.blinkDot`,
+  `MinimapModel.with`); the panel's minimap is painted right after the cell
+  (`paintMinimapNow`). The viewport ring is still drawn last and hides the dot
+  in view column 14, as in the original.
+- **A key while OFF** starts the slide at offset 0 (W2's `isShownAt`).
+- Recorder events: `blink` with `arm <reason>`, `rebase panel`, `off n=..`,
+  `on n=..`, `hold <reason>`, `stop <reason>`; `menu-open`, `menu-close`.
+
+`ClassicBlinkTest` checks the schedule on a fake clock (no drift over 1000
+toggles, ON first, reset on re-arm, the panel re-base and its window, stale
+toggles dropped), the thread on the real clock, and the minimap dot;
+`ClassicMapViewerTest.testBlink` the viewer's states (bare tile, hold, resume,
+stop, the dot).
 
 ## In-game HUD (menu strip, dropdowns, right panel)
 
@@ -3149,8 +3194,9 @@ paints as before). `ClassicTestHarness.install` (from `startGUI`) binds both.
   cell, step and hold, `redraw=jump|hidden` when offset 0 comes first),
   `slide-step k/16` (offset k painted), `slide-end` (the hold is over),
   `slide-skip` (fog, or a classic pref), `final-draw`, `end-turn`,
-  `dialog-open/close`, `music-request`, `music-mode`, `pref`, `late`. Reserved
-  for the M1 items: `blink` (W3), `endturn-timer-start/fire` (W5),
+  `dialog-open/close`, `menu-open/close`, `blink` (W3: `arm`, `rebase`,
+  `off`/`on n=..`, `hold`, `stop`), `music-request`, `music-mode`, `pref`,
+  `late`. Reserved for the M1 items: `endturn-timer-start/fire` (W5),
   `palette-step` (W6c), `music-fade`. Add a hook with
   `ClassicFrameRecorder.event(name, detail)`; guard a costly detail with
   `ClassicFrameRecorder.on()`.

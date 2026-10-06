@@ -1095,6 +1095,7 @@ public class ClassicGUI extends GUI {
         if (this.mapViewer != null) this.mapViewer.dispose();
         if (this.menuStrip != null) this.menuStrip.closeMenu();
         if (this.frame != null) this.frame.setJMenuBar(null);
+        ClassicDialog.setWatcher(null);
         restoreSessionOptions();
         this.mapViewer = null;
         this.infoPanel = null;
@@ -1605,7 +1606,31 @@ public class ClassicGUI extends GUI {
                     showInformationNotice(Messages.message(
                         "classic.mainMenu.notYet"));
                 }
+
+                @Override
+                public void menuOpened() {
+                    ClassicFrameRecorder.event("menu-open", "");
+                    if (mapViewer != null) mapViewer.holdBlink("menu");
+                }
+
+                @Override
+                public void menuClosed() {
+                    ClassicFrameRecorder.event("menu-close", "");
+                    if (mapViewer != null) mapViewer.resumeBlink("menu");
+                }
             }, tiny, wood, text);
+        // Every popup holds the map's blink ON and restarts it at its close.
+        ClassicDialog.setWatcher(new ClassicDialog.Watcher() {
+                @Override
+                public void opened() {
+                    if (mapViewer != null) mapViewer.holdBlink("dialog");
+                }
+
+                @Override
+                public void closed() {
+                    if (mapViewer != null) mapViewer.resumeBlink("dialog");
+                }
+            });
         this.hudPane = new ClassicHudPane(this.menuStrip, this.mapViewer,
             this.infoPanel, arrowSprite(pack), () -> sceneShowing);
         ClassicKeyMap.install(this.hudPane, this.mapViewer,
@@ -1640,6 +1665,35 @@ public class ClassicGUI extends GUI {
     }
 
     // View mode / focus — delegated to the map viewer.
+
+    /**
+     * Why the map's blink must hold the active unit ON now (build spec W3),
+     * or null to let it blink: the first scene, an open menu, a modal box,
+     * a classic screen over the map, or not our turn (the AI phase).  EDT
+     * only; asked at every toggle.
+     *
+     * @return The reason, or null.
+     */
+    String blinkHoldReason() {
+        if (this.sceneShowing) return "scene";
+        if (this.menuStrip != null && this.menuStrip.isMenuOpen()) return "menu";
+        if (modalDialogShowing()) return "dialog";
+        for (Window w : new Window[] { this.colonyFrame, this.europeFrame,
+                                        this.reportFrame, this.buildQueueFrame }) {
+            if (w != null && w.isShowing()) return "screen";
+        }
+        final FreeColClient fcc = getFreeColClient();
+        if (fcc == null || !fcc.currentPlayerIsMyPlayer()) return "ai";
+        return null;
+    }
+
+    /**
+     * Paint the panel's minimap now: the active unit's dot follows its
+     * blink, in the same paint as the map's cell or one later.  EDT only.
+     */
+    void paintBlinkDot() {
+        if (this.infoPanel != null) this.infoPanel.paintMinimapNow();
+    }
 
     /** Repaint the HUD info panel if it exists (view/model state changed). */
     private void repaintInfo() {
@@ -2500,6 +2554,7 @@ public class ClassicGUI extends GUI {
             closeMenus();
             this.sceneShowing = true;
             ClassicFrameRecorder.event("dialog-open", "first scene");
+            this.mapViewer.holdBlink("scene");
             this.hudOverlay.showScene(picture, this.mapViewer,
                                       this::dismissFirstScene);
             updateActions();
@@ -2527,6 +2582,8 @@ public class ClassicGUI extends GUI {
         if (this.mapViewer != null) {
             this.mapViewer.requestFocusInWindow();
             this.mapViewer.repaint();
+            // The blink restarts ON at the scene's close (build spec W3).
+            this.mapViewer.resumeBlink("scene");
         }
         // The HUD's own arrow takes over (it was held back under the scene).
         if (this.hudPane != null) this.hudPane.pointer().refresh();
@@ -2916,7 +2973,12 @@ public class ClassicGUI extends GUI {
             e -> d.dispose());
         prepareChildWindow(d, owner, false);
         SwingUtilities.invokeLater(pane::selectInitialValue);
-        d.setVisible(true);   // blocks until disposed
+        ClassicDialog.popupOpened();
+        try {
+            d.setVisible(true);   // blocks until disposed
+        } finally {
+            ClassicDialog.popupClosed();
+        }
         final Object sel = pane.getInputValue();
         return (sel == JOptionPane.UNINITIALIZED_VALUE) ? null : sel;
     }

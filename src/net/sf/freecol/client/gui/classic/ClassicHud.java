@@ -124,6 +124,13 @@ final class ClassicHud {
     static final int UNEXPLORED = -1;
 
     /**
+     * The active unit's minimap pixel while its blink is OFF: white, index
+     * 15 (landfall: 13 while the sprite is ON, 15 while OFF, 485 of 490
+     * toggles, {@code minimap_dot.txt}).
+     */
+    static final int BLINK_DOT_RGB = 0xFFFFFF;
+
+    /**
      * The nations' fill colours in the original order (England, France,
      * Spain, Holland); -1 = not measured, use FreeCol's nation colour.
      * Measured: England {@code 0xFF0000} (049/052 flags), Holland
@@ -165,6 +172,25 @@ final class ClassicHud {
                 return UNEXPLORED;
             }
             return this.rgb[y * this.mapWidth + x];
+        }
+
+        /**
+         * This minimap with one tile's pixel replaced (the active unit's
+         * blinking dot, {@link #BLINK_DOT_RGB}).
+         *
+         * @param x The tile's column.
+         * @param y The tile's row.
+         * @param c The colour.
+         * @return A new model; this one if (x, y) is off the map.
+         */
+        MinimapModel with(int x, int y, int c) {
+            if (x < 0 || y < 0 || x >= this.mapWidth || y >= this.mapHeight) {
+                return this;
+            }
+            final int[] p = this.rgb.clone();
+            p[y * this.mapWidth + x] = c;
+            return new MinimapModel(this.mapWidth, this.mapHeight, p,
+                                    this.c0, this.r0);
         }
     }
 

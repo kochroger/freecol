@@ -47,7 +47,7 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         assertTrue(sea.isExplored() && !sea.isLand());
         assertTrue(land.isLand());
 
-        final ClassicMapViewer mv = new ClassicMapViewer(null, null, null);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, null, null, false);
         final Unit ship = new ServerUnit(game, sea, dutch,
             spec().getUnitType("model.unit.merchantman"));
         assertSame(ship, mv.displayUnit(sea));
@@ -92,6 +92,105 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         // not on screen appears at offset 1.
         assertTrue(ClassicMapViewer.startsAtOffsetZero(true, false, false));
         assertFalse(ClassicMapViewer.startsAtOffsetZero(false, false, false));
+        mv.dispose();
+    }
+
+    /**
+     * The blink (build spec W3): armed ON on activation, OFF on odd
+     * toggles with the tile bare (no unit, no carrier, no stack), held ON
+     * by a box and re-armed ON at its close, stopped without an active
+     * unit; the minimap dot nation colour while ON, white while OFF.
+     */
+    public void testBlink() {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final UnitType colonistType = spec().getUnitType("model.unit.freeColonist");
+        final Tile sea = map.getTile(15, 7);
+        final Tile land = map.getTile(5, 7);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, null, null, false);
+        final Unit ship = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final Unit passenger = new ServerUnit(game, ship, dutch, colonistType);
+        mv.setFocus(sea);
+        assertFalse(mv.isBlinkArmed());
+
+        // Activation: ON, armed.
+        mv.changeToMoveUnits(ship);
+        assertTrue(mv.isBlinkArmed());
+        assertFalse(mv.isBlinkOff());
+        assertTrue(mv.isShownAt(ship, sea));
+
+        // Toggle 1 OFF: the tile is bare -- the laden ship, its cargo
+        // marker and its passenger are all gone; toggle 2 ON again.
+        mv.blinkToggle(1);
+        assertTrue(mv.isBlinkOff());
+        assertFalse(mv.isShownAt(ship, sea));
+        assertFalse(mv.isShownAt(passenger, sea));
+        mv.blinkToggle(2);
+        assertFalse(mv.isBlinkOff());
+        assertTrue(mv.isShownAt(ship, sea));
+
+        // A box opens while OFF: the unit is redrawn ON at once and held;
+        // its close re-arms ON (reset, not pause).
+        mv.blinkToggle(3);
+        assertTrue(mv.isBlinkOff());
+        mv.holdBlink("dialog");
+        assertFalse(mv.isBlinkOff());
+        assertTrue(mv.isBlinkHeld());
+        mv.resumeBlink("dialog");
+        assertFalse(mv.isBlinkHeld());
+        assertTrue(mv.isBlinkArmed());
+        assertFalse(mv.isBlinkOff());
+        // A hold that ended without a close hook: the next toggle re-arms
+        // instead of toggling.
+        mv.holdBlink("screen");
+        mv.blinkToggle(1);
+        assertFalse(mv.isBlinkHeld());
+        assertFalse(mv.isBlinkOff());
+        mv.blinkToggle(1);
+        assertTrue(mv.isBlinkOff());
+
+        // The minimap dot: nation colour while ON, white while OFF.
+        final ClassicHud.MinimapModel mm = ClassicHud.minimapOf(map, 8, 1);
+        assertEquals(0xFF7100, mm.at(15, 7));
+        assertEquals(ClassicHud.BLINK_DOT_RGB,
+            ClassicInfoPanel.blinkDot(mm, ship, true).at(15, 7));
+        assertEquals(0xFF7100, ClassicInfoPanel.blinkDot(mm, ship, false).at(15, 7));
+        assertEquals(mm.at(14, 7), ClassicInfoPanel.blinkDot(mm, ship, true).at(14, 7));
+        assertSame(mm, ClassicInfoPanel.blinkDot(mm, null, true));
+        assertNull(ClassicInfoPanel.blinkDot(null, ship, true));
+
+        // The passenger active (W18's case, landfall #13140): OFF shows the
+        // bare sea -- the carrier goes with it.
+        mv.changeToMoveUnits(passenger);
+        assertTrue(mv.isShownAt(passenger, sea));
+        mv.blinkToggle(1);
+        assertFalse(mv.isShownAt(passenger, sea));
+        assertFalse(mv.isShownAt(ship, sea));
+
+        // Another unit activated while OFF: ON again, a new phase.
+        final Unit a = new ServerUnit(game, land, dutch, colonistType);
+        mv.changeToMoveUnits(a);
+        assertFalse(mv.isBlinkOff());
+        assertTrue(mv.isBlinkArmed());
+        assertTrue(mv.isShownAt(ship, sea));
+        mv.blinkToggle(1);
+        assertFalse(mv.isShownAt(a, land));
+        assertTrue(mv.isShownAt(ship, sea));
+
+        // No active unit: no blink at all.
+        mv.changeToEndTurn();
+        assertFalse(mv.isBlinkArmed());
+        assertFalse(mv.isBlinkOff());
+        assertTrue(mv.isShownAt(a, land));
+        mv.blinkToggle(1);
+        assertFalse(mv.isBlinkOff());
+        mv.changeToMoveUnits(a);
+        assertTrue(mv.isBlinkArmed());
+        mv.changeToTerrain(land);
+        assertFalse(mv.isBlinkArmed());
         mv.dispose();
     }
 }

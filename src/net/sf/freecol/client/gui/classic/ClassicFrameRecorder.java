@@ -84,9 +84,12 @@ import javax.swing.JComponent;
  * {@code move-key}, {@code move-done}, {@code pan}, {@code slide-start},
  * {@code slide-step}, {@code slide-end}, {@code slide-skip},
  * {@code final-draw}, {@code end-turn}, {@code dialog-open/close},
+ * {@code menu-open/close}, {@code blink} (W3: {@code arm <reason>},
+ * {@code rebase panel}, {@code off n=..}, {@code on n=..},
+ * {@code hold <reason>}, {@code stop <reason>}),
  * {@code music-request}, {@code music-mode} (the jukebox switched to the
  * title or the in-game playlist), {@code pref}.  Reserved for
- * the M1 work items: {@code blink} (W3), {@code endturn-timer-start/fire}
+ * the M1 work items: {@code endturn-timer-start/fire}
  * (W5), {@code palette-step} (W6c), {@code music-fade} (W15).
  *
  * <p><b>Where the pixels come from.</b>  While recording, the HUD pane

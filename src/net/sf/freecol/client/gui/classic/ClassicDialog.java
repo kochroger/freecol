@@ -134,6 +134,23 @@ final class ClassicDialog extends JPanel {
     private static final Color ICON_BG = new Color(0x14, 0x10, 0x0A);
     static final Color COUNT_FG = new Color(0xB0, 0x98, 0x60);
 
+    /**
+     * Told when a popup opens and when it has closed: the map holds its
+     * blink ON while a box is up and restarts it ON at the close (build
+     * spec W3).  Set for the in-game view, else null.  EDT only.
+     */
+    interface Watcher {
+
+        /** A popup is about to open. */
+        void opened();
+
+        /** A popup has closed. */
+        void closed();
+    }
+
+    /** The watcher of every popup, or null ({@link #setWatcher}). */
+    private static Watcher watcher = null;
+
     private final List<Page> pages;
     private final String[] options;
 
@@ -240,11 +257,41 @@ final class ClassicDialog extends JPanel {
             ClassicFrameRecorder.event("dialog-open", title + ": "
                 + text.substring(0, Math.min(120, text.length())));
         }
-        d.setVisible(true);   // blocks until disposed
-        if (ClassicFrameRecorder.on()) {
-            ClassicFrameRecorder.event("dialog-close", title + " chosen=" + p.chosen);
+        popupOpened();
+        try {
+            d.setVisible(true);   // blocks until disposed
+        } finally {
+            if (ClassicFrameRecorder.on()) {
+                ClassicFrameRecorder.event("dialog-close", title + " chosen=" + p.chosen);
+            }
+            popupClosed();
         }
         return p.chosen;
+    }
+
+    /**
+     * Set the watcher told of every popup ({@link Watcher}).
+     *
+     * @param w The watcher, or null for none.
+     */
+    static void setWatcher(Watcher w) {
+        watcher = w;
+    }
+
+    /**
+     * Tell the watcher a popup is about to open: every classic popup, and
+     * the other modal boxes of the classic UI (the selection list of
+     * {@code ClassicGUI.chooseFromList}).  EDT only.
+     */
+    static void popupOpened() {
+        final Watcher w = watcher;
+        if (w != null) w.opened();
+    }
+
+    /** Tell the watcher a popup has closed.  EDT only. */
+    static void popupClosed() {
+        final Watcher w = watcher;
+        if (w != null) w.closed();
     }
 
 

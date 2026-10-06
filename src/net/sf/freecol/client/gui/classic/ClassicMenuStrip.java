@@ -116,6 +116,22 @@ final class ClassicMenuStrip extends JComponent {
         default void unavailable(ClassicMenuModel.Item item) {
             // nothing by default
         }
+
+        /**
+         * A menu has opened (none was open): the map holds its blink ON
+         * (build spec W3).  EDT only.
+         */
+        default void menuOpened() {
+            // nothing by default
+        }
+
+        /**
+         * The open menu has closed: the map restarts its blink ON
+         * (landing-slow #216/#217).  EDT only.
+         */
+        default void menuClosed() {
+            // nothing by default
+        }
     }
 
 
@@ -372,6 +388,7 @@ final class ClassicMenuStrip extends JComponent {
      */
     void openMenu(int m, boolean barFirst) {
         if (m < 0 || m >= this.menus.size() || !usable()) return;
+        final boolean wasOpen = this.openIndex >= 0;
         this.openIndex = m;
         this.selSlot = barFirst ? nextSelectable(slots(m), -1, 1) : -1;
         this.altArmed = false;
@@ -383,6 +400,7 @@ final class ClassicMenuStrip extends JComponent {
         this.drop.setVisible(true);
         repaint();
         this.drop.repaint();
+        if (!wasOpen) this.host.menuOpened();
     }
 
     /** Close the open menu, if any.  EDT only. */
@@ -398,6 +416,7 @@ final class ClassicMenuStrip extends JComponent {
         this.drop.setVisible(false);
         repaint();
         this.drop.repaint();
+        this.host.menuClosed();
     }
 
     /**
