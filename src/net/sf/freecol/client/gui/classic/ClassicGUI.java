@@ -167,6 +167,15 @@ public class ClassicGUI extends GUI {
     private ClassicMapViewer mapViewer;
 
     /**
+     * The true terrain of the fog ring (M1c design 10 §5, W6d): in single
+     * player the server's map, read only, for the terrain composer alone
+     * (fringe, blend, coast bits).  Created with the map viewer in
+     * {@link #reconnectGUI}, dropped in {@link #teardownInGame}; null
+     * without a game view.  EDT only.
+     */
+    private ClassicTerrainOracle terrainOracle;
+
+    /**
      * The right-hand info / orders panel (Phase 2 HUD), created alongside the
      * map viewer in {@link #reconnectGUI}.  Repainted whenever the view state or
      * model changes so it tracks the active unit / selected tile / treasury.
@@ -1120,10 +1129,12 @@ public class ClassicGUI extends GUI {
         // (FINAL "Open" item 11).
         if (this.menuStrip != null) this.menuStrip.closeMenu();
         if (this.mapViewer != null) this.mapViewer.dispose();
+        if (this.terrainOracle != null) this.terrainOracle.dispose();
         if (this.frame != null) this.frame.setJMenuBar(null);
         ClassicDialog.setWatcher(null);
         restoreSessionOptions();
         this.mapViewer = null;
+        this.terrainOracle = null;
         this.infoPanel = null;
         this.menuStrip = null;
         this.hudPane = null;
@@ -1536,6 +1547,12 @@ public class ClassicGUI extends GUI {
             if (this.mapViewer == null) {
                 this.mapViewer = new ClassicMapViewer(getFreeColClient(),
                                                       this, this.imageLibrary);
+                this.terrainOracle = ClassicTerrainOracle.of(getFreeColClient());
+                // Whether the fog ring gets its true terrain, and the ring
+                // at the start (the recorder's oracle line, W6d).
+                if (ClassicFrameRecorder.on()) {
+                    ClassicFrameRecorder.note("oracle", this.terrainOracle.census());
+                }
                 installInGameHud();
             }
             if (active != null) {
@@ -1893,6 +1910,17 @@ public class ClassicGUI extends GUI {
      */
     boolean turnInputBlocked() {
         return this.turnFlow != null && this.turnFlow.isInputBlocked();
+    }
+
+    /**
+     * The true terrain of the fog ring (M1c design 10 §5, W6d), for the
+     * terrain composer alone: the minimap and every other consumer keep
+     * using {@code Tile.isExplored} (least knowledge).
+     *
+     * @return The oracle of the game view, or null without one.
+     */
+    ClassicTerrainOracle terrainOracle() {
+        return this.terrainOracle;
     }
 
     /** @return Whether the Spielzugende mode is on (build spec W17). */

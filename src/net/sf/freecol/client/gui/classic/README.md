@@ -146,6 +146,30 @@ colours the game never shows). The composed map (W6a) and the water cycling
 recorder notes it (`terrain` event and `summary.txt` line). Re-run
 `ant classic-assets` to convert such a pack again.
 
+**True terrain of the fog ring (M1c design 10 §5, W6d).** The original draws
+the edge of the dark area from the real map: a dark tile next to explored water
+shows its own land in its 3-px fringe, explored water carries coast quarters
+toward land that is still dark, and explored tiles blend with the true terrain
+of a dark neighbour (landfall #1407, fog-start #876/#1042). FreeCol's client has
+no type for an unexplored tile, so `ClassicTerrainOracle.trueType(x, y)` gives:
+the client's type for an explored tile; for an unexplored tile **of the ring**
+(Chebyshev distance 1 from an explored one) in **single player**, the type of
+the in-process server's map (read only, as the client specification's object of
+the same id); else null, "unknown". Unknown is every tile beyond the ring (least
+knowledge: refused, counted, logged once), every tile in multiplayer (also for
+the host, whose client has a server too) and every tile while the server's game
+is not the client's (another UUID or map size, e.g. during a load); the
+composer's fallback is F-W6d-MP. `ClassicGUI` creates it with the map viewer
+and disposes of it in `teardownInGame`; only the terrain composer (W6a/W6b) may
+use it, the minimap and everything else keep `isExplored`. The recorder notes
+the start ring (`oracle: server ring=11 known=11 refused=0 highSeas=.. ocean=..`).
+Tests: `ClassicTerrainOracleTest` (client views made the way the login makes
+them) and `ClassicTerrainGoldenTest`, which reads the fixtures in
+`test/expected-data/classic-terrain/` (§12.1) and, with
+`-Dclassic.clips=<video/recordings>` and a converted pack, compares the
+fringe, blend and quarter sprites that follow from the true terrain with the
+clip frames' indices (all 0 px off; the multiplayer fallback fails each).
+
 **Unit & goods sprites.** The original *Colonization* unit map-sprites and goods
 icons come from `ICONS.SS`, aliased onto FreeCol's own resource keys in the same
 `aliases.properties` (all 194 `image.unit.model.unit.*` base+role keys and 22
@@ -3693,13 +3717,14 @@ paints as before). `ClassicTestHarness.install` (from `startGUI`) binds both.
   `dialog-open/close`, `menu-open/close`, `blink` (W3: `arm`, `rebase`,
   `off`/`on n=..`, `hold`, `stop`), `music-request`, `music-mode`, `pref`,
   `late`, `terrain` (W6e: `index ...` or `fallback ...`, whether the pack holds
-  the palette indices). Reserved for the M1 items: `endturn-timer-start/fire` (W5),
+  the palette indices), `oracle` (W6d: `server ...` or `unknown ...`, the fog
+  ring at the game view's start). Reserved for the M1 items: `endturn-timer-start/fire` (W5),
   `palette-step` (W6c), `music-fade`. Add a hook with
   `ClassicFrameRecorder.event(name, detail)`; guard a costly detail with
   `ClassicFrameRecorder.on()`. `ClassicFrameRecorder.note(key, value)` logs
   an event that is also a `key: value` line of `summary.txt`.
 - `summary.txt`: frames, PNGs, late ticks, palette misses, paint cost, the
-  notes (`terrain: ...`).
+  notes (`terrain: ...`, `oracle: ...`).
 
 How the pixels are taken: while recording, `ClassicHudPane` is the painting
 origin of all its children (`isPaintingOrigin`), paints itself as a print into

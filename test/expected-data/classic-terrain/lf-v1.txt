@@ -1,0 +1,67 @@
+# M1c design 10 §12.1 fixture: the landfall clip (LF), view V1 = (42,36),
+# clamped at the east edge (the ship starts at (56,42) in cell (14,6)).
+#
+# Measured on the clip's indexed PNGs against the pack's ssidx sheets
+# (freecol-spike-results/d/w6d/tools/CellId.java, OverlayId.java; logs in
+# d/w6d/measure/), with video/recordings/landfall/analysis/04-water-and-fog.md
+# and its 04-support/reveals.txt.  Format: see fs-v1.txt.
+
+clip landfall
+map 58,72
+view 42,36
+default model.tile.ocean
+
+# The start: the 3x3 around (56,42) (LF #340); x = 57 is never drawn.
+55,41 model.tile.ocean explored@340
+56,41 model.tile.highSeas explored@340
+57,41 model.tile.highSeas explored@340
+55,42 model.tile.ocean explored@340
+56,42 model.tile.highSeas explored@340
+57,42 model.tile.highSeas explored@340
+55,43 model.tile.ocean explored@340
+56,43 model.tile.highSeas explored@340
+57,43 model.tile.highSeas explored@340
+# The sea lane of the east columns (04 §6; LF #341 needs x = 57, y 38..44).
+56,38 model.tile.highSeas
+56,39 model.tile.highSeas
+56,40 model.tile.highSeas
+56,44 model.tile.highSeas
+57,38 model.tile.highSeas
+57,39 model.tile.highSeas
+57,40 model.tile.highSeas
+57,44 model.tile.highSeas
+
+# Move W to (55,42): x = 54 revealed at #1166/#1167.
+54,41 model.tile.ocean explored@1166
+54,42 model.tile.ocean explored@1166
+54,43 model.tile.ocean explored@1166
+
+# Move W to (54,42): x = 53 revealed at #1407, the first land in the fringe.
+53,41 model.tile.ocean explored@1407
+53,42 model.tile.ocean explored@1407
+53,43 model.tile.ocean explored@1407
+
+# Move NW to (53,41): revealed at #2107.
+52,40 model.tile.ocean explored@2107
+53,40 model.tile.ocean explored@2107
+54,40 model.tile.ocean explored@2107
+52,41 model.tile.ocean explored@2107
+# T002 + PHYS0 32 (mountains) at #2107.
+52,42 model.tile.mountains explored@2107
+
+# Dark water: its fringes from explored water show ocean, which land would
+# not; (52,44) is diagonal only, water by the quarter (53,43) SW (c = 0).
+52,43 model.tile.ocean
+53,44 model.tile.ocean
+52,44 model.tile.ocean
+
+# LF #1407: the unexplored island's own E fringe (04 §3.3).
+fringe 1407 52,42 E T002 truth
+# LF #1407: coast quarters toward the still-unexplored island.
+quarter 1407 53,41 SW P119 truth
+quarter 1407 53,42 NW P112 truth
+quarter 1407 53,42 SW P127 truth
+quarter 1407 53,43 NW P116 truth
+quarter 1407 53,41 NW -
+quarter 1407 53,43 SW -
+quarter 1407 53,42 NE -

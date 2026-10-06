@@ -1,0 +1,103 @@
+# M1c design 10 §12.1 fixture: clip 009 "fog-start" (FS), view V1 = (39,36).
+#
+# Measured on the clip's indexed PNGs against the pack's ssidx sheets
+# (freecol-spike-results/d/w6d/tools/CellId.java, OverlayId.java; logs in
+# d/w6d/measure/), with plan/m1c-sea/01-fog-start-measure.md.  These are
+# measurements, not art (Critic 10(b)).
+#
+# Lines:
+#   clip <folder under -Dclassic.clips>
+#   map <width>,<height>          the original's map
+#   view <x>,<y>                  the map tile in screen cell (0,0)
+#   default <type id>             the type of every tile not listed ('?')
+#   <x>,<y> <type id|?> [explored@<frame>] [base=<n>] [res=<id>] [forest]
+#       explored@: the first frame showing the tile explored;
+#       base=: the TERRAIN.SS frame the original draws it with, where the
+#       alias table differs (T008, O6).
+#   Checks of the true terrain (W6d acceptance, ClassicTerrainGoldenTest):
+#   fringe <frame> <x>,<y> <N|E|S|W> T<nnn> [truth]
+#       the dark tile's fringe on that side shows that TERRAIN.SS sprite;
+#   blend <frame> <x>,<y> <N|E|S|W> T<nnn> [truth]
+#       the explored tile's side mask shows that sprite (from its neighbour);
+#   quarter <frame> <x>,<y> <NW|NE|SE|SW> P<nnn>|- [truth]
+#       the explored water tile's coast quarter is that PHYS0.SS sprite
+#       (- = none, c = 0);
+#   truth: the check needs the true terrain of the fog ring, so the
+#       multiplayer fallback (unknown, F-W6d-MP) must fail it.
+# W6a adds the whole-frame compare lines and the rest of the view.
+
+clip fog-start
+map 58,72
+view 39,36
+default model.tile.ocean
+
+# The start: the 3x3 around the ship at (46,42) (FS #0/#19).
+45,41 model.tile.ocean explored@0
+46,41 model.tile.highSeas explored@0
+47,41 model.tile.highSeas explored@0
+45,42 model.tile.ocean explored@0
+46,42 model.tile.highSeas explored@0
+47,42 model.tile.highSeas explored@0
+45,43 model.tile.ocean explored@0
+46,43 model.tile.ocean explored@0
+47,43 model.tile.ocean explored@0
+# Sea lane under the fog: the blends of FS #19 need it (design §0.2).
+46,40 model.tile.highSeas
+47,40 model.tile.highSeas
+48,41 model.tile.highSeas
+48,42 model.tile.highSeas
+
+# Move 1 SW to (45,43), reveal FS #718.
+44,42 model.tile.ocean explored@718
+44,43 model.tile.ocean explored@718
+44,44 model.tile.ocean explored@718
+45,44 model.tile.ocean explored@718
+46,44 model.tile.ocean explored@718
+
+# Move 2 SW to (44,44), reveal FS #876: the first land shows in the fringe.
+43,43 model.tile.ocean explored@876
+43,44 model.tile.ocean explored@876
+43,45 model.tile.ocean explored@876
+44,45 model.tile.ocean explored@876
+45,45 model.tile.ocean explored@876 res=model.resource.fish
+
+# Move 3 SW to (43,45), reveal FS #1041/#1042 (split redraw).
+42,44 model.tile.ocean explored@1042
+42,45 model.tile.ocean explored@1042
+# T005 + PHYS0 67 (forest) at #1042.
+42,46 model.tile.tropicalForest explored@1042 forest
+# T003 + PHYS0 66 (forest) at FS #3264, after the native brave left it.
+43,46 model.tile.broadleafForest explored@1042 forest
+# T008 (sand with cacti) 213/256 at #1042, no overlay; fringes and blends
+# use T001 (FS §3.3, BLEND_BASE).
+44,46 model.tile.desert explored@1042 base=8
+
+# Dark land known from fringes and blends.
+# T004 (grassland or conifer forest): its N fringe at #876 (own terrain).
+45,46 model.tile.grassland
+# T004: the S blend of the explored (44,46) at #1042.
+44,47 model.tile.grassland
+# T003 (prairie or broadleaf forest): its E fringe at #1042 (own terrain).
+41,44 model.tile.prairie
+# Water: E fringes at #1042 show ocean, which land would not.
+41,45 model.tile.ocean
+42,43 model.tile.ocean
+
+# FS #876: the unexplored land's own N fringes (FS §3.1).
+fringe 876 43,46 N T003 truth
+fringe 876 44,46 N T001 truth
+fringe 876 45,46 N T004 truth
+# FS #876: coast quarters on explored water toward the unexplored land.
+quarter 876 43,45 SE P134 truth
+quarter 876 43,45 SW P123 truth
+quarter 876 44,45 SE P134 truth
+quarter 876 44,45 SW P123 truth
+quarter 876 43,45 NW -
+quarter 876 44,45 NE -
+# FS #1042: (45,46) still dark; its W fringe from the explored T008 tile is
+# T001 (no truth needed), its N fringe still its own T004 (the N/W corner
+# pixel is the W fringe's); the explored (44,46) blends with the dark
+# (45,46)'s true T004 (land <- land, neighbour unexplored, 04 §5.1).
+fringe 1042 45,46 N T004 truth
+fringe 1042 45,46 W T001
+blend 1042 44,46 E T004 truth
