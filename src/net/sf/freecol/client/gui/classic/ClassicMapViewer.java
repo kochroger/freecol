@@ -2217,7 +2217,7 @@ final class ClassicMapViewer extends JPanel {
         paintAnimatedUnit(g, vx, vy);
         // The original draws no box around the active unit; the cursor
         // marks only a selected tile (TERRAIN).
-        if (this.viewMode == GUI.ViewMode.TERRAIN) paintCursor(g, vx, vy);
+        if (isCursorShown()) paintCursor(g, vx, vy);
         // The Spielzugende mode's square, over terrain and sprite (W17).
         final Tile pt = this.promptTile;
         if (pt != null && isPromptShown()) {
@@ -2728,6 +2728,27 @@ final class ClassicMapViewer extends JPanel {
         final int x = sx + (tw - w) / 2;
         final int y = sy + (th - h) / 2;
         g.drawImage(img, x, y, w, h, null);
+    }
+
+    /**
+     * Whether the TERRAIN mode's cursor is drawn: a tile is selected, the
+     * player is not waiting and the Spielzugende mode is off.  With no unit
+     * left the controller selects its fallback tile (the first colony, else
+     * the entry tile) and the turn ends by itself 485 ms later; the cursor
+     * then flashed white for about 0.5 s in every turn without a unit (C
+     * acceptance A3), which the original does not show.  While the player
+     * waits (that end, the AI phase, a hand-over, our turn not yet shown)
+     * no key moves the cursor anyway (build spec W5d), and the Spielzugende
+     * mode has its own square (W17).
+     *
+     * @return True if the cursor is drawn.
+     */
+    boolean isCursorShown() {
+        if (this.viewMode != GUI.ViewMode.TERRAIN || this.selectedTile == null) {
+            return false;
+        }
+        return this.gui == null
+            || !(this.gui.turnInputBlocked() || this.gui.turnPrompt());
     }
 
     /**

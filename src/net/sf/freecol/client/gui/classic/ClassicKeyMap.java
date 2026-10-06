@@ -144,7 +144,9 @@ final class ClassicKeyMap {
         new Binding("T", ANY_MODE, "assignTradeRouteAction"),
         new Binding("shift D", ANY_MODE, "disbandUnitAction"),
         new Binding("P", ANY_MODE, "clearForestAction", "plowAction"),
-        new Binding("R", ANY_MODE, "roadAction"),
+        // R: the gold letter of St~raße bauen (land units) and of Zu~rück
+        // nach Europa (ships); each action is enabled only for its kind.
+        new Binding("R", ANY_MODE, "roadAction", "returnToEuropeAction"),
         new Binding("G", ANY_MODE, "gotoAction"),
         // ANSICHT
         new Binding("M", TERRAIN_ONLY, "toggleViewModeAction"),

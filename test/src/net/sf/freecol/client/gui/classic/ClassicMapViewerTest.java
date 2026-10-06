@@ -426,4 +426,55 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         assertEquals(28.54, ClassicMapViewer.CUE_GAP_MS, 0.01);
         assertEquals(250.0, ClassicMapViewer.CUE_MS);
     }
+
+    /**
+     * C FINAL trap 3 (acceptance A3): the TERRAIN mode's cursor is drawn
+     * only while the player can use it.  In a turn without a unit the
+     * controller selects its fallback tile and the turn ends by itself:
+     * the player waits, so no white square; the AI phase and the
+     * Spielzugende mode (its own square) draw none either.
+     */
+    public void testCursorOnlyWhileThePlayerCanUseIt() {
+        final Game game = getStandardGame();
+        final Map map = new MapBuilder(game).setDimensions(58, 72)
+            .setBaseTileType(spec().getTileType("model.tile.ocean"))
+            .setExploredByAll(true).build();
+        game.changeMap(map);
+        final Tile sea = map.getTile(30, 30);
+        final boolean[] waiting = { false };
+        final boolean[] prompt = { false };
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                boolean turnInputBlocked() {
+                    return waiting[0];
+                }
+
+                @Override
+                boolean turnPrompt() {
+                    return prompt[0];
+                }
+            };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        mv.setFocus(sea);
+        assertFalse(mv.isCursorShown());       // nothing selected
+        mv.changeToTerrain(sea);
+        assertTrue(mv.isCursorShown());        // the player's own selection
+        waiting[0] = true;                     // the automatic end, the AI
+        assertFalse(mv.isCursorShown());
+        waiting[0] = false;
+        prompt[0] = true;                      // the Spielzugende square
+        assertFalse(mv.isCursorShown());
+        prompt[0] = false;
+        assertTrue(mv.isCursorShown());
+        mv.changeToEndTurn();
+        assertFalse(mv.isCursorShown());
+        mv.dispose();
+
+        // Without a GUI (the preview harness): as before.
+        final ClassicMapViewer bare = new ClassicMapViewer(null, null, null, false);
+        bare.setFocus(sea);
+        bare.changeToTerrain(sea);
+        assertTrue(bare.isCursorShown());
+        bare.dispose();
+    }
 }

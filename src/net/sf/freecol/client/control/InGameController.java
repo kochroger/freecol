@@ -4870,6 +4870,36 @@ public final class InGameController extends FreeColClientHolder {
         Location destination = getGUI().showSelectDestinationDialog(unit);
         if (destination == null) return false;
 
+        return goToDestination(unit, destination);
+    }
+
+    /**
+     * Sends a unit to Europe, as choosing Europe in the destination
+     * dialog does: a unit on a tile that leads to Europe sails at once,
+     * any other one goes there by its goto orders.
+     *
+     * Called from ReturnToEuropeAction.
+     *
+     * @param unit The {@code Unit} to send.
+     * @return True if the destination change succeeds.
+     */
+    public boolean goToEurope(Unit unit) {
+        if (!requireOurTurn() || unit == null || !unit.hasTile()) return false;
+        final Europe europe = unit.getOwner().getEurope();
+        if (europe == null) return false;
+
+        if (!getGUI().confirmClearTradeRoute(unit)) return false;
+        return goToDestination(unit, europe);
+    }
+
+    /**
+     * Sets a unit's destination and starts it on its way there.
+     *
+     * @param unit The {@code Unit} to move.
+     * @param destination The {@code Location} to go to.
+     * @return True if the destination change succeeds.
+     */
+    private boolean goToDestination(Unit unit, Location destination) {
         UnitWas unitWas = new UnitWas(unit);
         boolean ret = askSetDestination(unit, destination);
         if (ret) {

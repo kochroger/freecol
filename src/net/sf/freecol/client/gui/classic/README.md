@@ -487,7 +487,14 @@ cell-fitted sprites (`drawCentered`, `UNIT_CELL_FRACTION`).
 - **Which unit.** The active unit when it is on the tile (a passenger is drawn
   instead of its ship, W18), else the first unit, never the one mid-slide.
 - **No cursor box** in MOVE_UNITS (the original has none); TERRAIN keeps the
-  selected-tile box.
+  selected-tile box, but only while the player can use it
+  (`ClassicMapViewer.isCursorShown`): not while the player waits
+  (`turnInputBlocked`: the automatic end, a hand-over, the AI phase) and not
+  in the Spielzugende mode, which has its own square. In a turn without a unit
+  the controller selects its fallback tile (the first colony, else the entry
+  tile) and the turn ends 485 ms later; the box flashed white there for about
+  0.5 s every turn (C acceptance A3), which the original does not show
+  (`ClassicMapViewerTest.testCursorOnlyWhileThePlayerCanUseIt`).
 - **Blink.** `setBlinkOff` draws the active unit's tile bare (no unit,
   carrier or stack); the blink clock drives it (next section), a slide clears it.
 
@@ -930,6 +937,35 @@ testArmDelayed`.
   null, the controllers' cancel. All questions and lists go through
   `ClassicGUI.Prompter` (`BOXES` in the game), so the tests answer them
   headless.
+- **Enter in the king's and the natives' boxes (C trap 1).** The original's
+  boxes open with the bar on row 1 unless GAME.TXT gives an `@default`. The
+  king's tax rise (`@KINGSTAMPACT` and the other tax texts, rows
+  `@TAXOPTIONS`) opens on "Den königlichen Ring küssen" (clip005 #17489,
+  clip006 #7380), so Enter there now accepts the tax
+  (`ClassicGUI.monarchEnterAccepts`: `RAISE_TAX_ACT`, `RAISE_TAX_WAR`);
+  FreeCol's box, and ours before, took the party. "Nein" and Escape still
+  hold the party: Escape answers no (W0e, Roger's rule). The mercenary offers
+  keep Enter on "no" (`@MERCENARIES` lists "Nein danke." first; I). The
+  natives' demands (`showNativeDemandDialog`) keep Enter and Escape on the
+  refusal: FreeCol's default, and the original's first row (`@INDIANGOLD`,
+  `@WANTSTUFF`, `@INDIANBEGFOOD` list the refusal first; I, no clip shows
+  one). `askEvent` takes the row Enter picks from its caller.
+- **Back to Europe from anywhere (C trap 2).** BEFEHLE row 16 "Zurück nach
+  Europa" (ships only) and its gold letter R fire FreeCol's new
+  `ReturnToEuropeAction` (`returnToEuropeAction`), which calls
+  `InGameController.goToEurope`: the destination dialog's "Europe" without
+  the dialog (`selectDestination` and it share `goToDestination`). A ship
+  on the high seas sails at once; any other one (in a west-coast colony,
+  say) gets Europe as its destination, sets out at once and sails on
+  entering the high seas, as a goto order does (with no way there, FreeCol
+  skips the unit; its notice is not shown yet, acceptance A2). It is not put on
+  the high seas where it stands (`InGameController.moveTo(unit, europe)`
+  would do that: the server does not check the tile). The action is enabled
+  for a ship on the map that can cross the high seas, while its player has
+  Europe; otherwise the row is grey. R stays the road order for land units
+  (the road action is disabled on water, the Europe action for land units).
+  No question is asked (I: the original's behaviour on this order was not
+  recorded).
 - **FreeCol's high-seas question is never shown (W0f).**
   `InGameController.moveHighSeas` asks `highseas.text` when a ship sails from
   coastal water onto the high seas; `modalConfirmDialog` answers it "no" at
@@ -972,7 +1008,9 @@ testArmDelayed`.
 
 Tests: `ClassicGUISeamTest` (`testEscapeAnswersNo`, `testEscapeCancelsAChoice`,
 `testHighSeasQuestionIsSilent`, `testEastPastView`,
-`testEuropeQuestionAtTheEastEdge`, `testSailHomeText`),
+`testEuropeQuestionAtTheEastEdge`, `testSailHomeText`,
+`testKingsBoxEnterKissesTheRing`, `testNativeDemandEnterRefuses`,
+`testReturnToEuropeOrder`), `ClassicMenuBarTest.testActionMap`,
 `ClassicTurnFlowTest.testCancelKeepsTheUnitUp`,
 `InGameControllerTest.testLearnSkillQuestionKeepsTheMove` (server).
 
@@ -1081,7 +1119,7 @@ M4) and gets 0 px.
 | --- | --- |
 | SPIEL | 0 `preferencesAction`ⁿ, 1 —, 2 —, 3 —, 4 `saveAction`ⁿ, 5 `openAction`ⁿ, 6 `declareIndependenceAction`ⁿ, 7 `retireAction`, 8 `quitAction` |
 | ANSICHT | 0 `toggleViewModeAction` (fires only in TERRAIN mode, key M), 1 `toggleViewModeAction` (fires only outside it, key V), 2 `europeAction`, 3 `findSettlementAction`ⁿ, 4 `zoomInAction`, 5 `zoomOutAction` (both disable themselves: `GUI.canZoomInMap` is false), 6-9 —, 10 —, 11 `centerAction` |
-| BEFEHLE | 0 `clearOrdersAction`, 1 `waitAction`, 2 `fortifyAction`, 3 (second fortify line: hidden, context unknown), 4 `sentryAction`, 5/6 `buildColonyAction` (no colony / colony on the tile), 7 `clearForestAction` (forest), 8 `plowAction` (no forest), 9 `roadAction`, 10 `loadAction` (carriers), 11 `unloadAction` (carrier in a colony), 12 — (armed land units), 13/14 `gotoAction`ⁿ (ship / land), 15 `assignTradeRouteAction`ⁿ (carriers), 16 — (ships), 17 `skipUnitAction`, 18 `unloadAction` (ship at sea: dumps cargo), 19 `disbandUnitAction` |
+| BEFEHLE | 0 `clearOrdersAction`, 1 `waitAction`, 2 `fortifyAction`, 3 (second fortify line: hidden, context unknown), 4 `sentryAction`, 5/6 `buildColonyAction` (no colony / colony on the tile), 7 `clearForestAction` (forest), 8 `plowAction` (no forest), 9 `roadAction`, 10 `loadAction` (carriers), 11 `unloadAction` (carrier in a colony), 12 — (armed land units), 13/14 `gotoAction`ⁿ (ship / land), 15 `assignTradeRouteAction`ⁿ (carriers), 16 `returnToEuropeAction` (ships, key R), 17 `skipUnitAction`, 18 `unloadAction` (ship at sea: dumps cargo), 19 `disbandUnitAction` |
 | BERICHTE | 0 —, 1 `reportReligionAction`, 2 `reportCongressAction`, 3 `reportLabourAction`, 4 `reportTradeAction`, 5 `reportColonyAction`, 6 `reportNavalAction`, 7 `reportForeignAction`, 8 `reportIndianAction`, 9 `reportHighScoresAction` (the hall of fame, not the live score: earlier README decision) |
 | HANDEL | 0-2 `tradeRouteAction`ⁿ (FreeCol's one panel does all three) |
 | COLONIPÄDIE | 0 `colopediaAction.goods`ⁿ, 1 `.units`ⁿ, 2 `.terrain`ⁿ, 3 —, 4 `.buildings`ⁿ, 5 `.fathers`ⁿ, 6 `.concepts`ⁿ, 7 — |
@@ -1093,7 +1131,7 @@ exists (`showClientOptionsDialog`, `showSaveDialog`, `showLoadSaveFileDialog`,
 — = **no engine equivalent**, drawn like the original (normal ink) and always
 inert: colony-report options, sound options, choose music, the four
 zoom-level presets, show hidden terrain, F1 terrain information, pillage,
-back to Europe, colonist skills, complete Colonipädie.  Zoom in/out are wired
+colonist skills, complete Colonipädie.  Zoom in/out are wired
 but disable themselves; outside BEFEHLE that only makes them inert, not grey.
 
 **Visibility** (manual + 001): BEFEHLE lists only the orders that apply to
@@ -1147,7 +1185,8 @@ map must keep winning as it did over the old accelerators.
 | U, O | unload (both `unloadAction`; each only where its BEFEHLE row is listed: U in a colony, O for a ship outside one — `Binding.when`, `contextAllows`; FreeCol's action would otherwise unload a whole ship on O in a colony, or dump cargo at sea on U without asking) |
 | T, G | assignTradeRoute, goto (no-op seams: ignored for now) |
 | Shift+D | disbandUnit |
-| P, R | clearForest else plow, road |
+| P | clearForest else plow |
+| R | road (land units), else back to Europe (ships, `returnToEuropeAction`): the gold letter of both BEFEHLE rows, each action enabled only for its kind |
 | M / V | toggleViewMode, only from TERRAIN / only from MOVE_UNITS |
 | E Z X C | europe, zoomIn, zoomOut, center |
 | F2..F9 | Religion, Congress, Labour, Trade, Colony, Naval, Foreign, Indian |

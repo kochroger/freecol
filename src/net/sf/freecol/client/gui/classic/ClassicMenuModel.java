@@ -312,7 +312,10 @@ final class ClassicMenuModel {
         new Item(BEFEHLE, 13, 3, "gotoAction", "G", NAVAL, ALWAYS),
         new Item(BEFEHLE, 14, 3, "gotoAction", "G", LAND, ALWAYS),
         new Item(BEFEHLE, 15, 3, "assignTradeRouteAction", "T", CARRIER, ALWAYS),
-        new Item(BEFEHLE, 16, 3, null, null, NAVAL, ALWAYS),   // back to Europe
+        // Back to Europe: from anywhere, as the destination dialog's Europe
+        // (a ship on the high seas sails at once); key R, the row's gold
+        // letter, as St~raße bauen's for land units.
+        new Item(BEFEHLE, 16, 3, "returnToEuropeAction", "R", NAVAL, ALWAYS),
         new Item(BEFEHLE, 17, 4, "skipUnitAction", "SPACE", ALWAYS, ALWAYS),
         new Item(BEFEHLE, 18, 5, "unloadAction", "O",
                  c -> CARRIER.test(c) && c.naval && !c.colony, ALWAYS),

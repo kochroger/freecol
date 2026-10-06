@@ -160,6 +160,7 @@ public class ActionManager extends OptionGroup {
         add(new ReportTradeAction(freeColClient));
         add(new ReportTurnAction(freeColClient));
         add(new RetireAction(freeColClient));
+        add(new ReturnToEuropeAction(freeColClient));
         add(new SaveAction(freeColClient));
         add(new ScaleMapAction(freeColClient));
         add(new SentryAction(freeColClient));

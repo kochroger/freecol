@@ -3097,7 +3097,10 @@ public class ClassicGUI extends GUI {
      * got to hold a Tea Party.  Mirror the standard {@code MonarchDialog}: the
      * message and per-action button labels come off the {@link MonarchAction}
      * (a null {@code yesKey} = an acknowledge-only notice), over the monarch's
-     * portrait.
+     * portrait.  Enter takes the original's first row
+     * ({@link #monarchEnterAccepts}): at a tax rise that is "kiss the ring",
+     * not the party.  Escape answers "no" (W0e, Roger's rule), which at a
+     * tax rise is the party, as in FreeCol's own box.
      */
     @Override
     public void showMonarchDialog(MonarchAction action, StringTemplate template,
@@ -3118,7 +3121,28 @@ public class ClassicGUI extends GUI {
             ? StringTemplate.key(messageId)
             : StringTemplate.copy(messageId, template);
         askEvent(ImageLibrary.getMonarchImage(monarchKey),
-                 Messages.message(hdrKey), msg, yesKey, noKey, handler);
+                 Messages.message(hdrKey), msg, yesKey, noKey,
+                 monarchEnterAccepts(action), handler);
+    }
+
+    /**
+     * Whether Enter accepts the king's box (build spec W24).  Every box of
+     * the original opens with its bar on row 1 unless GAME.TXT gives an
+     * {@code @default}, and the tax texts (GAME.TXT {@code @KINGSTAMPACT},
+     * {@code @KINGTAX}, {@code @KINGWAR} ...) have none: their bar starts on
+     * the first {@code @TAXOPTIONS} row, "Den königlichen Ring küssen"
+     * (clip005 #17489, clip006 #7380; both times the bar was moved down to
+     * the party before the close), which is FreeCol's "yes".  FreeCol's own
+     * box defaults to the party.  The mercenary offers keep FreeCol's "no":
+     * the first row of {@code @MERCENARIES} is "Nein danke." (I, not seen in
+     * a clip).
+     *
+     * @param action The king's action.
+     * @return True if Enter takes the "yes" row.
+     */
+    static boolean monarchEnterAccepts(MonarchAction action) {
+        return action == MonarchAction.RAISE_TAX_ACT
+            || action == MonarchAction.RAISE_TAX_WAR;
     }
 
     /**
@@ -3150,7 +3174,7 @@ public class ClassicGUI extends GUI {
             hdrKey = "firstContactDialog.meeting.natives";
         }
         askEvent(ImageLibrary.getMeetingImage(other), Messages.message(hdrKey),
-                 msg, "yes", "no", handler);
+                 msg, "yes", "no", false, handler);
     }
 
     /**
@@ -3160,7 +3184,11 @@ public class ClassicGUI extends GUI {
      * colony.  The handler sends accept/reject to {@code indianDemand}, so a
      * no-op left the demand unanswered.  Mirrors {@code NativeDemandDialog}:
      * the demand text and yes/no labels vary by what is demanded, over the
-     * colony's settlement sprite.
+     * colony's settlement sprite.  Enter and Escape refuse, as in FreeCol's
+     * box: the original's demand boxes (GAME.TXT {@code @INDIANGOLD},
+     * {@code @WANTSTUFF}, {@code @INDIANBEGFOOD}) have no {@code @default}
+     * and list the refusal first, so their bar opens on it (I: no clip shows
+     * one; the rule holds for the king's, the village and the father boxes).
      */
     @Override
     public void showNativeDemandDialog(Unit unit, Colony colony, GoodsType type,
@@ -3187,8 +3215,20 @@ public class ClassicGUI extends GUI {
         }
         final StringTemplate title = StringTemplate
             .template("nativeDemandDialog.name").addName("%colony%", colony.getName());
-        askEvent(this.imageLibrary.getSmallSettlementImage(colony),
-                 Messages.message(title), msg, yes, no, handler);
+        askEvent(demandIcon(colony), Messages.message(title), msg, yes, no,
+                 false, handler);
+    }
+
+    /**
+     * The native demand box's icon: the colony's settlement sprite.  A
+     * test without the image resources replaces it (their fallback image
+     * would be fatal there).
+     *
+     * @param colony The colony demanded of.
+     * @return The icon.
+     */
+    java.awt.Image demandIcon(Colony colony) {
+        return this.imageLibrary.getSmallSettlementImage(colony);
     }
 
     /**
@@ -3204,14 +3244,20 @@ public class ClassicGUI extends GUI {
      * events) is fine; the handler fires with the result the instant it closes.
      * The handler runs in a {@code finally} so the server exchange still resolves
      * (as a reject) if the popup throws, rather than dangling.  Escape and the
-     * close button reject too ({@link #confirmed}).
+     * close button reject too ({@link #confirmed}), whichever row Enter takes.
+     *
+     * @param enterAccepts Whether Enter takes the "yes" row; else it takes
+     *     the "no" row (and the lone row of a notice).
      */
     private void askEvent(java.awt.Image icon, String title,
                           StringTemplate message, String yesKey, String noKey,
+                          boolean enterAccepts,
                           DialogHandler<Boolean> handler) {
         final String[] options = (yesKey == null)
             ? new String[] { Messages.message(noKey) }
             : new String[] { Messages.message(yesKey), Messages.message(noKey) };
+        final int enter = (yesKey != null && enterAccepts) ? 0
+            : options.length - 1;
         final ClassicDialog.Page page
             = new ClassicDialog.Page(Messages.message(message), icon);
         final String yes = yesKey;   // effectively-final capture
@@ -3219,7 +3265,7 @@ public class ClassicGUI extends GUI {
                 int chosen = -1;
                 try {
                     chosen = this.prompter.ask(dialogOwner(), title, page,
-                                               options, options.length - 1);
+                                               options, enter);
                 } finally {
                     final boolean accept = (yes != null && confirmed(chosen));
                     if (handler != null) handler.handle(accept);
