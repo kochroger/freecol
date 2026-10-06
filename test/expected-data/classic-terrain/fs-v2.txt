@@ -1,0 +1,47 @@
+# M1c design 10 §12.1 fixture (W6b): clip 009 "fog-start" (FS), view chain 2
+# = (36,40) (01-support/chain_off.txt), frame #3162.  Format: see fs-v1.txt;
+# here explored@ means "explored by that frame" (not when it was revealed).
+#
+# Measured on the clip's indexed PNGs against the pack's ssidx sheets
+# (freecol-spike-results/d/w6b/tools: CellId, QuarterId, MaskSprites,
+# OverlayId; logs in d/w6b/measure/).  These are measurements, not art.
+#
+# The coast tile (41,45) has land N (prairie T003, an ore resource on it),
+# W (T007) and S (T005, a lost-city rumour on it): three land sides, so
+# quarters, not a beach corner.  Its quarters' transparent pixels show T007
+# everywhere -- the land layer of its last land side in N, E, S, W order,
+# W -- also in its NE quarter, whose own orthogonal land side is N (T003):
+# the design's per-corner fill (O1) would show T003 there.  The prairie N of
+# it shows T007 in its S mask: the water's land face (LAND_FACE), not its
+# own T003.
+
+clip fog-start
+map 58,72
+view 36,40
+default model.tile.ocean
+
+40,44 model.tile.swamp explored@3162
+41,44 model.tile.prairie explored@3162
+42,44 model.tile.ocean explored@3162
+40,45 model.tile.swamp explored@3162
+41,45 model.tile.ocean explored@3162
+42,45 model.tile.ocean explored@3162
+40,46 model.tile.savannah explored@3162
+41,46 model.tile.savannah explored@3162
+42,46 model.tile.savannah explored@3162
+# Water (fs-v1): the coast quarters of (42,44) and (42,45) need no more land.
+42,43 model.tile.ocean explored@3162
+43,44 model.tile.ocean explored@3162
+43,45 model.tile.ocean explored@3162
+43,46 model.tile.broadleafForest explored@3162
+
+# The coast pieces of (41,45): c = 7 / 1 / 6 / 7 (QuarterId).
+quarter 3162 41,45 NW P136
+quarter 3162 41,45 NE P113
+quarter 3162 41,45 SE P134
+quarter 3162 41,45 SW P139
+beach 3162 41,45 -
+# The prairie's S mask: the water's land face T007, 15/15 (CellId).
+blend 3162 41,44 S T007
+# The whole coast cell, 256 px.
+cells 3162 41,45

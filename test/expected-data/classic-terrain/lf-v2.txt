@@ -1,0 +1,122 @@
+# M1c design 10 §12.1 fixture (W6b): the landfall clip (LF), view V2 =
+# (42,40) (04-support Track.VIEWS, frames 10269-15009), frame #14247
+# (img/04-05_coast.png).  Format: see fs-v1.txt; here explored@ means
+# "explored by that frame".
+#
+# Measured with freecol-spike-results/d/w6b/tools (CellId, QuarterId,
+# MaskSprites; logs in d/w6b/measure/lf14247-*.txt).  The coast of the
+# island east of the Dutch landing: 14 explored coast cells (quarters 112,
+# 113, 114, 116, 117, 119, 120, 123, 124, 126, 127, 135, 136, 137; beach
+# corners 150 on (52,43), (51,44), (50,45) and 152 on (49,40), (50,41)) and
+# the dark land NW of it, whose fringes show the coast water's land face.
+# Not compared: unit, village and rumour cells, and (52,43), which the
+# village on (51,43) overhangs (its beach corner's own pixels are checked).
+
+clip landfall
+map 58,72
+view 42,40
+default model.tile.ocean
+
+# Row 40: forest W, a beach corner P152 on (49,40), sea.
+47,40 model.tile.grassland explored@14247
+48,40 model.tile.grassland explored@14247
+49,40 model.tile.ocean explored@14247
+50,40 model.tile.ocean explored@14247
+51,40 model.tile.ocean explored@14247
+52,40 model.tile.ocean explored@14247
+53,40 model.tile.ocean explored@14247 res=model.resource.fish
+54,40 model.tile.ocean explored@14247
+# Row 41: dark land (its N fringes T004), the beach corner P152 on (50,41).
+# (49,41) is T007: its E fringe from (50,41) is the water's land face, (49,41)
+# itself; its N fringe is (49,40)'s face, its W side's T004.
+47,41 model.tile.grassland
+48,41 model.tile.grassland
+49,41 model.tile.swamp
+50,41 model.tile.ocean explored@14247
+51,41 model.tile.ocean explored@14247 res=model.resource.fish
+52,41 model.tile.ocean explored@14247
+53,41 model.tile.ocean explored@14247
+54,41 model.tile.ocean explored@14247
+# Row 42: dark land; (50,42) shows T001 in (50,41)'s land layer S mask
+# (desert; 04 §3.3: explored later as T008, O6), its own N fringe T007, the
+# face of (50,41); marsh, the soldier's mountains (lf-v1), sea.
+47,42 model.tile.grassland
+48,42 model.tile.grassland
+49,42 model.tile.grassland
+50,42 model.tile.desert
+51,42 model.tile.marsh explored@14247
+52,42 model.tile.mountains explored@14247
+53,42 model.tile.ocean explored@14247
+54,42 model.tile.ocean explored@14247
+# Row 43: land with the village (51,43), the beach corner P150 on (52,43).
+47,43 model.tile.prairie explored@14247
+48,43 model.tile.savannah explored@14247
+49,43 model.tile.grassland explored@14247
+50,43 model.tile.swamp explored@14247
+51,43 model.tile.grassland explored@14247
+52,43 model.tile.ocean explored@14247
+53,43 model.tile.ocean explored@14247
+54,43 model.tile.ocean explored@14247
+# Row 44: a rumour (47,44), a unit on T002 (48,44) (its blend in (48,45)'s
+# land layer), the rumour disc on T007 (50,44), P150 on (51,44).
+47,44 model.tile.plains explored@14247
+48,44 model.tile.plains explored@14247
+49,44 model.tile.grassland explored@14247
+50,44 model.tile.swamp explored@14247
+51,44 model.tile.ocean explored@14247
+52,44 model.tile.ocean explored@14247
+53,44 model.tile.ocean explored@14247
+54,44 model.tile.ocean
+# Row 45: marsh, the inner water (48,45) (quarters 136/137/114/135, land N,
+# E, W), P150 on (50,45), fish (52,45).
+47,45 model.tile.marsh explored@14247
+48,45 model.tile.ocean explored@14247
+49,45 model.tile.grassland explored@14247
+50,45 model.tile.ocean explored@14247
+51,45 model.tile.ocean explored@14247
+52,45 model.tile.ocean explored@14247 res=model.resource.fish
+53,45 model.tile.ocean
+# Row 46: a unit on T003 (47,46), coast water, fish (50,46).
+47,46 model.tile.prairie explored@14247
+48,46 model.tile.ocean explored@14247
+49,46 model.tile.ocean explored@14247
+50,46 model.tile.ocean explored@14247 res=model.resource.fish
+51,46 model.tile.ocean explored@14247
+# Row 47: the ship (47,47).
+47,47 model.tile.ocean explored@14247
+48,47 model.tile.ocean explored@14247
+49,47 model.tile.ocean explored@14247
+50,47 model.tile.ocean explored@14247
+51,47 model.tile.ocean
+
+# The coast pieces (QuarterId on #14247).
+quarter 14247 50,40 SW P119 truth
+quarter 14247 52,41 SE P126
+quarter 14247 52,41 SW P123
+quarter 14247 53,41 SW P119
+quarter 14247 53,42 NW P112
+quarter 14247 53,42 SW P127
+quarter 14247 53,43 NW P116
+quarter 14247 52,44 NW P116
+quarter 14247 48,45 NW P136
+quarter 14247 48,45 NE P137
+quarter 14247 48,45 SE P114
+quarter 14247 48,45 SW P135
+quarter 14247 51,45 NW P116
+quarter 14247 48,46 NW P120
+quarter 14247 48,46 NE P117
+quarter 14247 48,46 SW P127
+quarter 14247 49,46 NW P124
+quarter 14247 49,46 NE P113
+quarter 14247 50,46 NW P116
+quarter 14247 48,47 NW P116
+beach 14247 49,40 P152 truth
+beach 14247 50,41 P152 truth
+beach 14247 52,43 P150
+beach 14247 51,44 P150
+beach 14247 50,45 P150
+beach 14247 48,45 -
+# The whole cells, 256 px each: the coast, and the dark land whose fringes
+# show the coast water's land face.
+cells 14247 49,40;50,40;50,41;52,41;53,41;53,42;53,43;51,44;52,44;48,45;50,45;51,45;48,46;49,46;50,46;48,47
+cells 14247 48,41;49,41;50,42

@@ -186,10 +186,12 @@ rules are `ClassicTerrainComposer`, pure code over the index sheets:
   **explored** (N, E, S, W; never a diagonal) its **fringe**: the 15 px of that
   side's mask `PHYS0.SS.104-107` (3 px deep, 7 + 4 + 4, inside the dark tile
   only), the sides a union (15 / 29 adjacent / 30 opposite / 43 / 56 px). The
-  fringe shows the neighbour's sprite where it bleeds in; water never bleeds
-  into land, so dark land next to explored water shows **its own true
-  terrain** (the oracle above): the first island shows a move before it is
-  explored. An unknown own type (multiplayer) takes the neighbour's.
+  fringe shows the neighbour's sprite where it bleeds in; water's own sprite
+  never bleeds into land, so dark land next to explored water shows the
+  water's **land face** (W6b, below), which is **its own true terrain** (the
+  oracle above) when it is the water's last land side: the first island shows
+  a move before it is explored. An unknown own type (multiplayer) takes the
+  neighbour's.
 - **Explored:** its TERRAIN.SS sprite, then for each side whose neighbour's
   type is known (explored, or the true type of the dark ring) and bleeds in,
   that sprite through the side's mask; an explored neighbour with the own
@@ -227,8 +229,64 @@ sheets, `ClassicTerrainSheets`), `ClassicMapViewerTest` (the reveal with the
 final draw, the fallback), and `ClassicTerrainGoldenTest`, whose `compare` lines
 compose whole clip frames from the pack's index sheets and compare them index
 for index: fog-start #19 (46,080/46,080 px), #718, #876, #1042 and landfall
-#341, #345, #1407 all 0 px off (the mouse arrow and the unit cells excused, and
-until W6b the explored water cells with land around them).
+#341, #345, #1407 all 0 px off (the mouse arrow and the unit cells excused; the
+coast cells included since W6b).
+
+**The coast (M1c design 10 §8, W6b).** Explored water with land among its 8
+neighbours (by `type()`, so land still dark counts and the coastline shows a
+move before the land is explored; off the map and unknown count as water) is
+composed twice: the **water layer** (its base and blends, as above) and the
+**land layer**, the cell drawn as land of the `blendSpr` of its **last land side
+in N, E, S, W order** (W before S before E before N) with the side-mask blends
+of its land neighbours (no water bleeds into it). Then:
+
+- **Beach corner** when exactly two adjacent sides are land, the other two
+  water and the diagonal opposite them water too (`BEACH_RULE`; the corner's
+  own diagonal does not matter): the land layer with `PHYS0.SS.150-153` (land
+  N+W, N+E, S+W, S+E) over it, 0xFD keeping the land, and no quarters. Its
+  base is therefore the W side for 150 and 152, the E side for 151 and the S
+  side for 153 (`BEACH_BASE`).
+- Else the **coast quarters** `PHYS0.SS.108 + 4c + q` (`ClassicTileArt.
+  coastQuarter`; q = 0 NW, 1 NE, 2 SE, 3 SW at (0,0), (8,0), (8,8), (0,8); c =
+  b0 + 2 b1 + 4 b2 from the land bits of the corner's three neighbours
+  clockwise: NW (W, NW, N), NE (N, NE, E), SE (E, SE, S), SW (S, SW, W)) over
+  the water layer: index 0 keeps the water layer, 0xFD shows the **land layer**
+  (`LAND_FILL`), any other index is drawn; c = 0 draws nothing. So the quarters
+  sit on top of the land blends (fog-start #876), and every quarter's
+  transparent pixels show the same land, also where its own orthogonal land
+  side is another (fog-start #3162 (41,45): land N T003, W T007, S T005; its NE
+  quarter shows T007).
+- The overlays (a fish, a rumour) come last.
+- **Land face** (`LAND_FACE`): explored coast water bleeds the sprite of its
+  land layer into its land neighbours, explored or dark, where that neighbour
+  is not itself the source: "water never bleeds into land" holds for the
+  water's own sprite only. Fog-start #3162: the prairie (41,44) shows T007 in
+  its S mask; landfall #14247: the dark (49,41) and (50,42) show T004 and T007
+  in their fringes from the beach corners N and W of them, not their own T007
+  and T001. Dark water stays out (least knowledge, unverified).
+
+How the rules were found (freecol-spike-results/d/w6b, scans of the clips'
+indexed frames): over nine clips, two adjacent land sides with the other two
+and the opposite diagonal water carry a beach corner in 2,787 cells (1 against,
+a blank screen); with the opposite diagonal land they carry quarters (9 cells
+at 4 places, e.g. clip005 #1046); a third land side gives quarters (landfall:
+234 cells with land N, E, W, no beach). Of the coast cells whose land sides
+show different sprites, all 2,207 of four clips fill their quarters' and beach
+corners' transparent pixels with the last land side's land layer, none with
+the first side's or each corner's own side (the design's O1 candidates); 345
+land cells next to coast water show its land face where it differs from their
+own, none their own; and 700 coast cells show no water neighbour's land face
+in their land layer. Tests: `ClassicTerrainComposerTest` (the frames, the
+layers, the beach rule and base, the land face, least knowledge), and
+`ClassicTerrainGoldenTest`: the whole frames above with their 10 coast cells,
+the `cells` lines (fog-start #3162, #4027 and #4876 and clip005 #1046 whole
+coast cells; landfall #14247 16 coast cells and 3 dark fringe cells), the
+`quarter`/`beach` lines (59 checks in all) -- all 0 px off -- and
+`testCoastRuleCandidates`, which composes every combination of the candidates
+(`LandFill`, `BeachRule`, `BeachBase`, `LAND_FACE`: 128) on all 328,750
+compared pixels: the committed rules 0 px off, every single alternative worse
+(33 to 1,777 px). Open: river mouths `PHYS0.SS.140-147` (O9) and the land
+face of dark water (not measured; left out).
 
 **The water cycling (M1c design 10 §7, W6c).** Palette entries 120-127 rotate
 one step every 35 game ticks, 575.05 ms (`ClassicGamePalette.PERIOD_MS`; the
@@ -473,10 +531,10 @@ rim (indices 67-71, landfall 04 §5.2). The original's borders are sprites:
   through the masks `PHYS0.SS.104-107` (`ClassicTerrainComposer`, above). That
   is the land-land border and the land side of the coast.
 - **Coast quarters** `PHYS0.SS.108-139` (8x8, quarter `q` = `108 + 4c + q`, `c`
-  from the three land bits around the corner; index 0 = keep, 0xFD = land
-  fill) and the **beach corners** `150-153`, on explored water, drawn after
-  the blends (W6b, next; fog-start #876 and landfall #1407/#14247 pin them).
-  Until W6b explored water next to land shows the land's blend only.
+  from the three land bits around the corner; index 0 = keep the water, 0xFD =
+  the cell's land layer) and the **beach corners** `150-153`, on explored
+  water, drawn after the blends (W6b, "The coast" above; fog-start #876,
+  #3162, #4027, #4876 and landfall #1407/#14247 pin them).
 
 The history of the procedural attempts is in git and
 [land-tile-borders.md](../../../../../../../classic_ui_plan/land-tile-borders.md)

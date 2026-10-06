@@ -1,0 +1,32 @@
+# M1c design 10 §12.1 fixture (W6b): clip 009 "fog-start" (FS), view chain 4
+# = (25,33) (01-support/chain_off.txt; FS #4876 and #4898 share 169 of 180
+# cells), frame #4876.  Format: see fs-v1.txt; here explored@ means
+# "explored by that frame".
+#
+# Measured with freecol-spike-results/d/w6b/tools (CellId, QuarterId,
+# MaskSprites; logs in d/w6b/measure/).
+#
+# The beach corner P152 (land S and W) on (35,42) = cell (10,9), design 10
+# F7 and Critic 2: 180/180 opaque px; its base is the W neighbour's T004
+# (its last land side), the S mask shows the S neighbour's T003 (the land
+# blend), no water bleeds in, no quarters; the vertical neighbour's T003 as
+# base would be wrong.
+
+clip fog-start
+map 58,72
+view 25,33
+default model.tile.ocean
+
+# A fish resource (its PHYS0 96 marker).
+34,41 model.tile.ocean explored@4876 res=model.resource.fish
+35,41 model.tile.ocean explored@4876
+36,41 model.tile.ocean explored@4876
+34,42 model.tile.grassland explored@4876
+35,42 model.tile.ocean explored@4876
+36,42 model.tile.ocean explored@4876
+34,43 model.tile.grassland explored@4876
+35,43 model.tile.prairie explored@4876
+36,43 model.tile.ocean explored@4876
+
+beach 4876 35,42 P152
+cells 4876 35,42

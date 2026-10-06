@@ -84,9 +84,9 @@ import net.sf.freecol.common.model.Unit;
  * indices (M1c design 10 §6, W6a): {@link ClassicTerrainLayer} composes the
  * 15x12 view from the {@code TERRAIN.SS} and {@code PHYS0.SS} index sheets
  * ({@link ClassicTerrainComposer}: the dark unexplored tile, its 3-px fog
- * fringe from explored neighbours, the side-mask blends, the overlays) and
- * draws it through the game palette.  It reads the explored state <em>as
- * shown</em> ({@link #shownExplored}): taken from the model by full paints
+ * fringe from explored neighbours, the side-mask blends, the coast quarters
+ * and beach corners, the overlays) and draws it through the game palette.
+ * It reads the explored state <em>as shown</em> ({@link #shownExplored}): taken from the model by full paints
  * outside a slide, so a reveal the model already holds appears with the
  * slide's final draw, not in its margins (Critic 5); the true terrain of
  * the fog ring comes from {@link ClassicTerrainOracle}.  Without the pack's

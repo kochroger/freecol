@@ -72,18 +72,19 @@ import net.sf.freecol.common.resources.ResourceManager;
  *       resource markers {@code 89..102}.</li>
  * </ul>
  *
- * <h2>Coastline: the frames {@code 108..139} are right</h2>
+ * <h2>Coastline: the frames {@code 108..139} and {@code 150..153}</h2>
  * The original's coast quarter-tiles (32 small 8&times;8 sprites,
  * {@code 4 corners &times; 8 configs}) were once drawn here from the PNGs
  * and then removed, because they showed a "green fleck" along the wave
  * crest that a reference screenshot seemed to lack.  That fleck is the
  * original's own rim (indices 67-71, landfall 04 section 5.2), not an
  * extraction fault: the frames are index-exact against the clips (M1c
- * design 10 F6).  They come back as palette indices in the composer with
- * the beach corners {@code 150..153} (item W6b, quarter {@code q} is
- * {@code P(108 + 4c + q)}); until then explored water next to land shows
- * the land's side-mask blend only.  The river mouths {@code 140..147} are
- * not drawn (O9).
+ * design 10 F6).  The composer draws them as palette indices on explored
+ * water (item W6b): quarter {@code q} is {@link #coastQuarter}
+ * {@code P(108 + 4c + q)}, and a tile with exactly two adjacent land sides
+ * gets a beach corner {@link #beachCorner} {@code 150..153} instead.  The
+ * RGBA fallback draws no coast.  The river mouths {@code 140..147} are not
+ * drawn (O9).
  *
  * <h2>Connectivity on the classic grid</h2>
  * Connectivity is computed from <em>raw-grid</em> neighbours (the tiles drawn
@@ -129,6 +130,12 @@ final class ClassicTileArt {
 
     private static final int LOST_CITY = 103;
     private static final int PLOWED = 149;
+
+    /** The first coast quarter; quarter q of land bits c is +4c+q. */
+    private static final int COAST_QUARTER = 108;
+
+    /** The first beach corner: land N+W, then N+E, S+W, S+E. */
+    private static final int BEACH_CORNER = 150;
 
     /** Connectivity bits (see the class comment): the frame is their sum. */
     private static final int E = 1, W = 2, S = 4, N = 8;
@@ -260,6 +267,39 @@ final class ClassicTileArt {
             if (r >= 0) frames.accept(r);
         }
         if (tile.hasLostCityRumour()) frames.accept(LOST_CITY);
+    }
+
+    /**
+     * The coast quarter of a water tile's corner (M1c design 10 §8.1,
+     * landfall 04 §5.2: 64 of 71 quarters with land exact).
+     *
+     * @param q The corner: 0 NW at (0,0), 1 NE at (8,0), 2 SE at (8,8),
+     *     3 SW at (0,8).
+     * @param c Its land bits {@code b0 + 2 b1 + 4 b2}, the corner's three
+     *     neighbours clockwise: NW (W, NW, N), NE (N, NE, E), SE (E, SE, S),
+     *     SW (S, SW, W).
+     * @return The {@code PHYS0.SS} frame {@code 108 + 4c + q}, or -1 for
+     *     c = 0 (108-111 are all index 0: nothing drawn).
+     */
+    static int coastQuarter(int q, int c) {
+        if (q < 0 || q > 3 || c < 0 || c > 7) {
+            throw new IllegalArgumentException("quarter " + q + ", bits " + c);
+        }
+        return (c == 0) ? -1 : COAST_QUARTER + 4 * c + q;
+    }
+
+    /**
+     * The beach corner of a water tile whose two adjacent land sides are
+     * given (sand along them, landfall 04 §5.3; which tiles carry one is
+     * the composer's rule).
+     *
+     * @param north Land on the N side (else S).
+     * @param west Land on the W side (else E).
+     * @return The {@code PHYS0.SS} frame: 150 N+W, 151 N+E, 152 S+W,
+     *     153 S+E.
+     */
+    static int beachCorner(boolean north, boolean west) {
+        return BEACH_CORNER + ((north) ? 0 : 2) + ((west) ? 0 : 1);
     }
 
     /**

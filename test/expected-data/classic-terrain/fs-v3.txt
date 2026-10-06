@@ -1,0 +1,33 @@
+# M1c design 10 §12.1 fixture (W6b): clip 009 "fog-start" (FS), view chain 3
+# = (30,38) (01-support/chain_off.txt; FS #4027 and #4122 share 170 of 180
+# cells), frame #4027.  Format: see fs-v1.txt; here explored@ means
+# "explored by that frame".
+#
+# Measured with freecol-spike-results/d/w6b/tools (CellId, QuarterId,
+# MaskSprites; logs in d/w6b/measure/).
+#
+# The beach corner P153 (land E and S) on (37,44): its base, the transparent
+# pixels outside the masks, is T001 32/32 -- the desert (T008, 214/256) S of
+# it, its last land side in N, E, S, W order -- not the horizontal E
+# neighbour's T005 nor the diagonal SE neighbour's T004 (Critic 2's two
+# candidates); its E mask shows T005 (the land blend), its S mask T001.
+
+clip fog-start
+map 58,72
+view 30,38
+default model.tile.ocean
+
+36,43 model.tile.ocean explored@4027
+37,43 model.tile.ocean explored@4027
+38,43 model.tile.ocean explored@4027
+# The ship's cell.
+36,44 model.tile.ocean explored@4027
+37,44 model.tile.ocean explored@4027
+38,44 model.tile.savannah explored@4027
+36,45 model.tile.plains explored@4027
+# T008 (sand with cacti) 214/256; T001 in blends (BLEND_BASE).
+37,45 model.tile.desert explored@4027 base=8
+38,45 model.tile.grassland explored@4027
+
+beach 4027 37,44 P153
+cells 4027 37,44

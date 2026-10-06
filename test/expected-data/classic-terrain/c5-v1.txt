@@ -1,0 +1,37 @@
+# M1c design 10 §12.1 fixture (W6b): clip 005 (2026-10-05_clip005.avi),
+# frame #1046.  Its view was not measured: the tiles are given relative to
+# view (20,20), i.e. map (20 + c, 20 + r) for screen cell (c,r).  Format: see
+# fs-v1.txt; here explored@ means "explored by that frame".
+#
+# Measured with freecol-spike-results/d/w6b/tools (CellId, QuarterId,
+# MaskSprites; logs in d/w6b/measure/).
+#
+# The inland water (26,26) = cell (6,6) has land E (T004) and S (T001) only,
+# the other two sides water -- a beach corner P153's sides -- but the
+# diagonal opposite them, NW (25,25), is land, and the original draws
+# quarters 116/133/138/115 instead (BEACH_RULE; the same at clip005 #181,
+# clip006 #445/#5586 and dago-colony #10824).  Their transparent pixels show
+# T001, the S side's land layer (its last land side), with T004 in the E
+# mask.
+
+clip clip005
+map 58,72
+view 20,20
+default model.tile.ocean
+
+25,25 model.tile.grassland explored@1046
+26,25 model.tile.ocean explored@1046
+27,25 model.tile.prairie explored@1046
+25,26 model.tile.ocean explored@1046
+26,26 model.tile.ocean explored@1046
+27,26 model.tile.grassland explored@1046
+25,27 model.tile.ocean explored@1046
+26,27 model.tile.desert explored@1046
+27,27 model.tile.prairie explored@1046
+
+quarter 1046 26,26 NW P116
+quarter 1046 26,26 NE P133
+quarter 1046 26,26 SE P138
+quarter 1046 26,26 SW P115
+beach 1046 26,26 -
+cells 1046 26,26

@@ -75,7 +75,7 @@ compare 345 px=45785 pointer=39 cells=6,7,167 exclude=56,42
 histogram 345 0,0 60x56 61x165 62x35
 # LF #1407: x = 53 revealed, the island (52,42) dark with its own E fringe;
 # the ship on (54,42).
-compare 1407 px=45017 pointer=39 cells=12,11,157 exclude=54,42 w6b=3
+compare 1407 px=45785 pointer=39 cells=12,11,157 exclude=54,42 coast=3
 
 # W6c, the water cycling (design 10 §7.4, §12.2; the format: see fs-v1.txt).
 # LF #0 is phase 1 (F3).

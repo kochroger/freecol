@@ -397,6 +397,336 @@ public class ClassicTerrainComposerTest extends FreeColTestCase {
         assertFalse("land", cyc[0]);
     }
 
+    // W6b: the coast (design 10 §8.3)
+
+    private static final ClassicIndexSheet COAST = ClassicTerrainSheets.coastPhys();
+
+    /** A composer over the coast pattern with a choice of the coast rules. */
+    private static ClassicTerrainComposer coastComposer(ClassicTerrainComposer.Rules rules) {
+        return new ClassicTerrainComposer(TERRAIN, COAST,
+            id -> ClassicTerrainGoldenTest.ALIAS.getOrDefault(id, -1), rules);
+    }
+
+    /** The committed coast rules over the coast pattern. */
+    private static ClassicTerrainComposer coastComposer() {
+        return coastComposer(ClassicTerrainComposer.Rules.COMMITTED);
+    }
+
+    /** The committed rules. */
+    private static final ClassicTerrainComposer.Rules RULES
+        = ClassicTerrainComposer.Rules.COMMITTED;
+
+    /**
+     * A layer by hand: a base sprite, then sprites at side masks in order.
+     *
+     * @param base The TERRAIN frame.
+     * @param sides Pairs {side, TERRAIN frame}, in drawing order.
+     * @return The 256 indices.
+     */
+    private static int[] layer(int base, int[]... sides) {
+        final int[] r = new int[256];
+        for (int k = 0; k < 256; k++) {
+            r[k] = terrain(base, k);
+            for (int[] s : sides) {
+                if (ClassicTerrainSheets.inMask(s[0], k)) r[k] = terrain(s[1], k);
+            }
+        }
+        return r;
+    }
+
+    /** @return The quarter (0 NW, 1 NE, 2 SE, 3 SW) of a cell offset. */
+    private static int quarterOf(int k) {
+        final int x = k % 16, y = k / 16;
+        return (y < 8) ? ((x < 8) ? 0 : 1) : ((x < 8) ? 3 : 2);
+    }
+
+    /**
+     * The coast quarters by hand over a water layer: 0 keeps it, FD shows
+     * the land layer, the rest is the quarter's index.
+     *
+     * @param water The water layer.
+     * @param land The land layer (null: FD keeps too).
+     * @param c The land bits of the quarters NW, NE, SE, SW.
+     * @return The cell.
+     */
+    private static int[] quarters(int[] water, int[] land, int... c) {
+        final int[] r = water.clone();
+        for (int k = 0; k < 256; k++) {
+            final int q = quarterOf(k);
+            if (c[q] == 0) continue;
+            final int f = 108 + 4 * c[q] + q;
+            final int kind = ClassicTerrainSheets.quarterKind(k % 16 % 8, k / 16 % 8);
+            if (kind == 0) r[k] = ClassicTerrainSheets.quarterIndex(f);
+            else if (kind == 2 && land != null) r[k] = land[k];
+        }
+        return r;
+    }
+
+    /** The frame selection: all 32 (c, q) give 108 + 4c + q, c = 0 none; the 4 beach corners. */
+    public void testCoastFrames() {
+        for (int c = 0; c < 8; c++) {
+            for (int q = 0; q < 4; q++) {
+                assertEquals("c=" + c + " q=" + q, (c == 0) ? -1 : 108 + 4 * c + q,
+                             ClassicTileArt.coastQuarter(q, c));
+            }
+        }
+        assertEquals(150, ClassicTileArt.beachCorner(true, true));
+        assertEquals(151, ClassicTileArt.beachCorner(true, false));
+        assertEquals(152, ClassicTileArt.beachCorner(false, true));
+        assertEquals(153, ClassicTileArt.beachCorner(false, false));
+        try {
+            ClassicTileArt.coastQuarter(4, 1);
+            fail("quarter 4");
+        } catch (IllegalArgumentException e) {
+            // expected
+        }
+        final boolean[] t = { true, false, false, true };   // N, W
+        assertEquals(3, ClassicTerrainComposer.lastLandSide(t));
+        assertEquals(-1, ClassicTerrainComposer.lastLandSide(new boolean[4]));
+        assertEquals(2, ClassicTerrainComposer.lastLandSide(new boolean[] { true, true, true, false }));
+    }
+
+    /**
+     * Coast quarters (fog-start #3162 cell (5,5): land N, W, S): drawn over
+     * the water layer, which keeps its land blends; index 0 keeps it; FD
+     * shows the land layer: the last land side's sprite (W, grassland T004)
+     * with the land blends of N (plains T002) and S (desert T001), in every
+     * quarter -- also NE, whose own orthogonal land side is N.  The
+     * design's per-corner fill would show T002 there.
+     */
+    public void testCoastQuartersOverTheWaterLayer() {
+        final Grid g = new Grid("PPo", "GOo", "DDo");
+        final int[] water = layer(10, new int[] { N, 2 }, new int[] { E, 10 },
+                                  new int[] { S, 1 }, new int[] { W, 4 });
+        final int[] land = layer(4, new int[] { N, 2 }, new int[] { S, 1 });
+        // NW (W, NW, N) 7, NE (N, NE, E) 1, SE (E, SE, S) 4, SW (S, SW, W) 7.
+        final int[] want = quarters(water, land, 7, 1, 4, 7);
+        final int[] got = cell(coastComposer(), g, 1, 1);
+        for (int k = 0; k < 256; k++) assertEquals("px " + k, want[k], got[k]);
+        // The quarters' own px win over the blend at a mask px.
+        boolean overMask = false;
+        for (int k = 0; k < 256; k++) {
+            if (ClassicTerrainSheets.inMask(W, k) && got[k] >= 210 && got[k] < 242) overMask = true;
+        }
+        assertTrue("a quarter px over the W blend", overMask);
+        g.assertLeastKnowledge();
+        // The design's alternative: each quarter's own orthogonal land side
+        // (NE: N's plains; NW and SW with both: the vertical one).
+        final int[] alt = cell(coastComposer(RULES.landFill(ClassicTerrainComposer.LandFill.CORNER_VERTICAL)), g, 1, 1);
+        final int[] sideSprite = { 2, 2, 1, 1 };   // NW: N, NE: N, SE: S, SW: S
+        int differ = 0;
+        for (int k = 0; k < 256; k++) {
+            final int q = quarterOf(k);
+            if (ClassicTerrainSheets.quarterKind(k % 16 % 8, k / 16 % 8) == 2) {
+                assertEquals("px " + k, terrain(sideSprite[q], k), alt[k]);
+            } else {
+                assertEquals("px " + k, want[k], alt[k]);
+            }
+            if (alt[k] != want[k] && q == 1) differ++;
+        }
+        assertTrue("the NE quarter tells them apart", differ > 0);
+    }
+
+    /**
+     * A beach corner (fog-start #4027 cell (7,6): land E and S): no
+     * quarters; the land layer -- the last land side S, desert T001, with
+     * the E side's grassland T004 blended in -- under the corner, whose FD
+     * keeps it; its cycling pixel flags the cell.
+     */
+    public void testBeachCorner() {
+        final Grid g = new Grid("ooo", "oOG", "oDg");
+        final boolean[] cyc = new boolean[1];
+        final int[] got = cell(coastComposer(), g, 1, 1, cyc);
+        final int[] land = layer(1, new int[] { E, 4 });
+        for (int k = 0; k < 256; k++) {
+            final int x = k % 16, y = k / 16;
+            final int want = (ClassicTerrainSheets.beachDrawn(x, y))
+                ? ClassicTerrainSheets.beachIndex(153, x, y) : land[k];
+            assertEquals("px " + k, want, got[k]);
+        }
+        assertTrue("the corner's cycling px", cyc[0]);
+        g.assertLeastKnowledge();
+        // The base candidates: horizontal = E's grassland.
+        final int[] h = cell(coastComposer(RULES.beachBase(ClassicTerrainComposer.BeachBase.HORIZONTAL)),
+            g, 1, 1);
+        final int[] hl = layer(4, new int[] { S, 1 });
+        for (int k = 0; k < 256; k++) {
+            if (!ClassicTerrainSheets.beachDrawn(k % 16, k / 16)) assertEquals("px " + k, hl[k], h[k]);
+        }
+        // The other three corners: their frame, base = the last land side.
+        final Object[][] cases = {
+            { new String[] { "oPo", "GOo", "ooo" }, 150, 4 },   // N+W: W
+            { new String[] { "oPo", "oOG", "ooo" }, 151, 4 },   // N+E: E
+            { new String[] { "ooo", "GOo", "oPo" }, 152, 4 },   // S+W: W
+        };
+        for (Object[] cs : cases) {
+            final Grid c = new Grid((String[])cs[0]);
+            final int[] px = cell(coastComposer(), c, 1, 1);
+            int base = 0;
+            for (int k = 0; k < 256; k++) {
+                final int x = k % 16, y = k / 16;
+                if (ClassicTerrainSheets.beachDrawn(x, y)) {
+                    assertEquals(cs[1] + " px " + k,
+                                 ClassicTerrainSheets.beachIndex((int)cs[1], x, y), px[k]);
+                } else if (!inAnyMask(k, N, E, S, W)) {
+                    assertEquals(cs[1] + " base px " + k, terrain((int)cs[2], k), px[k]);
+                    base++;
+                }
+            }
+            assertTrue(base > 0);
+        }
+    }
+
+    /**
+     * When a beach corner is drawn ({@link ClassicTerrainComposer#BEACH_RULE}):
+     * exactly two adjacent land sides and the diagonal opposite them water
+     * (its own diagonal may be water too); three sides, two opposite sides,
+     * the opposite diagonal land (clip005 #1046) or a diagonal only give
+     * quarters; the candidates PAIR_OF_SIDES, ANY_PAIR and OFF.
+     */
+    public void testBeachRule() {
+        final ClassicTerrainComposer c = coastComposer();
+        final java.util.function.Predicate<int[]> hasBeach = px -> {
+            for (int v : px) if (v >= 244 && v < 248) return true;
+            return false;
+        };
+        final java.util.function.Predicate<int[]> hasQuarter = px -> {
+            for (int v : px) if (v >= 210 && v < 242) return true;
+            return false;
+        };
+        final String[][] beach = {
+            { "oPo", "GOo", "ooo" },   // N, W
+            { "PPo", "GOo", "Poo" },   // N, W, the diagonals NW and SW land
+            { "ooo", "oOP", "oPP" },   // E, S, its own diagonal SE land
+            { "ooo", "oOP", "oPo" },   // E, S, its own diagonal water
+        };
+        final String[][] quarters = {
+            { "PPo", "GOo", "DDo" },   // N, W, S
+            { "oPo", "oOo", "oPo" },   // N, S
+            { "oPo", "GOo", "ooP" },   // N, W, the opposite diagonal SE land
+            { "Poo", "oOo", "ooo" },   // NW only
+            { "oPo", "oOo", "ooo" },   // N only
+        };
+        for (String[] rows : beach) {
+            final int[] px = cell(c, new Grid(rows), 1, 1);
+            assertTrue(java.util.Arrays.toString(rows), hasBeach.test(px));
+            assertFalse(java.util.Arrays.toString(rows), hasQuarter.test(px));
+        }
+        for (String[] rows : quarters) {
+            final int[] px = cell(c, new Grid(rows), 1, 1);
+            assertFalse(java.util.Arrays.toString(rows), hasBeach.test(px));
+            assertTrue(java.util.Arrays.toString(rows), hasQuarter.test(px));
+        }
+        final ClassicTerrainComposer sides = coastComposer(
+            RULES.beachRule(ClassicTerrainComposer.BeachRule.PAIR_OF_SIDES));
+        assertTrue(hasBeach.test(cell(sides, new Grid(quarters[2]), 1, 1)));
+        assertFalse(hasBeach.test(cell(sides, new Grid(quarters[0]), 1, 1)));
+        final ClassicTerrainComposer any = coastComposer(
+            RULES.beachRule(ClassicTerrainComposer.BeachRule.ANY_PAIR));
+        assertTrue(hasBeach.test(cell(any, new Grid(quarters[0]), 1, 1)));
+        assertFalse(hasBeach.test(cell(any, new Grid(quarters[1]), 1, 1)));
+        final ClassicTerrainComposer off = coastComposer(
+            RULES.beachRule(ClassicTerrainComposer.BeachRule.OFF));
+        final int[] px = cell(off, new Grid(beach[0]), 1, 1);
+        assertFalse(hasBeach.test(px));
+        assertTrue(hasQuarter.test(px));
+    }
+
+    /**
+     * Only explored water gets a coast: explored land next to water is
+     * unchanged, dark water next to explored land shows only its fringe, a
+     * cell without land (or with an unknown neighbour, F-W6d-MP) is the
+     * W6a cell; a diagonal-only quarter keeps the water at its FD px.
+     */
+    public void testCoastOnlyOnExploredWater() {
+        final ClassicTerrainComposer c = coastComposer();
+        // Explored land next to explored water: water never bleeds in.
+        assertUnchangedBy(c, new Grid("PO"), 0, 0, 2);
+        // Dark water next to explored land: the fringe only.
+        final Grid dark = new Grid("Po");
+        final int[] px = cell(c, dark, 1, 0);
+        for (int k = 0; k < 256; k++) {
+            assertEquals("px " + k, (ClassicTerrainSheets.inMask(W, k)) ? terrain(2, k)
+                         : COAST.index(ClassicTerrainComposer.DARK, k % 16, k / 16), px[k]);
+        }
+        // No land around, or an unknown neighbour: the W6a cell.
+        assertUnchangedBy(c, new Grid("OO"), 0, 0, 10);
+        assertUnchangedBy(c, new Grid("O?"), 0, 0, 10);
+        // Land diagonal only (NW): quarter 116 (c = 2), FD keeps the water.
+        final Grid diag = new Grid("Poo", "oOo", "ooo");
+        final int[] want = quarters(layer(10, new int[] { E, 10 }, new int[] { S, 10 },
+                                          new int[] { N, 10 }, new int[] { W, 10 }),
+                                    null, 2, 0, 0, 0);
+        final int[] got = cell(c, diag, 1, 1);
+        for (int k = 0; k < 256; k++) assertEquals("px " + k, want[k], got[k]);
+        diag.assertLeastKnowledge();
+    }
+
+    /**
+     * Least knowledge with the coast: a whole view of coast asks the type of
+     * an unexplored tile only within Chebyshev 1 of an explored one, and the
+     * land still dark gives the explored water its coast (the true type).
+     */
+    public void testCoastLeastKnowledge() {
+        final ClassicTerrainComposer c = coastComposer();
+        final Grid g = new Grid(
+            "ggggggggggggggg",
+            "gooooooooooooog",
+            "gooooHHHoooopgg",
+            "goooOOOHHOOOOgg",
+            "gooOOOOOOOOpppg",
+            "goooOOgpOOOpggg",
+            "goooooooooooooo",
+            "ppppppppppppppp");
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 15; x++) cell(c, g, x, y);
+        }
+        g.assertLeastKnowledge();
+        // (10,4) is explored ocean with the dark plains (11,4) E of it.
+        final int[] px = cell(c, g, 10, 4);
+        boolean quarter = false;
+        for (int v : px) quarter |= v >= 210 && v < 242;
+        assertTrue("the coast toward dark land", quarter);
+    }
+
+    /**
+     * {@link ClassicTerrainComposer#LAND_FACE}: explored coast water bleeds
+     * its land face -- its last land side's sprite -- into a land neighbour,
+     * explored (fog-start #3162 (41,44) S) or dark (its fringe); dark water
+     * does not; without the rule nothing bleeds and the dark tile shows its
+     * own.
+     */
+    public void testLandFace() {
+        final ClassicTerrainComposer c = coastComposer();
+        // (1,1) water, land N (plains T002) and W (grassland T004): face T004.
+        final Grid lit = new Grid("oPo", "GOo", "ooo");
+        assertEquals(4, c.landFace(lit, 1, 1));
+        assertEquals(-1, c.landFace(new Grid("ooo", "oOo", "ooo"), 1, 1));
+        final int[] plains = cell(c, lit, 1, 0);
+        final int[] want = layer(2, new int[] { S, 4 });
+        for (int k = 0; k < 256; k++) assertEquals("px " + k, want[k], plains[k]);
+        lit.assertLeastKnowledge();
+        // The plains dark: its fringe from the water is the face, not its own.
+        final Grid dark = new Grid("opo", "GOo", "ooo");
+        final int[] fringe = cell(c, dark, 1, 0);
+        for (int k : c.mask(S)) assertEquals("px " + k, terrain(4, k), fringe[k]);
+        dark.assertLeastKnowledge();
+        // Dark water bleeds nothing into explored land.
+        assertUnchangedBy(c, new Grid("oPo", "Goo", "ooo"), 1, 0, 2);
+        // Without the rule.
+        final ClassicTerrainComposer off = coastComposer(RULES.landFace(false));
+        assertUnchangedBy(off, lit, 1, 0, 2);
+        final int[] own = cell(off, dark, 1, 0);
+        for (int k : c.mask(S)) assertEquals("px " + k, terrain(2, k), own[k]);
+    }
+
+    /** The cell is its own base, 256/256, with a given composer. */
+    private static void assertUnchangedBy(ClassicTerrainComposer c, Grid g, int x, int y,
+                                          int own) {
+        final int[] px = cell(c, g, x, y);
+        for (int k = 0; k < 256; k++) assertEquals("px " + k, terrain(own, k), px[k]);
+    }
+
     /** Sheets short of a frame are refused. */
     public void testShortSheetsAreRefused() {
         try {

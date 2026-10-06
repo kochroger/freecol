@@ -22,6 +22,7 @@ package net.sf.freecol.client.gui.classic;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.function.IntBinaryOperator;
+import java.util.function.IntUnaryOperator;
 
 
 /**
@@ -29,7 +30,10 @@ import java.util.function.IntBinaryOperator;
  * original's four side masks at their measured positions (they are
  * measurements, not art: {@code 02-fixtures/w6e-census.txt}), "tag"
  * sheets whose every TERRAIN frame is one index (a fringe or blend then
- * names its sprite), and patterned sheets with cycling pixels.
+ * names its sprite; {@link #tagCoast} does the same for the coast pieces),
+ * patterned sheets with cycling pixels, and {@link #coastPhys} with
+ * patterned coast pieces.  The coast quarters {@code 108-139} are 8x8, as
+ * the original's; every other frame is 16x16.
  */
 final class ClassicTerrainSheets {
 
@@ -54,6 +58,12 @@ final class ClassicTerrainSheets {
     /** A tag sheet's dark tile (PHYS0.SS.148) index. */
     static final int TAG_DARK = 1;
 
+    /** {@link #tagCoast}: coast quarter f is index QTAG + f - 108. */
+    static final int QTAG = 140;
+
+    /** {@link #tagCoast}: beach corner f is index BTAG + f - 150. */
+    static final int BTAG = 180;
+
     static final int FD = ClassicIndexSheet.TRANSPARENT;
 
 
@@ -68,19 +78,47 @@ final class ClassicTerrainSheets {
      * @return The sheet.
      */
     static ClassicIndexSheet sheet(String name, int frames, IntBinaryOperator px) {
+        return sheet(name, frames, f -> 16, px);
+    }
+
+    /**
+     * A sheet of square frames.
+     *
+     * @param name The SS name.
+     * @param frames The frame count.
+     * @param size The side length of frame f.
+     * @param px The index of frame f at offset k (y * 16 + x, x and y in
+     *     the frame).
+     * @return The sheet.
+     */
+    static ClassicIndexSheet sheet(String name, int frames, IntUnaryOperator size,
+                                   IntBinaryOperator px) {
         final ByteArrayOutputStream out = new ByteArrayOutputStream();
         out.writeBytes("CSSI".getBytes(StandardCharsets.US_ASCII));
         out.write(1);
         out.write(frames & 0xFF);
         out.write(frames >> 8);
         for (int f = 0; f < frames; f++) {
-            out.write(16);
+            final int s = size.applyAsInt(f);
+            out.write(s);
             out.write(0);
-            out.write(16);
+            out.write(s);
             out.write(0);
-            for (int k = 0; k < 256; k++) out.write(px.applyAsInt(f, k));
+            for (int y = 0; y < s; y++) {
+                for (int x = 0; x < s; x++) out.write(px.applyAsInt(f, y * 16 + x));
+            }
         }
         return ClassicIndexSheet.parse(name, out.toByteArray());
+    }
+
+    /** @return Whether PHYS0.SS frame f is a coast quarter (8x8). */
+    static boolean quarter(int f) {
+        return f >= 108 && f < 140;
+    }
+
+    /** @return Whether PHYS0.SS frame f is a beach corner. */
+    static boolean beach(int f) {
+        return f >= 150 && f < 154;
     }
 
     /** @return Whether cell offset k lies in side d's mask. */
@@ -93,10 +131,23 @@ final class ClassicTerrainSheets {
 
     /**
      * A PHYS0.SS of 154 frames: the masks at 104-107, the dark tile at 148
-     * from {@code dark}, the other frames from {@code other} (FD for none).
+     * from {@code dark}, the coast quarters 108-139 (8x8) all index 0 (they
+     * keep what is below: no coast) and the beach corners 150-153 all FD
+     * (the land layer shows), the other frames from {@code other} (FD for
+     * none).
      */
     static ClassicIndexSheet phys(IntBinaryOperator dark, IntBinaryOperator other) {
-        return sheet("PHYS0.SS", 154, (f, k) -> (f >= 104 && f <= 107)
+        return rawPhys(dark, (f, k) -> quarter(f) ? 0 : beach(f) ? FD : other.applyAsInt(f, k));
+    }
+
+    /**
+     * A PHYS0.SS of 154 frames: the masks at 104-107, the dark tile at 148
+     * from {@code dark}, every other frame from {@code other} (k is y * 16
+     * + x within the frame; the quarters are 8x8).
+     */
+    private static ClassicIndexSheet rawPhys(IntBinaryOperator dark, IntBinaryOperator other) {
+        return sheet("PHYS0.SS", 154, f -> quarter(f) ? 8 : 16,
+            (f, k) -> (f >= 104 && f <= 107)
             ? (inMask(f - 104, k) ? 0 : FD)
             : (f == 148) ? dark.applyAsInt(f, k) : other.applyAsInt(f, k));
     }
@@ -106,9 +157,63 @@ final class ClassicTerrainSheets {
         return sheet("TERRAIN.SS", 12, (f, k) -> TAG + f);
     }
 
-    /** @return PHYS0.SS with the dark tile all TAG_DARK and no overlays. */
+    /** @return PHYS0.SS with the dark tile all TAG_DARK and no overlays or coast. */
     static ClassicIndexSheet tagPhys() {
         return phys((f, k) -> TAG_DARK, (f, k) -> FD);
+    }
+
+    /**
+     * @return PHYS0.SS with the dark tile all TAG_DARK, no overlays, and
+     *     every coast quarter and beach corner drawn whole in its tag
+     *     ({@link #QTAG}, {@link #BTAG}): a composed coast cell names its
+     *     pieces.
+     */
+    static ClassicIndexSheet tagCoast() {
+        return rawPhys((f, k) -> TAG_DARK, (f, k) -> quarter(f) ? QTAG + f - 108
+                    : beach(f) ? BTAG + f - 150 : FD);
+    }
+
+    /**
+     * The pattern of a coast quarter pixel (x, y in the quarter):
+     * {@code (x + 2y) % 3} 0 drawn, 1 index 0 (keep), 2 FD (land).
+     */
+    static int quarterKind(int x, int y) {
+        return (x + 2 * y) % 3;
+    }
+
+    /** The drawn index of coast quarter f. */
+    static int quarterIndex(int f) {
+        return 210 + f - 108;
+    }
+
+    /** The pattern of a beach corner pixel: drawn where (x + y) % 2 == 0. */
+    static boolean beachDrawn(int x, int y) {
+        return (x + y) % 2 == 0;
+    }
+
+    /** The drawn index of beach corner f (one pixel cycles, at (0,0)). */
+    static int beachIndex(int f, int x, int y) {
+        return (x == 0 && y == 0) ? 126 : 244 + f - 150;
+    }
+
+    /**
+     * {@link #patternPhys} with patterned coast pieces: the quarters but
+     * 108-111 (all index 0, as the original's c = 0) by {@link #quarterKind}
+     * in {@link #quarterIndex}, the beach corners by {@link #beachDrawn} in
+     * {@link #beachIndex}, FD elsewhere.
+     */
+    static ClassicIndexSheet coastPhys() {
+        final ClassicIndexSheet pattern = patternPhys();
+        return rawPhys((f, k) -> 200 + k % 3, (f, k) -> {
+                final int x = k % 16, y = k / 16;
+                if (quarter(f)) {
+                    if (f < 112) return 0;
+                    final int kind = quarterKind(x, y);
+                    return (kind == 0) ? quarterIndex(f) : (kind == 1) ? 0 : FD;
+                }
+                if (beach(f)) return (beachDrawn(x, y)) ? beachIndex(f, x, y) : FD;
+                return pattern.index(f, x, y);
+            });
     }
 
     /** The sea lane's (frame 11) cycling pixels: offset k -> 120 + k % 8 when k % 7 == 0. */

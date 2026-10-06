@@ -65,17 +65,24 @@ import net.sf.freecol.util.test.FreeColTestCase;
  *       client's type, every unexplored ring tile the fixture's true type,
  *       every other tile null (least knowledge); the fixture's
  *       {@code fringe}/{@code blend} lines name the sprite the composer
- *       puts at that side (always, with tag sheets), the {@code quarter}
- *       lines the coast quarter of the rule {@code 108 + 4c + q}
- *       (reference code until W6b), and the multiplayer fallback (unknown
- *       ring, F-W6d-MP) gets every {@code truth} line wrong.</li>
- *   <li><b>W6a, whole frames</b> (§6.4, §12.2): each {@code compare} line
- *       composes all 180 cells of the view with the pack's index sheets and
- *       compares them with the clip frame index for index: 0 px off, the
- *       counted pointer pixels (indices 0/7/15 where we differ) excused,
- *       the unit cells excluded, and until W6b the explored water cells
- *       with land around them (the coast quarters).  Plus the
- *       {@code histogram} and {@code cycling} cell lines.</li>
+ *       puts at that side, the {@code quarter}/{@code beach} lines the coast
+ *       piece it draws (always, with tag sheets), and the multiplayer
+ *       fallback (unknown ring, F-W6d-MP) gets every {@code truth} line
+ *       wrong.</li>
+ *   <li><b>W6a and W6b, whole frames</b> (§6.4, §8.4, §12.2): each
+ *       {@code compare} line composes all 180 cells of the view with the
+ *       pack's index sheets and compares them with the clip frame index for
+ *       index: 0 px off, the counted pointer pixels (indices 0/7/15 where we
+ *       differ) excused, the unit cells excluded; the coast cells (explored
+ *       water with land around) are counted.  Each {@code cells} line does
+ *       the same for named cells of a view known only around them.  Plus
+ *       the {@code histogram} and {@code cycling} cell lines.</li>
+ *   <li><b>W6b, pin by golden</b> (§8.2): every combination of the coast
+ *       rules' candidates ({@link ClassicTerrainComposer.LandFill},
+ *       {@link ClassicTerrainComposer.BeachRule},
+ *       {@link ClassicTerrainComposer.BeachBase}) on every compared cell;
+ *       the committed ones give the fewest mismatches, 0
+ *       ({@link #testCoastRuleCandidates}).</li>
  *   <li><b>W6c, the water cycling</b> (§7.4, §12.2): the {@code palette},
  *       {@code phases} and {@code sprite} lines -- the clips' palettes are
  *       phases of VICEROY.PAL, 8 consecutive phases of a sea lane and of
@@ -87,7 +94,6 @@ import net.sf.freecol.util.test.FreeColTestCase;
  *       10(a)(d)); "frame n" is the last PNG at or before n (Critic
  *       10(c)).</li>
  * </ul>
- * W6b extends this class with the coast quarters and the beach corners.
  */
 public class ClassicTerrainGoldenTest extends FreeColTestCase {
 
@@ -119,13 +125,6 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
     private static final int[][] SIDES = ClassicTerrainComposer.SIDES;
     private static final String SIDE_NAMES = "NESW";
 
-    /** The quarters NW, NE, SE, SW: their 3 neighbours, clockwise (§8.1). */
-    private static final int[][][] CORNERS = {
-        { { -1, 0 }, { -1, -1 }, { 0, -1 } },  // NW: W, NW, N
-        { { 0, -1 }, { 1, -1 }, { 1, 0 } },    // NE: N, NE, E
-        { { 1, 0 }, { 1, 1 }, { 0, 1 } },      // SE: E, SE, S
-        { { 0, 1 }, { -1, 1 }, { -1, 0 } }     // SW: S, SW, W
-    };
     private static final String[] QUARTER_NAMES = { "NW", "NE", "SE", "SW" };
 
     /** The view: 15x12 cells, the map area at y = 8 of the 320x200 screen. */
@@ -171,21 +170,41 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
 
     /**
      * One whole-frame line: {@code compare <frame> px=<n> pointer=<n>
-     * cells=<explored>,<fringe>,<dark> [exclude=<x>,<y>;...] [w6b=<n>]}.
+     * cells=<explored>,<fringe>,<dark> [exclude=<x>,<y>;...] [coast=<n>]}
+     * (coast: the compared explored water cells with land among their 8
+     * neighbours).
      */
     static final class Compare {
-        final int frame, px, pointer, explored, fringe, dark, w6b;
+        final int frame, px, pointer, explored, fringe, dark, coast;
         final Set<Long> exclude = new HashSet<>();
         final String line;
 
-        Compare(int frame, int px, int pointer, int[] cells, int w6b, String line) {
+        Compare(int frame, int px, int pointer, int[] cells, int coast, String line) {
             this.frame = frame;
             this.px = px;
             this.pointer = pointer;
             this.explored = cells[0];
             this.fringe = cells[1];
             this.dark = cells[2];
-            this.w6b = w6b;
+            this.coast = coast;
+            this.line = line;
+        }
+    }
+
+    /**
+     * One line of whole named cells: {@code cells <frame> <x>,<y>;...
+     * [pointer=<n>]}: each tile's composed cell equals the clip's 256 px,
+     * the counted pointer pixels (0/7/15 where we differ) excused.  For the
+     * views a fixture knows only around the named tiles (W6b's coast).
+     */
+    static final class Cells {
+        final int frame, pointer;
+        final List<long[]> tiles = new ArrayList<>();
+        final String line;
+
+        Cells(int frame, int pointer, String line) {
+            this.frame = frame;
+            this.pointer = pointer;
             this.line = line;
         }
     }
@@ -247,6 +266,7 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
         final java.util.Map<Long, FixtureTile> tiles = new LinkedHashMap<>();
         final List<Check> checks = new ArrayList<>();
         final List<Compare> compares = new ArrayList<>();
+        final List<Cells> named = new ArrayList<>();
         final List<CellCheck> cells = new ArrayList<>();
         final List<CycleCheck> cycles = new ArrayList<>();
 
@@ -274,10 +294,18 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
             return t != null && t.explored >= 0 && t.explored <= frame;
         }
 
-        /** @return The frames the W6d checks look at, in order. */
+        /** @return The frames the W6d/W6b checks look at, in order. */
         TreeSet<Integer> frames() {
             final TreeSet<Integer> s = new TreeSet<>();
             for (Check c : this.checks) s.add(c.frame);
+            return s;
+        }
+
+        /** @return The frames of the compare and cells lines, in order. */
+        TreeSet<Integer> cellFrames() {
+            final TreeSet<Integer> s = new TreeSet<>();
+            for (Compare c : this.compares) s.add(c.frame);
+            for (Cells c : this.named) s.add(c.frame);
             return s;
         }
 
@@ -343,6 +371,26 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                                             expected, truth, line));
                     break;
                 }
+                case "beach": {
+                    final int[] xy = xy(w[2]);
+                    final int expected = ("-".equals(w[3])) ? -1
+                        : Integer.parseInt(w[3].substring(1));
+                    final boolean truth = w.length > 4 && "truth".equals(w[4]);
+                    fx.checks.add(new Check(w[0], Integer.parseInt(w[1]), xy[0], xy[1], 0,
+                                            expected, truth, line));
+                    break;
+                }
+                case "cells": {
+                    final java.util.Map<String, String> kv = keyValues(w, 3, at);
+                    final Cells c = new Cells(Integer.parseInt(w[1]),
+                        Integer.parseInt(kv.getOrDefault("pointer", "0")), line);
+                    for (String e : w[2].split(";")) {
+                        final int[] xy = xy(e);
+                        c.tiles.add(new long[] { xy[0], xy[1] });
+                    }
+                    fx.named.add(c);
+                    break;
+                }
                 case "compare": {
                     final java.util.Map<String, String> kv = keyValues(w, 2, at);
                     if (!kv.containsKey("px") || !kv.containsKey("pointer")
@@ -355,7 +403,7 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                         Integer.parseInt(kv.get("pointer")),
                         new int[] { Integer.parseInt(cs[0]), Integer.parseInt(cs[1]),
                                     Integer.parseInt(cs[2]) },
-                        Integer.parseInt(kv.getOrDefault("w6b", "0")), line);
+                        Integer.parseInt(kv.getOrDefault("coast", "0")), line);
                     if (kv.containsKey("exclude")) {
                         for (String e : kv.get("exclude").split(";")) {
                             final int[] xy = xy(e);
@@ -595,39 +643,56 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
      * @param o The oracle (truth or unknown).
      * @param c The check.
      * @param tag The composer over the tag sheets.
+     * @param tagCoast The composer over the tag sheets with tagged coast
+     *     pieces ({@link ClassicTerrainSheets#tagCoast}).
      * @param real The composer over the pack's sheets, or null.
      * @param phys The pack's PHYS0.SS, or null.
      * @return The result.
      */
     private static Derived derive(Frame f, ClassicTerrainOracle o, Check c,
-                                  ClassicTerrainComposer tag,
+                                  ClassicTerrainComposer tag, ClassicTerrainComposer tagCoast,
                                   ClassicTerrainComposer real, ClassicIndexSheet phys) {
         final Map map = f.client.getMap();
         final Tile tile = map.getTile(c.x, c.y);
         final Derived d = new Derived();
-        if ("quarter".equals(c.kind)) {
-            // The coast quarter rule, reference code until W6b.
+        if ("quarter".equals(c.kind) || "beach".equals(c.kind)) {
+            // The coast piece the composer draws: with the tag sheets every
+            // quarter and beach corner is drawn whole in its own index.
             assertTrue(f.at() + " " + c.line + ": explored water",
                        tile.isExplored() && tile.getType().isWater());
-            int bits = 0;
-            for (int k = 0; k < 3; k++) {
-                final int[] nb = CORNERS[c.part][k];
-                if (isLand(o.trueType(c.x + nb[0], c.y + nb[1]))) bits |= 1 << k;
+            final byte[] t = new byte[256];
+            tagCoast.composeCell(f.source(o), c.x, c.y, t, 0, 16);
+            final boolean beach = "beach".equals(c.kind);
+            final int qx = (c.part == 1 || c.part == 2) ? 8 : 0;
+            final int qy = (c.part >= 2) ? 8 : 0;
+            int sprite = -2;
+            for (int k = 0; k < 256; k++) {
+                final int x = k % 16, y = k / 16;
+                if (!beach && (x < qx || x >= qx + 8 || y < qy || y >= qy + 8)) continue;
+                final int v = t[k] & 0xFF;
+                final int s = (beach)
+                    ? ((v >= ClassicTerrainSheets.BTAG && v < ClassicTerrainSheets.BTAG + 4)
+                       ? 150 + v - ClassicTerrainSheets.BTAG : -1)
+                    : ((v >= ClassicTerrainSheets.QTAG && v < ClassicTerrainSheets.QTAG + 32)
+                       ? 108 + v - ClassicTerrainSheets.QTAG : -1);
+                if (beach && s < 0) continue;
+                assertTrue(f.at() + " " + c.line + ": one piece", sprite == -2 || sprite == s);
+                sprite = s;
             }
-            d.sprite = (bits == 0) ? -1 : 108 + 4 * bits + c.part;
-            if (phys != null && d.sprite >= 0) {
-                final int qx = (c.part == 1 || c.part == 2) ? 8 : 0;
-                final int qy = (c.part >= 2) ? 8 : 0;
+            d.sprite = Math.max(-1, sprite);
+            if (real != null && d.sprite >= 0) {
+                final byte[] px = new byte[256];
+                real.composeCell(f.source(o), c.x, c.y, px, 0, 16);
                 d.pixels = new int[256];
-                java.util.Arrays.fill(d.pixels, -1);
+                for (int k = 0; k < 256; k++) d.pixels[k] = px[k] & 0xFF;
+                // The piece's drawn pixels (0 keeps the water, FD the land).
+                final int ox = (beach) ? 0 : qx, oy = (beach) ? 0 : qy;
                 final List<int[]> cmp = new ArrayList<>();
-                for (int j = 0; j < 8; j++) {
-                    for (int i = 0; i < 8; i++) {
+                for (int j = 0; j < phys.height(d.sprite); j++) {
+                    for (int i = 0; i < phys.width(d.sprite); i++) {
                         final int v = phys.index(d.sprite, i, j);
-                        // 0 keeps what is below, FD is the land fill (O1).
                         if (v == 0 || v == ClassicIndexSheet.TRANSPARENT) continue;
-                        d.pixels[(qy + j) * 16 + qx + i] = v;
-                        cmp.add(new int[] { qx + i, qy + j });
+                        cmp.add(new int[] { ox + i, oy + j });
                     }
                 }
                 d.compare = cmp.toArray(new int[0][]);
@@ -685,14 +750,13 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
     }
 
     private static String sprite(Check c, int s) {
-        return (s < 0) ? "-" : (("quarter".equals(c.kind)) ? "P" : "T")
+        return (s < 0) ? "-" : (("quarter".equals(c.kind) || "beach".equals(c.kind)) ? "P" : "T")
             + String.format("%03d", s);
     }
 
     /**
-     * Whether an explored water tile carries a coast quarter: a land tile
-     * among its 8 neighbours (W6b draws it; until then the cell is not
-     * compared).
+     * Whether an explored water tile is a coast cell: a land tile among its
+     * 8 neighbours (its quarters or beach corner, W6b).
      */
     private static boolean coastCell(Frame f, int x, int y) {
         final Tile tile = f.client.getMap().getTile(x, y);
@@ -787,7 +851,7 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
             assertEquals(fx.name, 58, fx.width);
             assertEquals(fx.name, 72, fx.height);
             assertFalse(fx.name, fx.checks.isEmpty());
-            assertFalse(fx.name, fx.compares.isEmpty());
+            assertFalse(fx.name, fx.compares.isEmpty() && fx.named.isEmpty());
             fx.alias();
             for (Check c : fx.checks) {
                 final int cx = c.x - fx.vx, cy = c.y - fx.vy;
@@ -797,6 +861,12 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
             for (Compare c : fx.compares) {
                 assertEquals(fx.name + " " + c.line, COLS * ROWS,
                              c.explored + c.fringe + c.dark);
+            }
+            for (Cells c : fx.named) {
+                for (long[] t : c.tiles) {
+                    final long cx = t[0] - fx.vx, cy = t[1] - fx.vy;
+                    assertTrue(fx.name + " " + c.line, cx >= 0 && cx < COLS && cy >= 0 && cy < ROWS);
+                }
             }
             compares += fx.compares.size();
         }
@@ -883,6 +953,8 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
         for (Fixture fx : fixtures()) {
             final ClassicTerrainComposer tag = composer(fx,
                 ClassicTerrainSheets.tagTerrain(), ClassicTerrainSheets.tagPhys());
+            final ClassicTerrainComposer tagCoast = composer(fx,
+                ClassicTerrainSheets.tagTerrain(), ClassicTerrainSheets.tagCoast());
             final ClassicTerrainComposer real = (pack == null) ? null
                 : composer(fx, terrain, phys);
             for (int frame : fx.frames()) {
@@ -898,8 +970,8 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                     checks++;
                     final String at = f.at() + " " + c.line;
                     final int refused = f.truth.refusals();
-                    final Derived t = derive(f, f.truth, c, tag, real, phys);
-                    final Derived u = derive(f, f.unknown, c, tag, real, phys);
+                    final Derived t = derive(f, f.truth, c, tag, tagCoast, real, phys);
+                    final Derived u = derive(f, f.unknown, c, tag, tagCoast, real, phys);
                     // The rules ask nothing beyond the ring (least knowledge).
                     assertEquals(at + ": refusals", refused, f.truth.refusals());
                     assertEquals(at + ": refusals", 0, f.unknown.refusals());
@@ -993,7 +1065,7 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                 final File png = frameFile(new File(clips, fx.clip), cmp.frame);
                 assertNotNull(fx.clip + " #" + cmp.frame, png);
                 final Raster ras = ImageIO.read(png).getRaster();
-                int compared = 0, off = 0, pointer = 0, excluded = 0, w6b = 0;
+                int compared = 0, off = 0, pointer = 0, excluded = 0, coast = 0;
                 final StringBuilder bad = new StringBuilder();
                 for (int r = 0; r < ROWS; r++) {
                     for (int c = 0; c < COLS; c++) {
@@ -1002,10 +1074,7 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                             excluded++;
                             continue;
                         }
-                        if (coastCell(f, x, y)) {
-                            w6b++;
-                            continue;
-                        }
+                        if (coastCell(f, x, y)) coast++;
                         alt.composeCell(src, x, y, cell, 0, 16);
                         for (int k = 0; k < 256; k++) {
                             final int v = ras.getSample(16 * c + k % 16,
@@ -1048,10 +1117,10 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                 pixelFrames++;
                 final String line = "  " + at + ": " + cells + " px=" + compared
                     + " off=" + off + " pointer=" + pointer + " excluded=" + excluded
-                    + " w6b=" + w6b + ((bad.length() > 0) ? ", off at" + bad : "");
+                    + " coast=" + coast + ((bad.length() > 0) ? ", off at" + bad : "");
                 report.append(line).append('\n');
                 if (off != 0 || cmp.px != compared || cmp.pointer != pointer
-                    || cmp.exclude.size() != excluded || cmp.w6b != w6b) failures.add(line);
+                    || cmp.exclude.size() != excluded || cmp.coast != coast) failures.add(line);
                 if (f.truth.refusals() != 0) failures.add(at + ": refusals");
             }
         }
@@ -1102,8 +1171,7 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                 for (int r = 0; r < ROWS; r++) {
                     for (int c = 0; c < COLS; c++) {
                         final int x = fx.vx + c, y = fx.vy + r;
-                        if (cmp.exclude.contains(Fixture.key(x, y))
-                            || coastCell(f, x, y)) continue;
+                        if (cmp.exclude.contains(Fixture.key(x, y))) continue;
                         for (int i = 0; i < comps.size(); i++) {
                             comps.get(i).composeCell(src, x, y, cell, 0, 16);
                             for (int k = 0; k < 256; k++) {
@@ -1134,6 +1202,256 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
         System.out.println("ClassicTerrainGoldenTest: side orders, px off on the whole"
             + " frames:" + sb);
         assertEquals("SIDE_ORDER gives the fewest mismatches:" + sb, best, committed);
+    }
+
+    /** The check frames' games and clip frames, each built once. */
+    private static final class Views {
+        final java.util.Map<String, Frame> frames = new HashMap<>();
+        final java.util.Map<String, Raster> rasters = new HashMap<>();
+        final File clips;
+
+        Views(File clips) {
+            this.clips = clips;
+        }
+
+        Frame frame(Fixture fx, int n) {
+            return this.frames.computeIfAbsent(fx.name + "#" + n, k -> new Frame(fx, n));
+        }
+
+        Raster raster(Fixture fx, int n) throws IOException {
+            final String k = fx.name + "#" + n;
+            Raster r = this.rasters.get(k);
+            if (r == null) {
+                final File png = frameFile(new File(this.clips, fx.clip), n);
+                assertNotNull(fx.clip + " #" + n, png);
+                r = ImageIO.read(png).getRaster();
+                this.rasters.put(k, r);
+            }
+            return r;
+        }
+    }
+
+    /**
+     * Compare one composed cell with a clip frame.
+     *
+     * @return { compared px, px off, pointer px (0/7/15 where we differ) }.
+     */
+    private static int[] compareCell(ClassicTerrainComposer comp, Source src, Raster ras,
+                                     Fixture fx, int x, int y, int[] only,
+                                     StringBuilder bad) {
+        final byte[] cell = new byte[256];
+        comp.composeCell(src, x, y, cell, 0, 16);
+        final int c = x - fx.vx, r = y - fx.vy;
+        int compared = 0, off = 0, pointer = 0, shown = 0;
+        for (int i = 0; i < ((only == null) ? 256 : only.length); i++) {
+            final int k = (only == null) ? i : only[i];
+            final int v = ras.getSample(16 * c + k % 16, MAP_Y + 16 * r + k / 16, 0);
+            final int ours = cell[k] & 0xFF;
+            if (v == ours) {
+                compared++;
+            } else if (v == 0 || v == 7 || v == 15) {
+                pointer++;
+            } else {
+                compared++;
+                off++;
+                if (bad != null && ++shown <= 4) {
+                    bad.append(" (").append(k % 16).append(',').append(k / 16).append(") ")
+                        .append(ours).append('/').append(v);
+                }
+            }
+        }
+        return new int[] { compared, off, pointer };
+    }
+
+    /**
+     * @return The cell offsets a check line compares: a side's mask, or the
+     *     named coast piece's drawn pixels (none for "-").
+     */
+    private static int[] checkPixels(Check c, ClassicTerrainComposer comp,
+                                     ClassicIndexSheet phys) {
+        if ("fringe".equals(c.kind) || "blend".equals(c.kind)) return comp.mask(c.part);
+        if (c.expected < 0) return new int[0];
+        final boolean beach = "beach".equals(c.kind);
+        final int ox = (!beach && (c.part == 1 || c.part == 2)) ? 8 : 0;
+        final int oy = (!beach && c.part >= 2) ? 8 : 0;
+        final List<Integer> k = new ArrayList<>();
+        for (int j = 0; j < phys.height(c.expected); j++) {
+            for (int i = 0; i < phys.width(c.expected); i++) {
+                final int v = phys.index(c.expected, i, j);
+                if (v != 0 && v != ClassicIndexSheet.TRANSPARENT) k.add((oy + j) * 16 + ox + i);
+            }
+        }
+        final int[] r = new int[k.size()];
+        for (int i = 0; i < r.length; i++) r[i] = k.get(i);
+        return r;
+    }
+
+    /**
+     * The px off of one composer on every compared pixel of a fixture: the
+     * compare lines' cells, the cells lines' and the check lines' pixels.
+     *
+     * @return { compared, off }.
+     */
+    private static int[] fixtureOff(Fixture fx, ClassicTerrainComposer comp,
+                                    ClassicIndexSheet phys, Views v)
+        throws IOException {
+        int compared = 0, off = 0;
+        for (Compare cmp : fx.compares) {
+            final Frame f = v.frame(fx, cmp.frame);
+            final Raster ras = v.raster(fx, cmp.frame);
+            final Source src = f.source(f.truth);
+            for (int r = 0; r < ROWS; r++) {
+                for (int c = 0; c < COLS; c++) {
+                    final int x = fx.vx + c, y = fx.vy + r;
+                    if (cmp.exclude.contains(Fixture.key(x, y))) continue;
+                    final int[] m = compareCell(comp, src, ras, fx, x, y, null, null);
+                    compared += m[0];
+                    off += m[1];
+                }
+            }
+        }
+        for (Cells cl : fx.named) {
+            final Frame f = v.frame(fx, cl.frame);
+            final Raster ras = v.raster(fx, cl.frame);
+            for (long[] t : cl.tiles) {
+                final int[] m = compareCell(comp, f.source(f.truth), ras, fx, (int)t[0],
+                                            (int)t[1], null, null);
+                compared += m[0];
+                off += m[1];
+            }
+        }
+        for (Check c : fx.checks) {
+            final Frame f = v.frame(fx, c.frame);
+            final int[] m = compareCell(comp, f.source(f.truth), v.raster(fx, c.frame), fx,
+                                        c.x, c.y, checkPixels(c, comp, phys), null);
+            compared += m[0];
+            off += m[1];
+        }
+        return new int[] { compared, off };
+    }
+
+    /**
+     * W6b's named cells ({@code cells} lines, design 10 §8.4): each tile's
+     * composed cell equals the clip's 256 px, the pointer excused.  Always:
+     * least knowledge; with the pack and the clips: the pixels.
+     */
+    public void testNamedCellsMatchTheOriginal() throws IOException {
+        final ClassicPackFiles pack = pack();
+        final File clips = clips();
+        final List<String> failures = new ArrayList<>();
+        final StringBuilder report = new StringBuilder();
+        int lines = 0, tiles = 0, pixelTiles = 0;
+        final Views v = new Views(clips);
+        for (Fixture fx : fixtures()) {
+            final ClassicTerrainComposer tag = composer(fx,
+                ClassicTerrainSheets.tagTerrain(), ClassicTerrainSheets.tagCoast());
+            final ClassicTerrainComposer real = (pack == null) ? null
+                : composer(fx, pack.indexSheet(ClassicPackFiles.TERRAIN_SS),
+                           pack.indexSheet(ClassicPackFiles.PHYS0_SS));
+            for (Cells cl : fx.named) {
+                lines++;
+                final Frame f = v.frame(fx, cl.frame);
+                final String at = f.at() + " " + cl.line;
+                final byte[] cell = new byte[256];
+                for (long[] t : cl.tiles) {
+                    tiles++;
+                    tag.composeCell(f.source(f.truth), (int)t[0], (int)t[1], cell, 0, 16);
+                }
+                if (f.truth.refusals() != 0) failures.add(at + ": refusals");
+                if (real == null || clips == null) continue;
+                final Raster ras = v.raster(fx, cl.frame);
+                int compared = 0, off = 0, pointer = 0;
+                final StringBuilder bad = new StringBuilder();
+                for (long[] t : cl.tiles) {
+                    final StringBuilder b = new StringBuilder();
+                    final int[] m = compareCell(real, f.source(f.truth), ras, fx, (int)t[0],
+                                                (int)t[1], null, b);
+                    compared += m[0];
+                    off += m[1];
+                    pointer += m[2];
+                    pixelTiles++;
+                    if (m[1] > 0) {
+                        bad.append(" (").append(t[0]).append(',').append(t[1]).append(")=")
+                            .append(m[1]).append(" [ours/clip").append(b).append(']');
+                    }
+                }
+                final String line = "  " + at + ": px=" + compared + " off=" + off
+                    + " pointer=" + pointer + ((bad.length() > 0) ? ", off at" + bad : "");
+                report.append(line).append('\n');
+                if (off != 0 || pointer != cl.pointer) failures.add(line);
+            }
+        }
+        System.out.println("ClassicTerrainGoldenTest: " + lines + " cells lines, " + tiles
+            + " tiles, " + pixelTiles + " compared with the clips\n" + report);
+        assertTrue("named cells: " + failures, failures.isEmpty());
+        assertTrue("cells lines " + lines, lines >= 4);
+    }
+
+    /**
+     * W6b's "pin by golden" (design 10 §8.2): every combination of the coast
+     * rules' candidates -- {@link ClassicTerrainComposer.LandFill} (O1),
+     * {@link ClassicTerrainComposer.BeachRule} and
+     * {@link ClassicTerrainComposer.BeachBase} (O2),
+     * {@link ClassicTerrainComposer#LAND_FACE} -- on every compared pixel
+     * of every fixture.  The committed rules give the fewest mismatches, 0,
+     * and each single alternative is worse (the clips pin it).
+     */
+    public void testCoastRuleCandidates() throws IOException {
+        final ClassicPackFiles pack = pack();
+        final File clips = clips();
+        if (pack == null || clips == null) return;
+        final ClassicIndexSheet terrain = pack.indexSheet(ClassicPackFiles.TERRAIN_SS);
+        final ClassicIndexSheet phys = pack.indexSheet(ClassicPackFiles.PHYS0_SS);
+        final ClassicTerrainComposer.Rules committed = ClassicTerrainComposer.Rules.COMMITTED;
+        final List<ClassicTerrainComposer.Rules> all = new ArrayList<>();
+        for (ClassicTerrainComposer.LandFill lf : ClassicTerrainComposer.LandFill.values()) {
+            for (ClassicTerrainComposer.BeachRule br : ClassicTerrainComposer.BeachRule.values()) {
+                for (ClassicTerrainComposer.BeachBase bb : ClassicTerrainComposer.BeachBase.values()) {
+                    for (boolean face : new boolean[] { true, false }) {
+                        all.add(committed.landFill(lf).beachRule(br).beachBase(bb).landFace(face));
+                    }
+                }
+            }
+        }
+        assertEquals(128, all.size());
+        final List<Fixture> fixtures = fixtures();
+        final Views v = new Views(clips);
+        final int[] off = new int[all.size()];
+        int compared = 0;
+        for (int i = 0; i < all.size(); i++) {
+            for (Fixture fx : fixtures) {
+                final java.util.Map<String, Integer> alias = fx.alias();
+                final ClassicTerrainComposer comp = new ClassicTerrainComposer(terrain, phys,
+                    id -> alias.getOrDefault(id, -1), all.get(i));
+                final int[] m = fixtureOff(fx, comp, phys, v);
+                off[i] += m[1];
+                if (i == 0) compared += m[0];
+            }
+        }
+        int best = Integer.MAX_VALUE, mine = -1;
+        final StringBuilder ties = new StringBuilder(), singles = new StringBuilder();
+        final List<String> unpinned = new ArrayList<>();
+        for (int i = 0; i < all.size(); i++) best = Math.min(best, off[i]);
+        for (int i = 0; i < all.size(); i++) {
+            final ClassicTerrainComposer.Rules r = all.get(i);
+            final int diffs = (r.landFill != committed.landFill ? 1 : 0)
+                + (r.beachRule != committed.beachRule ? 1 : 0)
+                + (r.beachBase != committed.beachBase ? 1 : 0)
+                + (r.landFace != committed.landFace ? 1 : 0);
+            if (diffs == 0) mine = off[i];
+            if (off[i] == best && diffs > 0) ties.append("\n    ").append(r);
+            if (diffs == 1) {
+                singles.append("\n    ").append(r).append(": ").append(off[i]).append(" px off");
+                if (off[i] <= best) unpinned.add(r.toString());
+            }
+        }
+        System.out.println("ClassicTerrainGoldenTest: coast rule candidates on " + compared
+            + " px; committed " + committed + ": " + mine + " px off; best " + best
+            + "; single alternatives:" + singles
+            + ((ties.length() > 0) ? "\n  as good:" + ties : ""));
+        assertEquals("the committed coast rules are the best", best, mine);
+        assertEquals("the committed coast rules match the clips", 0, mine);
+        assertTrue("each alternative is pinned: " + unpinned, unpinned.isEmpty());
     }
 
     private static void permute(int[] a, int k, List<int[]> out) {
