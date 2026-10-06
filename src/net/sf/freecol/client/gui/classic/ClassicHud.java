@@ -642,7 +642,8 @@ final class ClassicHud {
      * Whether a step goes east past the last column the view shows: E, NE
      * or SE (6, 9, 3) from that column (or the never-drawn ring beyond it)
      * onto the ring or off the map.  It is the step Roger's Europe question
-     * answers (build spec W8a, {@code ClassicGUI.asksSailHome}).
+     * answers at the east edge (build spec W8a,
+     * {@code ClassicGUI.asksSailHome}).
      *
      * @param mapWidth The map's width.
      * @param d The direction.
@@ -654,6 +655,49 @@ final class ClassicHud {
         if (d != Direction.E && d != Direction.NE && d != Direction.SE) return false;
         final int last = lastViewColumn(mapWidth);
         return fromX >= last && (toX < 0 || toX > last);
+    }
+
+    /**
+     * The first map column the view ever shows, the left screen edge at
+     * the west clamp: 1, the outer ring (column 0) is never shown
+     * ({@link #clampView}).
+     */
+    static int firstViewColumn() {
+        return 1;
+    }
+
+    /**
+     * Whether a step goes west past the first column the view shows: W, NW
+     * or SW (4, 7, 1) from that column (or the never-drawn ring before it)
+     * onto the ring or off the map.  The mirror of {@link #eastPastView}:
+     * Roger's Europe question is asked at the west edge too (E1).
+     *
+     * @param d The direction.
+     * @param fromX The unit's column.
+     * @param toX The target tile's column, or -1 off the map.
+     * @return True if the step leaves the drawn map westward.
+     */
+    static boolean westPastView(Direction d, int fromX, int toX) {
+        if (d != Direction.W && d != Direction.NW && d != Direction.SW) return false;
+        final int first = firstViewColumn();
+        return fromX <= first && toX < first;
+    }
+
+    /**
+     * Whether a step leaves the drawn map sideways, east past the last
+     * column the view shows or west past the first one
+     * ({@link #eastPastView}, {@link #westPastView}).  It is the step
+     * Roger's Europe question answers ({@code ClassicGUI.asksSailHome}).
+     *
+     * @param mapWidth The map's width.
+     * @param d The direction.
+     * @param fromX The unit's column.
+     * @param toX The target tile's column, or -1 off the map.
+     * @return True if the step leaves the drawn map east or west.
+     */
+    static boolean sidePastView(int mapWidth, Direction d, int fromX, int toX) {
+        return eastPastView(mapWidth, d, fromX, toX)
+            || westPastView(d, fromX, toX);
     }
 
     /**

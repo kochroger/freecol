@@ -775,9 +775,10 @@ have it too. Isometric maps, and maps built otherwise (the tests'
 
 - **Moves.** A move onto the ring is illegal, as a move off the map is
   (`Unit.getSimpleMoveType`: `MOVE_ILLEGAL`). So paths, the AI's missions and
-  the server's move check keep off it. At the east edge Roger's Europe
-  question (W8a, below) comes first; any other key toward the ring does
-  nothing. A unit already on the ring could move off it, but not along it.
+  the server's move check keep off it. At the east and west edges Roger's
+  Europe question (W8a and E1, below) comes first; any other key toward the
+  ring does nothing. A unit already on the ring could move off it, but not
+  along it.
 - **The way to Europe.** The ring leads nowhere: `Map.resetHighSeasCount`
   leaves it out, and FreeCol's rule that water on the map's vertical edges
   leads to Europe (`moveToEurope`) applies to the columns just inside it
@@ -1106,10 +1107,23 @@ testArmDelayed`.
   brings the next unit. The second row and Escape do nothing: the ship keeps
   its moves and stays the active unit; the box's close restarts its blink ON
   and the turn flow's clock. Every other move is a plain one: entering the
-  light water, leaving it, moving along it, and every move at the west edge.
-  The original also asks one column earlier (EUQ, C5 #21226); we do not
-  (master plan section 10). Recorder event: `sail-home unit=.. at=x,y <dir>
-  chosen=<0|1|-1>`, and the key's `move-done ... question`.
+  light water, leaving it, and moving along it. The original also asks one
+  column earlier (EUQ, C5 #21226); we do not (master plan section 10).
+  Recorder event: `sail-home unit=.. at=x,y <dir> chosen=<0|1|-1>`, and the
+  key's `move-done ... question`.
+- **The same question at the west edge (E1, Roger's rule mirrored).** A ship
+  on the high seas in the first column the view shows
+  (`ClassicHud.firstViewColumn`: x = 1, the west clamp; column 0 is the
+  never-drawn ring) ordered W, NW or SW (4, 7, 1) past it, onto the ring or
+  off the map (`ClassicHud.westPastView`), gets the same @SAILHOME box with
+  the same answers: "Jawohl" sails it to Europe, "Nein" and Escape do
+  nothing and keep the moves. `ClassicGUI.asksSailHome` asks
+  `ClassicHud.sidePastView`, both edges together. As at the east edge,
+  entering the light water, leaving it and moving along it are plain moves,
+  and in isometric mode a NW or SW step that stays in column 1 is a plain
+  move too. No clip shows the original's west edge (EUQ section 7, open
+  point 4); the rule is Roger's. A ship that sails home from the west edge
+  comes back there: FreeCol keeps the tile it left as its entry location.
 - **"Handlung abbrechen" keeps the move (house rule D1).** The game option
   `model.option.cancelKeepsMove` (classic spec, `gameOptions.map`, default
   **on**; older saves get it on, `Specification.fixGameOptions`): the server's
@@ -1126,7 +1140,8 @@ testArmDelayed`.
 
 Tests: `ClassicGUISeamTest` (`testEscapeAnswersNo`, `testEscapeCancelsAChoice`,
 `testHighSeasQuestionIsSilent`, `testEastPastView`,
-`testEuropeQuestionAtTheEastEdge`, `testSailHomeText`,
+`testEuropeQuestionAtTheEastEdge`, `testWestPastView`,
+`testEuropeQuestionAtTheWestEdge`, `testSailHomeText`,
 `testKingsBoxEnterKissesTheRing`, `testNativeDemandEnterRefuses`,
 `testReturnToEuropeOrder`, `testShipAtSeaGivesTheEndView`),
 `ClassicMenuBarTest.testActionMap`,
@@ -3758,8 +3773,9 @@ Hard-won details, each of which silently wastes a run:
   The log shows `Classic key map: N keys bound.` once per game view.
 - **Drive states that actually produce output.** An idle unit generates no
   notices at all. Populated saves, ending turns, `B` (found colony) and sailing
-  a ship east past the last drawn column (the Europe question; FreeCol's own
-  `highseas.text` confirm is silent since W0f) do.
+  a ship east past the last drawn column or west past the first one (the
+  Europe question; FreeCol's own `highseas.text` confirm is silent since W0f)
+  do.
 - **Screenshot a popup by the handle you enumerated**, not by re-finding it by
   title: `GetWindowText` raced against dialog creation returns a truncated title
   (a "FreeCol" dialog read as "F"), and the re-find then misses.

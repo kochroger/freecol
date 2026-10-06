@@ -277,8 +277,41 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         }
         // An isometric NE that stays in the column is a plain move.
         assertFalse(ClassicHud.eastPastView(w, Direction.NE, 56, 56));
-        // The west edge asks nothing.
+        // The west edge is westPastView's.
         assertFalse(ClassicHud.eastPastView(w, Direction.W, 1, 0));
+    }
+
+    /**
+     * E1, Roger's rule mirrored: the step west past the first drawn column
+     * (x = 1), and only that, is the Europe question's too.
+     */
+    public void testWestPastView() {
+        final int w = 58;
+        assertEquals(1, ClassicHud.firstViewColumn());
+        for (Direction d : Direction.values()) {
+            final boolean west = d == Direction.W || d == Direction.NW
+                || d == Direction.SW;
+            final boolean east = d == Direction.E || d == Direction.NE
+                || d == Direction.SE;
+            // From the first drawn column onto the never-drawn ring.
+            assertEquals(d.toString(), west, ClassicHud.westPastView(d, 1, 0));
+            // From the ring (FreeCol may still put a ship there) off the map.
+            assertEquals(d.toString(), west, ClassicHud.westPastView(d, 0, -1));
+            // One column after the edge: a plain move.
+            assertFalse(d.toString(), ClassicHud.westPastView(d, 2, 1));
+            // Both edges together.
+            assertEquals(d.toString(), west,
+                ClassicHud.sidePastView(w, d, 1, 0));
+            assertEquals(d.toString(), east,
+                ClassicHud.sidePastView(w, d, 56, 57));
+            assertFalse(d.toString(), ClassicHud.sidePastView(w, d, 2, 1));
+            assertFalse(d.toString(), ClassicHud.sidePastView(w, d, 55, 56));
+        }
+        // An isometric NW that stays in the column is a plain move.
+        assertFalse(ClassicHud.westPastView(Direction.NW, 1, 1));
+        assertFalse(ClassicHud.westPastView(Direction.SW, 1, 1));
+        // The east edge is not westPastView's.
+        assertFalse(ClassicHud.westPastView(Direction.E, 56, 57));
     }
 
     /**
@@ -358,6 +391,111 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertFalse(ClassicGUI.asksSailHome(colonist, Direction.E));
         assertFalse(ClassicGUI.asksSailHome(null, Direction.E));
         assertFalse(ClassicGUI.asksSailHome(ship, null));
+    }
+
+    /**
+     * E1, the mirror of W8a (Roger): a ship on the high seas in the first
+     * drawn column (x = 1) ordered W, NW or SW gets the same question;
+     * "Nein" and Escape leave it with its moves, "Jawohl" sails it home.
+     * Every other order there, and the west orders one column further in,
+     * are plain moves.
+     */
+    public void testEuropeQuestionAtTheWestEdge() {
+        Topology.setCurrent(Topology.SQUARE);
+        final Game game = getStandardGame();
+        final MapBuilder builder = new MapBuilder(game);
+        builder.setDimensions(20, 15).setBaseTileType(ocean)
+            .setExploredByAll(true);
+        for (int y = 0; y < 15; y++) {
+            for (int x = 0; x < 5; x++) builder.setTileType(x, y, highSeas);
+            for (int x = 15; x < 20; x++) builder.setTileType(x, y, highSeas);
+        }
+        final Map map = builder.build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile edge = map.getTile(1, 7);        // the first drawn column
+        final Tile inner = map.getTile(2, 7);       // one column after
+        final Unit ship = new ServerUnit(game, edge, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final int moves = ship.getMovesLeft();
+        assertTrue(moves > 0);
+        assertNotNull(dutch.getEurope());
+
+        for (Direction d : Direction.values()) {
+            final boolean west = d == Direction.W || d == Direction.NW
+                || d == Direction.SW;
+            assertEquals(d.toString(), west, ClassicGUI.asksSailHome(ship, d));
+        }
+
+        final SailingGUI gui = new SailingGUI();
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        // Nein, then Escape: nothing happens, the moves are kept.
+        fake.answer = 1;
+        assertTrue(gui.sailHomeKey(ship, Direction.W));
+        fake.answer = -1;
+        assertTrue(gui.sailHomeKey(ship, Direction.NW));
+        assertTrue(gui.sailed.isEmpty());
+        assertSame(edge, ship.getTile());
+        assertEquals(moves, ship.getMovesLeft());
+        // The same box as at the east edge: two rows, Enter on "Jawohl".
+        assertEquals(2, last(fake.asked).length);
+        assertEquals(Integer.valueOf(0), last(fake.defaults));
+        // Jawohl: the ship sails home.
+        fake.answer = 0;
+        assertTrue(gui.sailHomeKey(ship, Direction.SW));
+        assertEquals(List.of(ship), gui.sailed);
+        assertEquals(3, fake.asked.size());
+        // Every other order is a plain move, with no question.
+        assertFalse(gui.sailHomeKey(ship, Direction.N));
+        assertFalse(gui.sailHomeKey(ship, Direction.E));
+        assertFalse(gui.sailHomeKey(ship, Direction.NE));
+        assertEquals(3, fake.asked.size());
+
+        // On the column before the drawn map (FreeCol's x = 0, on a map
+        // without the outer ring): west is off the map, and asks too.
+        ship.setLocation(map.getTile(0, 7));
+        assertTrue(ClassicGUI.asksSailHome(ship, Direction.W));
+        assertTrue(ClassicGUI.asksSailHome(ship, Direction.SW));
+        assertFalse(ClassicGUI.asksSailHome(ship, Direction.E));
+        // One column after the edge, on light water: plain moves.
+        ship.setLocation(inner);
+        for (Direction d : Direction.values()) {
+            assertFalse(d.toString(), ClassicGUI.asksSailHome(ship, d));
+        }
+        // At the edge but on ordinary ocean: plain moves.
+        final Tile coast = map.getTile(1, 3);
+        coast.setType(ocean);
+        ship.setLocation(coast);
+        assertFalse(ClassicGUI.asksSailHome(ship, Direction.W));
+        // No moves left: no question (the controller says why).
+        ship.setLocation(edge);
+        ship.setMovesLeft(0);
+        assertFalse(ClassicGUI.asksSailHome(ship, Direction.W));
+        ship.setMovesLeft(moves);
+        assertTrue(ClassicGUI.asksSailHome(ship, Direction.W));
+        // A land unit is never asked.
+        final Unit colonist = new ServerUnit(game, ship, dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        assertFalse(ClassicGUI.asksSailHome(colonist, Direction.W));
+
+        // Isometric: W always leaves the column, a NW or SW step asks only
+        // where it does (on every other row it stays in column 1).
+        Topology.setCurrent(Topology.ISOMETRIC);
+        int plain = 0;
+        for (int y = 6; y <= 9; y++) {
+            ship.setLocation(map.getTile(1, y));
+            for (Direction d : new Direction[] {
+                    Direction.W, Direction.NW, Direction.SW }) {
+                final Tile to = ship.getTile().getNeighbourOrNull(d);
+                final boolean leaves = to == null || to.getX() < 1;
+                if (!leaves) plain++;
+                assertEquals(d + " at y=" + y, leaves,
+                    ClassicGUI.asksSailHome(ship, d));
+            }
+            assertTrue(ClassicGUI.asksSailHome(ship, Direction.W));
+        }
+        assertTrue(plain > 0);
     }
 
     /**

@@ -3508,7 +3508,8 @@ public class ClassicGUI extends GUI {
      * <p>FreeCol's own question on sailing from coastal water onto the high
      * seas ({@code InGameController.moveHighSeas}) is never shown: it is
      * answered "no" at once, so that move is a plain one (W0f).  The
-     * original asks only at the map's east edge ({@link #sailHomeKey}).
+     * Europe question comes only at the map's east and west edges
+     * ({@link #sailHomeKey}).
      */
     @Override
     public boolean modalConfirmDialog(Tile tile, StringTemplate template,
@@ -3716,9 +3717,11 @@ public class ClassicGUI extends GUI {
      * Whether a move order gets the Europe question instead of a move, by
      * Roger's rule (master plan section 1): a ship on the high seas in the
      * last column the view shows, ordered east (6, 9 or 3) past it
-     * ({@link ClassicHud#eastPastView}).  Entering the light water, leaving
-     * it and moving along it are plain moves, and so is every move at the
-     * west edge (master plan section 10).
+     * ({@link ClassicHud#eastPastView}); and, the mirror at the west edge
+     * (Roger, E1), a ship on the high seas in the first column the view
+     * shows, ordered west (4, 7 or 1) past it
+     * ({@link ClassicHud#westPastView}).  Entering the light water, leaving
+     * it and moving along it are plain moves.
      *
      * @param unit The unit ordered.
      * @param direction The direction ordered.
@@ -3734,7 +3737,7 @@ public class ClassicGUI extends GUI {
         final Tile tile = unit.getTile();
         if (!tile.isDirectlyHighSeasConnected() || tile.getMap() == null) return false;
         final Tile target = tile.getNeighbourOrNull(direction);
-        return ClassicHud.eastPastView(tile.getMap().getWidth(), direction,
+        return ClassicHud.sidePastView(tile.getMap().getWidth(), direction,
             tile.getX(), (target == null) ? -1 : target.getX());
     }
 
