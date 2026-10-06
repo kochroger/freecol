@@ -64,7 +64,9 @@ import net.sf.freecol.common.model.Unit;
  * (re)activation comes, from which the first OFF is timed.
  *
  * <p>In <em>scene mode</em> ({@link #setSceneMode}, the first game scene)
- * the unit block is hidden.
+ * the unit block is hidden.  In the Spielzugende mode (build spec W17,
+ * {@link #enterPrompt}) the tile mode of the cursor tile replaces it, with
+ * the blinking word under it; a press on the word ends the turn.
  */
 final class ClassicInfoPanel extends JComponent {
 
@@ -105,6 +107,15 @@ final class ClassicInfoPanel extends JComponent {
     private Unit staleUnit = null;
     private ClassicHud.UnitFacts staleActive = null;
     private List<ClassicHud.UnitFacts> staleList = new ArrayList<>();
+
+    /**
+     * The Spielzugende mode (build spec W17): the tile the panel shows in
+     * the tile mode instead of the unit block, as it was when the mode
+     * began, or null; and whether the end command froze the word white
+     * (until the turn-start wipe, clip004 #2745).
+     */
+    private ClassicHud.TileFacts promptFacts = null;
+    private boolean promptFrozen = false;
 
     /**
      * The season line of the last paint in our turn: kept while the turn
@@ -170,6 +181,61 @@ final class ClassicInfoPanel extends JComponent {
         this.staleUnit = null;
         this.staleActive = null;
         this.staleList = new ArrayList<>();
+        this.promptFacts = null;
+        this.promptFrozen = false;
+    }
+
+    /**
+     * The Spielzugende mode begins (build spec W17 item 5): the panel shows
+     * the tile mode of {@code tile} -- position, land, terrain, its
+     * settlement and units, no "Züge" line -- with the word under it.  The
+     * caller paints it, together with the map's square (landing-slow
+     * #2305/#2306: one update).
+     *
+     * @param tile The cursor tile, or null for none.
+     */
+    void enterPrompt(Tile tile) {
+        this.promptFacts = (tile == null) ? null : tileFacts(tile);
+        this.promptFrozen = false;
+    }
+
+    /**
+     * The end command in the mode: the word is forced white and stays
+     * so until the turn-start wipe (clip004 #2427 -&gt; #2745).
+     */
+    void freezePrompt() {
+        if (this.promptFacts == null) return;
+        this.promptFrozen = true;
+        paintNow();
+    }
+
+    /** The mode was left without an end (a unit was activated): the unit block is back. */
+    void leavePrompt() {
+        if (this.promptFacts == null) return;
+        this.promptFacts = null;
+        this.promptFrozen = false;
+        paintNow();
+    }
+
+    /** @return The tile mode's tile, or null (tests and the recorder). */
+    ClassicHud.TileFacts promptFacts() {
+        return this.promptFacts;
+    }
+
+    /** The tile mode's facts of a live tile, as the player knows it. */
+    private ClassicHud.TileFacts tileFacts(Tile tile) {
+        final List<ClassicHud.UnitFacts> units = new ArrayList<>();
+        for (Unit u : tile.getUnitList()) units.add(facts(u));
+        BufferedImage sp = null;
+        if (tile.getSettlement() != null) {
+            try {
+                sp = this.lib.getScaledSettlementImage(tile.getSettlement());
+            } catch (RuntimeException e) {
+                sp = null;
+            }
+        }
+        return ClassicHud.TileFacts.of(tile, this.freeColClient.getMyPlayer(),
+                                       sp, units);
     }
 
     /** Paint the whole panel at once (EDT), else ask for a repaint. */
@@ -219,6 +285,8 @@ final class ClassicInfoPanel extends JComponent {
                 mm = blinkDot(ClassicHud.minimapOf(game.getMap(), o[0], o[1]),
                               this.mapViewer.getActiveUnit(),
                               this.mapViewer.isBlinkOff());
+                mm = promptDot(mm, this.mapViewer.promptTile(),
+                               this.mapViewer.isPromptShown());
             }
         }
         if (game != null && game.getTurn() != null) {
@@ -242,6 +310,16 @@ final class ClassicInfoPanel extends JComponent {
                     + "  " + Messages.message("tax") + ": " + player.getTax();
             }
         }
+        final int indicator = (flow == null) ? -1 : flow.indicatorRgb();
+        if (flow != null) flow.indicatorShown(indicator);
+        if (this.promptFacts != null) {
+            // The Spielzugende mode: the tile mode, the word blinking with
+            // the map's square, white once the end command froze it.
+            final boolean on = this.promptFrozen || this.mapViewer.isPromptShown();
+            return new ClassicHud.PanelModel(mm, season, gold, this.scene, null,
+                null, indicator, this.promptFacts,
+                on ? ClassicHud.PROMPT_ON_RGB : ClassicHud.PROMPT_OFF_RGB);
+        }
         ClassicHud.UnitFacts active = null;
         List<ClassicHud.UnitFacts> list = new ArrayList<>();
         final Unit unit = this.mapViewer.getActiveUnit();
@@ -264,8 +342,6 @@ final class ClassicInfoPanel extends JComponent {
             active = this.staleActive;
             list = new ArrayList<>(this.staleList);
         }
-        final int indicator = (flow == null) ? -1 : flow.indicatorRgb();
-        if (flow != null) flow.indicatorShown(indicator);
         return new ClassicHud.PanelModel(mm, season, gold, this.scene, active,
                                          list, indicator);
     }
@@ -303,6 +379,22 @@ final class ClassicInfoPanel extends JComponent {
         final Tile t = active.getTile();
         return mm.with(t.getX(), t.getY(), off ? ClassicHud.BLINK_DOT_RGB
             : ClassicHud.nationRgb(active.getOwner()));
+    }
+
+    /**
+     * The Spielzugende mode's minimap pixel (build spec W17 item 4): the
+     * cursor tile's pixel white while the map's square is drawn, its own
+     * colour otherwise -- the opposite phase to the unit's dot.
+     *
+     * @param mm The minimap, or null.
+     * @param tile The cursor tile, or null.
+     * @param shown The square is drawn.
+     * @return The minimap with the pixel, or {@code mm}.
+     */
+    static ClassicHud.MinimapModel promptDot(ClassicHud.MinimapModel mm,
+                                             Tile tile, boolean shown) {
+        if (mm == null || tile == null || !shown) return mm;
+        return mm.with(tile.getX(), tile.getY(), ClassicHud.PROMPT_ON_RGB);
     }
 
     /**
@@ -401,13 +493,24 @@ final class ClassicInfoPanel extends JComponent {
         return changed;
     }
 
-    /** A click in the minimap's interior recentres the map on that tile. */
+    /**
+     * A press on the word "Spielzugende" ends the turn (build spec W17 item
+     * 7: the pointer rested on the word before every end, 5 of 5); a click
+     * in the minimap's interior recentres the map on that tile.
+     */
     private void onClick(MouseEvent e) {
-        final ClassicHud.MinimapModel m = this.lastMinimap;
-        if (m == null) return;
         final int s = scale();
         final int vx = ClassicHud.PANEL_X + e.getX() / s;
         final int vy = ClassicHud.PANEL_Y + e.getY() / s;
+        final ClassicTurnFlow flow = this.turnFlow;
+        if (this.promptFacts != null && !this.promptFrozen && flow != null
+            && flow.isPrompt() && ClassicHud.promptWordBounds(this.font,
+                this.text, this.promptFacts).contains(vx, vy)) {
+            flow.endTurnNow("prompt-click");
+            return;
+        }
+        final ClassicHud.MinimapModel m = this.lastMinimap;
+        if (m == null) return;
         final Rectangle in = ClassicHud.MINIMAP;
         if (!in.contains(vx, vy)) return;
         this.mapViewer.recenterOnTile(

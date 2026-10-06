@@ -1843,6 +1843,49 @@ public class ClassicGUI extends GUI {
         return this.turnFlow != null && this.turnFlow.isInputBlocked();
     }
 
+    /** @return Whether the Spielzugende mode is on (build spec W17). */
+    boolean turnPrompt() {
+        return this.turnFlow != null && this.turnFlow.isPrompt();
+    }
+
+    /**
+     * Whether Enter (or Space with no unit) may end the turn now: in the
+     * Spielzugende mode, or with no unit up and none left that can move
+     * (spec delta W17 item 7).  Without the turn flow, always.
+     *
+     * @return True if the key ends the turn.
+     */
+    boolean mayEndTurnByKey() {
+        if (this.turnFlow == null || this.turnFlow.isPrompt()) return true;
+        final Player p = getMyPlayer();
+        return this.mapViewer != null && this.mapViewer.getActiveUnit() == null
+            && p != null && !p.hasNextActiveUnit() && !p.hasNextGoingToUnit();
+    }
+
+    /**
+     * Paint the panel now for the Spielzugende mode's square: the word and
+     * the minimap pixel change with it (build spec W17 item 6).  EDT only.
+     */
+    void paintPromptPanel() {
+        if (this.infoPanel != null) this.infoPanel.paintNow();
+    }
+
+    /**
+     * The map's Spielzugende square went: a live mode's panel goes back to
+     * the unit block; a frozen one keeps its word until the wipe.
+     *
+     * @param frozen The square was frozen by the end command.
+     * @param minimap Repaint the minimap's pixel now.
+     */
+    void promptCleared(boolean frozen, boolean minimap) {
+        if (this.infoPanel == null) return;
+        if (!frozen) {
+            this.infoPanel.leavePrompt();
+        } else if (minimap) {
+            this.infoPanel.paintMinimapNow();
+        }
+    }
+
     /** The player saw the map or the panel change: the pauses run from the last change. */
     void screenChanged() {
         if (this.turnFlow != null) this.turnFlow.screenChanged();
@@ -2004,11 +2047,26 @@ public class ClassicGUI extends GUI {
         }
 
         @Override
-        public void enterPrompt() {
-            // The Spielzugende mode's look (tile info, the word, the square)
-            // is build spec W17; until then the mode only waits for Enter
-            // or Space, with the arrows inert.
-            repaintInfo();
+        public void enterPrompt(Tile village) {
+            // Build spec W17: the panel's tile mode with the word and the
+            // map's square on the cursor tile, in one go (landing-slow
+            // #2305/#2306); then it waits for Enter or a press on the word.
+            if (mapViewer == null) return;
+            final Tile tile = (village != null) ? village : mapViewer.promptTileFor();
+            if (infoPanel != null) infoPanel.enterPrompt(tile);
+            mapViewer.enterPrompt(tile);   // paints the square, then the panel
+        }
+
+        @Override
+        public void freezePrompt() {
+            if (mapViewer != null) mapViewer.freezePrompt();
+            if (infoPanel != null) infoPanel.freezePrompt();
+        }
+
+        @Override
+        public void leavePrompt() {
+            if (mapViewer != null) mapViewer.clearPrompt("left", true);
+            if (infoPanel != null) infoPanel.leavePrompt();
         }
 
         @Override
@@ -3241,7 +3299,8 @@ public class ClassicGUI extends GUI {
     public net.sf.freecol.common.model.Constants.ArmedUnitSettlementAction
         getArmedUnitSettlementChoice(
             net.sf.freecol.common.model.Settlement settlement) {
-        return villageChoice(super.getArmedUnitSettlementChoice(settlement));
+        return villageChoice(settlement,
+                             super.getArmedUnitSettlementChoice(settlement));
     }
 
     /** {@inheritDoc} */
@@ -3251,8 +3310,8 @@ public class ClassicGUI extends GUI {
             net.sf.freecol.common.model.Settlement settlement,
             StringTemplate template, boolean canBuy, boolean canSell,
             boolean canGift) {
-        return villageChoice(super.getIndianSettlementTradeChoice(settlement,
-                template, canBuy, canSell, canGift));
+        return villageChoice(settlement, super.getIndianSettlementTradeChoice(
+                settlement, template, canBuy, canSell, canGift));
     }
 
     /** {@inheritDoc} */
@@ -3261,8 +3320,8 @@ public class ClassicGUI extends GUI {
         getMissionaryChoice(Unit unit,
             net.sf.freecol.common.model.IndianSettlement is,
             boolean canEstablish, boolean canDenounce) {
-        return villageChoice(super.getMissionaryChoice(unit, is, canEstablish,
-                                                       canDenounce));
+        return villageChoice(is, super.getMissionaryChoice(unit, is, canEstablish,
+                                                           canDenounce));
     }
 
     /** {@inheritDoc} */
@@ -3271,21 +3330,25 @@ public class ClassicGUI extends GUI {
         getScoutIndianSettlementChoice(
             net.sf.freecol.common.model.IndianSettlement is,
             String numberString) {
-        return villageChoice(super.getScoutIndianSettlementChoice(is,
-                                                                  numberString));
+        return villageChoice(is, super.getScoutIndianSettlementChoice(is,
+                                                                      numberString));
     }
 
     /**
      * Pass a village box's answer on, telling the turn flow of a cancel
-     * (null) so the next idle pause is the original's longer one.
+     * (null) so the next idle pause is the original's longer one, and the
+     * Spielzugende mode's cursor goes to the village (landing-slow #4193).
      *
+     * @param settlement The village, or null.
      * @param choice The answer, null for "Handlung abbrechen".
      * @return {@code choice}.
      */
-    private <T> T villageChoice(T choice) {
+    private <T> T villageChoice(net.sf.freecol.common.model.Settlement settlement,
+                                T choice) {
         if (choice == null) {
+            final Tile tile = (settlement == null) ? null : settlement.getTile();
             invokeNowOrLater(() -> {
-                    if (this.turnFlow != null) this.turnFlow.villageBoxCancelled();
+                    if (this.turnFlow != null) this.turnFlow.villageBoxCancelled(tile);
                 });
         }
         return choice;

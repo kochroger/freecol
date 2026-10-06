@@ -22,6 +22,7 @@ package net.sf.freecol.client.gui.classic;
 import java.util.Locale;
 
 import net.sf.freecol.common.model.Player;
+import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Unit;
 
 
@@ -40,8 +41,9 @@ import net.sf.freecol.common.model.Unit;
  *   is up and no unit can move or go to its destination.  Never FreeCol's
  *   {@code autoEndTurn}, which ends at once.  With the classic pref
  *   {@code endTurnPrompt} on, read at this idle decision, the Spielzugende
- *   mode follows instead ({@link #PROMPT_MS}, W17), which waits for Enter
- *   or Space.</li>
+ *   mode follows instead ({@link #PROMPT_MS}, W17): the host draws it, and
+ *   it waits for Enter, Space or a press on the word; the end forces its
+ *   look ON and the request follows {@link #PROMPT_END_MS} later.</li>
  *   <li><b>Hand-over</b> (W5e): when the controller brings a different
  *   unit after the previous one ran out of moves, its panel block comes
  *   {@link #HANDOVER_MS} after the last change, and a view jump it needs
@@ -87,6 +89,13 @@ final class ClassicTurnFlow {
 
     /** Spielzugende mode entry after a cancelled village box (#4136 -&gt; #4193). */
     static final double PROMPT_VILLAGE_MS = 813.0;
+
+    /**
+     * The end command in the Spielzugende mode: the indicator (and our
+     * end request) this long after the forced-ON paint (landing-slow
+     * #5500 -&gt; #5501, clip004 #2427 -&gt; #2428: one frame; #4957 -&gt; #4960).
+     */
+    static final double PROMPT_END_MS = 15.0;
 
     /** Hand-over: the next unit's panel block after the last change (499-514 ms). */
     static final double HANDOVER_MS = 500.0;
@@ -208,8 +217,24 @@ final class ClassicTurnFlow {
         /** Ask the controller for the next active unit. */
         void nextActiveUnit();
 
-        /** The Spielzugende mode begins (W17 draws it). */
-        void enterPrompt();
+        /**
+         * The Spielzugende mode begins (W17): the panel's tile mode, the
+         * word and the map's square on the cursor tile, blinking.
+         *
+         * @param village The village whose box was cancelled just before
+         *     (the cursor goes there, landing-slow #4193), or null for the
+         *     last unit's tile.
+         */
+        void enterPrompt(Tile village);
+
+        /**
+         * The end command in the Spielzugende mode: the word, the square
+         * and the minimap pixel ON at once and frozen (W17 item 7).
+         */
+        void freezePrompt();
+
+        /** The Spielzugende mode ends without an end (a unit was activated). */
+        void leavePrompt();
 
         /** @return The player whose turn it is, or null. */
         Player currentPlayer();
@@ -229,10 +254,10 @@ final class ClassicTurnFlow {
     }
 
     /** The pauses. */
-    enum Kind { END_TURN, PROMPT, HANDOVER, TURN_START }
+    enum Kind { END_TURN, PROMPT, PROMPT_END, HANDOVER, TURN_START }
 
     /** What a pause does at one of its moments. */
-    enum Action { END, PROMPT, JUMP, ACTIVATE, GOTO }
+    enum Action { END, PROMPT, END_NOW, JUMP, ACTIVATE, GOTO }
 
     /** One moment of a pause: {@code ms} after its base. */
     static final class Stage {
@@ -313,6 +338,15 @@ final class ClassicTurnFlow {
 
     /** When a village box was last cancelled (0: never). */
     private long villageCancel = 0L;
+
+    /** The tile of the village whose box was last cancelled, or null. */
+    private Tile villageTile = null;
+
+    /** The village tile the armed idle pause's Spielzugende mode shows, or null. */
+    private Tile idleVillage = null;
+
+    /** What ended the Spielzugende mode (for the recorder), while its end is pending. */
+    private String promptEndWhy = null;
 
     /** Our turn has been wiped and shown (false from our end until the next wipe). */
     private boolean turnStarted = true;
@@ -460,10 +494,16 @@ final class ClassicTurnFlow {
         catchUp();
     }
 
-    /** A village box was cancelled ("Handlung abbrechen"). */
-    void villageBoxCancelled() {
+    /**
+     * A village box was cancelled ("Handlung abbrechen").
+     *
+     * @param village The village's tile, or null.
+     */
+    void villageBoxCancelled(Tile village) {
         this.villageCancel = this.clock.now();
-        ClassicFrameRecorder.event("endturn-village", "cancel");
+        this.villageTile = village;
+        ClassicFrameRecorder.event("endturn-village", "cancel"
+            + ((village == null) ? "" : " at=" + village.getX() + "," + village.getY()));
     }
 
     /**
@@ -472,6 +512,8 @@ final class ClassicTurnFlow {
      * our turn with nothing left to move, the idle pause is armed.
      */
     void noUnitLeft() {
+        final Pending p = this.pending;
+        if (p != null && p.kind == Kind.PROMPT_END) return;   // the end is out
         cancel("no-unit");
         this.afterGoto = false;
         this.idleWanted = this.host.myTurn() && !this.ending;
@@ -495,7 +537,7 @@ final class ClassicTurnFlow {
     boolean unitChosen(Unit unit, Unit previous) {
         final Pending p = this.pending;
         if (unit == null) {
-            cancel("no-unit");
+            if (p == null || p.kind != Kind.PROMPT_END) cancel("no-unit");
             return false;
         }
         if (!this.host.myTurn() || this.ending) {
@@ -516,7 +558,7 @@ final class ClassicTurnFlow {
             return true;
         }
         cancel("unit");
-        this.prompt = false;
+        leavePrompt();
         this.idleWanted = false;
         final int turn = this.host.turnNumber();
         if (!this.turnStarted || turn != this.activatedTurn) {
@@ -546,12 +588,26 @@ final class ClassicTurnFlow {
 
     /**
      * End the turn now: the timer, Enter or Space (with no unit, or in the
-     * Spielzugende mode).  The indicator lights with the next player's
-     * colour first, in its own paint.
+     * Spielzugende mode), a press on the word.  The indicator lights with
+     * the next player's colour first, in its own paint.  In the
+     * Spielzugende mode the word, the square and the minimap pixel are
+     * first forced ON and frozen, and the indicator and the request follow
+     * {@link #PROMPT_END_MS} later (W17 item 7).
      *
      * @param why What ends it (for the recorder).
      */
     void endTurnNow(String why) {
+        if (this.prompt) {
+            this.prompt = false;
+            this.promptEndWhy = why;
+            cancel("prompt-end");
+            ClassicFrameRecorder.event("endturn-prompt", "end " + why);
+            final long command = this.clock.now();   // the paints take time
+            this.host.freezePrompt();
+            start(new Pending(Kind.PROMPT_END, null, command,
+                    new Stage(PROMPT_END_MS, Action.END_NOW)));
+            return;
+        }
         cancel("end");
         this.prompt = false;
         this.idleWanted = false;
@@ -578,7 +634,7 @@ final class ClassicTurnFlow {
             this.unwipedSince = 0L;
             if (this.turnStarted && !this.ending) {
                 cancel("not-our-turn");
-                this.prompt = false;
+                leavePrompt();
                 this.idleWanted = false;
                 waiting();
             }
@@ -785,6 +841,7 @@ final class ClassicTurnFlow {
         }
         final boolean village = this.villageCancel != 0L
             && this.clock.now() - this.villageCancel <= nanos(VILLAGE_WINDOW_MS);
+        this.idleVillage = (village) ? this.villageTile : null;
         final boolean promptPref = this.host.promptPref();
         start(new Pending((promptPref) ? Kind.PROMPT : Kind.END_TURN, null, base,
                 new Stage(idleMs(promptPref, village),
@@ -855,7 +912,8 @@ final class ClassicTurnFlow {
     private void fire(Pending p) {
         if (p != this.pending) return;
         final Action a = p.stages[p.next].action;
-        if (a != Action.END && a != Action.PROMPT && this.host.blocked()) {
+        if (a != Action.END && a != Action.PROMPT && a != Action.END_NOW
+            && this.host.blocked()) {
             // A box came up meanwhile (a tutorial tip at the switch): the
             // unit comes up with its close (landfall 03 section 6).
             p.held = true;
@@ -878,6 +936,10 @@ final class ClassicTurnFlow {
             break;
         case PROMPT:
             idleDecision(true);
+            break;
+        case END_NOW:
+            endTurnNow((this.promptEndWhy == null) ? "prompt" : this.promptEndWhy);
+            this.promptEndWhy = null;
             break;
         case JUMP:
             if (usable(p.unit)) this.host.jumpTo(p.unit);
@@ -932,10 +994,18 @@ final class ClassicTurnFlow {
             this.prompt = true;
             this.idleWanted = false;
             ClassicFrameRecorder.event("endturn-prompt", "on");
-            this.host.enterPrompt();
+            this.host.enterPrompt(this.idleVillage);
             return;
         }
         endTurnNow("auto");
+    }
+
+    /** The Spielzugende mode ends without an end: its look goes. */
+    private void leavePrompt() {
+        if (!this.prompt) return;
+        this.prompt = false;
+        ClassicFrameRecorder.event("endturn-prompt", "left");
+        this.host.leavePrompt();
     }
 
     /**

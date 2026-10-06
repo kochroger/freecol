@@ -125,9 +125,23 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
             this.calls.add("next");
         }
 
+        /** The village tile the last Spielzugende mode was entered with. */
+        Tile promptVillage = null;
+
         @Override
-        public void enterPrompt() {
+        public void enterPrompt(Tile village) {
+            this.promptVillage = village;
             this.calls.add("prompt");
+        }
+
+        @Override
+        public void freezePrompt() {
+            this.calls.add("freeze");
+        }
+
+        @Override
+        public void leavePrompt() {
+            this.calls.add("leave");
         }
 
         @Override public Player currentPlayer() { return this.current; }
@@ -342,8 +356,9 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
 
     /** After a cancelled village box: 756 ms (813 ms to the Spielzugende mode). */
     public void testVillageCancel() {
+        final Tile village = this.map.getTile(6, 5);
         final Rig r = new Rig(this.game);
-        r.flow.villageBoxCancelled();
+        r.flow.villageBoxCancelled(village);
         r.flow.boxClosed();
         r.flow.noUnitLeft();
         r.advanceMs(755);
@@ -351,22 +366,33 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         r.advanceMs(1);
         assertEquals(1, r.count("endTurn"));
 
+        // The Spielzugende mode: 813 ms, the cursor on the village
+        // (landing-slow #4136 -> #4193).
         final Rig p = new Rig(this.game);
         p.host.promptPref = true;
-        p.flow.villageBoxCancelled();
+        p.flow.villageBoxCancelled(village);
         p.flow.noUnitLeft();
         p.advanceMs(812);
         assertEquals(0, p.count("prompt"));
         p.advanceMs(1);
         assertEquals(1, p.count("prompt"));
+        assertSame(village, p.host.promptVillage);
 
-        // A cancel long ago does not count.
+        // A cancel long ago does not count, nor does its village.
         final Rig o = new Rig(this.game);
-        o.flow.villageBoxCancelled();
+        o.flow.villageBoxCancelled(village);
         o.advanceMs(1000);
         o.flow.noUnitLeft();
         o.advanceMs(485);
         assertEquals(1, o.count("endTurn"));
+        final Rig q = new Rig(this.game);
+        q.host.promptPref = true;
+        q.flow.villageBoxCancelled(village);
+        q.advanceMs(1000);
+        q.flow.noUnitLeft();
+        q.advanceMs(500);
+        assertEquals(1, q.count("prompt"));
+        assertNull(q.host.promptVillage);
     }
 
     /**
@@ -386,9 +412,60 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         r.advanceMs(20000);
         r.flow.tick();
         assertEquals(0, r.count("endTurn"));   // it waits
+        assertNull(r.host.promptVillage);       // the last unit's tile
+        // The end command: forced ON and frozen at once, the indicator
+        // and the request one frame later (landing-slow #5500 -> #5501);
+        // the input is blocked meanwhile.
         r.flow.endTurnNow("key");
-        assertEquals(1, r.count("endTurn"));
+        assertEquals(1, r.count("freeze"));
+        assertEquals(0, r.count("endTurn"));
+        assertEquals(0, r.count("indicator"));
         assertFalse(r.flow.isPrompt());
+        assertTrue(r.flow.isInputBlocked());
+        assertEquals(ClassicTurnFlow.Kind.PROMPT_END, r.flow.pending().kind);
+        r.flow.noUnitLeft();                    // the controller's view: kept
+        assertEquals(ClassicTurnFlow.Kind.PROMPT_END, r.flow.pending().kind);
+        r.advanceMs(14.9);
+        assertEquals(0, r.count("endTurn"));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("endTurn"));
+        final int end = r.host.calls.indexOf("endTurn");
+        assertEquals("indicator", r.host.calls.get(end - 1));
+        assertTrue(r.host.calls.indexOf("freeze") < end - 1);
+        assertEquals(0, r.count("leave"));
+        assertNull(r.flow.pending());
+    }
+
+    /**
+     * W17: the pref switched off while the mode shows does not end the
+     * turn (clip004 #4560); a unit made active leaves the mode, and its
+     * look goes.
+     */
+    public void testPromptModeKeepsAndLeaves() {
+        final Rig r = new Rig(this.game);
+        r.host.promptPref = true;
+        r.flow.noUnitLeft();
+        r.advanceMs(500);
+        assertTrue(r.flow.isPrompt());
+        r.host.promptPref = false;
+        r.flow.boxClosed();                     // the options box closes
+        r.advanceMs(5000);
+        r.flow.tick();
+        assertTrue(r.flow.isPrompt());
+        assertEquals(0, r.count("endTurn"));
+        assertNull(r.flow.pending());
+        // A click on a unit that can still move.
+        final Unit a = ship(5, 5);
+        assertFalse(r.flow.unitChosen(a, null));
+        assertFalse(r.flow.isPrompt());
+        assertEquals(1, r.count("leave"));
+        assertEquals(0, r.count("freeze"));
+        // The next idle decision reads the pref again: now the automatic end.
+        r.host.active = null;
+        r.flow.noUnitLeft();
+        r.advanceMs(485);
+        assertEquals(1, r.count("endTurn"));
+        assertEquals(1, r.count("prompt"));
     }
 
     /** The hand-over: 500 ms, or a jump at 280 ms and the block at 500 ms. */

@@ -31,6 +31,7 @@ import net.sf.freecol.client.gui.ImageLibrary;
 import net.sf.freecol.common.i18n.Messages;
 import net.sf.freecol.common.model.AbstractGoods;
 import net.sf.freecol.common.model.Player;
+import net.sf.freecol.common.model.ResourceType;
 import net.sf.freecol.common.model.Role;
 import net.sf.freecol.common.model.Settlement;
 import net.sf.freecol.common.model.Tile;
@@ -253,6 +254,15 @@ final class ClassicHud {
         /** The turn indicator's colour ({@link #INDICATOR}), or -1 for none. */
         final int indicator;
 
+        /**
+         * The tile mode's tile (the Spielzugende mode, build spec W17),
+         * shown instead of the unit block, or null.
+         */
+        final TileFacts tile;
+
+        /** The word "Spielzugende" under the tile mode in this colour, or -1 for none. */
+        final int promptRgb;
+
         PanelModel(MinimapModel minimap, String season, String gold,
                    boolean scene) {
             this(minimap, season, gold, scene, null, null);
@@ -266,6 +276,12 @@ final class ClassicHud {
         PanelModel(MinimapModel minimap, String season, String gold,
                    boolean scene, UnitFacts active, List<UnitFacts> list,
                    int indicator) {
+            this(minimap, season, gold, scene, active, list, indicator, null, -1);
+        }
+
+        PanelModel(MinimapModel minimap, String season, String gold,
+                   boolean scene, UnitFacts active, List<UnitFacts> list,
+                   int indicator, TileFacts tile, int promptRgb) {
             this.minimap = minimap;
             this.season = season;
             this.gold = gold;
@@ -273,6 +289,8 @@ final class ClassicHud {
             this.active = active;
             this.list = (list == null) ? new ArrayList<>() : list;
             this.indicator = indicator;
+            this.tile = tile;
+            this.promptRgb = promptRgb;
         }
     }
 
@@ -393,6 +411,146 @@ final class ClassicHud {
                 t != null && t.hasRoad(),
                 person ? jobRow(type) : -1, roleless,
                 qualifier(type, role), tools);
+        }
+    }
+
+    /**
+     * What the tile mode shows of one tile (build spec W17, Spielzugende
+     * mode; clip004 analysis W21 item 1): plain data, built from a FreeCol
+     * tile by {@link #of} or by hand in the tests and the preview harness.
+     */
+    static final class TileFacts {
+
+        /** Map position. */
+        final int x, y;
+
+        /**
+         * The number after the position: "1" in six of seven samples, "2"
+         * once (landing-slow, clips 004/005); its meaning is unknown, so it
+         * is always {@link #REGION_UNKNOWN} until Roger answers.
+         */
+        final int region;
+
+        /** The tile is land: then the land name line comes first. */
+        final boolean land;
+
+        /** The player's own name for the new land (@LANDHO), or null: the nation's default. */
+        final String landName;
+
+        /** Original nation index of the player (@COLONYNAME row of the default name), or -1. */
+        final int nation;
+
+        /** NAMES.TXT {@code @TRIBES} row of a native settlement on the tile, or -1. */
+        final int tribeRow;
+
+        /** FreeCol tile type id (the terrain line), or null. */
+        final String terrainId;
+
+        /** River: 0 none, 1 minor, 2 major. */
+        final int river;
+
+        /** Road, plowed. */
+        final boolean road, plowed;
+
+        /** NAMES.TXT {@code @RESOURCE} row, or -1. */
+        final int resourceRow;
+
+        /** The native settlement's entry, or null. */
+        final SettlementFacts settlement;
+
+        /** The units on the tile, in the tile's order. */
+        final List<UnitFacts> units;
+
+        TileFacts(int x, int y, int region, boolean land, String landName,
+                  int nation, int tribeRow, String terrainId, int river,
+                  boolean road, boolean plowed, int resourceRow,
+                  SettlementFacts settlement, List<UnitFacts> units) {
+            this.x = x;
+            this.y = y;
+            this.region = region;
+            this.land = land;
+            this.landName = landName;
+            this.nation = nation;
+            this.tribeRow = tribeRow;
+            this.terrainId = terrainId;
+            this.river = river;
+            this.road = road;
+            this.plowed = plowed;
+            this.resourceRow = resourceRow;
+            this.settlement = settlement;
+            this.units = (units == null) ? new ArrayList<>() : units;
+        }
+
+        /**
+         * The facts of a live tile, as the player knows it.
+         *
+         * @param tile The tile.
+         * @param player The player whose land name is shown, or null.
+         * @param settlementSprite The sprite of a native settlement on the
+         *     tile, or null.
+         * @param units The units' facts, in the tile's order.
+         * @return The facts.
+         */
+        static TileFacts of(Tile tile, Player player, BufferedImage settlementSprite,
+                            List<UnitFacts> units) {
+            final int nation = (player == null) ? -1
+                : Arrays.asList(ClassicNewWorldScreens.NATION_IDS)
+                    .indexOf(player.getNationId());
+            final Settlement s = tile.getSettlement();
+            final int tribe = (s == null || s.getOwner() == null
+                               || !s.getOwner().isIndian()) ? -1
+                : tribeRow(s.getOwner().getNationId());
+            SettlementFacts sf = null;
+            if (tribe >= 0) {
+                sf = new SettlementFacts(fitSettlement(settlementSprite), tribe,
+                                         s.isCapital());
+            }
+            int river = 0;
+            if (tile.hasRiver()) {
+                final TileImprovement r = tile.getRiver();
+                river = (r != null && r.getMagnitude() >= TileImprovement.LARGE_RIVER)
+                    ? 2 : 1;
+            }
+            final ResourceType rt = (tile.getResource() == null) ? null
+                : tile.getResource().getType();
+            return new TileFacts(tile.getX(), tile.getY(), REGION_UNKNOWN,
+                tile.isLand(), (player == null) ? null : player.getNewLandName(),
+                nation, tribe, (tile.getType() == null) ? null : tile.getType().getId(),
+                river, tile.hasRoad(), plowed(tile),
+                (rt == null) ? -1 : resourceRow(rt.getId()), sf, units);
+        }
+
+        /** Whether a tile has a completed plow improvement. */
+        private static boolean plowed(Tile tile) {
+            for (TileImprovement imp : tile.getCompleteTileImprovements()) {
+                if (imp.getType() != null
+                    && "model.improvement.plow".equals(imp.getType().getId())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * A native settlement as the tile mode lists it (landing-slow #4193:
+     * the hut, then the tribe and "ein Dorf" in green).
+     */
+    static final class SettlementFacts {
+
+        /** The settlement's sprite (at most 22 wide, 16 high), or null. */
+        final BufferedImage sprite;
+
+        /** NAMES.TXT {@code @TRIBES} row. */
+        final int tribeRow;
+
+        /** The tribe's capital ({@code @LEVELS} row 4). */
+        final boolean capital;
+
+        SettlementFacts(BufferedImage sprite, int tribeRow, boolean capital) {
+            this.sprite = sprite;
+            this.tribeRow = tribeRow;
+            this.capital = capital;
         }
     }
 
@@ -591,8 +749,9 @@ final class ClassicHud {
 
     /**
      * The whole panel: chrome, minimap, status lines, and -- unless in scene
-     * mode -- the unit block and list ({@link #paintUnits}); last the turn
-     * indicator, if any ({@link #paintIndicator}).
+     * mode -- the unit block and list ({@link #paintUnits}), or in their
+     * place the tile mode of the Spielzugende mode ({@link #paintTileMode});
+     * last the turn indicator, if any ({@link #paintIndicator}).
      *
      * @param text The pack's texts for the unit lines, or null (then only
      *     the units' plain names are written).
@@ -602,7 +761,13 @@ final class ClassicHud {
         paintChrome(g, wood);
         paintMinimap(g, p.minimap);
         paintStatus(g, font, p.season, p.gold);
-        if (!p.scene) paintUnits(g, font, text, p.active, p.list);
+        if (!p.scene) {
+            if (p.tile != null) {
+                paintTileMode(g, font, text, p.tile, p.promptRgb);
+            } else {
+                paintUnits(g, font, text, p.active, p.list);
+            }
+        }
         paintIndicator(g, p.indicator);
     }
 
@@ -952,9 +1117,13 @@ final class ClassicHud {
         return (nat == null) ? unit : nat + " " + unit;
     }
 
+    /** NAMES.TXT {@code @UNIT} rows of the ships (caravel .. man-of-war). */
+    static final int FIRST_SHIP_ROW = 13, LAST_SHIP_ROW = 18;
+
     /**
      * A list entry's lines, all gold at x = 260 from {@code spriteY + 4}
-     * (032, 000, 007): the qualifier -- the veteran word, the expert word
+     * (032, 000, 007): for a ship its {@code @UNIT} name (clip007 #3107:
+     * "Handelsschiff" over the orders); else the qualifier -- the veteran word, the expert word
      * plus the tool count for an expert pioneer, else the bare tool count,
      * else the skill of a colonist without a role or with a skill that is not
      * the free colonist's -- with the tools word on its own line after a
@@ -971,7 +1140,11 @@ final class ClassicHud {
         final List<String> q = new ArrayList<>();
         final String toolsWord = cell(t, "CARGO", CARGO_TOOLS);
         final String count = (f.tools >= 0) ? Integer.toString(f.tools) : null;
-        if (f.qualifier != QUAL_NONE) {
+        if (f.unitRow >= FIRST_SHIP_ROW && f.unitRow <= LAST_SHIP_ROW) {
+            // A ship: its type name, then the orders (clip007 #3107).
+            final String ship = cell(t, "UNIT", f.unitRow);
+            if (ship != null) q.add(ship);
+        } else if (f.qualifier != QUAL_NONE) {
             final String w = t.misc(f.qualifier == QUAL_VETERAN ? MISC_VETERAN
                                     : MISC_EXPERT);
             if (w != null) q.add((count == null) ? w.trim() : w.trim() + " " + count);
@@ -1169,6 +1342,295 @@ final class ClassicHud {
         } finally {
             gg.dispose();
         }
+    }
+
+
+    // The tile mode and the Spielzugende word (build spec W17)
+
+    /**
+     * The tile mode's first line ("Ort: (x, y) n") at the active cell's
+     * top, x 242; the lines follow {@link #LINE_PITCH} apart (landing-slow
+     * #2306/#4193/#6182, clip004 #1974/#3798, clip005 #18186).
+     */
+    static final int TILE_X = CELL_X, TILE_Y = ACTIVE_CELL_Y;
+
+    /** The number after the position until its meaning is known. */
+    static final int REGION_UNKNOWN = 1;
+
+    /** LABELS.TXT {@code @MISC} rows: the Spielzugende word (:17), "Land" (:33), plowed (:98). */
+    static final int MISC_END_TURN = 2, MISC_LAND = 18, MISC_PLOWED = 82;
+
+    /** NAMES.TXT {@code @OTHER_NAMES} rows of the major and the minor river. */
+    static final int OTHER_NAMES_MAJOR_RIVER = 2, OTHER_NAMES_MINOR_RIVER = 3;
+
+    /** NAMES.TXT {@code @LEVELS} row of a capital, and its column of the singular. */
+    static final int LEVEL_CAPITAL = 4, LEVEL_SINGULAR = 1;
+
+    /** NAMES.TXT {@code @TRIBES} column of the tech level. */
+    static final int TRIBE_LEVEL = 3;
+
+    /**
+     * A settlement entry: its text at x 262, glyph tops at the cell + 4
+     * and + 10 like a unit's, green (landing-slow #4193); the entry is 23
+     * tall, the word 30 below its cell (I: one sample).
+     */
+    static final int SETTLEMENT_TEXT_X = 262, SETTLEMENT_STEP = 23;
+
+    /**
+     * The word sits this far below the top the next list entry would have
+     * (clip004 #1974: max(102 + 8, 92 + 18) + 7 = 117; landing-slow
+     * #6182: 124, #4193 under the hut: 129), and without any entry this far
+     * below the last line (I).
+     */
+    static final int PROMPT_WORD_DY = 7, PROMPT_WORD_NO_LIST_DY = 15;
+
+    /** The word's lowest glyph top: drawn over what lies there (clip005 #15391). */
+    static final int PROMPT_WORD_MAX_Y = 192;
+
+    /**
+     * The word's colours: white while the blink is ON, black while OFF,
+     * no shadow (clip004 section 1.2: indices 15 and 0).
+     */
+    static final int PROMPT_ON_RGB = 0xFFFFFF, PROMPT_OFF_RGB = 0x000000;
+
+    /** FreeCol resource suffixes by NAMES.TXT {@code @RESOURCE} row (null: none). */
+    private static final String[] RESOURCES = {
+        null, "oasis", "grain", "cotton", "tobacco", "sugar", "minerals",
+        "fish", "furs", "game", "lumber", null, "silver", "ore"
+    };
+
+    /** FreeCol native nation suffixes by NAMES.TXT {@code @TRIBES} row. */
+    private static final String[] TRIBES = {
+        "inca", "aztec", "arawak", "iroquois", "cherokee", "apache", "sioux",
+        "tupi"
+    };
+
+    /** NAMES.TXT {@code @RESOURCE} row of a FreeCol resource type, or -1. */
+    static int resourceRow(String resourceTypeId) {
+        final String id = Role.getRoleIdSuffix(resourceTypeId);
+        for (int i = 0; i < RESOURCES.length; i++) {
+            if (id.equals(RESOURCES[i])) return i;
+        }
+        return -1;
+    }
+
+    /** NAMES.TXT {@code @TRIBES} row of a FreeCol native nation, or -1. */
+    static int tribeRow(String nationId) {
+        final String id = Role.getRoleIdSuffix(nationId);
+        for (int i = 0; i < TRIBES.length; i++) {
+            if (id.equals(TRIBES[i])) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * The tile mode's land name: the tribe's land on a native settlement's
+     * tile ("Araukaner Land", landing-slow #4193), else the player's name
+     * for the new land, else the nation's default ({@code @COLONYNAME},
+     * "Neuholland"); none on water (clip005 #18186).  The tile next to a
+     * village reads "Neuholland" (#2306), so the tribe's name goes with
+     * the settlement, not with FreeCol's land claims (I).
+     *
+     * @return The name, or null.
+     */
+    static String landName(ClassicText t, TileFacts f) {
+        if (!f.land) return null;
+        if (f.tribeRow >= 0) {
+            final String tribe = (t == null) ? null : cell(t, "TRIBES", f.tribeRow);
+            final String land = (t == null) ? null : t.misc(MISC_LAND);
+            return (tribe == null || land == null) ? tribe : tribe + " " + land.trim();
+        }
+        if (f.landName != null) return f.landName;
+        return (t == null || f.nation < 0) ? null : cell(t, "COLONYNAME", f.nation);
+    }
+
+    /**
+     * The tile mode's lines (clip004 section 1.3): "Ort: (x, y) n" at
+     * (242,68), then {@link #LINE_PITCH} apart the land name (land only),
+     * the terrain in parentheses, and one line each for a river, a road,
+     * plowing and a resource, in that order (W21 item 2), all green.
+     */
+    static List<TextLine> tileLines(ClassicText t, TileFacts f) {
+        final List<TextLine> out = new ArrayList<>();
+        int y = TILE_Y;
+        final String placeL = (t == null) ? null : t.label("INFO", INFO_PLACE);
+        out.add(new TextLine(((placeL == null) ? "" : placeL.trim() + " ")
+                + "(" + f.x + ", " + f.y + ") " + f.region, TILE_X, y, false));
+        y += LINE_PITCH;
+        final String land = landName(t, f);
+        if (land != null) {
+            out.add(new TextLine(land, TILE_X, y, false));
+            y += LINE_PITCH;
+        }
+        if (t == null) return out;
+        final List<String> extra = new ArrayList<>();
+        extra.add(terrainName(t, f.terrainId));
+        if (f.river > 0) {
+            extra.add(cell(t, "OTHER_NAMES", (f.river > 1)
+                ? OTHER_NAMES_MAJOR_RIVER : OTHER_NAMES_MINOR_RIVER));
+        }
+        if (f.road) extra.add(t.misc(MISC_ROAD));
+        if (f.plowed) extra.add(t.misc(MISC_PLOWED));
+        if (f.resourceRow >= 0) extra.add(cell(t, "RESOURCE", f.resourceRow));
+        for (String e : extra) {
+            if (e == null) continue;
+            out.add(new TextLine("(" + e.trim() + ")", TILE_X, y, false));
+            y += LINE_PITCH;
+        }
+        return out;
+    }
+
+    /** A settlement entry's two green lines: the tribe and its kind ("ein Dorf"). */
+    static List<TextLine> settlementLines(ClassicText t, SettlementFacts s,
+                                          int cellY) {
+        final List<TextLine> out = new ArrayList<>();
+        if (t == null) return out;
+        final String tribe = cell(t, "TRIBES", s.tribeRow);
+        final String lv = cell(t, "TRIBES", s.tribeRow, TRIBE_LEVEL);
+        int level = -1;
+        try {
+            level = (s.capital) ? LEVEL_CAPITAL : Integer.parseInt(lv);
+        } catch (NumberFormatException | NullPointerException e) {
+            level = -1;
+        }
+        final String kind = (level < 0) ? null
+            : cell(t, "LEVELS", level, LEVEL_SINGULAR);
+        if (tribe != null) {
+            out.add(new TextLine(tribe, SETTLEMENT_TEXT_X, cellY + LIST_TEXT_DY, false));
+        }
+        if (kind != null) {
+            out.add(new TextLine(kind, SETTLEMENT_TEXT_X,
+                cellY + LIST_TEXT_DY + LIST_ORDERS_DY, false));
+        }
+        return out;
+    }
+
+    /**
+     * The tile mode's layout: where each list entry's cell goes (the
+     * settlement first, then the units, {@link #LIST_GAP} below the last
+     * line and stepped as the unit list) and where the word goes.
+     *
+     * @return {word y, entry cell y ...}; an entry that would cross the
+     *     screen's bottom gets -1 (skipped, as in the unit list).
+     */
+    static int[] tileLayout(ClassicText t, TileFacts f) {
+        final List<TextLine> lines = tileLines(t, f);
+        int last = TILE_Y;
+        for (TextLine l : lines) last = Math.max(last, l.y);
+        final int n = ((f.settlement == null) ? 0 : 1) + f.units.size();
+        final int[] out = new int[1 + n];
+        int y = last + LIST_GAP, next = -1, k = 1;
+        if (f.settlement != null) {
+            out[k++] = y;
+            y += SETTLEMENT_STEP;
+            next = y;
+        }
+        for (UnitFacts u : f.units) {
+            if (y + 16 > PANEL_Y + PANEL_H) {
+                out[k++] = -1;
+                continue;
+            }
+            out[k++] = y;
+            y = nextListY(y, listLines(t, u, y));
+            next = y;
+        }
+        out[0] = Math.min(PROMPT_WORD_MAX_Y, (next < 0)
+            ? last + PROMPT_WORD_NO_LIST_DY : next + PROMPT_WORD_DY);
+        return out;
+    }
+
+    /**
+     * Where the word "Spielzugende" is drawn under a tile: its glyph box
+     * (a press there ends the turn, build spec W17 item 7).
+     *
+     * @param font FONTTINY, or null (then a box 7 rows high and 45 wide).
+     * @return The box in screen pixels.
+     */
+    static Rectangle promptWordBounds(ClassicFont font, ClassicText t, TileFacts f) {
+        final String w = promptWord(t);
+        final int y = tileLayout(t, f)[0];
+        final int width = (font == null) ? 45 : font.stringWidth(w);
+        final int height = (font == null) ? 7 : font.height();
+        return new Rectangle(TILE_X, y, Math.max(1, width), Math.max(1, height));
+    }
+
+    /** The word "Spielzugende" (LABELS @MISC row 2), or FreeCol's end-turn label. */
+    static String promptWord(ClassicText t) {
+        final String w = (t == null) ? null : t.misc(MISC_END_TURN);
+        return (w == null) ? Messages.message("endTurnAction.name") : w.trim();
+    }
+
+    /**
+     * The tile mode in place of the unit block (build spec W17; clip004
+     * section 1.3, landing-slow #2306/#4193/#6182): the tile's lines, the
+     * settlement's entry (its sprite at the map's settlement offset, no
+     * shadow), the units' entries as in the unit list, and below them the
+     * word "Spielzugende" in {@code wordRgb}, drawn over whatever lies
+     * there.
+     *
+     * @param wordRgb The word's colour, or -1 for no word (a tile mode
+     *     without the Spielzugende mode, clip005 #18186).
+     */
+    static void paintTileMode(Graphics2D g, ClassicFont font, ClassicText t,
+                              TileFacts f, int wordRgb) {
+        if (f == null) return;
+        final Graphics2D gg = (Graphics2D) g.create();
+        try {
+            gg.clipRect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H);
+            drawLines(gg, font, tileLines(t, f));
+            final int[] lay = tileLayout(t, f);
+            int k = 1;
+            if (f.settlement != null) {
+                final int cy = lay[k++];
+                final BufferedImage sp = f.settlement.sprite;
+                if (sp != null) {
+                    gg.drawImage(sp, CELL_X + settlementOffset(sp.getWidth()), cy, null);
+                }
+                drawLines(gg, font, settlementLines(t, f.settlement, cy));
+            }
+            for (UnitFacts u : f.units) {
+                final int cy = lay[k++];
+                if (cy < 0) continue;
+                paintIcon(gg, font, letter(t, u), u, CELL_X, cy);
+                drawLines(gg, font, listLines(t, u, cy));
+            }
+            if (wordRgb >= 0) {
+                final String w = promptWord(t);
+                if (font != null) {
+                    font.draw(gg, w, TILE_X, lay[0], ClassicFont.colours(wordRgb & 0xFFFFFF));
+                } else {
+                    gg.setColor(new Color(wordRgb & 0xFFFFFF));
+                    gg.drawString(w, TILE_X, lay[0] + 6);
+                }
+            }
+        } finally {
+            gg.dispose();
+        }
+    }
+
+    /**
+     * The Spielzugende mode's cursor square (build spec W17 item 3): a
+     * 1-native-px white outline of the cell, its 60 border pixels, drawn
+     * over terrain and sprite (clip004 section 1.2).
+     *
+     * @param g The graphics, in screen pixels.
+     * @param sx The cell's left edge.
+     * @param sy The cell's top edge.
+     * @param s The scale (screen pixels per native pixel).
+     */
+    static void paintPromptSquare(Graphics2D g, int sx, int sy, int s) {
+        g.setColor(new Color(PROMPT_ON_RGB));
+        final int n = 16 * s;
+        g.fillRect(sx, sy, n, s);
+        g.fillRect(sx, sy + n - s, n, s);
+        g.fillRect(sx, sy, s, n);
+        g.fillRect(sx + n - s, sy, s, n);
+    }
+
+    /** A settlement sprite as the map draws it on the HUD (at most 22x16), else fitted. */
+    static BufferedImage fitSettlement(BufferedImage img) {
+        if (img == null || (img.getWidth() <= 22 && img.getHeight() <= 16)) return img;
+        return fit16(img);
     }
 
     /** Scale a sprite down to fit 16x16 (nearest-neighbour); small ones as they are. */

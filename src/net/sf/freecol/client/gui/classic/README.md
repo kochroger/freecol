@@ -213,11 +213,15 @@ minimap box.
     begins) and the map/minimap refresh. Through `ClassicGUI.requestEndTurn` ->
     `ClassicTurnFlow.endTurnNow`, which lights the turn indicator first (W5c).
     Without a key the turn ends by itself 485 ms after the last change once
-    nothing can move (W5a).
+    nothing can move (W5a). Since W17 only in the Spielzugende mode (or with no
+    unit up and none left that can move, `ClassicGUI.mayEndTurnByKey`): the
+    original has no other end of turn, with units left it ends by itself once
+    none can move (spec delta W17 item 7); otherwise the key is logged
+    `key-ignored end-turn`.
   - **Space** → "no orders": skip the active unit for this turn, mirroring
     `SkipUnitAction` (`changeState(unit, SKIPPED)` then `nextActiveUnit()`). With no
-    active unit, Space ends the turn instead (as in the original, where Space
-    advances the turn once every unit is done).
+    active unit, Space ends the turn instead, under Enter's condition (as in the
+    original, where Space advances the turn once every unit is done).
   - **W** → wait: `InGameController.waitUnit()` — cycle to the other units needing
     orders and return to this one.
   - **B** → build colony: `InGameController.buildColony(activeUnit)`, mirroring
@@ -633,7 +637,7 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   for the session (`SESSION_OPTIONS`, restored at teardown): it ends at once.
   With the classic pref `endTurnPrompt` on -- read at this idle decision, not
   at the turn start -- the Spielzugende mode follows at **500 ms** (813 after a
-  village cancel) instead and waits for Enter or Space; its look is W17's.
+  village cancel) instead; see "The Spielzugende mode" (W17).
 - **Stale panel (W5b).** `ClassicInfoPanel` remembers the block it last built
   for a unit and paints it while no unit is active or the remembered unit has
   no moves left (`showsLive`): after the last move the panel keeps "Züge" and
@@ -699,6 +703,66 @@ cancel, stale posts, the thread on the real clock).
 moves, the stale-block rule and the jump question; `ClassicHudTest.
 testTurnIndicator` the 15 pixels; `ClassicUnitIconTest.testSessionOptions`
 the forced options.
+
+### The Spielzugende mode (build spec W17, spec delta D3)
+
+With the classic pref `endTurnPrompt` on (the original's "Spielzug~ende",
+default **off**) the turn does not end by itself: at the idle decision
+(**500 ms** after the last change, **813 ms** after a cancelled village box;
+the pref read there, so switching it mid-turn counts for that turn and
+switching it off while the mode shows keeps the mode) `ClassicTurnFlow` enters
+the mode and waits. Measured in landing-slow (1505-1507) and clip004
+(1509/1510); the panel re-rendered with our painters is identical to the
+original's #2306, #2328, #2352 and clip004 #1974, #1995 (0 px; the m1 W17
+harness).
+
+- **The cursor tile.** The last active unit's tile (`ClassicMapViewer.
+  promptTileFor`: the target of its last move), or the village whose box was
+  just cancelled (`villageBoxCancelled(Tile)`, #4193), else the view's focus.
+- **The panel's tile mode** (`ClassicHud.paintTileMode`, `TileFacts`) instead
+  of the unit block: "Ort: (x, y) 1" at (242,68) (the trailing number is
+  unexplained, always 1 for now), then 7 px apart the land name on land
+  (the player's @LANDHO name, else @COLONYNAME "Neuholland"; "<tribe> Land" on
+  a native settlement's tile), the terrain, and one line each for a river, a
+  road, plowing and a resource; then the list 10 below: a native settlement
+  (its sprite, the tribe and "ein Dorf" green at x 262) and the units as in the
+  unit list (a ship now with its type name over the orders, clip007 #3107); no
+  "Züge" line. Below it the word **"Spielzugende"** (LABELS @MISC 2) at x 242,
+  7 below where the next entry would go (117 under one unit at 92), at most
+  192, white while ON and black while OFF. The facts are taken when the mode
+  begins.
+- **The map's square** (`ClassicHud.paintPromptSquare`): a 1-px white outline
+  of the cursor cell, 60 native pixels, over terrain and sprite. No unit
+  blinks in the mode.
+- **The minimap pixel** of the cursor tile is white while the square is
+  drawn, its own colour otherwise (`ClassicInfoPanel.promptDot`), the opposite
+  phase to a unit's dot.
+- **Blink.** Square, word and pixel change together on the map viewer's second
+  `ClassicBlink` (328.5 ms, ON first). A menu or a box freezes the phase (no
+  forced ON); its close restarts it ON one frame later (`armDelayed`, #5320 ->
+  #5321). A FreeCol box without the watcher is noticed by the next toggle.
+- **The end.** Enter, Space or a press on the word (`promptWordBounds`): the
+  square, the word and the pixel go ON at once and freeze; the indicator and
+  the end request follow 15 ms later (`PROMPT_END_MS`, #5500 -> #5501). The
+  word stays white until the turn-start wipe; the square and its pixel stay
+  until a paint covers them -- a slide over the cell or a slide's final draw, a
+  jump, the next activation (clip004 #2766, landing-slow #2902/#5525/#6460).
+- **Other input** in the mode: the arrows are inert; a map click does
+  something only on an own unit that can still move, which becomes active and
+  ends the mode (I, item 6); the menus and the minimap work.
+- **Not built / I:** the colony block and "+ Weiter +" of a colony tile (W21),
+  the meaning of the number after the position, Enter vs. click (both work),
+  what arrows do.
+- Recorder events: `endturn-prompt on|end <why>|left`, `prompt on|off n=..|hold|
+  restart|freeze|clear <why>`, `click-ignored prompt`.
+
+Tests: `ClassicTurnFlowTest.testPromptMode` / `testPromptModeKeepsAndLeaves` /
+`testVillageCancel` (the stages, the forced-ON end one frame before the
+request, the pref off in the mode, leaving by a unit, the village tile),
+`ClassicMapViewerTest.testPromptSquare` (phases, hold and restart, freeze,
+what clears it, the minimap pixel), `ClassicHudTest.testTileMode*` (lines,
+layout, word and square pixels, live tile facts), `ClassicBlinkTest.
+testArmDelayed`.
 
 ## In-game HUD (menu strip, dropdowns, right panel)
 

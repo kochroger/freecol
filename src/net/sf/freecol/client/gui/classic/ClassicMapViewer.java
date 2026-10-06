@@ -299,6 +299,38 @@ final class ClassicMapViewer extends JPanel {
      */
     private boolean blinkHeld = false;
 
+    /**
+     * The Spielzugende mode's cursor tile (build spec W17), or null: a
+     * white 16x16 square on it, blinking on its own clock in step with the
+     * panel's word, while the unit blink is idle (no active unit).
+     */
+    private Tile promptTile = null;
+
+    /** The square is in its OFF phase (the tile drawn as it is). */
+    private boolean promptOff = false;
+
+    /**
+     * The end command froze the square ON: it stays until the map is next
+     * repainted over it -- a slide, a jump, the next activation (clip004
+     * #2766, landing-slow #2902/#5525/#6460).
+     */
+    private boolean promptFrozen = false;
+
+    /** A box, a menu or a screen is up: the square's phase is frozen until it closes. */
+    private boolean promptHeld = false;
+
+    /** The square's clock (the blink's half-period, ON first). */
+    private final ClassicBlink promptBlink;
+
+    /** The last unit made active (the Spielzugende mode's cursor tile is its tile). */
+    private Unit lastUnit = null;
+
+    /**
+     * The delay of the square's ON after a box or a menu closes: one frame
+     * (landing-slow #5320 restore -&gt; #5321 ON, clip004 #4726 -&gt; #4727).
+     */
+    static final double PROMPT_RESTART_MS = 15.0;
+
     /** FONTTINY and the pack's texts for the flag letters; null without the pack. */
     private ClassicFont iconFont;
     private ClassicText iconText;
@@ -364,6 +396,8 @@ final class ClassicMapViewer extends JPanel {
         this.tileArt = new ClassicTileArt(lib);
         this.blink = new ClassicBlink(ClassicSlide.SYSTEM,
             SwingUtilities::invokeLater, this::blinkToggle, blinkThread);
+        this.promptBlink = new ClassicBlink(ClassicSlide.SYSTEM,
+            SwingUtilities::invokeLater, this::promptToggle, blinkThread);
         setBackground(Color.BLACK);
         setOpaque(true);
         setFocusable(true);
@@ -446,10 +480,13 @@ final class ClassicMapViewer extends JPanel {
      * <p>Keys follow the original 1994 game's reference (from the manual):
      * <ul>
      *   <li><b>Enter</b> — end of turn ("Pressing the Space Bar, Enter key … causes
-     *   the next game turn to begin").</li>
+     *   the next game turn to begin"), in the Spielzugende mode only (or with
+     *   nothing left to move; build spec W17): with units left the turn ends by
+     *   itself once none can move.</li>
      *   <li><b>Space</b> — "no orders": skip the active unit for this turn.  With
-     *   no active unit, Space likewise ends the turn (matching the original, where
-     *   Space advances the turn once every unit is done).</li>
+     *   no active unit, Space likewise ends the turn, under the same condition as
+     *   Enter (matching the original, where Space advances the turn once every
+     *   unit is done).</li>
      *   <li><b>W</b> — wait: temporarily skip this unit, cycle through the others,
      *   then return to it.</li>
      *   <li><b>B</b> — build a colony with the active unit ("To build a colony,
@@ -502,6 +539,14 @@ final class ClassicMapViewer extends JPanel {
      */
     private void endTurn() {
         if (this.gui != null) {
+            // Only in the Spielzugende mode, or with nothing left to move
+            // (spec delta W17 item 7): the original has no other end of
+            // turn, it ends by itself when no unit can move.
+            if (!this.gui.mayEndTurnByKey()) {
+                ClassicFrameRecorder.event("key-ignored", "end-turn mode="
+                    + this.viewMode);
+                return;
+            }
             this.gui.requestEndTurn("key");
             return;
         }
@@ -787,6 +832,7 @@ final class ClassicMapViewer extends JPanel {
         if (tile != this.selectedTile || this.viewMode != GUI.ViewMode.TERRAIN) {
             this.changeToShow = true;   // the cursor moves
         }
+        clearPrompt("terrain", true);
         this.viewMode = GUI.ViewMode.TERRAIN;
         this.selectedTile = tile;
         this.activeUnit = null;
@@ -811,8 +857,14 @@ final class ClassicMapViewer extends JPanel {
     void changeToMoveUnits(Unit unit) {
         final boolean activated = unit != this.activeUnit
             || this.viewMode != GUI.ViewMode.MOVE_UNITS;
+        // The Spielzugende square goes (left, or frozen until this
+        // repaint: the first unit of the next turn, clip004 #2766).  Not
+        // for no unit: the controller's "restore the active unit" after
+        // our end's goto pass (doExecuteGotoOrders) is no activation.
+        if (unit != null) clearPrompt("activate", true);
         this.viewMode = GUI.ViewMode.MOVE_UNITS;
         this.activeUnit = unit;
+        if (unit != null) this.lastUnit = unit;
         boolean jumped = false;
         if (unit != null && unit.getTile() != null) {
             this.selectedTile = unit.getTile();
@@ -920,6 +972,9 @@ final class ClassicMapViewer extends JPanel {
         if (o != null && o[0] == v[0] && o[1] == v[1]) return false;
         this.origin = v;
         this.changeToShow = true;
+        // A jump repaints the whole map: a frozen Spielzugende square goes
+        // with it (clip004 #5058); a live one stays on its tile.
+        if (this.promptFrozen) clearPrompt("jump", true);
         if (ClassicFrameRecorder.on()) {
             ClassicFrameRecorder.event("view-jump", reason + " "
                 + ((o == null) ? "-" : o[0] + "," + o[1]) + " -> "
@@ -979,6 +1034,11 @@ final class ClassicMapViewer extends JPanel {
             return;
         }
         final boolean own = isOwn(unit);
+        // A frozen Spielzugende square stays on the screen until a paint
+        // covers it: this slide's steps where they cross it, else its
+        // final draw (landing-slow #5525, #2902/#6460); its minimap pixel
+        // goes with the final draw.
+        final boolean promptGone = this.promptFrozen && clearPrompt("slide", false);
         // A chained slide: draw the previous slide's final frame if no
         // paint has yet, then keep the pause after it.
         if (this.finalDrawPending) paintNow(null);
@@ -1056,6 +1116,7 @@ final class ClassicMapViewer extends JPanel {
             // refresh after the final draw re-bases it (build spec W3).
             rearmBlink("slide");
             repaint();
+            if (promptGone && this.gui != null) this.gui.paintBlinkDot();
         }
     }
 
@@ -1217,6 +1278,7 @@ final class ClassicMapViewer extends JPanel {
             ClassicFrameRecorder.event("blink", "hold " + reason);
         }
         setBlinkOff(false);
+        holdPrompt(reason);
     }
 
     /**
@@ -1229,9 +1291,197 @@ final class ClassicMapViewer extends JPanel {
     void resumeBlink(String reason) {
         if (blinkHoldReason() == null) {
             rearmBlink(reason);
+            resumePrompt(reason);
         } else {
             this.blinkHeld = true;
         }
+    }
+
+
+    // The Spielzugende mode's square (build spec W17)
+
+    /**
+     * The Spielzugende mode begins: the white square on {@code tile}, ON
+     * now, and its clock started (the first OFF one half-period later,
+     * landing-slow #2306 -&gt; #2328 = 23 frames).  Painted at once, with the
+     * panel's tile mode ({@link ClassicGUI}).
+     *
+     * @param tile The cursor tile, or null for none.
+     */
+    void enterPrompt(Tile tile) {
+        this.promptBlink.stop();
+        this.promptTile = null;
+        if (tile == null) return;
+        this.promptTile = tile;
+        this.promptOff = false;
+        this.promptFrozen = false;
+        this.promptHeld = blinkHoldReason() != null;
+        if (!this.promptHeld) this.promptBlink.arm();
+        this.changeToShow = true;
+        ClassicFrameRecorder.event("prompt", "on " + xy(tile)
+            + (this.promptHeld ? " held" : ""));
+        paintPromptCell();
+    }
+
+    /**
+     * A toggle of the square's clock (the event thread): OFF for odd
+     * {@code n}, ON for even, while nothing holds it; a hold freezes the
+     * phase (landing-slow #4731-#5320, clip004 #4028-#4726), and the first
+     * toggle after a hold that ended without a close hook restarts it.
+     *
+     * @param n The toggle.
+     */
+    void promptToggle(int n) {
+        if (this.promptTile == null || this.promptFrozen) {
+            this.promptBlink.stop();
+            return;
+        }
+        if (blinkHoldReason() != null) {
+            if (!this.promptHeld) {
+                this.promptHeld = true;
+                ClassicFrameRecorder.event("prompt", "hold");
+            }
+            return;
+        }
+        if (this.promptHeld) {
+            resumePrompt("toggle");
+            return;
+        }
+        final boolean off = ClassicBlink.isOff(n);
+        final long late = System.nanoTime()
+            - ClassicBlink.dueNanos(this.promptBlink.phaseStart(), n);
+        setPromptOff(off);
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("prompt", (off ? "off" : "on")
+                + " n=" + n + " at=" + xy(this.promptTile)
+                + String.format(Locale.ROOT, " late=%.2fms", late / 1e6));
+        }
+    }
+
+    /** A box or a menu opens in the mode: the square's phase is frozen. */
+    private void holdPrompt(String reason) {
+        if (this.promptTile == null || this.promptFrozen || this.promptHeld) return;
+        this.promptHeld = true;
+        this.promptBlink.stop();
+        ClassicFrameRecorder.event("prompt", "hold " + reason);
+    }
+
+    /**
+     * The box or menu has closed: the square (and the word) restart ON one
+     * frame after the close's restore, then blink on.
+     */
+    private void resumePrompt(String reason) {
+        if (this.promptTile == null || this.promptFrozen) return;
+        this.promptHeld = false;
+        this.promptBlink.armDelayed(PROMPT_RESTART_MS);
+        ClassicFrameRecorder.event("prompt", "restart " + reason);
+    }
+
+    /**
+     * Set the square's phase and paint it at once: the cell, and the
+     * panel's word and minimap pixel ({@link ClassicGUI#paintPromptPanel}).
+     */
+    private void setPromptOff(boolean off) {
+        if (off == this.promptOff) return;
+        this.promptOff = off;
+        this.changeToShow = true;
+        paintPromptCell();
+    }
+
+    /**
+     * The end command: the square ON at once (out of rhythm if it was
+     * OFF, landing-slow #5500) and frozen there.
+     */
+    void freezePrompt() {
+        if (this.promptTile == null) return;
+        this.promptFrozen = true;
+        this.promptHeld = false;
+        this.promptBlink.stop();
+        ClassicFrameRecorder.event("prompt", "freeze " + xy(this.promptTile));
+        if (this.promptOff) {
+            this.promptOff = false;
+            this.changeToShow = true;
+        }
+        paintPromptCell();
+    }
+
+    /**
+     * The square goes: the mode was left, or the paint that covers a frozen
+     * square comes.  A live mode's panel goes back to the unit block; a
+     * frozen one keeps the word until the wipe.
+     *
+     * @param why What clears it (for the recorder).
+     * @param paint Ask for the map's repaint and paint the panel's minimap
+     *     pixel now; false when the caller's own paints do it (a slide).
+     * @return True if there was a square.
+     */
+    boolean clearPrompt(String why, boolean paint) {
+        if (this.promptTile == null) return false;
+        final boolean frozen = this.promptFrozen;
+        this.promptTile = null;
+        this.promptOff = false;
+        this.promptFrozen = false;
+        this.promptHeld = false;
+        this.promptBlink.stop();
+        ClassicFrameRecorder.event("prompt", "clear " + why + (frozen ? " frozen" : ""));
+        if (paint) repaint();
+        if (this.gui != null) this.gui.promptCleared(frozen, paint);
+        return true;
+    }
+
+    /**
+     * Paint the square's cell now, and the panel's word and minimap
+     * pixel; a pending final draw paints the whole map instead.
+     */
+    private void paintPromptCell() {
+        final Tile t = this.promptTile;
+        final int[] o = this.origin;
+        if (this.finalDrawPending || t == null || o == null) {
+            repaint();
+        } else {
+            paintNow(new Rectangle(screenX(t.getX(), o[0]), screenY(t.getY(), o[1]),
+                                   tileW(), tileH()));
+        }
+        if (this.gui != null) this.gui.paintPromptPanel();
+    }
+
+    /** @return The Spielzugende mode's cursor tile, or null. */
+    Tile promptTile() {
+        return this.promptTile;
+    }
+
+    /** @return Whether the square is drawn now (ON, or frozen). */
+    boolean isPromptShown() {
+        return this.promptTile != null && (this.promptFrozen || !this.promptOff);
+    }
+
+    /** @return Whether the square is frozen by the end command. */
+    boolean isPromptFrozen() {
+        return this.promptTile != null && this.promptFrozen;
+    }
+
+    /** @return Whether the square's phase is frozen by a box or a menu. */
+    boolean isPromptHeld() {
+        return this.promptHeld;
+    }
+
+    /** @return Whether the square's clock runs. */
+    boolean isPromptArmed() {
+        return this.promptBlink.isArmed();
+    }
+
+    /**
+     * The tile the Spielzugende mode shows when no village decides it: the
+     * last active unit's tile (the target of its last move; landing-slow
+     * #2306, #6182, clip004 #1973), else the view's focus tile (the tile
+     * mode at a turn start, clip005 #18186).
+     *
+     * @return The tile, or null without a map.
+     */
+    Tile promptTileFor() {
+        final Unit u = this.lastUnit;
+        if (u != null && !u.isDisposed() && u.getTile() != null) return u.getTile();
+        return getFocus();
     }
 
     /**
@@ -1535,6 +1785,7 @@ final class ClassicMapViewer extends JPanel {
         this.disposed = true;
         stopEdgeScroll();
         this.blink.close();
+        this.promptBlink.close();
     }
 
     /** Resolve the map {@link Tile} under a screen point, or null if off-map. */
@@ -1569,6 +1820,19 @@ final class ClassicMapViewer extends JPanel {
         requestFocusInWindow();
         final Player player = this.freeColClient.getMyPlayer();
 
+        if (this.gui != null && this.gui.turnPrompt()) {
+            // The Spielzugende mode: only an own unit that can still move
+            // takes a click, and becomes active (build spec W17 item 6, I);
+            // the rest of the map is inert, as the arrows are.
+            final Unit u = (tile.isExplored()) ? tile.getFirstUnit() : null;
+            if (u != null && player != null && player.owns(u)
+                && u.getMovesLeft() > 0) {
+                this.gui.changeView(u, false);
+            } else {
+                ClassicFrameRecorder.event("click-ignored", "prompt " + xy(tile));
+            }
+            return;
+        }
         if (!tile.isExplored()) { // Select (focus) unexplored tiles
             this.gui.setFocus(tile);
             return;
@@ -1656,6 +1920,12 @@ final class ClassicMapViewer extends JPanel {
         // The original draws no box around the active unit; the cursor
         // marks only a selected tile (TERRAIN).
         if (this.viewMode == GUI.ViewMode.TERRAIN) paintCursor(g, vx, vy);
+        // The Spielzugende mode's square, over terrain and sprite (W17).
+        final Tile pt = this.promptTile;
+        if (pt != null && isPromptShown()) {
+            ClassicHud.paintPromptSquare(g, screenX(pt.getX(), vx),
+                                         screenY(pt.getY(), vy), scale());
+        }
         boolean changed = this.changeToShow || this.animUnit != null;
         this.changeToShow = false;
         if (this.finalDrawPending && this.animUnit == null) {

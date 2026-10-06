@@ -195,6 +195,91 @@ public class ClassicMapViewerTest extends FreeColTestCase {
     }
 
     /**
+     * Build spec W17: the Spielzugende square on the last unit's tile, ON
+     * first and toggled by its own clock, frozen in its phase while a box
+     * or a menu is up and restarted ON after it, forced ON and frozen by
+     * the end command, gone with the next activation (frozen: also with a
+     * jump); its minimap pixel white while it is drawn.
+     */
+    public void testPromptSquare() {
+        final Game game = getStandardGame();
+        final Map map = new MapBuilder(game).setDimensions(58, 72)
+            .setBaseTileType(spec().getTileType("model.tile.ocean"))
+            .setExploredByAll(true).build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile sea = map.getTile(30, 30);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, null, null, false);
+        final Unit ship = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        mv.setFocus(sea);
+        mv.changeToMoveUnits(ship);
+        ship.setMovesLeft(0);
+        mv.changeToEndTurn();
+        assertNull(mv.getActiveUnit());
+        assertSame(sea, mv.promptTileFor());     // the last unit's tile
+
+        mv.enterPrompt(sea);
+        assertSame(sea, mv.promptTile());
+        assertTrue(mv.isPromptShown());
+        assertTrue(mv.isPromptArmed());
+        assertFalse(mv.isBlinkArmed());          // no unit blinks in the mode
+        mv.promptToggle(1);
+        assertFalse(mv.isPromptShown());
+        mv.promptToggle(2);
+        assertTrue(mv.isPromptShown());
+        mv.promptToggle(3);
+        // A menu opens while OFF: the phase stays (no forced ON), the clock
+        // waits; the close restarts it (ON one frame later).
+        mv.holdBlink("menu");
+        assertTrue(mv.isPromptHeld());
+        assertFalse(mv.isPromptShown());
+        assertFalse(mv.isPromptArmed());
+        mv.resumeBlink("menu");
+        assertFalse(mv.isPromptHeld());
+        assertTrue(mv.isPromptArmed());
+        assertFalse(mv.isPromptShown());
+        mv.promptToggle(2);
+        assertTrue(mv.isPromptShown());
+        // The end command while OFF: ON at once, frozen.
+        mv.promptToggle(3);
+        assertFalse(mv.isPromptShown());
+        mv.freezePrompt();
+        assertTrue(mv.isPromptShown());
+        assertTrue(mv.isPromptFrozen());
+        assertFalse(mv.isPromptArmed());
+        mv.promptToggle(5);
+        assertTrue(mv.isPromptShown());
+
+        // The minimap pixel: white while the square is drawn.
+        final ClassicHud.MinimapModel mm = ClassicHud.minimapOf(map, 23, 24);
+        assertEquals(0xFF7100, mm.at(30, 30));
+        assertEquals(0xFFFFFF, ClassicInfoPanel.promptDot(mm, sea, true).at(30, 30));
+        assertSame(mm, ClassicInfoPanel.promptDot(mm, sea, false));
+        assertSame(mm, ClassicInfoPanel.promptDot(mm, null, true));
+
+        // Frozen: a jump takes it away; live: it stays on its tile.
+        final int[] o = mv.viewOrigin();
+        assertTrue(mv.jumpTo(map.getTile(o[0] + 7, o[1] + 11), "test"));
+        assertNull(mv.promptTile());
+        assertFalse(mv.isPromptShown());
+        mv.enterPrompt(sea);
+        assertTrue(mv.jumpTo(map.getTile(o[0] + 7, o[1] + 6), "test"));
+        assertSame(sea, mv.promptTile());
+        // The next activation ends it.
+        ship.setMovesLeft(3);
+        mv.changeToMoveUnits(ship);
+        assertNull(mv.promptTile());
+        assertFalse(mv.isPromptArmed());
+        mv.enterPrompt(sea);
+        mv.changeToTerrain(sea);
+        assertNull(mv.promptTile());
+        mv.enterPrompt(null);
+        assertNull(mv.promptTile());
+        mv.dispose();
+    }
+
+    /**
      * Build spec W5: after its last move the unit stays on screen and does
      * not blink (landfall 03 section 1); the panel keeps the block from
      * before that move until another unit comes up (W5b); the hand-over

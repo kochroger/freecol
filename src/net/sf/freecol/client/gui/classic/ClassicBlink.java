@@ -197,6 +197,27 @@ final class ClassicBlink {
     }
 
     /**
+     * Start a new phase whose ON comes {@code delayMs} from now, as toggle
+     * 2 (ON), then OFF one half-period after it, and so on: the
+     * Spielzugende mode's restart one frame after a box closes (build spec
+     * W17, landing-slow #5320 -&gt; #5321).  No panel re-basing.
+     *
+     * @param delayMs The delay of the ON, less than a half-period.
+     */
+    synchronized void armDelayed(double delayMs) {
+        if (this.closed) return;
+        final long now = this.clock.now();
+        this.t0 = now + Math.round(delayMs * NS_PER_MS)
+            - Math.round(2 * HALF_PERIOD_MS * NS_PER_MS);
+        this.armedAt = now;
+        this.armed = true;
+        this.awaitPanel = false;
+        newGeneration();
+        this.lastPosted = 1;   // toggle 1 (OFF) lies before now: never posted
+        startThread();
+    }
+
+    /**
      * The panel was painted: if this is the refresh of the current arm,
      * the phase starts now instead.
      *

@@ -129,6 +129,30 @@ public class ClassicBlinkTest extends TestCase {
         assertEquals(328.5, slopeMs(r, 7_000 * MS, 31), 1e-9);
     }
 
+    /**
+     * The Spielzugende mode's restart after a box (build spec W17): ON
+     * (toggle 2) one frame after the close, then OFF a half-period later
+     * on that grid; the panel never re-bases it.
+     */
+    public void testArmDelayed() {
+        final Rig r = new Rig(9_000 * MS);
+        r.blink.arm();
+        r.step();                                   // 1, OFF
+        r.blink.armDelayed(15.0);
+        final long t = 9_000 * MS + H;
+        assertTrue(r.blink.isArmed());
+        assertFalse(r.blink.panelPainted());
+        assertEquals(t + 15 * MS, r.step());        // ON, 15 ms after the close
+        assertEquals(2, (int) r.toggles.get(r.toggles.size() - 1));
+        assertEquals(t + 15 * MS + H, r.step());    // OFF a half-period later
+        assertEquals(3, (int) r.toggles.get(r.toggles.size() - 1));
+        assertEquals(t + 15 * MS + 2 * H, r.step());
+        // A stale toggle of the phase before is dropped.
+        final int g = r.blink.generation();
+        r.blink.armDelayed(15.0);
+        assertFalse(r.blink.isCurrent(g));
+    }
+
     /** A late wake-up never repeats a toggle and keeps the grid. */
     public void testLateWakeUp() {
         final Rig r = new Rig(0L);

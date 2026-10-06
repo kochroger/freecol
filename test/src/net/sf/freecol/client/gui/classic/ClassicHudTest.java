@@ -31,6 +31,8 @@ import java.util.List;
 
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Player;
+import net.sf.freecol.tools.classicassets.ClassicAssetDecoderTest;
+import net.sf.freecol.tools.classicassets.FfDecoder;
 import net.sf.freecol.util.test.FreeColTestCase;
 
 import junit.framework.TestCase;
@@ -201,10 +203,21 @@ public class ClassicHudTest extends TestCase {
         n.append("\r\n@FORESTED\r\n");
         for (int i = 0; i < 8; i++) n.append("F").append(i).append("-, 1\r\n");
         n.append("\r\n@OTHER\r\nArc, 1\r\nOce, 1\r\nSea, 1\r\nMnt, 1\r\nHil, 1\r\n\r\n"
-                 + "@OTHER_NAMES\r\nWoods\r\nRiv\r\nBigRiv\r\n\r\n");
+                 + "@OTHER_NAMES\r\nWoods\r\nRiv\r\nBigRiv\r\nSmallRiv\r\nUnexp\r\n\r\n");
+        n.append("@RESOURCE\r\n");
+        for (int i = 0; i < 14; i++) n.append("R").append(i).append(", 6\r\n");
+        n.append("\r\n@COLONYNAME\r\nNewE\r\nNewF\r\nNewS\r\nNewH\r\n\r\n@TRIBES\r\n");
+        final int[] levels = { 3, 2, 1, 1, 1, 0, 0, 0 };   // as in NAMES.TXT
+        for (int i = 0; i < 8; i++) {
+            n.append("Tribe").append(i).append(", Tribe").append(i).append(", Gifts, ")
+                .append(levels[i]).append(", 54\r\n");
+        }
+        n.append("\r\n@LEVELS\r\nLv0, a camp, camps\r\nLv1, a village, villages\r\n"
+                 + "Lv2, a town, towns\r\nLv3, a town, towns\r\nAll, a capital, capitals\r\n\r\n");
         final StringBuilder l = new StringBuilder("@INFO\r\nMv:\r\nAt:\r\n\r\n@MISC\r\n");
-        for (int i = 0; i < 70; i++) {
-            l.append(i == 4 ? "Exp" : i == 31 ? "Path" : i == 64 ? "Vet" : "m" + i).append("\r\n");
+        for (int i = 0; i < 90; i++) {
+            l.append(i == 2 ? "AA" : i == 4 ? "Exp" : i == 18 ? "Land" : i == 31 ? "Path"
+                     : i == 64 ? "Vet" : i == 82 ? "Plow" : "m" + i).append("\r\n");
             if (i == 36) l.append("\r\n");     // a blank line inside, as in the file
         }
         final File g = new File(dir, "GAME.TXT"), nf = new File(dir, "NAMES.TXT"),
@@ -291,10 +304,11 @@ public class ClassicHudTest extends TestCase {
             assertEquals("[(260,142,gold) J19, (260,148,gold) O0]", lines(ClassicHud.listLines(t,
                 facts(6, "freeColonist", null, ClassicHud.ORDERS_NONE, -1, null, false, 3, 0, 0),
                 138)));
-            // A ship in a list: only the orders line; the next entry 18 lower.
+            // A ship in a list: its type name over the orders (clip007
+            // #3107: "Handelsschiff" / "Keine Befehle"); the next entry 18 lower.
             final List<ClassicHud.TextLine> s = ClassicHud.listLines(t, facts(13, "caravel",
                 null, ClassicHud.ORDERS_NONE, -1, null, false, 12, 0, 0), 150);
-            assertEquals("[(260,154,gold) O0]", lines(s));
+            assertEquals("[(260,154,gold) U13, (260,160,gold) O0]", lines(s));
             assertEquals(168, ClassicHud.nextListY(150, s));
             assertEquals("F2- Woods", ClassicHud.terrainName(t, "model.tile.mixedForest"));
             assertEquals("T2", ClassicHud.terrainName(t, "model.tile.plains"));
@@ -382,6 +396,193 @@ public class ClassicHudTest extends TestCase {
         assertEquals(new Rectangle(315, 197, 5, 3), ClassicHud.INDICATOR);
         // The old constructors paint no indicator.
         assertEquals(-1, new ClassicHud.PanelModel(null, null, null, true).indicator);
+    }
+
+    // The tile mode of the Spielzugende mode (build spec W17).
+
+    private static ClassicHud.TileFacts tileFacts(boolean land, String name, int tribe,
+                                                  int river, boolean road, boolean plowed,
+                                                  int resource, ClassicHud.SettlementFacts s,
+                                                  ClassicHud.UnitFacts... units) {
+        return new ClassicHud.TileFacts(50, 43, ClassicHud.REGION_UNKNOWN, land, name, 3,
+            tribe, land ? "model.tile.rainForest" : "model.tile.ocean", river, road,
+            plowed, resource, s, new java.util.ArrayList<>(Arrays.asList(units)));
+    }
+
+    /**
+     * The lines (landing-slow #2306/#4193/#6182, clip005 #18186): "Ort"
+     * at (242,68), the land name on land only, the terrain, then river,
+     * road, plowing and resource, 7 px apart; the land's name is the
+     * player's, the nation's default, or the tribe's at its village.
+     */
+    public void testTileModeLines() throws IOException {
+        final File dir = Files.createTempDirectory("classic-hud-t").toFile();
+        try {
+            final ClassicText t = unitTexts(dir);
+            assertEquals("[(242,68) At: (50, 43) 1, (242,75) NewH, (242,82) (F7- Woods)]",
+                lines(ClassicHud.tileLines(t, tileFacts(true, null, -1, 0, false, false, -1,
+                                                        null))));
+            assertEquals("[(242,68) At: (50, 43) 1, (242,75) (Oce)]",
+                lines(ClassicHud.tileLines(t, tileFacts(false, "Mine", -1, 0, false, false,
+                                                        -1, null))));
+            assertEquals("[(242,68) At: (50, 43) 1, (242,75) Mine, (242,82) (F7- Woods), "
+                + "(242,89) (SmallRiv), (242,96) (Path), (242,103) (Plow), (242,110) (R10)]",
+                lines(ClassicHud.tileLines(t, tileFacts(true, "Mine", -1, 1, true, true,
+                    ClassicHud.resourceRow("model.resource.lumber"), null))));
+            assertEquals("(BigRiv)", ClassicHud.tileLines(t, tileFacts(true, null, -1, 2,
+                false, false, -1, null)).get(3).text);
+            assertEquals("Tribe2 Land", ClassicHud.landName(t, tileFacts(true, "Mine", 2, 0,
+                false, false, -1, null)));
+            assertNull(ClassicHud.landName(t, tileFacts(false, "Mine", 2, 0, false, false,
+                                                        -1, null)));
+            // The tables.
+            assertEquals(10, ClassicHud.resourceRow("model.resource.lumber"));
+            assertEquals(9, ClassicHud.resourceRow("model.resource.game"));
+            assertEquals(8, ClassicHud.resourceRow("model.resource.furs"));
+            assertEquals(-1, ClassicHud.resourceRow("model.resource.unknown"));
+            assertEquals(2, ClassicHud.tribeRow("model.nation.arawak"));
+            assertEquals(7, ClassicHud.tribeRow("model.nation.tupi"));
+            assertEquals(-1, ClassicHud.tribeRow("model.nation.dutch"));
+            // A village entry: tribe and kind, green at x 262, cell + 4 / + 10.
+            assertEquals("[(262,103) Tribe2, (262,109) a village]", lines(
+                ClassicHud.settlementLines(t, new ClassicHud.SettlementFacts(null, 2, false),
+                                           99)));
+            assertEquals("[(262,103) Tribe2, (262,109) a capital]", lines(
+                ClassicHud.settlementLines(t, new ClassicHud.SettlementFacts(null, 2, true),
+                                           99)));
+            assertEquals("AA", ClassicHud.promptWord(t));
+        } finally {
+            dir.delete();
+        }
+    }
+
+    /**
+     * The layout: the entries 10 below the last line, the word 7 below
+     * where the next entry would go -- 117 under one unit at 92 (clip004
+     * #1974, landing-slow #2306), 124 at 99 (#6182), 129 under a village
+     * at 99 (#4193) -- 15 below the last line without an entry, never
+     * below 192 (clip005 #15391).
+     */
+    public void testTileModeLayout() throws IOException {
+        final File dir = Files.createTempDirectory("classic-hud-t").toFile();
+        try {
+            final ClassicText t = unitTexts(dir);
+            final ClassicHud.UnitFacts vet = facts(8, "veteranSoldier", "soldier",
+                ClassicHud.ORDERS_NONE, -1, null, false, 0, 50, 43);
+            assertTrue(Arrays.equals(new int[] { 117, 92 }, ClassicHud.tileLayout(t,
+                tileFacts(true, null, -1, 0, false, false, -1, null, vet))));
+            assertTrue(Arrays.equals(new int[] { 124, 99 }, ClassicHud.tileLayout(t,
+                tileFacts(true, null, -1, 0, false, false, 10, null, vet))));
+            assertTrue(Arrays.equals(new int[] { 129, 99 }, ClassicHud.tileLayout(t,
+                tileFacts(true, null, 2, 0, true, false, -1,
+                          new ClassicHud.SettlementFacts(null, 2, false)))));
+            assertTrue(Arrays.equals(new int[] { 90 }, ClassicHud.tileLayout(t,
+                tileFacts(false, null, -1, 0, false, false, -1, null))));
+            // Many units: the word stops at 192; entries past the bottom are skipped.
+            final ClassicHud.UnitFacts[] many = new ClassicHud.UnitFacts[8];
+            Arrays.fill(many, vet);
+            final int[] lay = ClassicHud.tileLayout(t,
+                tileFacts(true, null, -1, 0, false, false, -1, null, many));
+            assertEquals(192, lay[0]);
+            assertEquals(92, lay[1]);
+            assertEquals(110, lay[2]);
+            assertEquals(182, lay[6]);
+            assertEquals(-1, lay[7]);
+            // Its press area: x 242, the word's glyph box.
+            assertEquals(new Rectangle(242, 117, 45, 7), ClassicHud.promptWordBounds(null, t,
+                tileFacts(true, null, -1, 0, false, false, -1, null, vet)));
+        } finally {
+            dir.delete();
+        }
+    }
+
+    /**
+     * The paint: the panel's tile mode instead of the unit block, the word
+     * white while ON and black while OFF at its place, nothing else
+     * different; the map's square is the cell's 60 border pixels.
+     */
+    public void testTileModePaint() throws IOException {
+        final File dir = Files.createTempDirectory("classic-hud-t").toFile();
+        try {
+            final ClassicText t = unitTexts(dir);
+            final FfDecoder.Font ff = FfDecoder.decodePart(ClassicAssetDecoderTest.ffPart(
+                2, 3, new int[][] { { 65, 3,  1, 0, 0,   0, 1, 0 } }));
+            final ClassicFont font = ClassicFont.fromAtlas(FfDecoder.toAtlas(ff),
+                                                           FfDecoder.metrics(ff));
+            final ClassicHud.TileFacts f = tileFacts(false, null, -1, 0, false, false, -1,
+                                                     null);
+            final BufferedImage on = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+            final BufferedImage off = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+            Graphics2D g = on.createGraphics();
+            ClassicHud.paintPanel(g, font, null, t, new ClassicHud.PanelModel(null, null,
+                null, false, null, null, -1, f, ClassicHud.PROMPT_ON_RGB));
+            g.dispose();
+            g = off.createGraphics();
+            ClassicHud.paintPanel(g, font, null, t, new ClassicHud.PanelModel(null, null,
+                null, false, null, null, -1, f, ClassicHud.PROMPT_OFF_RGB));
+            g.dispose();
+            final int wy = ClassicHud.tileLayout(t, f)[0];
+            int changed = 0;
+            for (int y = 0; y < 200; y++) {
+                for (int x = 0; x < 320; x++) {
+                    if (on.getRGB(x, y) == off.getRGB(x, y)) continue;
+                    changed++;
+                    assertTrue(x + "," + y, x >= 242 && x < 248 && y >= wy && y < wy + 2);
+                    assertEquals(0xFFFFFF, rgb(on, x, y));
+                    assertEquals(0x000000, rgb(off, x, y));
+                }
+            }
+            assertEquals(4, changed);   // "AA": two ink pixels per glyph
+
+            // The square: 60 native pixels, at any scale.
+            for (int s : new int[] { 1, 3 }) {
+                final BufferedImage m = new BufferedImage(64 * s, 64 * s,
+                                                          BufferedImage.TYPE_INT_RGB);
+                g = m.createGraphics();
+                ClassicHud.paintPromptSquare(g, 16 * s, 16 * s, s);
+                g.dispose();
+                int white = 0;
+                for (int y = 0; y < m.getHeight(); y += s) {
+                    for (int x = 0; x < m.getWidth(); x += s) {
+                        if (rgb(m, x, y) != 0xFFFFFF) continue;
+                        white++;
+                        final int cx = x / s - 16, cy = y / s - 16;
+                        assertTrue(cx + "," + cy, cx >= 0 && cx < 16 && cy >= 0 && cy < 16
+                            && (cx == 0 || cx == 15 || cy == 0 || cy == 15));
+                    }
+                }
+                assertEquals(60, white);
+            }
+        } finally {
+            dir.delete();
+        }
+    }
+
+    /** The facts of a live tile: units in order, the tribe at its village, the extras. */
+    public void testTileFactsOf() {
+        final Game game = FreeColTestCase.getStandardGame();
+        final net.sf.freecol.common.model.Map map = FreeColTestCase.getTestMap(
+            FreeColTestCase.spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final net.sf.freecol.common.model.Tile tile = map.getTile(5, 5);
+        final ClassicHud.UnitFacts u = facts(8, "veteranSoldier", "soldier",
+            ClassicHud.ORDERS_NONE, -1, null, false, 0, 5, 5);
+        ClassicHud.TileFacts f = ClassicHud.TileFacts.of(tile, dutch, null, Arrays.asList(u));
+        assertEquals(5, f.x);
+        assertEquals(5, f.y);
+        assertTrue(f.land);
+        assertEquals(3, f.nation);
+        assertEquals(-1, f.tribeRow);
+        assertNull(f.settlement);
+        assertNull(f.landName);
+        assertEquals("model.tile.plains", f.terrainId);
+        assertEquals(1, f.units.size());
+        dutch.setNewLandName("Mine");
+        f = ClassicHud.TileFacts.of(tile, dutch, null, null);
+        assertEquals("Mine", f.landName);
+        assertEquals(0, f.units.size());
+        assertEquals(ClassicHud.REGION_UNKNOWN, f.region);
     }
 
     /** The HUD canvas at 1920x1080: scale 5, strip/map/panel on one grid. */
