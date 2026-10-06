@@ -181,9 +181,15 @@ public final class ClassicAssetConverter {
      * sprites, already converted with the other SS frames, so no name is
      * ever transcribed anywhere; these two files only say WHEN and WHERE.
      * Like every other copy they stay in the git-ignored pack.
+     *
+     * <p>{@code PEDIA.TXT} is the Colonizopedia's text (the founding
+     * fathers' pages, {@code @FATHERn}) and {@code COLONY.TXT} the colony
+     * names each nation offers in turn when a colony is founded; both are
+     * read by later screens (plan D8b and D4).
      */
     static final String[] TEXT_FILES = { "GAME.TXT", "NAMES.TXT", "LABELS.TXT",
-                                         "MENU.TXT", "OPENING.TXT", "PATH.DAT" };
+                                         "MENU.TXT", "OPENING.TXT", "PATH.DAT",
+                                         "PEDIA.TXT", "COLONY.TXT" };
 
     /**
      * Copy {@link #TEXT_FILES} byte for byte into {@code <pack>/text/}, under
@@ -204,9 +210,12 @@ public final class ClassicAssetConverter {
      * <p>A missing file is only a warning: the art is still worth having, and
      * the client then falls back to starting a game with defaults.
      *
+     * @param install The original's install directory.
+     * @param textDir The pack's {@code text/} directory (created if absent).
      * @return The number of files copied.
+     * @exception IOException if a file cannot be copied.
      */
-    private static int copyTexts(Path install, Path textDir) throws IOException {
+    static int copyTexts(Path install, Path textDir) throws IOException {
         Files.createDirectories(textDir);
         int n = 0;
         for (String name : TEXT_FILES) {
@@ -243,7 +252,11 @@ public final class ClassicAssetConverter {
         }
     }
 
-    /** Write the scaffold keys, then append the optional A2 aliases file. */
+    /**
+     * Write the scaffold keys, then append the optional A2 aliases file
+     * with its line ends as the scaffold's ({@code \n}), so the pack does
+     * not depend on how git checked the file out.
+     */
     private static void writeResourceProperties(Path path,
             TreeMap<String, String> entries, Path aliases) throws IOException {
         try (Writer w = Files.newBufferedWriter(path, StandardCharsets.UTF_8)) {
@@ -258,7 +271,8 @@ public final class ClassicAssetConverter {
             }
             if (aliases != null && Files.isRegularFile(aliases)) {
                 w.write("\n# --- A2 aliases (from tools/classic_assets/aliases.properties) ---\n");
-                w.write(Files.readString(aliases, StandardCharsets.UTF_8));
+                w.write(Files.readString(aliases, StandardCharsets.UTF_8)
+                    .replace("\r\n", "\n"));
             }
         }
     }

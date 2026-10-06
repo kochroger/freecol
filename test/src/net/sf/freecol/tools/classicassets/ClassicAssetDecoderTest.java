@@ -21,7 +21,13 @@ package net.sf.freecol.tools.classicassets;
 
 import java.awt.image.BufferedImage;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import junit.framework.TestCase;
 
@@ -295,5 +301,51 @@ public class ClassicAssetDecoderTest extends TestCase {
         assertEquals(1, img.getHeight());
         assertEquals(0xFFFF0000, img.getRGB(0, 0));   // opaque red
         assertEquals(0x00000000, img.getRGB(1, 0));   // transparent
+    }
+
+
+    /** The name the fake install below gives a text file (cases vary). */
+    private static String onDisk(String name) {
+        return name.equals("PEDIA.TXT") ? "pedia.txt"
+            : name.equals("COLONY.TXT") ? "Colony.Txt" : name;
+    }
+
+    /**
+     * The pack's {@code text/} gets every text file the screens read,
+     * PEDIA.TXT and COLONY.TXT included (plan D0f): found ignoring case,
+     * copied byte for byte under the upper-case name; a missing one is
+     * skipped.
+     */
+    public void testCopyTextsCopiesThePackTexts() throws Exception {
+        assertTrue(Arrays.asList(ClassicAssetConverter.TEXT_FILES)
+            .containsAll(List.of("GAME.TXT", "PEDIA.TXT", "COLONY.TXT")));
+        final Path install = Files.createTempDirectory("classic-install");
+        final Path text = install.resolve("pack").resolve("text");
+        try {
+            int written = 0;
+            for (String name : ClassicAssetConverter.TEXT_FILES) {
+                if (name.equals("PATH.DAT")) continue;          // a missing file
+                Files.write(install.resolve(onDisk(name)), new byte[] {
+                        0x1C, '\r', '\n', (byte) written });
+                written++;
+            }
+            assertEquals(written, ClassicAssetConverter.copyTexts(install, text));
+            final List<String> names;
+            try (Stream<Path> s = Files.list(text)) {
+                names = s.map(p -> p.getFileName().toString()).sorted()
+                    .collect(Collectors.toList());
+            }
+            assertEquals("[COLONY.TXT, GAME.TXT, LABELS.TXT, MENU.TXT, NAMES.TXT,"
+                + " OPENING.TXT, PEDIA.TXT]", names.toString());
+            for (String name : names) {
+                assertTrue(name, Arrays.equals(
+                    Files.readAllBytes(install.resolve(onDisk(name))),
+                    Files.readAllBytes(text.resolve(name))));
+            }
+        } finally {
+            try (Stream<Path> s = Files.walk(install)) {
+                s.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            }
+        }
     }
 }

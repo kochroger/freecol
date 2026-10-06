@@ -57,7 +57,8 @@ import net.sf.freecol.common.io.FreeColModFile;
  * <p>The pack layout is the converter's ({@code ClassicAssetConverter}):
  * {@code resources.properties} maps {@code image.classic_original.*} keys
  * onto PNG paths relative to the pack, font metrics are quoted string values,
- * {@code text/} holds verbatim copies of the original's GAME/NAMES/LABELS.TXT,
+ * {@code text/} holds verbatim copies of the original's GAME/NAMES/LABELS.TXT
+ * and the other text files ({@code ClassicAssetConverter.TEXT_FILES}),
  * and {@code ss-anchors.properties} the sprite-header anchors.
  *
  * <p>Thread-safe (all caches synchronized): the title screen prefetches the

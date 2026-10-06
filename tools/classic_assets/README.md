@@ -58,6 +58,11 @@ The `classic-assets` Ant target compiles the source and runs
    (`net.sf.freecol.client.gui.classic.ClassicText`) alone owns the format
    (the game's umlaut codes, markup, sections). A missing file is a warning;
    the client then skips the new-game screens and starts with defaults.
+   `MENU.TXT`, `OPENING.TXT` and `PATH.DAT` (the menu bar, the opening's
+   schedule and ship path) are copied the same way, and so are `PEDIA.TXT`
+   (the Colonizopedia, e.g. the founding fathers' pages) and `COLONY.TXT`
+   (the colony names each nation offers in turn) for the screens that come
+   later.
 4. Writes `ss-anchors.properties`: one line `STEM.SS.nnn=ax,ay` per SS frame,
    the raw bottom-centre screen anchor from bytes 8-11 of the frame's 16-byte
    sprite header (`SsDecoder.anchors`). The original places its sprites by

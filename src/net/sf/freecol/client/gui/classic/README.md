@@ -1328,12 +1328,16 @@ one with **B**; hosted in its own `JFrame` (no `Canvas`). Layout, top to bottom:
   along the very bottom. The red **"E"** at the bottom-right (part of the
   `COLONY.PIK` art) and **Escape** both close the screen.
 
-**Provisional `BUILDING.SS` frame map (`BUILDING_FRAMES`).** Which of the 48
-frames is which building was read off a labelled montage by eye. The clearly
-distinct sets are certain (fortification walls; dock/drydock/shipyard; the sooty
-blacksmith chain; the churches; the banner town hall), but several
-interchangeable house/shop/factory chains are best-effort — hence the hover name,
-which lets the expert spot a mis-mapped sprite and correct the table from a shot.
+**`BUILDING.SS` frame map (`BUILDING_FRAMES`, plan D0e).** The seven buildings
+a new colony starts with are matched on the original's colony screen (clip008,
+population 1): town hall 9, carpenter's 35, distiller's 27, weaver's 21,
+tobacconist's 24, fur trader's 32, blacksmith's 39. Each house's two upgrades
+are inferred as the next two frames (22/23, 25/26, 28/29, 33/34, 40/41; lumber
+mill 36), church and cathedral as the other two 53×37 frames 37/38, walls and
+harbour scenes by size and slot. The custom house and the armory chain draw no
+sprite until a capture shows them (the old townHall 19 / customHouse 9 were
+wrong: 9 is the town hall). Schools, chapel, press, storage and stables are
+older guesses by look; the hover name keeps a mis-mapped sprite legible.
 
 **Verified live (2026-07-14):** sailed the start ship to land, disembarked a
 pioneer (the multi-unit disembark choice dialog now works), founded a colony with
@@ -2608,7 +2612,9 @@ game opens on the original's first scene with the admiral (083/049, see
   runtime; tracked code holds only section names, line/index numbers,
   geometry and colours.
   - `ant classic-assets` copies `GAME.TXT`, `NAMES.TXT`, `LABELS.TXT` byte
-    for byte into the git-ignored `<pack>/text/` (they are copyrighted).
+    for byte into the git-ignored `<pack>/text/` (they are copyrighted),
+    and with them `MENU.TXT`, `OPENING.TXT`, `PATH.DAT`, `PEDIA.TXT` and
+    `COLONY.TXT`.
   - `ClassicText` decodes them with a 7-entry table (0x1C ö, 0x1D ß, 0x1E Ä,
     0x1F Ö, 0x5C Ü, 0x60 ä, 0x7F ü — the codes `ClassicFont.toCode` draws),
     never a charset, because ä, Ü and ü sit on printable ASCII. CR stripped,

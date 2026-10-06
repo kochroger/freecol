@@ -82,17 +82,16 @@ import net.sf.freecol.common.model.Unit;
  *   and amounts along the bottom.</li>
  * </ul>
  *
- * <p><b>Provisional building frame map.</b> {@code BUILDING.SS} holds 48 frames;
- * which frame is which building was read off a labelled montage by eye (as for
- * {@code TERRAIN.SS} / {@code PHYS0.SS} / {@code ICONS.SS} before it).  The
- * clearly-identifiable sets are certain — the fortification walls, the dock /
- * drydock / shipyard water scenes, the sooty blacksmith chain, the churches, the
- * town hall with its banner — but several of the interchangeable house/shop/
- * factory chains are a best-effort assignment pending the expert player's
- * sign-off.  Each building therefore also carries its localized <b>name tag</b>,
- * which the original only shows on hover: that makes a mis-mapped sprite legible
- * and lets the expert correct {@link #BUILDING_FRAMES} from a screenshot.  Both
- * are noted as follow-ups in CLASSIC_UI_PLAN.md.
+ * <p><b>Building frame map.</b> {@code BUILDING.SS} holds 48 frames.  The
+ * seven buildings a new colony starts with are matched against the
+ * original's colony screen (clip008, population 1: every sprite found with
+ * match 1.000): the town hall, the carpenter's and the five craft houses.
+ * Their upgrades are inferred as the consecutive frames after each house,
+ * the fortifications and harbour scenes by their size and slot; the
+ * buildings no frame could be tied to yet (custom house, armory chain)
+ * draw no sprite.  See {@link #BUILDING_FRAMES}.  Each
+ * building also carries its localized <b>name tag</b>, which the original
+ * only shows on hover, so a mis-mapped sprite stays legible.
  *
  * <p>Interaction is click-to-select, click-to-target — the same style as every
  * other classic screen (order buttons, report rows, the build queue, Europe
@@ -156,60 +155,84 @@ final class ClassicColonyPanel extends JPanel {
 
     /**
      * FreeCol building-type id (minus the {@code model.building.} prefix) to
-     * {@code BUILDING.SS} frame.  Provisional — see the class comment.  Types
-     * absent from the map (notably {@code depot} and {@code country}, which have
-     * no structure of their own in the original) simply draw no sprite.
+     * {@code BUILDING.SS} frame.  Types absent from the map draw no sprite:
+     * {@code depot} and {@code country}, which have no structure of their own
+     * in the original, and the ones no frame is tied to yet.
+     *
+     * <p>Sources (plan D0e; clip008 {@code 01-colony.md} &sect;2.3):
+     * <ul>
+     *   <li><b>Matched</b> on the original's colony screen at population 1:
+     *   the town hall and the six houses a new colony starts with.</li>
+     *   <li><b>Inferred</b>: each house's two upgrades are the next two
+     *   frames (same size class, the original numbers each chain in a row);
+     *   the lumber mill follows the carpenter's, the church and cathedral are
+     *   the two other 53&times;37 frames after it; the harbour scenes and
+     *   the walls by their size and slot (where tree frame 45 and the fence
+     *   16 stand in a new colony).  The schools, chapel, press, storage and
+     *   stables are older guesses by look, kept until a developed colony is
+     *   seen.</li>
+     *   <li><b>Unmapped</b> until a capture shows them: the custom house and
+     *   the armory, magazine and arsenal.  The 23&times;27 frames 18-20 are
+     *   likely candidates (20 is the newspaper's older guess), but they do
+     *   not fit one-to-one.</li>
+     * </ul>
      */
     private static final Map<String, Integer> BUILDING_FRAMES = new HashMap<>();
     static {
-        // Fortification walls (certain).
+        // Fortification walls (inferred: the fence 16's size and slot).
         BUILDING_FRAMES.put("stockade", 0);
         BUILDING_FRAMES.put("fort", 1);
         BUILDING_FRAMES.put("fortress", 2);
-        // Harbour scenes (certain).
+        // Harbour scenes (inferred: tree frame 45 is the scene without a pier).
         BUILDING_FRAMES.put("docks", 6);
         BUILDING_FRAMES.put("drydock", 7);
         BUILDING_FRAMES.put("shipyard", 8);
-        // Civic (the banner buildings + the colonnaded trade house).
-        BUILDING_FRAMES.put("townHall", 19);
+        // The town hall (matched).
+        BUILDING_FRAMES.put("townHall", 9);
+        // The press (by look).
         BUILDING_FRAMES.put("printingPress", 13);
         BUILDING_FRAMES.put("newspaper", 20);
-        BUILDING_FRAMES.put("customHouse", 9);
-        // Churches (certain).
+        // Churches: the chapel by look, the two 53x37 frames inferred.
         BUILDING_FRAMES.put("chapel", 12);
         BUILDING_FRAMES.put("church", 37);
         BUILDING_FRAMES.put("cathedral", 38);
-        // Schooling.
+        // Schooling (by look).
         BUILDING_FRAMES.put("schoolhouse", 3);
         BUILDING_FRAMES.put("college", 4);
         BUILDING_FRAMES.put("university", 5);
-        // Lumber -> hammers (the open shed and the water mill).
-        BUILDING_FRAMES.put("carpenterHouse", 35);
-        BUILDING_FRAMES.put("lumberMill", 36);
-        // Ore -> tools (the sooty, chimneyed chain; certain).
-        BUILDING_FRAMES.put("blacksmithHouse", 32);
-        BUILDING_FRAMES.put("blacksmithShop", 33);
-        BUILDING_FRAMES.put("ironWorks", 34);
-        // The interchangeable goods chains (provisional).
-        BUILDING_FRAMES.put("tobacconistHouse", 21);
-        BUILDING_FRAMES.put("tobacconistShop", 22);
-        BUILDING_FRAMES.put("cigarFactory", 23);
-        BUILDING_FRAMES.put("weaverHouse", 24);
-        BUILDING_FRAMES.put("weaverShop", 25);
-        BUILDING_FRAMES.put("textileMill", 26);
+        // The goods chains: each house matched, its upgrades the next frames.
+        BUILDING_FRAMES.put("weaverHouse", 21);
+        BUILDING_FRAMES.put("weaverShop", 22);
+        BUILDING_FRAMES.put("textileMill", 23);
+        BUILDING_FRAMES.put("tobacconistHouse", 24);
+        BUILDING_FRAMES.put("tobacconistShop", 25);
+        BUILDING_FRAMES.put("cigarFactory", 26);
         BUILDING_FRAMES.put("distillerHouse", 27);
         BUILDING_FRAMES.put("rumDistillery", 28);
         BUILDING_FRAMES.put("rumFactory", 29);
-        BUILDING_FRAMES.put("furTraderHouse", 18);
-        BUILDING_FRAMES.put("furTradingPost", 39);
-        BUILDING_FRAMES.put("furFactory", 40);
-        BUILDING_FRAMES.put("armory", 41);
-        BUILDING_FRAMES.put("magazine", 14);
-        BUILDING_FRAMES.put("arsenal", 15);
-        // Storage and livestock.
+        BUILDING_FRAMES.put("furTraderHouse", 32);
+        BUILDING_FRAMES.put("furTradingPost", 33);
+        BUILDING_FRAMES.put("furFactory", 34);
+        BUILDING_FRAMES.put("carpenterHouse", 35);
+        BUILDING_FRAMES.put("lumberMill", 36);
+        BUILDING_FRAMES.put("blacksmithHouse", 39);
+        BUILDING_FRAMES.put("blacksmithShop", 40);
+        BUILDING_FRAMES.put("ironWorks", 41);
+        // Storage and livestock (by look).
         BUILDING_FRAMES.put("warehouse", 47);
         BUILDING_FRAMES.put("warehouseExpansion", 15);
         BUILDING_FRAMES.put("stables", 46);
+    }
+
+    /**
+     * The {@code BUILDING.SS} frame of a building type.
+     *
+     * @param typeId The building type's id, with or without the
+     *     {@code model.building.} prefix.
+     * @return The frame, or null when the type draws no sprite.
+     */
+    static Integer buildingFrame(String typeId) {
+        return BUILDING_FRAMES.get(shortId(typeId));
     }
 
     private final FreeColClient freeColClient;
@@ -233,6 +256,17 @@ final class ClassicColonyPanel extends JPanel {
 
     /** The {@link Building}s parallel to {@link #buildingBounds}, as work targets. */
     private final List<Building> buildingTargets = new ArrayList<>();
+
+    /**
+     * While recording: each drawn building's type, frame and place, as
+     * the last paint left them, and as last logged (see
+     * {@link #recordBuildings}).
+     */
+    private final StringBuilder buildingsDrawn = new StringBuilder();
+    private String buildingsLogged = null;
+
+    /** The stills taken so far, for their names (EDT only). */
+    private static int stills = 0;
 
     /** The construction indicator's clickable band, set on each paint. */
     private final java.awt.Rectangle constructionBounds
@@ -416,10 +450,6 @@ final class ClassicColonyPanel extends JPanel {
     protected void paintComponent(Graphics g0) {
         super.paintComponent(g0);
         final Graphics2D g = (Graphics2D) g0.create();
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                           RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
-                           RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
         // Fit the 320x200 canvas into the window at the largest integer scale.
         this.scale = Math.max(1, Math.min(getWidth() / VW, getHeight() / VH));
@@ -427,6 +457,17 @@ final class ClassicColonyPanel extends JPanel {
         this.originY = (getHeight() - VH * this.scale) / 2;
         g.translate(this.originX, this.originY);
         g.scale(this.scale, this.scale);
+        paintCanvas(g);
+        g.dispose();
+        recordBuildings();
+    }
+
+    /** Paint the 320x200 canvas into {@code g}, in canvas coordinates. */
+    private void paintCanvas(Graphics2D g) {
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                           RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                           RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g.clipRect(0, 0, VW, VH);
 
         // Rebuilt across paintBuildings/paintWorkTiles/paintPopulation below,
@@ -441,7 +482,31 @@ final class ClassicColonyPanel extends JPanel {
         paintWorkTiles(g);
         paintBand(g);
         paintHover(g);
-        g.dispose();
+    }
+
+    /**
+     * While the acceptance recorder runs: log which sprite frame each
+     * building got and where ({@code colony-buildings}), and save the
+     * canvas as a still, whenever that changes.  This window is not in the
+     * HUD copy the recorder samples.
+     */
+    private void recordBuildings() {
+        if (!ClassicFrameRecorder.on()) return;
+        final String drawn = this.buildingsDrawn.toString();
+        if (drawn.equals(this.buildingsLogged)) return;
+        this.buildingsLogged = drawn;
+        final String name = "colony-" + (++stills);
+        ClassicFrameRecorder.event("colony-buildings",
+            name + " " + this.colony.getId() + drawn);
+        final BufferedImage still
+            = new BufferedImage(VW, VH, BufferedImage.TYPE_INT_RGB);
+        final Graphics2D g = still.createGraphics();
+        try {
+            paintCanvas(g);
+        } finally {
+            g.dispose();
+        }
+        ClassicFrameRecorder.still(name, still);
     }
 
     /**
@@ -511,11 +576,13 @@ final class ClassicColonyPanel extends JPanel {
         this.buildingBounds.clear();
         this.buildingNames.clear();
         this.buildingTargets.clear();
+        this.buildingsDrawn.setLength(0);
+        final boolean record = ClassicFrameRecorder.on();
         int x = 4;
         int y = AREA_Y + CONSTR_H + 5;
         int rowH = 0;
         for (Building b : this.colony.getBuildings()) {
-            final Integer frame = BUILDING_FRAMES.get(shortId(b.getType().getId()));
+            final Integer frame = buildingFrame(b.getType().getId());
             final BufferedImage img = (frame == null) ? null : buildingImage(frame);
             final int w = (img != null) ? img.getWidth() : 24;
             final int h = (img != null) ? img.getHeight() : 20;
@@ -525,6 +592,15 @@ final class ClassicColonyPanel extends JPanel {
                 rowH = 0;
             }
             if (y + h > BAND_Y - 6) break;       // out of ground; rest are hidden
+            if (record) {
+                this.buildingsDrawn.append(' ')
+                    .append(shortId(b.getType().getId())).append('=')
+                    .append((frame == null) ? "-" : frame.toString())
+                    .append('@').append(x).append(',').append(y);
+                if (img != null) {
+                    this.buildingsDrawn.append(':').append(w).append('x').append(h);
+                }
+            }
             if (img != null) {
                 g.drawImage(img, x, y, null);
             } else {

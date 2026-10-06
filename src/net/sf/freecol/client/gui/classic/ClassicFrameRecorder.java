@@ -73,6 +73,8 @@ import javax.swing.JComponent;
  *       line per event, {@code System.nanoTime} stamps, ms and frame on the
  *       timeline's clock (the detail is the rest of the line);</li>
  *   <li>{@code summary.txt}, written when the recorder closes.</li>
+ *   <li>{@code colony-N.png} and the like: stills of windows outside the
+ *       HUD copy ({@link #still}), true colour.</li>
  * </ul>
  *
  * <p><b>Events</b> ({@link #event}; a hook costs one volatile read while
@@ -91,7 +93,9 @@ import javax.swing.JComponent;
  * now=..}, the reason {@code activate}, {@code move}, {@code foreign-move},
  * {@code terrain}, {@code focus}, {@code pan} or {@code default}),
  * {@code music-request}, {@code music-mode} (the jukebox switched to the
- * title or the in-game playlist), {@code pref}.  Reserved for
+ * title or the in-game playlist), {@code pref}, {@code colony-buildings}
+ * (the sprite frame and place of each building on the colony screen),
+ * {@code still}.  Reserved for
  * the M1 work items: {@code endturn-timer-start/fire}
  * (W5), {@code palette-step} (W6c), {@code music-fade} (W15).
  *
@@ -351,6 +355,34 @@ public final class ClassicFrameRecorder {
     public static void event(String type, String detail) {
         final ClassicFrameRecorder r = instance;
         if (r != null) r.log(System.nanoTime(), type, detail);
+    }
+
+    /**
+     * Save a picture of a window the HUD copy does not hold (the colony
+     * screen has a window of its own) as {@code <name>.png} in the record
+     * directory, written off the calling thread, and log a {@code still}
+     * event.  A no-op while recording is off.
+     *
+     * @param name The file name, without {@code .png}.
+     * @param img The picture; it must not change afterwards.
+     */
+    static void still(String name, BufferedImage img) {
+        final ClassicFrameRecorder r = instance;
+        if (r == null || img == null) return;
+        final File f = new File(r.dir, name + ".png");
+        try {
+            r.pngWriter.execute(() -> {
+                    try {
+                        ImageIO.write(img, "png", f);
+                    } catch (IOException e) {
+                        logger.log(Level.WARNING,
+                            "Classic recorder: " + f + " not written", e);
+                    }
+                });
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            return; // the recorder has closed
+        }
+        r.log(System.nanoTime(), "still", f.getName());
     }
 
     /**
