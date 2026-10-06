@@ -273,11 +273,17 @@ public class ClassicGUI extends GUI {
     private final ImageLibrary imageLibrary;
 
     /**
-     * Puts every question and choice of the classic boxes
-     * ({@link Prompter#BOXES}); a test puts its own in, as no box can open
+     * Puts every question, choice and notice of the classic boxes
+     * ({@link #putBox}); a test puts its own in, as no box can open
      * headless.
      */
-    Prompter prompter = Prompter.BOXES;
+    Prompter prompter = this::putBox;
+
+    /**
+     * The in-canvas advisor boxes of the game view (build spec W7), or null
+     * without one.
+     */
+    private ClassicAdvisorLayer boxLayer = null;
 
 
     /**
@@ -473,7 +479,7 @@ public class ClassicGUI extends GUI {
      */
     void toggleFullScreen() {
         if (this.frame == null) return;
-        if (modalDialogShowing()) {
+        if (modalDialogShowing() || boxBusy()) {
             logger.info("ClassicGUI: Alt+Enter ignored while a dialog is open.");
             return;
         }
@@ -1124,6 +1130,10 @@ public class ClassicGUI extends GUI {
      * removes the menu bar.  EDT only; a no-op when no game was shown.
      */
     private void teardownInGame() {
+        // A box still up or due answers "dismissed" (no, cancel), first,
+        // while the blink and the turn flow it tells are still there.
+        if (this.boxLayer != null) this.boxLayer.dispose();
+        this.boxLayer = null;
         closeColonyPanel();
         closeBuildQueuePanel();
         closeEuropePanel();
@@ -1680,7 +1690,7 @@ public class ClassicGUI extends GUI {
 
                 @Override
                 public boolean inputBlocked() {
-                    return sceneShowing;
+                    return sceneShowing || boxBusy();
                 }
 
                 @Override
@@ -1740,11 +1750,91 @@ public class ClassicGUI extends GUI {
             () -> (mapViewer == null) ? ClassicMenuModel.Context.NONE
                 : ClassicMenuModel.Context.of(mapViewer.getActiveUnit(),
                                               mapViewer.getViewMode()),
-            () -> sceneShowing || (menuStrip != null && menuStrip.isMenuOpen()),
+            () -> sceneShowing || boxBusy()
+                || (menuStrip != null && menuStrip.isMenuOpen()),
             this::turnInputBlocked);
+        // The advisor boxes on the same canvas (build spec W7).
+        this.boxLayer = new ClassicAdvisorLayer(new BoxHost(pack, tiny, wood),
+            waitClock(), SwingUtilities::invokeLater, true);
+        this.hudPane.installBoxes(this.boxLayer);
         this.frame.setJMenuBar(null);
         this.frame.setContentPane(this.hudPane);
         this.frame.revalidate();
+    }
+
+    /** What the advisor boxes need from the game view (build spec W7). */
+    private final class BoxHost implements ClassicAdvisorLayer.Host {
+
+        private final ClassicPackFiles pack;
+        private final ClassicFont tiny;
+        private final BufferedImage wood;
+
+        BoxHost(ClassicPackFiles pack, ClassicFont tiny, BufferedImage wood) {
+            this.pack = pack;
+            this.tiny = tiny;
+            this.wood = wood;
+        }
+
+        @Override
+        public ClassicFont font() {
+            return this.tiny;
+        }
+
+        @Override
+        public BufferedImage wood() {
+            return this.wood;
+        }
+
+        @Override
+        public BufferedImage portrait(String sprite) {
+            return (this.pack == null || sprite == null) ? null
+                : this.pack.image(ClassicPackFiles.ssKey(sprite));
+        }
+
+        @Override
+        public int[] portraitPalette(ClassicAdvisorBox.Portrait p) {
+            if (this.pack == null || p == null || p.sprite == null) return null;
+            return ClassicAdvisorBox.portraitPalette(
+                this.pack.indexSheet(p.sheet()), 0, portrait(p.sprite));
+        }
+
+        @Override
+        public void opened() {
+            if (menuStrip != null && menuStrip.isMenuOpen()) menuStrip.closeMenu();
+            ClassicDialog.popupOpened();
+        }
+
+        @Override
+        public void closed() {
+            ClassicDialog.popupClosed();
+        }
+
+        @Override
+        public void idle() {
+            // The actions a box disabled (isDialogShowing) come back, and
+            // the keys go to the map again.
+            updateActions();
+            if (mapViewer != null) mapViewer.requestFocusInWindow();
+        }
+
+        @Override
+        public boolean isAutoRepeat(KeyEvent e) {
+            return ClassicGUI.this.isAutoRepeat(e);
+        }
+    }
+
+    /**
+     * Whether an advisor box is up or due (build spec W7).  EDT only.
+     *
+     * @return True if so.
+     */
+    boolean boxBusy() {
+        return this.boxLayer != null && this.boxLayer.isBusy();
+    }
+
+    /** @return The advisor boxes' layer, or null (the harness, tests). */
+    ClassicAdvisorLayer boxLayer() {
+        return this.boxLayer;
     }
 
     /**
@@ -1757,13 +1847,28 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * A one-page classic notice (the shared {@link ClassicDialog}), e.g. for
-     * a menu row whose feature follows later.  EDT only.
+     * A classic notice (an advisor box without rows, build spec W7), e.g.
+     * for a menu row whose feature follows later.  EDT only.
      */
     private void showInformationNotice(String text) {
-        ClassicDialog.showMessages(dialogOwner(),
-            Messages.message("classic.dialog.messages"),
-            List.of(new ClassicDialog.Page(text, null)));
+        this.prompter.ask(notice("notice", text,
+            Messages.message("classic.dialog.messages"), null));
+    }
+
+    /**
+     * A notice box of FreeCol's text: no rows, any key or a click dismisses
+     * it (build spec W7).
+     *
+     * @param id What it is (for the recorder).
+     * @param text The text.
+     * @param title The stopgap's window title.
+     * @param icon The stopgap's illustration, or null.
+     * @return The request.
+     */
+    static ClassicAdvisorBox.Request notice(String id, String text, String title,
+                                            java.awt.Image icon) {
+        return ClassicAdvisorBox.Request.builder(id).freeColText(text)
+            .stopgap(title, icon).build();
     }
 
     // View mode / focus — delegated to the map viewer.
@@ -1778,6 +1883,7 @@ public class ClassicGUI extends GUI {
      */
     String blinkHoldReason() {
         if (this.sceneShowing) return "scene";
+        if (boxBusy()) return "dialog";
         if (this.menuStrip != null && this.menuStrip.isMenuOpen()) return "menu";
         if (modalDialogShowing()) return "dialog";
         if (classicScreenUp()) return "screen";
@@ -2077,7 +2183,7 @@ public class ClassicGUI extends GUI {
      * @return True if so.
      */
     private boolean turnBlocked() {
-        if (this.sceneShowing || modalDialogShowing()) return true;
+        if (this.sceneShowing || modalDialogShowing() || boxBusy()) return true;
         if (this.menuStrip != null && this.menuStrip.isMenuOpen()) return true;
         return classicScreenUp();
     }
@@ -2966,16 +3072,18 @@ public class ClassicGUI extends GUI {
         }
         final Game game = getGame();
         if (game == null) return;
-        final List<ClassicDialog.Page> pages = new ArrayList<>();
+        // One box per notice, each after the one before (build spec W7):
+        // the original has no paged report.
+        final List<ClassicAdvisorBox.Request> boxes = new ArrayList<>();
+        final String title = Messages.message(titleKey);
         for (ModelMessage m : messages) {
             final ImageIcon icon = this.imageLibrary
                 .getObjectImageIcon(game.getMessageDisplay(m));
-            pages.add(new ClassicDialog.Page(Messages.message(m),
-                    (icon == null) ? null : icon.getImage()));
+            boxes.add(notice("message " + m.getId(), Messages.message(m), title,
+                             (icon == null) ? null : icon.getImage()));
         }
         onEventThread(() -> {
-                ClassicDialog.showMessages(dialogOwner(),
-                    Messages.message(titleKey), pages);
+                for (ClassicAdvisorBox.Request r : boxes) this.prompter.ask(r);
                 return null;
             }, null);
     }
@@ -3024,7 +3132,7 @@ public class ClassicGUI extends GUI {
      */
     @Override
     public boolean isDialogShowing() {
-        return this.sceneShowing || super.isDialogShowing();
+        return this.sceneShowing || boxBusy() || super.isDialogShowing();
     }
 
     // Accessors for the acceptance harness (ClassicTestHarness).
@@ -3188,9 +3296,8 @@ public class ClassicGUI extends GUI {
         final String text = (message == null) ? "" : message;
         onEventThread(() -> {
                 try {
-                    ClassicDialog.showMessages(dialogOwner(),
-                        Messages.message("classic.dialog.error"),
-                        List.of(new ClassicDialog.Page(text, null)));
+                    this.prompter.ask(notice("error", text,
+                        Messages.message("classic.dialog.error"), null));
                 } finally {
                     if (callback != null) callback.run();
                 }
@@ -3215,7 +3322,11 @@ public class ClassicGUI extends GUI {
      * portrait.  Enter takes the original's first row
      * ({@link #monarchEnterAccepts}): at a tax rise that is "kiss the ring",
      * not the party.  Escape answers "no" (W0e, Roger's rule), which at a
-     * tax rise is the party, as in FreeCol's own box.
+     * tax rise is the party, as in FreeCol's own box.  In the advisor box
+     * (W7) the King stands at the left and the box is flush right
+     * ({@link ClassicAdvisorBox.Portrait#KING}); where Enter takes the "no"
+     * (the mercenary offers) the "no" is the first row, as the original's
+     * {@code @MERCENARIES} lists it.
      */
     @Override
     public void showMonarchDialog(MonarchAction action, StringTemplate template,
@@ -3235,9 +3346,10 @@ public class ClassicGUI extends GUI {
         final StringTemplate msg = (template == null)
             ? StringTemplate.key(messageId)
             : StringTemplate.copy(messageId, template);
-        askEvent(ImageLibrary.getMonarchImage(monarchKey),
-                 Messages.message(hdrKey), msg, yesKey, noKey,
-                 monarchEnterAccepts(action), handler);
+        final boolean enterAccepts = monarchEnterAccepts(action);
+        askEvent("monarch " + action, ImageLibrary.getMonarchImage(monarchKey),
+                 Messages.message(hdrKey), msg, yesKey, noKey, enterAccepts,
+                 !enterAccepts, ClassicAdvisorBox.Portrait.KING, handler);
     }
 
     /**
@@ -3273,7 +3385,11 @@ public class ClassicGUI extends GUI {
      * row 1 "Ja", and FreeCol's own box defaults to "yes".  A refusal costs
      * dearly (major tension, a mission ban for that nation, the offered
      * land; the original's {@code @INDIANSHUN}: war).  Escape still answers
-     * "no" (W0e, Roger's rule; an open question for him).
+     * "no" (W0e, Roger's rule; an open question for him).  In the advisor
+     * box (W7) the tribe's chief stands at the right under the box
+     * ({@link ClassicAdvisorBox.Portrait#chief}); the words are still
+     * FreeCol's (the original's chain {@code @INDIANWELCOME},
+     * {@code @INDIANPEACE}, {@code @INDIANCOME} is W8c).
      */
     @Override
     public void showFirstContactDialog(Player player, Player other, Tile tile,
@@ -3293,8 +3409,28 @@ public class ClassicGUI extends GUI {
         if (!Messages.containsKey(hdrKey)) {
             hdrKey = "firstContactDialog.meeting.natives";
         }
-        askEvent(ImageLibrary.getMeetingImage(other), Messages.message(hdrKey),
-                 msg, "yes", "no", true, handler);
+        askEvent("first-contact " + other.getNation().getSuffix(),
+                 ImageLibrary.getMeetingImage(other), Messages.message(hdrKey),
+                 msg, "yes", "no", true, false,
+                 ClassicAdvisorBox.Portrait.chief(tribeIndex(other)), handler);
+    }
+
+    /**
+     * The original tribes in NAMES.TXT {@code @TRIBES} order, as FreeCol's
+     * nation suffixes: the chiefs' portraits {@code IND<n>A0}.
+     */
+    static final List<String> TRIBES = List.of("inca", "aztec", "arawak",
+        "iroquois", "cherokee", "apache", "sioux", "tupi");
+
+    /**
+     * The original tribe of a native player.
+     *
+     * @param player The player.
+     * @return Its {@link #TRIBES} index, or -1.
+     */
+    static int tribeIndex(Player player) {
+        return (player == null || player.getNation() == null) ? -1
+            : TRIBES.indexOf(player.getNation().getSuffix());
     }
 
     /**
@@ -3309,6 +3445,8 @@ public class ClassicGUI extends GUI {
      * {@code @WANTSTUFF}, {@code @INDIANBEGFOOD}) have no {@code @default}
      * and list the refusal first, so their bar opens on it (I: no clip shows
      * one; the rule holds for the king's, the village and the father boxes).
+     * The advisor box (W7) lists the refusal first, as the original does,
+     * with the bar on it (D acceptance D5).
      */
     @Override
     public void showNativeDemandDialog(Unit unit, Colony colony, GoodsType type,
@@ -3335,8 +3473,9 @@ public class ClassicGUI extends GUI {
         }
         final StringTemplate title = StringTemplate
             .template("nativeDemandDialog.name").addName("%colony%", colony.getName());
-        askEvent(demandIcon(colony), Messages.message(title), msg, yes, no,
-                 false, handler);
+        askEvent("native-demand", demandIcon(colony), Messages.message(title),
+                 msg, yes, no, false, true, ClassicAdvisorBox.Portrait.NONE,
+                 handler);
     }
 
     /**
@@ -3352,43 +3491,54 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * Shared body of the event-confirm dialogs above: show {@code message} (with
-     * {@code icon}) in the classic popup with a Yes/No pair (or a lone No/close
-     * plate when {@code yesKey} is null, for acknowledge-only notices), and hand
-     * the choice to {@code handler} as a {@code Boolean}.
+     * Shared body of the event-confirm dialogs above: show {@code message} in
+     * an advisor box (build spec W7) with a "yes" and a "no" row (or as a
+     * notice without rows when {@code yesKey} is null), and hand the answer
+     * to {@code handler} as a {@code Boolean}.
      *
      * <p>These {@code GUI} seams are asynchronous ({@link DialogHandler}), but
-     * the shared {@link ClassicDialog#ask} is modal-blocking — which is right
-     * for a demand that must be answered.  The controllers already post them via
-     * {@code invokeLater}, so blocking the classic popup on the EDT (which pumps
-     * events) is fine; the handler fires with the result the instant it closes.
-     * The handler runs in a {@code finally} so the server exchange still resolves
-     * (as a reject) if the popup throws, rather than dangling.  Escape and the
-     * close button reject too ({@link #confirmed}), whichever row Enter takes.
+     * the box is modal-blocking ({@link ClassicAdvisorLayer#show}) -- which is
+     * right for a demand that must be answered.  The controllers already post
+     * them via {@code invokeLater}, so blocking on the EDT (which pumps
+     * events) is fine; the handler fires with the result the instant the box
+     * closes.  The handler runs in a {@code finally} so the server exchange
+     * still resolves (as a reject) if the box throws, rather than dangling.
+     * Escape takes the "no" row (W0e), whichever row Enter takes.
      *
-     * @param enterAccepts Whether Enter takes the "yes" row; else it takes
-     *     the "no" row (and the lone row of a notice).
+     * @param id What the box is (for the recorder).
+     * @param icon The stopgap's illustration, or null.
+     * @param title The stopgap's window title.
+     * @param enterAccepts Whether the bar starts on (Enter takes) the "yes"
+     *     row; else on the "no" row.
+     * @param noFirst Whether the "no" row comes first (the original's order
+     *     where Enter refuses: the natives' demands, the mercenaries).
+     * @param portrait Who stands at the box.
      */
-    private void askEvent(java.awt.Image icon, String title,
+    private void askEvent(String id, java.awt.Image icon, String title,
                           StringTemplate message, String yesKey, String noKey,
-                          boolean enterAccepts,
+                          boolean enterAccepts, boolean noFirst,
+                          ClassicAdvisorBox.Portrait portrait,
                           DialogHandler<Boolean> handler) {
-        final String[] options = (yesKey == null)
-            ? new String[] { Messages.message(noKey) }
-            : new String[] { Messages.message(yesKey), Messages.message(noKey) };
-        final int enter = (yesKey != null && enterAccepts) ? 0
-            : options.length - 1;
-        final ClassicDialog.Page page
-            = new ClassicDialog.Page(Messages.message(message), icon);
-        final String yes = yesKey;   // effectively-final capture
+        final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.Request
+            .builder(id).freeColText(Messages.message(message))
+            .portrait(portrait).stopgap(title, icon);
+        final int yesRow;
+        if (yesKey == null) {
+            yesRow = -1;
+        } else {
+            final String yes = ClassicAdvisorBox.literal(Messages.message(yesKey));
+            final String no = ClassicAdvisorBox.literal(Messages.message(noKey));
+            yesRow = noFirst ? 1 : 0;
+            if (noFirst) b.rows(no, yes); else b.rows(yes, no);
+            b.defaultRow(enterAccepts ? yesRow : 1 - yesRow).cancelRow(1 - yesRow);
+        }
+        final ClassicAdvisorBox.Request r = b.build();
         onEventThread(() -> {
-                int chosen = -1;
+                int chosen = ClassicAdvisorBox.Bar.DISMISSED;
                 try {
-                    chosen = this.prompter.ask(dialogOwner(), title, page,
-                                               options, enter);
+                    chosen = this.prompter.ask(r);
                 } finally {
-                    final boolean accept = (yes != null && confirmed(chosen));
-                    if (handler != null) handler.handle(accept);
+                    if (handler != null) handler.handle(yesRow >= 0 && chosen == yesRow);
                 }
                 return null;
             }, null);
@@ -3497,13 +3647,13 @@ public class ClassicGUI extends GUI {
      * aborts the controller flows that gate on one — notably {@code buildColony},
      * which confirms the site warnings before founding a colony.
      *
-     * <p>Phase 3: put the question in the classic wood-framed popup shared with
-     * every other classic dialog ({@link ClassicDialog}), replacing the plain
-     * Swing stopgap this shipped as.  {@code defaultOk} only decides which
-     * option Enter takes.  A dismissed popup ({@code -1}: Escape, the close
-     * button, a box that failed to open) answers "no", whatever the default
-     * (build spec W0e): Escape had answered {@code defaultOk}, so it chose
-     * "learn" at a village and "found" at the site warnings.
+     * <p>The question goes into an advisor box (build spec W7): FreeCol's
+     * words, its "yes" row first and its "no" row second, the bar on the row
+     * {@code defaultOk} names (the original has no such box, so FreeCol's
+     * default stands in for a GAME.TXT {@code @default}).  Escape takes the
+     * "no" row, and a box that could not open answers "no" too, whatever the
+     * default (build spec W0e): Escape had answered {@code defaultOk}, so it
+     * chose "learn" at a village and "found" at the site warnings.
      *
      * <p>FreeCol's own question on sailing from coastal water onto the high
      * seas ({@code InGameController.moveHighSeas}) is never shown: it is
@@ -3519,14 +3669,16 @@ public class ClassicGUI extends GUI {
             ClassicFrameRecorder.event("dialog-silent", template.getId() + " no");
             return false;
         }
-        final String[] options = {
-            Messages.message(okKey), Messages.message(cancelKey)
-        };
-        final ClassicDialog.Page page = new ClassicDialog.Page(
-            Messages.message(template), (icon == null) ? null : icon.getImage());
-        final int chosen = onEventThread(() -> this.prompter.ask(dialogOwner(),
-                colony(tile), page, options, (defaultOk ? 0 : 1)),
-            -1);
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request
+            .builder("confirm " + template.getId())
+            .freeColText(Messages.message(template))
+            .rows(ClassicAdvisorBox.literal(Messages.message(okKey)),
+                  ClassicAdvisorBox.literal(Messages.message(cancelKey)))
+            .defaultRow(defaultOk ? 0 : 1).cancelRow(1)
+            .stopgap(colony(tile), (icon == null) ? null : icon.getImage())
+            .build();
+        final int chosen = onEventThread(() -> this.prompter.ask(r),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
         return confirmed(chosen);
     }
 
@@ -3545,10 +3697,11 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * The answer of a yes/no box: only its first option is "yes"; the other,
-     * Escape and the close button ({@code -1}) are "no" (build spec W0e).
+     * The answer of a yes/no box: only its first row is "yes"; the other,
+     * Escape and a box that closed or could not open ({@code -1}) are "no"
+     * (build spec W0e).
      *
-     * @param chosen The option index the box returned, -1 if dismissed.
+     * @param chosen The row the box returned, -1 if dismissed.
      * @return True for "yes".
      */
     static boolean confirmed(int chosen) {
@@ -3556,53 +3709,67 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * What puts the classic boxes' questions: {@link #BOXES} in the game, a
-     * fake in the tests.  EDT only.
+     * What puts the classic boxes: {@link #putBox} in the game, a fake in
+     * the tests.  EDT only.
      */
     interface Prompter {
 
         /**
-         * Put a question ({@link ClassicDialog#ask}).
+         * Put a box and wait for its answer.
          *
-         * @param owner The window it belongs over.
-         * @param title The window title.
-         * @param page The question.
-         * @param options The option plates.
-         * @param defaultIndex The option Enter takes.
-         * @return The option chosen, -1 if dismissed (Escape, close).
+         * @param request The box.
+         * @return The row taken; on Escape the request's cancel row, else
+         *     -1 ({@link ClassicAdvisorBox.Request#escapeAnswer}); 0 for a
+         *     notice; -1 if the box closed with no row or could not open.
          */
-        int ask(Window owner, String title, ClassicDialog.Page page,
-                String[] options, int defaultIndex);
+        int ask(ClassicAdvisorBox.Request request);
+    }
 
-        /**
-         * Pick one item from a list ({@link ClassicGUI#chooseFromList}).
-         *
-         * @param owner The window it belongs over.
-         * @param title The window title.
-         * @param message The prompt.
-         * @param icon An optional icon, or null.
-         * @param options The items.
-         * @return The item chosen, or null on Cancel, Escape or close.
-         */
-        Object choose(Window owner, String title, Object message, Icon icon,
-                      Object[] options);
+    /**
+     * Put a box: in the game's canvas when the map is what the player is
+     * looking at ({@link ClassicAdvisorLayer}, build spec W7), else -- on
+     * the title screens, over a colony, Europe or report screen, or without
+     * the pack -- in the stopgap window ({@link #stopgapBox}).  EDT only.
+     *
+     * @param r The box.
+     * @return The answer ({@link Prompter#ask}).
+     */
+    int putBox(ClassicAdvisorBox.Request r) {
+        final ClassicAdvisorLayer layer = this.boxLayer;
+        if (layer != null && !this.sceneShowing && this.hudPane != null
+            && this.hudPane.isShowing() && dialogOwner() == this.frame) {
+            final int got = layer.show(r);
+            if (got != ClassicAdvisorLayer.UNAVAILABLE) return got;
+        }
+        return stopgapBox(r);
+    }
 
-        /** The real boxes. */
-        Prompter BOXES = new Prompter() {
-                @Override
-                public int ask(Window owner, String title,
-                               ClassicDialog.Page page, String[] options,
-                               int defaultIndex) {
-                    return ClassicDialog.ask(owner, title, page, options,
-                                             defaultIndex);
-                }
-
-                @Override
-                public Object choose(Window owner, String title, Object message,
-                                     Icon icon, Object[] options) {
-                    return chooseFromList(owner, title, message, icon, options);
-                }
-            };
+    /**
+     * The stopgap of a box: the shared {@link ClassicDialog} popup (rows as
+     * plates), or the selection list for a choice.  EDT only.
+     *
+     * @param r The box.
+     * @return The answer ({@link Prompter#ask}).
+     */
+    private int stopgapBox(ClassicAdvisorBox.Request r) {
+        final Window owner = dialogOwner();
+        final ClassicDialog.Page page = new ClassicDialog.Page(r.plainText(), r.icon);
+        if (r.isNotice()) {
+            ClassicDialog.showMessages(owner, r.title, List.of(page));
+            return 0;
+        }
+        final String[] rows = r.plainRows();
+        if (r.list) {
+            final Object sel = chooseFromList(owner, r.title, r.plainText(),
+                (r.icon == null) ? null : new ImageIcon(r.icon), rows);
+            for (int i = 0; i < rows.length; i++) {
+                if (rows[i] == sel) return i;
+            }
+            return r.escapeAnswer();
+        }
+        final int chosen = ClassicDialog.ask(owner, r.title, page, rows,
+                                             r.defaultRow);
+        return (chosen < 0) ? r.escapeAnswer() : chosen;
     }
 
     /**
@@ -3612,29 +3779,61 @@ public class ClassicGUI extends GUI {
      * flows can only proceed through a choice.  Notably, disembarking a carrier
      * that holds more than one unit asks <em>which</em> unit(s) to land — so
      * without this a laden ship could never put colonists ashore, and the colony
-     * screen (which needs a founded colony) would be unreachable.  Presented as a
-     * plain Swing selection list for now; Phase 3 reskins it.
+     * screen (which needs a founded colony) would be unreachable.
      *
-     * <p>Built by hand rather than with {@code JOptionPane.showInputDialog},
-     * whose dialog is already packed (displayable) when it is returned, so
-     * its decoration can no longer be changed: in full screen the list must
-     * be undecorated like every other classic window
-     * ({@link #prepareChildWindow}).  Behaviour is that of
-     * {@code showInputDialog}: OK (or a double click) answers the selected
-     * item; Cancel, Escape or closing answers null.  Undecorated, the pane
-     * gets the popups' wood border so it does not float frameless.
+     * <p>An advisor box (build spec W7): FreeCol's prompt, one row per
+     * choice and, with a {@code cancelKey}, a last row for it ("Handlung
+     * abbrechen"), which Escape takes too.  The bar starts on the choice
+     * FreeCol marks as the default, else on row 1, as the original's village
+     * boxes do (landfall #15898, #22322).  A choice FreeCol disables is
+     * greyed and cannot be taken.  Without a cancel row, Escape closes with
+     * no choice (null), as before.  Without the in-game canvas, or when the
+     * rows do not fit on the screen, the stopgap selection list stays
+     * ({@link #chooseFromList}).
      */
     @Override
     protected <T> T modalChoiceDialog(Tile tile, StringTemplate template,
                                       ImageIcon icon, String cancelKey,
                                       List<ChoiceItem<T>> choices) {
         if (choices == null || choices.isEmpty()) return null;
-        final String text = Messages.message(template);
-        final ChoiceItem<T>[] options = choices.toArray(new ChoiceItem[0]);
-        final ChoiceItem<T> chosen = onEventThread(() ->
-            (ChoiceItem<T>) this.prompter.choose(dialogOwner(), colony(tile),
-                                                 text, icon, options), null);
-        return (chosen == null) ? null : chosen.getObject();
+        final ClassicAdvisorBox.Request r = choiceRequest(
+            Messages.message(template), (cancelKey == null) ? null
+                : Messages.message(cancelKey), choices, colony(tile),
+            (icon == null) ? null : icon.getImage());
+        final int chosen = onEventThread(() -> this.prompter.ask(r),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        return (chosen >= 0 && chosen < choices.size()
+                && choices.get(chosen).isEnabled())
+            ? choices.get(chosen).getObject() : null;
+    }
+
+    /**
+     * The box of a choice ({@link #modalChoiceDialog}).
+     *
+     * @param text The prompt.
+     * @param cancel The cancel row's words, or null for none.
+     * @param choices The choices.
+     * @param title The stopgap's window title.
+     * @param icon The stopgap's illustration, or null.
+     * @return The request.
+     */
+    static <T> ClassicAdvisorBox.Request choiceRequest(String text, String cancel,
+        List<ChoiceItem<T>> choices, String title, java.awt.Image icon) {
+        final List<String> rows = new ArrayList<>();
+        final boolean[] disabled = new boolean[choices.size() + 1];
+        int def = 0;
+        for (int i = 0; i < choices.size(); i++) {
+            final ChoiceItem<T> c = choices.get(i);
+            rows.add(ClassicAdvisorBox.literal(c.toString()));
+            disabled[i] = !c.isEnabled();
+            if (c.isDefault() && c.isEnabled()) def = i;
+        }
+        if (cancel != null) rows.add(ClassicAdvisorBox.literal(cancel));
+        final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.Request
+            .builder("choice").freeColText(text).rows(rows).disabled(disabled)
+            .defaultRow(def).stopgap(title, icon).list();
+        if (cancel != null) b.cancelRow(rows.size() - 1); else b.noCancelRow();
+        return b.build();
     }
 
     // The village boxes.  Only their cancel is seen here: the original
@@ -3707,8 +3906,8 @@ public class ClassicGUI extends GUI {
         return choice;
     }
 
-    // The Europe question, by Roger's rule (build spec W8a).  A ClassicDialog
-    // until the original's in-canvas box (W7).
+    // The Europe question, by Roger's rule (build spec W8a), in the
+    // original's advisor box (W7).
 
     /** GAME.TXT's Europe question (@SAILHOME). */
     static final String SAIL_HOME_SECTION = "SAILHOME";
@@ -3743,11 +3942,13 @@ public class ClassicGUI extends GUI {
 
     /**
      * A map key's move order, if it is the Europe question's
-     * ({@link #asksSailHome}): ask it.  The first row (Enter's, GAME.TXT
-     * {@code @default=1}) sails the ship to Europe ({@link #sailHome}): it
-     * leaves the map with no slide, as in the original.  The second row and
-     * Escape do nothing: the ship keeps its moves and stays the active unit,
-     * and the box's close restarts its blink and the turn flow's clock
+     * ({@link #asksSailHome}): ask it, in the original's advisor box
+     * (build spec W7): GAME.TXT {@code @SAILHOME} with the admiral, the bar
+     * on {@code @default=1}, "Jawohl" (landfall #7720, c5 #21226).  "Jawohl"
+     * sails the ship to Europe ({@link #sailHome}): it leaves the map with
+     * no slide, as in the original.  "Nein" and Escape do nothing: the ship
+     * keeps its moves and stays the active unit, and the box's close
+     * restarts its blink and the turn flow's clock
      * ({@link ClassicDialog.Watcher}).  EDT only.
      *
      * @param unit The unit ordered.
@@ -3757,15 +3958,15 @@ public class ClassicGUI extends GUI {
      */
     boolean sailHomeKey(Unit unit, Direction direction) {
         if (!asksSailHome(unit, direction)) return false;
-        final ClassicPackFiles pack = ClassicPackFiles.runtime();
-        final SailHomeText q = sailHomeText(ClassicText.load(pack), unit);
-        final BufferedImage admiral = (pack == null) ? null
-            : pack.image(ClassicPackFiles.ssKey(ClassicFirstScene.PORTRAIT));
-        final int chosen = this.prompter.ask(dialogOwner(), colony(null),
-            new ClassicDialog.Page(q.text, admiral), q.options, q.defaultIndex);
-        ClassicFrameRecorder.event("sail-home", "unit=" + unit.getId()
-            + " at=" + unit.getTile().getX() + "," + unit.getTile().getY()
-            + " " + direction + " chosen=" + chosen);
+        final Tile from = unit.getTile();
+        final ClassicAdvisorBox.Request r = sailHomeRequest(
+            ClassicText.load(ClassicPackFiles.runtime()), unit);
+        final int chosen = this.prompter.ask(r);
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("sail-home", "unit=" + unit.getId()
+                + ((from == null) ? "" : " at=" + from.getX() + "," + from.getY())
+                + " " + direction + " chosen=" + chosen);
+        }
         if (confirmed(chosen)) sailHome(unit);
         return true;
     }
@@ -3782,49 +3983,39 @@ public class ClassicGUI extends GUI {
         fcc.getInGameController().moveTo(unit, unit.getOwner().getEurope());
     }
 
-    /** The Europe question's text, its two rows and the row Enter takes. */
-    static final class SailHomeText {
-
-        final String text;
-        final String[] options;
-        final int defaultIndex;
-
-        SailHomeText(String text, String[] options, int defaultIndex) {
-            this.text = text;
-            this.options = options;
-            this.defaultIndex = defaultIndex;
-        }
-    }
-
     /**
-     * The Europe question's words: GAME.TXT {@code @SAILHOME} from the pack
-     * (its gold markup dropped, the stopgap box draws one colour), else
-     * FreeCol's own high-seas strings.
+     * The Europe question's box: GAME.TXT {@code @SAILHOME} from the pack,
+     * its markup kept ({@code {hoher See}} in gold), its rows "Jawohl" and
+     * "Nein" (Escape's), the bar on {@code @default}; else FreeCol's own
+     * high-seas strings.  The admiral stands at the box either way.
      *
      * @param t The original texts, or null.
-     * @param unit The ship (its sailing time, for FreeCol's text).
-     * @return The words.
+     * @param unit The ship (its sailing time, for FreeCol's text), or null.
+     * @return The box.
      */
-    static SailHomeText sailHomeText(ClassicText t, Unit unit) {
+    static ClassicAdvisorBox.Request sailHomeRequest(ClassicText t, Unit unit) {
         final ClassicText.Message m = (t == null) ? null
             : t.message(SAIL_HOME_SECTION);
-        if (m != null && !m.text.isEmpty() && m.options.size() >= 2) {
-            final int def = (m.defaultOption == null) ? 0
-                : ClassicHud.clamp(m.defaultOption - 1, 0, 1);
-            return new SailHomeText(unmarked(String.join(" ", m.text)),
-                new String[] { unmarked(m.options.get(0)),
-                               unmarked(m.options.get(1)) }, def);
+        if (m != null && !m.text.isEmpty() && m.options.size() >= 2
+            && m.width != null) {
+            final List<String> rows = new ArrayList<>();
+            rows.add(m.options.get(0).trim());
+            rows.add(m.options.get(1).trim());
+            return ClassicAdvisorBox.Request.builder(SAIL_HOME_SECTION)
+                .gameText(m.text).width(m.width).y(m.y).rows(rows)
+                .defaultRow(ClassicHud.clamp(ClassicAdvisorBox.defaultRow(m), 0, 1))
+                .cancelRow(1).portrait(ClassicAdvisorBox.Portrait.ADMIRAL)
+                .stopgap(colony(null), null).build();
         }
-        return new SailHomeText(Messages.message(StringTemplate
+        return ClassicAdvisorBox.Request.builder(SAIL_HOME_SECTION)
+            .freeColText(Messages.message(StringTemplate
                 .template("highseas.text")
-                .addAmount("%number%", (unit == null) ? 0 : unit.getSailTurns())),
-            new String[] { Messages.message("highseas.yes"),
-                           Messages.message("highseas.no") }, 0);
-    }
-
-    /** @return A GAME.TXT line without its colour braces, blanks collapsed. */
-    static String unmarked(String s) {
-        return s.replace("{", "").replace("}", "").replaceAll("\\s+", " ").trim();
+                .addAmount("%number%", (unit == null) ? 0 : unit.getSailTurns())))
+            .rows(ClassicAdvisorBox.literal(Messages.message("highseas.yes")),
+                  ClassicAdvisorBox.literal(Messages.message("highseas.no")))
+            .defaultRow(0).cancelRow(1)
+            .portrait(ClassicAdvisorBox.Portrait.ADMIRAL)
+            .stopgap(colony(null), null).build();
     }
 
     /**

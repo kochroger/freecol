@@ -19,14 +19,12 @@
 
 package net.sf.freecol.client.gui.classic;
 
-import java.awt.Window;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 
-import javax.swing.Icon;
 import javax.swing.ImageIcon;
 
 import net.sf.freecol.client.gui.ChoiceItem;
@@ -58,30 +56,67 @@ import net.sf.freecol.util.test.FreeColTestCase;
  */
 public class ClassicGUISeamTest extends FreeColTestCase {
 
-    /** Answers every box with {@link #answer} and keeps what it was asked. */
+    /**
+     * Answers every box with {@link #answer} and keeps what it was asked:
+     * the rows (plain), the bar's first row, the text (plain), the box.
+     */
     private static final class FakePrompter implements ClassicGUI.Prompter {
 
         int answer = -1;
-        Object choice = null;
         final List<String[]> asked = new ArrayList<>();
         final List<Integer> defaults = new ArrayList<>();
         final List<String> texts = new ArrayList<>();
-        int choices = 0;
+        final List<ClassicAdvisorBox.Request> boxes = new ArrayList<>();
 
         @Override
-        public int ask(Window owner, String title, ClassicDialog.Page page,
-                       String[] options, int defaultIndex) {
-            this.asked.add(options);
-            this.defaults.add(defaultIndex);
-            this.texts.add(page.text);
+        public int ask(ClassicAdvisorBox.Request r) {
+            this.boxes.add(r);
+            this.asked.add(r.plainRows());
+            this.defaults.add(r.defaultRow);
+            this.texts.add(r.plainText());
             return this.answer;
+        }
+    }
+
+    /**
+     * Answers every box by pressing {@link #keys} on its real bar
+     * ({@link ClassicAdvisorBox.Bar}): what the player's keys answer.
+     * Keys: UP, DOWN, ENTER, ESC, X (any other key).
+     */
+    static final class KeyPrompter implements ClassicGUI.Prompter {
+
+        String[] keys = {};
+        final List<ClassicAdvisorBox.Request> boxes = new ArrayList<>();
+
+        /** The bar's row after the keys of the last box (if it stayed open). */
+        int lastRow = -2;
+
+        KeyPrompter press(String... k) {
+            this.keys = k;
+            return this;
         }
 
         @Override
-        public Object choose(Window owner, String title, Object message,
-                             Icon icon, Object[] options) {
-            this.choices++;
-            return this.choice;
+        public int ask(ClassicAdvisorBox.Request r) {
+            this.boxes.add(r);
+            return answer(r, this.keys);
+        }
+
+        int answer(ClassicAdvisorBox.Request r, String... ks) {
+            final ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+            for (String k : ks) {
+                final int a;
+                switch (k) {
+                case "UP": a = bar.up(); break;
+                case "DOWN": a = bar.down(); break;
+                case "ENTER": a = bar.enter(); break;
+                case "ESC": a = bar.escape(); break;
+                default: a = bar.otherKey(); break;
+                }
+                if (a != ClassicAdvisorBox.Bar.OPEN) return a;
+            }
+            this.lastRow = bar.row();
+            return ClassicAdvisorBox.Bar.DISMISSED;   // left open: as closed
         }
     }
 
@@ -202,7 +237,7 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertFalse(gui.confirmStopGame());
 
         // A box that could not open counts as dismissed: no.
-        gui.prompter = ClassicGUI.Prompter.BOXES;
+        gui.prompter = gui::putBox;
         if (java.awt.GraphicsEnvironment.isHeadless()) {
             assertFalse(gui.modalConfirmDialog(null,
                     StringTemplate.template("learnSkill.text")
@@ -226,13 +261,77 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         final List<ChoiceItem<String>> items = new ArrayList<>();
         items.add(new ChoiceItem<>("speak", "speak"));
         items.add(new ChoiceItem<>("tribute", "tribute"));
-        fake.choice = null;
+        fake.answer = -1;
         assertNull(gui.modalChoiceDialog(null, StringTemplate.key("x"),
                                          (ImageIcon) null, "cancel", items));
-        fake.choice = items.get(1);
+        fake.answer = 1;
         assertEquals("tribute", gui.modalChoiceDialog(null,
                 StringTemplate.key("x"), (ImageIcon) null, "cancel", items));
-        assertEquals(2, fake.choices);
+        fake.answer = 2;                     // the cancel row
+        assertNull(gui.modalChoiceDialog(null, StringTemplate.key("x"),
+                                         (ImageIcon) null, "cancel", items));
+        assertEquals(3, fake.asked.size());
+        // The rows: the choices, then the cancel row (Escape's).
+        assertEquals(3, last(fake.asked).length);
+        assertEquals("speak", last(fake.asked)[0]);
+        assertEquals(Messages.message("cancel"), last(fake.asked)[2]);
+        assertEquals(2, last(fake.boxes).cancelRow);
+        assertEquals(0, last(fake.boxes).defaultRow);
+    }
+
+    /**
+     * W7: a choice box's keys, on its real bar.  The bar starts on row 1
+     * (the original's village boxes: landfall #15898, #22322) or on the
+     * choice FreeCol marks as the default; Up and Down move it one row
+     * (never past the ends), Enter takes its row, Escape the cancel row; a
+     * greyed choice cannot be taken.  Without a cancel row Escape gives no
+     * choice.
+     */
+    public void testChoiceBoxKeys() {
+        final ClassicGUI gui = new ClassicGUI(null);
+        final KeyPrompter keys = new KeyPrompter();
+        gui.prompter = keys;
+        final List<ChoiceItem<String>> items = new ArrayList<>();
+        items.add(new ChoiceItem<>("speak", "speak"));
+        items.add(new ChoiceItem<>("tribute", "tribute"));
+        items.add(new ChoiceItem<>("attack", "attack"));
+        final StringTemplate t = StringTemplate.key("x");
+        final ImageIcon none = null;
+        keys.press("ENTER");
+        assertEquals("speak", gui.modalChoiceDialog(null, t, none, "cancel", items));
+        keys.press("DOWN", "ENTER");
+        assertEquals("tribute", gui.modalChoiceDialog(null, t, none, "cancel", items));
+        keys.press("DOWN", "DOWN", "ENTER");
+        assertEquals("attack", gui.modalChoiceDialog(null, t, none, "cancel", items));
+        keys.press("DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "ENTER");   // the last row
+        assertNull(gui.modalChoiceDialog(null, t, none, "cancel", items));
+        keys.press("DOWN", "UP", "UP", "UP", "ENTER");                 // the first row
+        assertEquals("speak", gui.modalChoiceDialog(null, t, none, "cancel", items));
+        keys.press("DOWN", "ESC");
+        assertNull(gui.modalChoiceDialog(null, t, none, "cancel", items));
+        keys.press("X", "Y", "ENTER");                                 // other keys: nothing
+        assertEquals("speak", gui.modalChoiceDialog(null, t, none, "cancel", items));
+        // FreeCol's default choice: the bar starts there.
+        items.get(2).defaultOption();
+        keys.press("ENTER");
+        assertEquals("attack", gui.modalChoiceDialog(null, t, none, "cancel", items));
+        keys.press("UP", "ENTER");
+        assertEquals("tribute", gui.modalChoiceDialog(null, t, none, "cancel", items));
+        // A greyed choice cannot be taken: the box stays.
+        final List<ChoiceItem<String>> trade = new ArrayList<>();
+        trade.add(new ChoiceItem<>("buy", "buy", false));
+        trade.add(new ChoiceItem<>("sell", "sell", true));
+        keys.press("ENTER");
+        assertNull(gui.modalChoiceDialog(null, t, none, "cancel", trade));
+        assertEquals(0, keys.lastRow);
+        assertTrue(last(keys.boxes).disabled[0]);
+        keys.press("ENTER", "DOWN", "ENTER");
+        assertEquals("sell", gui.modalChoiceDialog(null, t, none, "cancel", trade));
+        // Without a cancel key: no cancel row, Escape gives no choice.
+        keys.press("ESC");
+        assertNull(gui.modalChoiceDialog(null, t, none, null, items));
+        assertEquals(3, last(keys.boxes).rows.size());
+        assertEquals(-1, last(keys.boxes).cancelRow);
     }
 
     /**
@@ -499,8 +598,9 @@ public class ClassicGUISeamTest extends FreeColTestCase {
     }
 
     /**
-     * The question's words come from GAME.TXT @SAILHOME (markup dropped,
-     * Enter on @default), else from FreeCol's high-seas strings.  The test
+     * The question's box: GAME.TXT @SAILHOME (markup kept for the box,
+     * dropped for the stopgap; the bar on @default, Escape on "Nein", the
+     * admiral), else FreeCol's high-seas strings.  The test
      * file is a stand-in: the original's text is never in the repository.
      */
     public void testSailHomeText() throws Exception {
@@ -516,28 +616,38 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             Files.write(names.toPath(), "@END\r\n".getBytes(StandardCharsets.US_ASCII));
             Files.write(labels.toPath(), "@END\r\n".getBytes(StandardCharsets.US_ASCII));
             final ClassicText t = ClassicText.fromFiles(game, names, labels);
-            final ClassicGUI.SailHomeText q = ClassicGUI.sailHomeText(t, null);
-            assertEquals("We are on open water. Go home?", q.text);
-            assertEquals("Yes, home.", q.options[0]);
-            assertEquals("No, stay.", q.options[1]);
-            assertEquals(0, q.defaultIndex);
+            final ClassicAdvisorBox.Request q = ClassicGUI.sailHomeRequest(t, null);
+            // The box keeps the markup (gold), its stopgap drops it.
+            assertEquals(List.of(List.of("We are on {open} water.", "Go  home?")),
+                         q.paragraphs);
+            assertEquals("We are on open water. Go home?", q.plainText());
+            assertEquals(List.of("Yes, home.", "No, stay."), q.rows);
+            assertEquals(230, q.width);
+            assertEquals(0, q.defaultRow);
+            assertEquals(1, q.cancelRow);
+            assertSame(ClassicAdvisorBox.Portrait.ADMIRAL, q.portrait);
+            assertEquals(ClassicGUI.SAIL_HOME_SECTION, q.id);
         } finally {
             for (File f : dir.listFiles()) f.delete();
             dir.delete();
         }
-        final ClassicGUI.SailHomeText f = ClassicGUI.sailHomeText(null, null);
-        assertEquals(Messages.message("highseas.yes"), f.options[0]);
-        assertEquals(Messages.message("highseas.no"), f.options[1]);
-        assertEquals(0, f.defaultIndex);
-        assertFalse(f.text.isEmpty());
+        final ClassicAdvisorBox.Request f = ClassicGUI.sailHomeRequest(null, null);
+        assertEquals(Messages.message("highseas.yes"), f.plainRows()[0]);
+        assertEquals(Messages.message("highseas.no"), f.plainRows()[1]);
+        assertEquals(0, f.defaultRow);
+        assertEquals(1, f.cancelRow);
+        assertFalse(f.plainText().isEmpty());
+        assertSame(ClassicAdvisorBox.Portrait.ADMIRAL, f.portrait);
     }
 
     /**
-     * The king's tax rise (C FINAL trap 1, build spec W24): Enter takes the
-     * original's first row, "Den königlichen Ring küssen" = FreeCol's "yes"
-     * (clip005 #17489, clip006 #7380), not the party; "no" and Escape hold
-     * the party (Roger's rule: Escape answers no).  The mercenary offers
-     * keep FreeCol's default, the "no"; a notice has its one row.
+     * The king's tax rise (C FINAL trap 1, build spec W24): the bar starts
+     * on the original's first row, "Den königlichen Ring küssen" =
+     * FreeCol's "yes" (clip005 #17489, clip006 #7380), so Enter kisses the
+     * ring; Down and Enter, "no" and Escape hold the party (Roger's rule:
+     * Escape answers no).  The mercenary offers list the "no" first with the
+     * bar on it (the original's @MERCENARIES); a notice has no rows and any
+     * key dismisses it.  The King stands at the left (W7's King exception).
      */
     public void testKingsBoxEnterKissesTheRing() {
         final ClassicGUI gui = new ClassicGUI(null);
@@ -555,6 +665,8 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             assertEquals(Messages.message(a.getYesKey()), last(fake.asked)[0]);
             assertEquals(Messages.message(a.getNoKey()), last(fake.asked)[1]);
             assertEquals("Enter's row, " + a, Integer.valueOf(0), last(fake.defaults));
+            assertEquals(1, last(fake.boxes).cancelRow);
+            assertSame(ClassicAdvisorBox.Portrait.KING, last(fake.boxes).portrait);
             assertEquals(Boolean.TRUE, last(answers));        // the ring
             fake.answer = 1;
             gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
@@ -567,32 +679,66 @@ public class ClassicGUISeamTest extends FreeColTestCase {
                 MonarchAction.MONARCH_MERCENARIES,
                 MonarchAction.HESSIAN_MERCENARIES }) {
             assertFalse(a.toString(), ClassicGUI.monarchEnterAccepts(a));
-            fake.answer = 1;
+            fake.answer = 0;
             gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
             assertEquals(a.toString(), 2, last(fake.asked).length);
-            assertEquals("Enter's row, " + a, Integer.valueOf(1), last(fake.defaults));
+            assertEquals(Messages.message(a.getNoKey()), last(fake.asked)[0]);
+            assertEquals(Messages.message(a.getYesKey()), last(fake.asked)[1]);
+            assertEquals("Enter's row, " + a, Integer.valueOf(0), last(fake.defaults));
+            assertEquals(0, last(fake.boxes).cancelRow);
             assertEquals(Boolean.FALSE, last(answers));
+            fake.answer = 1;
+            gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
+            assertEquals(Boolean.TRUE, last(answers));
         }
-        // A notice (no "yes"): one row, Enter on it, answered "no".
+        // A notice (no "yes"): no rows, answered "no".
         fake.answer = 0;
         gui.showMonarchDialog(MonarchAction.LOWER_TAX_WAR, t,
                               "model.nation.dutch", answers::add);
-        assertEquals(1, last(fake.asked).length);
-        assertEquals(Integer.valueOf(0), last(fake.defaults));
+        assertEquals(0, last(fake.asked).length);
+        assertTrue(last(fake.boxes).isNotice());
+        assertEquals(Integer.valueOf(-1), last(fake.defaults));
         assertEquals(Boolean.FALSE, last(answers));
         assertFalse(ClassicGUI.monarchEnterAccepts(null));
-        assertEquals(9, fake.asked.size());
-        assertEquals(9, answers.size());
+        assertEquals(11, fake.asked.size());
+        assertEquals(11, answers.size());
+
+        // The same with the player's keys on the real bar.
+        final KeyPrompter keys = new KeyPrompter();
+        gui.prompter = keys;
+        final MonarchAction tax = MonarchAction.RAISE_TAX_ACT;
+        final MonarchAction merc = MonarchAction.MONARCH_MERCENARIES;
+        final Object[][] cases = {
+            { tax, new String[] { "ENTER" }, true },
+            { tax, new String[] { "DOWN", "ENTER" }, false },
+            { tax, new String[] { "DOWN", "UP", "ENTER" }, true },
+            { tax, new String[] { "UP", "ENTER" }, true },
+            { tax, new String[] { "ESC" }, false },
+            { tax, new String[] { "DOWN", "ESC" }, false },
+            { merc, new String[] { "ENTER" }, false },
+            { merc, new String[] { "DOWN", "ENTER" }, true },
+            { merc, new String[] { "DOWN", "ESC" }, false },
+            { MonarchAction.LOWER_TAX_WAR, new String[] { "X" }, false },
+            { MonarchAction.LOWER_TAX_WAR, new String[] { "ENTER" }, false },
+        };
+        for (Object[] c : cases) {
+            keys.press((String[]) c[1]);
+            gui.showMonarchDialog((MonarchAction) c[0], t, "model.nation.dutch",
+                                  answers::add);
+            assertEquals(c[0] + " " + String.join(" ", (String[]) c[1]),
+                         c[2], last(answers));
+        }
     }
 
     /**
-     * The natives' demand at a colony (C FINAL trap 1): Enter and Escape
-     * refuse, FreeCol's default, which is also the original's first row
-     * (GAME.TXT @INDIANGOLD, @WANTSTUFF, @INDIANBEGFOOD list the refusal
-     * first and give no @default); only the "yes" row pays.  The first
+     * The natives' demand at a colony (C FINAL trap 1): the box lists the
+     * refusal first with the bar on it, as the original's @INDIANGOLD,
+     * @WANTSTUFF, @INDIANBEGFOOD do (no @default; D acceptance D5), so
+     * Enter and Escape refuse and only Down then Enter pays.  The first
      * contact box, through the same code, takes "Ja" (the peace) on Enter
      * (GAME.TXT @INDIANWELCOME lists "Ja" first, no @default; FreeCol's
-     * own default), and Escape still answers "no" (D acceptance review).
+     * own default), Escape still answers "no" (D acceptance review), and
+     * the tribe's chief stands at the box (W7).
      */
     public void testNativeDemandEnterRefuses() {
         final Game game = getStandardGame();
@@ -621,19 +767,20 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         for (int i = 0; i < demands.length; i++) {
             final String what = (demands[i] == null) ? "gold"
                 : demands[i].getId();
-            fake.answer = 1;
+            fake.answer = 0;
             gui.showNativeDemandDialog(brave, colony, demands[i], 50,
                                        answers::add);
-            assertEquals(what, Messages.message(yes[i]), last(fake.asked)[0]);
-            assertEquals(what, Messages.message(no[i]), last(fake.asked)[1]);
-            assertEquals("Enter's row, " + what, Integer.valueOf(1),
+            assertEquals(what, Messages.message(no[i]), last(fake.asked)[0]);
+            assertEquals(what, Messages.message(yes[i]), last(fake.asked)[1]);
+            assertEquals("Enter's row, " + what, Integer.valueOf(0),
                          last(fake.defaults));
+            assertEquals(0, last(fake.boxes).cancelRow);
             assertEquals(what, Boolean.FALSE, last(answers));
             fake.answer = -1;
             gui.showNativeDemandDialog(brave, colony, demands[i], 50,
                                        answers::add);
             assertEquals("Escape, " + what, Boolean.FALSE, last(answers));
-            fake.answer = 0;
+            fake.answer = 1;
             gui.showNativeDemandDialog(brave, colony, demands[i], 50,
                                        answers::add);
             assertEquals("yes, " + what, Boolean.TRUE, last(answers));
@@ -645,6 +792,10 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertEquals(Messages.message("no"), last(fake.asked)[1]);
         assertEquals("Enter's row, first contact", Integer.valueOf(0),
                      last(fake.defaults));
+        assertEquals(1, last(fake.boxes).cancelRow);
+        assertEquals("IND0A0.SS.000", last(fake.boxes).portrait.sprite);
+        assertSame(ClassicAdvisorBox.Portrait.Kind.CHIEF,
+                   last(fake.boxes).portrait.kind);
         assertEquals(Boolean.TRUE, last(answers));
         fake.answer = -1;                  // Escape: no
         gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
@@ -653,6 +804,160 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
         assertEquals(Boolean.FALSE, last(answers));
         assertEquals(3 * demands.length + 3, answers.size());
+
+        // The tribes and their chiefs: NAMES.TXT @TRIBES order.
+        assertEquals(2, ClassicGUI.tribeIndex(
+            game.getPlayerByNationId("model.nation.arawak")));
+        assertEquals(6, ClassicGUI.tribeIndex(
+            game.getPlayerByNationId("model.nation.sioux")));
+        assertEquals(-1, ClassicGUI.tribeIndex(dutch));
+        assertEquals(-1, ClassicGUI.tribeIndex(null));
+
+        // The same with the player's keys on the real bar.
+        final KeyPrompter keys = new KeyPrompter();
+        gui.prompter = keys;
+        final String[][] refuse = { { "ENTER" }, { "ESC" }, { "DOWN", "ESC" },
+                                    { "DOWN", "UP", "ENTER" }, { "UP", "ENTER" } };
+        for (String[] k : refuse) {
+            keys.press(k);
+            gui.showNativeDemandDialog(brave, colony, null, 50, answers::add);
+            assertEquals("demand " + String.join(" ", k), Boolean.FALSE, last(answers));
+        }
+        keys.press("DOWN", "ENTER");
+        gui.showNativeDemandDialog(brave, colony, null, 50, answers::add);
+        assertEquals(Boolean.TRUE, last(answers));
+        keys.press("DOWN", "DOWN", "ENTER");          // no row past the last
+        gui.showNativeDemandDialog(brave, colony, null, 50, answers::add);
+        assertEquals(Boolean.TRUE, last(answers));
+        keys.press("ENTER");
+        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
+        assertEquals(Boolean.TRUE, last(answers));
+        keys.press("DOWN", "ENTER");
+        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
+        assertEquals(Boolean.FALSE, last(answers));
+        keys.press("ESC");
+        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
+        assertEquals(Boolean.FALSE, last(answers));
+    }
+
+    /**
+     * W7: every confirm's keys on its real bar (the learn question, the
+     * site warning, the landing, the rumour, the hostile action): the bar
+     * starts on FreeCol's default ({@code defaultOk}: "yes" or "no"), Up
+     * and Down move it one row, Enter takes its row, Escape is "no".
+     */
+    public void testConfirmBoxKeys() {
+        final ClassicGUI gui = new ClassicGUI(null);
+        final KeyPrompter keys = new KeyPrompter();
+        gui.prompter = keys;
+        final StringTemplate learn = StringTemplate.template("learnSkill.text")
+            .addName("%skill%", "Pelzjäger");
+        final StringTemplate hostile = StringTemplate.key("confirmHostile.peace");
+        final Object[][] cases = {
+            // defaultOk = true: the bar on "yes"
+            { learn, true, new String[] { "ENTER" }, true },
+            { learn, true, new String[] { "ESC" }, false },
+            { learn, true, new String[] { "DOWN", "ENTER" }, false },
+            { learn, true, new String[] { "DOWN", "UP", "ENTER" }, true },
+            { learn, true, new String[] { "UP", "UP", "ENTER" }, true },
+            { learn, true, new String[] { "DOWN", "DOWN", "ENTER" }, false },
+            { learn, true, new String[] { "X", "ENTER" }, true },
+            // defaultOk = false: the bar on "no"
+            { hostile, false, new String[] { "ENTER" }, false },
+            { hostile, false, new String[] { "ESC" }, false },
+            { hostile, false, new String[] { "UP", "ENTER" }, true },
+            { hostile, false, new String[] { "UP", "ESC" }, false },
+            { hostile, false, new String[] { "UP", "DOWN", "ENTER" }, false },
+        };
+        for (Object[] c : cases) {
+            keys.press((String[]) c[2]);
+            final boolean got = gui.modalConfirmDialog(null, (StringTemplate) c[0],
+                (ImageIcon) null, "ok", "cancel", (Boolean) c[1]);
+            assertEquals(((StringTemplate) c[0]).getId() + " defaultOk=" + c[1]
+                + " " + String.join(" ", (String[]) c[2]), c[3], got);
+            final ClassicAdvisorBox.Request r = last(keys.boxes);
+            assertEquals(2, r.rows.size());
+            assertEquals(1, r.cancelRow);
+            assertEquals(((Boolean) c[1]) ? 0 : 1, r.defaultRow);
+            assertTrue(r.id.startsWith("confirm "));
+        }
+    }
+
+    /**
+     * W7 for the Europe question: on its real bar, Enter is "Jawohl" (the
+     * ship sails), Down then Enter is "Nein", Escape is "Nein"; Up never
+     * goes past "Jawohl".
+     */
+    public void testSailHomeBoxKeys() {
+        Topology.setCurrent(Topology.SQUARE);
+        final Game game = getStandardGame();
+        final MapBuilder builder = new MapBuilder(game);
+        builder.setDimensions(20, 15).setBaseTileType(ocean)
+            .setExploredByAll(true);
+        for (int y = 0; y < 15; y++) {
+            for (int x = 15; x < 20; x++) builder.setTileType(x, y, highSeas);
+        }
+        final Map map = builder.build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Unit ship = new ServerUnit(game, map.getTile(18, 7), dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final SailingGUI gui = new SailingGUI();
+        final KeyPrompter keys = new KeyPrompter();
+        gui.prompter = keys;
+        final Object[][] cases = {
+            { new String[] { "ENTER" }, 1 },
+            { new String[] { "DOWN", "ENTER" }, 0 },
+            { new String[] { "ESC" }, 0 },
+            { new String[] { "DOWN", "ESC" }, 0 },
+            { new String[] { "DOWN", "UP", "ENTER" }, 1 },
+            { new String[] { "UP", "ENTER" }, 1 },
+            { new String[] { "DOWN", "DOWN", "ENTER" }, 0 },
+            { new String[] { "X", "ENTER" }, 1 },
+        };
+        for (Object[] c : cases) {
+            gui.sailed.clear();
+            keys.press((String[]) c[0]);
+            assertTrue(gui.sailHomeKey(ship, Direction.E));
+            assertEquals(String.join(" ", (String[]) c[0]), c[1], gui.sailed.size());
+            assertSame(ClassicAdvisorBox.Portrait.ADMIRAL, last(keys.boxes).portrait);
+        }
+    }
+
+    /**
+     * W7: the notices.  Each model message is a box of its own, without
+     * rows, one after the other in their order; the error notice runs its
+     * callback when it closes.  Any key dismisses a notice.
+     */
+    public void testNoticesOneBoxEach() {
+        final ClassicGUI gui = new ClassicGUI(null);
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        final int[] ran = { 0 };
+        gui.showErrorPanel("broken", () -> ran[0]++);
+        assertEquals(1, ran[0]);
+        assertEquals(1, fake.boxes.size());
+        assertTrue(last(fake.boxes).isNotice());
+        assertEquals("broken", last(fake.texts));
+        assertEquals("error", last(fake.boxes).id);
+        // The callback runs even if the box fails.
+        gui.prompter = r -> {
+            throw new IllegalStateException("no box");
+        };
+        gui.showErrorPanel("broken again", () -> ran[0]++);
+        assertEquals(2, ran[0]);
+        // A notice on its real bar: any key, Enter, Escape dismiss it.
+        final KeyPrompter keys = new KeyPrompter();
+        final ClassicAdvisorBox.Request n = ClassicGUI.notice("notice",
+            "Line one.\nLine {two}.", "t", null);
+        assertTrue(n.isNotice());
+        assertEquals(-1, n.defaultRow);
+        assertEquals(-1, n.cancelRow);
+        assertEquals(2, n.paragraphs.size());
+        assertEquals("Line (two).", n.paragraphs.get(1).get(0));
+        for (String k : new String[] { "X", "ENTER", "ESC", "UP", "DOWN" }) {
+            assertEquals(k, 0, keys.answer(n, k));
+        }
     }
 
     /**

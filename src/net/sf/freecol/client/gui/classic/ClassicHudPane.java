@@ -40,6 +40,8 @@ import javax.swing.JLayeredPane;
  *   <li>the right panel (240,8,80,192), {@link ClassicInfoPanel};</li>
  *   <li>over all of it, on the popup layer, the strip's dropdown layer
  *       (visible only while a menu is open);</li>
+ *   <li>over them, the advisor boxes ({@link ClassicAdvisorLayer}, build
+ *       spec W7; visible only while a box is up or due);</li>
  *   <li>on top, on the drag layer, the original mouse arrow
  *       ({@link ClassicPointer}): it never takes a mouse event, blanks this
  *       pane's cursor (which every child inherits) over the canvas and gives
@@ -65,6 +67,12 @@ final class ClassicHudPane extends JLayeredPane {
     private final ClassicMapViewer map;
     private final ClassicInfoPanel panel;
     private final ClassicPointer pointer;
+
+    /** The advisor boxes' layer, or null until {@link #installBoxes}. */
+    private ClassicAdvisorLayer boxes = null;
+
+    /** The layer of the advisor boxes: over the dropdowns, under the arrow. */
+    static final Integer BOX_LAYER = POPUP_LAYER + 10;
 
     /** The acceptance recorder of frames, or null: the usual case. */
     private final ClassicFrameRecorder recorder = ClassicFrameRecorder.forFrames();
@@ -115,6 +123,18 @@ final class ClassicHudPane extends JLayeredPane {
         }
     }
 
+    /**
+     * Put the advisor boxes' layer on the pane (once).  EDT only.
+     *
+     * @param layer The layer.
+     */
+    void installBoxes(ClassicAdvisorLayer layer) {
+        if (this.boxes != null || layer == null) return;
+        this.boxes = layer;
+        add(layer, BOX_LAYER);
+        layer.setBounds(0, 0, getWidth(), getHeight());
+    }
+
     /** The arrow layer (to refresh it when the first scene goes). */
     ClassicPointer pointer() {
         return this.pointer;
@@ -147,7 +167,9 @@ final class ClassicHudPane extends JLayeredPane {
         this.map.setBounds(r[2]);
         this.panel.setBounds(r[3]);
         this.strip.dropLayer().setBounds(r[0]);
-        // The whole pane: the arrow layer maps points with the pane's canvas.
+        // The whole pane: the boxes and the arrow map points with the
+        // pane's canvas.
+        if (this.boxes != null) this.boxes.setBounds(0, 0, getWidth(), getHeight());
         this.pointer.setBounds(0, 0, getWidth(), getHeight());
     }
 

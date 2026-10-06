@@ -53,6 +53,13 @@ import net.sf.freecol.common.i18n.Messages;
  * The shared frame for every classic-UI <b>popup</b> — the original 1994
  * <em>Colonization</em>'s wood-framed message and question boxes.
  *
+ * <p><b>Since build spec W7 the stopgap only:</b> in the game every
+ * question, choice and notice is the original's advisor box in the canvas
+ * ({@link ClassicAdvisorBox}, {@link ClassicAdvisorLayer}).  This popup
+ * stays where the canvas is not what the player looks at: the title
+ * screens, a colony, Europe or report screen in front, a pack without
+ * FONTTINY ({@code ClassicGUI.putBox}).
+ *
  * <p>The classic UI has no {@code Canvas}, so each popup is hosted in a modal
  * {@link JDialog} of its own -- undecorated while the game runs in
  * borderless full screen, decorated in a window

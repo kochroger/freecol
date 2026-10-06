@@ -665,7 +665,8 @@ recorder's `Thread.sleep` plus spin, never `parkNanos`) and run on the EDT
 - **(Re)arm, reset not pause.** `rearmBlink` sets ON and starts a new phase on
   every activation (`changeToMoveUnits`, which also covers the turn start), at
   the end of every slide (`animateMove`), and when a box closes (every
-  `ClassicDialog` and the `chooseFromList` list through `ClassicDialog.Watcher`,
+  advisor box, `ClassicAdvisorLayer`, and the stopgaps `ClassicDialog` and
+  the `chooseFromList` list, through `ClassicDialog.Watcher`,
   the first scene, a menu of the strip through `ClassicMenuStrip.Host`). The
   original measures its first OFF from the **panel refresh** that follows
   (57 episodes); so every panel paint that changes a pixel within 100 ms of
@@ -1053,11 +1054,13 @@ testArmDelayed`.
   (`ClassicGUI.monarchEnterAccepts`: `RAISE_TAX_ACT`, `RAISE_TAX_WAR`);
   FreeCol's box, and ours before, took the party. "Nein" and Escape still
   hold the party: Escape answers no (W0e, Roger's rule). The mercenary offers
-  keep Enter on "no" (`@MERCENARIES` lists "Nein danke." first; I). The
+  keep Enter on "no" (`@MERCENARIES` lists "Nein danke." first; I), and the
+  advisor box (W7) lists their "no" first, with the bar on it. The
   natives' demands (`showNativeDemandDialog`) keep Enter and Escape on the
   refusal: FreeCol's default, and the original's first row (`@INDIANGOLD`,
   `@WANTSTUFF`, `@INDIANBEGFOOD` list the refusal first; I, no clip shows
-  one). The first contact with a native nation (`showFirstContactDialog`)
+  one); the advisor box lists the refusal first too, with the bar on it
+  (D acceptance D5), so Down then Enter pays. The first contact with a native nation (`showFirstContactDialog`)
   takes "Ja", the peace, on Enter: `@INDIANWELCOME` lists "Ja" first and
   has no `@default`, and FreeCol's `FirstContactDialog` defaults to "yes"
   (D acceptance review). A refusal costs dearly -- the server adds major
@@ -1092,17 +1095,19 @@ testArmDelayed`.
   the plain move. A ship with Europe as its destination (a goto order, a
   trade route) still leaves the map on entering the high seas, as the
   original's "Ziel Amsterdam" ship does (landfall #25713).
-- **The Europe question, by Roger's rule (W8a, a stopgap until the
-  in-canvas box W7).** A ship on the high seas in the last column the view
+- **The Europe question, by Roger's rule (W8a, in the advisor box W7).**
+  A ship on the high seas in the last column the view
   shows (`ClassicHud.lastViewColumn`: x = W-2 = 56 of 58) ordered E, NE or
   SE (6, 9, 3) past it, onto the never-drawn ring or off the map
   (`ClassicHud.eastPastView`, `ClassicGUI.asksSailHome`), gets the original's
   @SAILHOME question instead of a move: `ClassicMapViewer.handleMoveKey`
   asks `ClassicGUI.sailHomeKey` before the controller. Its words are GAME.TXT
-  `@SAILHOME` read from the pack (the gold braces dropped; without the pack
-  FreeCol's `highseas.*` strings), with the admiral as the icon, in a
-  `ClassicDialog`. The first row ("Jawohl, ...", Enter's: `@default=1`) sails
-  the ship to Europe (`InGameController.moveTo(unit, europe)`): it leaves its
+  `@SAILHOME` read from the pack ("{hoher See}" in gold; without the pack
+  FreeCol's `highseas.*` strings), in the original's advisor box with the
+  admiral over it (see "Advisor boxes" below): 0 px against the landfall
+  crops 05a and 05b, live as well. The bar starts on the first row
+  ("Jawohl, ...", `@default=1`); Down and Up move it one row, Enter or a
+  click takes a row. "Jawohl" sails the ship to Europe (`InGameController.moveTo(unit, europe)`): it leaves its
   tile with no slide, as in the original (c8 #44179), and the controller
   brings the next unit. The second row and Escape do nothing: the ship keeps
   its moves and stays the active unit; the box's close restarts its blink ON
@@ -1143,10 +1148,128 @@ Tests: `ClassicGUISeamTest` (`testEscapeAnswersNo`, `testEscapeCancelsAChoice`,
 `testEuropeQuestionAtTheEastEdge`, `testWestPastView`,
 `testEuropeQuestionAtTheWestEdge`, `testSailHomeText`,
 `testKingsBoxEnterKissesTheRing`, `testNativeDemandEnterRefuses`,
-`testReturnToEuropeOrder`, `testShipAtSeaGivesTheEndView`),
+`testReturnToEuropeOrder`, `testShipAtSeaGivesTheEndView`,
+`testChoiceBoxKeys`, `testConfirmBoxKeys`, `testSailHomeBoxKeys`,
+`testNoticesOneBoxEach`),
 `ClassicMenuBarTest.testActionMap`,
 `ClassicTurnFlowTest.testCancelKeepsTheUnitUp`,
 `InGameControllerTest.testLearnSkillQuestionKeepsTheMove` (server).
+
+### Advisor boxes (`ClassicAdvisorBox`, `ClassicAdvisorLayer`; build spec W7)
+
+Every question, choice and notice of the game is now the original's
+advisor box, drawn into the 320x200 canvas over the map and the panel, in
+place of the `ClassicDialog` windows (which stay as the stopgap where the
+canvas is not what the player looks at, below). Measured on the landfall
+clip's 24 GAME.TXT boxes (`landfall 05-dialogs-and-events.md` sections 2-3),
+clip004 (the Sioux chief), clips 005/006 (the King, the Tea Party) and the
+dago-colony clips (the bar); V where verified on the pixels, I inferred.
+
+- **Look (V).** `ClassicMenuBox.paintDialogFrame` in the GAME theme,
+  WOODTILE from the box's corner; no title bar, no buttons, no page
+  counter, no "Okay". FONTTINY, ink 68 with `{..}` gold 149, rows marked
+  too; the prompt at box + (5, 9), 6 px apart; rows at x + 9, glyph top
+  `y + 13 + 6P + 8i`; the bar a flat index-138 strip
+  `(x + 4, rowTop - 1, w - 8, 7)` under its row's text, which keeps its
+  colour. A greyed row (a choice FreeCol disables) is ink `0x555555`.
+- **Size (V).** `w = @width + 6`, `h = 6P + 8R + 18`. GAME.TXT's own line
+  breaks are ignored: the text is reflowed by `ClassicTextLayout.BOX`, the
+  plain advance width of a line, spaces collapsed, braces taking no room, at
+  most `@width - 6` (161 line ends of the clip: one exception,
+  @TUTORIAL13's first line, kept at 216 of 214 px). The page rule of the
+  nation pages (`ClassicTextLayout.PAGE`) misses four of them. FreeCol's
+  own texts are laid out at width 230, one paragraph per line, their `{ } ~
+  ^ _` made literal; a text too tall for the screen gets width 300, then is
+  cut with "...".
+- **Place (V).** Without a portrait the box is centred, `x = (321 - w) div
+  2`, `y = (201 - h) div 2`, or `y = @y` when the message has one
+  (@TUTORIAL17). An advisor stands OVER the box at a fixed offset and the
+  union of both is centred (`ClassicFirstScene.place`): admiral MSS0 at
+  (-4, -71), soldier MSS1 at (w - 55, -77), trade advisor MSS2, frontiersman
+  MSS3, priest MSS4 and colonist MSS5 centred, `(w - pw + 1) div 2`, at -78,
+  -87, -52 and -62. A chief stands at the right UNDER the box:
+  `chief.x = min(246, 317 - pw)`, `chief.y = (197 - ph) div 2`, the box's
+  right edge 3 px left of him, at least x 0 (Arawak (246,8) and box x 7,
+  Sioux (210,10) and box x 0; the vertical rule and the 3 px are I). The
+  King is the exception: at the left, `(0, (197 - ph) div 2)` = (0,18),
+  under the box, which is flush right, `x = 320 - w` (84,68,236,64). The
+  chiefs' sprites are `IND<n>A0` in NAMES.TXT @TRIBES order (Inca 0 ...
+  Tupi 7, `ClassicGUI.TRIBES`).
+- **The bar (V, Roger).** It starts on GAME.TXT's `@default=n` (1-based),
+  else on row 1 (@SAILHOME, @LANDFALL, @ABANDON's 2, @BUYME1, every box
+  without one); in a FreeCol box on the row FreeCol makes the default.
+  Up and Down (also the keypad's 8/2, held keys repeating) move it one row,
+  never past the ends, in one paint; Enter takes its row, Escape the box's
+  cancel row (Roger's rule: the "no" row). The mouse never moves it by
+  hovering: a press on a row puts it there and the release on that row
+  takes it; a press outside the box removes it and the release outside
+  closes the box as Escape (clip004, the options box). A notice (no rows)
+  goes on any key or click. Enter, Escape and the other keys count only as
+  fresh presses made while the box is on screen (an auto-repeat of a key
+  held from before, or a press older than the box, does nothing).
+- **Timing (V).** A box comes, moves its bar and goes in one paint
+  (`paintImmediately`, as the slide and the blink paint, so also in a
+  minimized window, whose `repaint()`s Swing holds back). A box after
+  another comes no earlier than 200 ms after its close (the clip restores
+  the screen for 0.13-0.27 s between chained boxes). A box whose portrait
+  is not the last one shown loads its palette first, 3 frames ahead (the
+  clip: 2-8, only when the advisor changes): the recorder's frames then
+  carry the portrait's entries 152-223 and 251-255
+  (`ClassicFrameRecorder.portraitPalette`, from the pack's index sheet and
+  sprite). The same portrait again loads nothing.
+- **Frozen screen, exact close (V).** While a box is up or due the blink
+  holds ON and the turn flow waits (`blinkHoldReason`, `turnBlocked`, the
+  `ClassicDialog.Watcher` hooks), the map, the key map and the strip take
+  no input (`isDialogShowing`, `boxBusy`), Alt+Enter is refused. Only the
+  water cycles under it. The layer paints nothing but the box and its
+  portrait, so its close shows exactly what was there: 0 px in every live
+  check.
+- **Modal like a dialog.** `ClassicAdvisorLayer.show` returns the answer
+  the seam needs (`modalConfirmDialog` returns a boolean): it waits in a
+  secondary loop of the event queue, which keeps pumping, as a modal
+  `JDialog` does. A box asked for while another is up or due waits its
+  turn, in the order they came; the earlier caller resumes after the later
+  box is answered, as with stacked dialogs. The game view's teardown closes
+  every box as dismissed ("no", "cancel").
+- **The seams (`ClassicGUI.Prompter`, `putBox`).** `modalConfirmDialog`
+  (every confirm: FreeCol's words, its "yes" row first, the bar on
+  `defaultOk`'s row, Escape "no"); the event boxes through `askEvent`: the
+  King's (the King at the left; the tax rise opens on "kiss the ring", the
+  mercenaries on their "no", listed first), the first contact (the tribe's
+  chief at the right; "Ja" first and barred; FreeCol's words until W8c),
+  the natives' demands (the refusal first and barred); `sailHomeKey`
+  (GAME.TXT @SAILHOME with the admiral); `modalChoiceDialog` (one row per
+  choice, the cancel row last, greyed choices); and the notices: each model
+  message is a box of its own, one after the other (the original has no
+  paged report), the error and "not yet" notices too. The answers are
+  FreeCol's as before. `putBox` shows the box in the canvas while the main
+  window is the one the player looks at; on the title screens, over a
+  colony, Europe or report screen (`dialogOwner` is not the main frame),
+  without the pack's FONTTINY, or when the rows do not fit on the screen,
+  the stopgap stays (`ClassicDialog`, the selection list for a choice).
+- **Not yet.** FreeCol's words in the FreeCol boxes (the GAME.TXT texts of
+  the landing, the villages, the rumours, the first contact chain, the
+  King's texts are W8b-W8f, W24); @SAILPORT's indented port rows; the
+  @LANDHO input field; the King's KING2 gesture (W24); a notice's
+  portrait (N1); the original's list boxes with "(F1 für Hilfe)" (D2).
+- **Recorder events:** `box-palette` and `palette-portrait` (the portrait's
+  palette), `box-open <id> box=x,y,w,h portrait=<sprite>@x,y rows= bar=
+  text=`, `box-bar <id> row=`, `box-close <id> chosen=`; the harness's
+  state line shows ` box=<id>:<bar row>` (or `due`), its `isIdle` is false
+  and its keys and clicks go to the box while one is up or due.
+
+Tests: `ClassicAdvisorBoxTest` (the geometry of all 26 measured boxes, the
+bar's keys and mouse, the text helpers, `@default`, long texts, the
+portraits and their palette; and `testGoldenAgainstTheLandfallClip`: 26
+GAME.TXT boxes drawn from the pack against the clip's pixel-exact crops
+`landfall/analysis/img/*_1x.png`, box and portrait pixels, 0 px off apart
+from the original's mouse arrow and @TUTORIAL13's first four lines; it
+needs the pack and `-Dclassic.clips`), `ClassicAdvisorLayerTest` (modal
+show, keys, held keys, the mouse, chained boxes 200 ms apart, the
+palette's lead, notices, teardown), `ClassicGUISeamTest` (every seam's
+Enter, Escape and arrows on the real bar: `testConfirmBoxKeys`,
+`testChoiceBoxKeys`, `testSailHomeBoxKeys`, `testKingsBoxEnterKissesTheRing`,
+`testNativeDemandEnterRefuses`, `testNoticesOneBoxEach`).
 
 ## In-game HUD (menu strip, dropdowns, right panel)
 
@@ -2272,6 +2395,13 @@ screen's backdrop and row/field choices are open guesses — see "High Scores"
 above.
 
 ## Popups (`ClassicDialog`) — and the dispatch seams that stranded them
+
+> **Since W7 the stopgap only.** In the game every question, choice and
+> notice is the original's advisor box in the canvas ("Advisor boxes",
+> above); `ClassicDialog` and the selection list remain where the canvas is
+> not what the player looks at: the title screens, a colony, Europe or
+> report screen in front, a pack without FONTTINY, rows that do not fit.
+> The seams below still describe what each answer means.
 
 The shared wood-framed popup every classic dialog routes through — the plan's
 "build it once" for Phase 3. Like the reports it paints a virtual pixel canvas

@@ -103,7 +103,10 @@ import javax.swing.JComponent;
  * {@code cells=c0,r0-c1,r1}, {@code final-draw}, {@code none},
  * {@code hidden}), {@code palette-start}, {@code palette-hold},
  * {@code palette-release}, {@code palette-pref} (the cycle),
- * {@code palette-file} (the record palette's phase).  Reserved for
+ * {@code palette-file} (the record palette's phase), {@code box-open},
+ * {@code box-bar}, {@code box-close}, {@code box-palette} and
+ * {@code palette-portrait} (W7, the advisor boxes:
+ * {@link ClassicAdvisorLayer}).  Reserved for
  * the M1 work items: {@code endturn-timer-start/fire}
  * (W5), {@code music-fade} (W15).
  *
@@ -147,6 +150,14 @@ import javax.swing.JComponent;
  * {@code paletteEntriesChanged=8} and gets a PNG even with no changed pixel,
  * as in ZmbvExtract's clips.  The index hint names the cycling pixels whose
  * colour a lower index holds too (120 = 56 and 127 = 59 at phase 0).
+ *
+ * <p><b>The portrait's palette</b> (W7, landfall 05 section 2.4).  An
+ * advisor box whose portrait is not the last one loads that portrait's
+ * entries (152-223, 251-255) a few frames before the box
+ * ({@link #portraitPalette}, event {@code palette-portrait}); the next
+ * frame's PLTE has them, as the original's palette frame does, so the
+ * portrait's colours map to its own indices.  They stay until the next
+ * portrait comes.
  */
 public final class ClassicFrameRecorder {
 
@@ -291,6 +302,12 @@ public final class ClassicFrameRecorder {
      */
     private int publishedRotation = 0, cycleFirst = ClassicGamePalette.CYCLE_FIRST,
         cycleCount = ClassicGamePalette.CYCLE_COUNT;
+
+    /**
+     * A portrait's palette entries for the next frame (under
+     * {@link #frameLock}), or null ({@link #portraitPalette}).
+     */
+    private int[] pendingPortrait = null;
 
     /** The game palette {@link #fileCyclePhase} was found for (EDT only). */
     private ClassicGamePalette cyclePalette = null;
@@ -451,6 +468,37 @@ public final class ClassicFrameRecorder {
     public static void event(String type, String detail) {
         final ClassicFrameRecorder r = instance;
         if (r != null) r.log(System.nanoTime(), type, detail);
+    }
+
+    /**
+     * An advisor box's portrait palette goes in (class comment): the next
+     * frame's palette has these entries.  A no-op while recording is off.
+     *
+     * @param sprite The portrait (for the event).
+     * @param entries 256 entries 0xRRGGBB, -1 where it has none; or null
+     *     (logged, nothing changes).
+     */
+    static void portraitPalette(String sprite, int[] entries) {
+        final ClassicFrameRecorder r = instance;
+        if (r != null) r.notePortraitPalette(sprite, entries);
+    }
+
+    /**
+     * {@link #portraitPalette} on this recorder.
+     *
+     * @param sprite The portrait.
+     * @param entries The entries, or null.
+     */
+    void notePortraitPalette(String sprite, int[] entries) {
+        int n = 0;
+        if (entries != null) {
+            for (int e : entries) if (e >= 0) n++;
+        }
+        log(System.nanoTime(), "palette-portrait", sprite + " entries=" + n);
+        if (entries == null || entries.length != 256 || n == 0) return;
+        synchronized (this.frameLock) {
+            this.pendingPortrait = entries.clone();
+        }
     }
 
     /**
@@ -877,6 +925,11 @@ public final class ClassicFrameRecorder {
             // The frame's palette: the record palette at the terrain's phase.
             rotated = this.palette.rotate(this.publishedRotation, this.cycleFirst,
                                           this.cycleCount);
+            // An advisor box's portrait palette (W7).
+            if (this.pendingPortrait != null) {
+                rotated |= this.palette.overlay(this.pendingPortrait);
+                this.pendingPortrait = null;
+            }
             this.hintPixels += downsample(this.shadow, this.canvas, this.scale,
                 this.palette, (this.hintOn) ? this.hintShadow : null, cur);
         }
@@ -1358,6 +1411,36 @@ public final class ClassicFrameRecorder {
             this.lastRgb = -1;
             this.lastMiss = false;
             return true;
+        }
+
+        /**
+         * Put an advisor portrait's entries into a fixed palette (the class
+         * comment's "portrait's palette"); the file's copy follows, so a
+         * later rotation of the colour cycle (120-127, outside the slot)
+         * keeps them.  An adaptive palette is left alone.
+         *
+         * @param entries 256 entries 0xRRGGBB, -1 where nothing changes.
+         * @return True if the entries changed.
+         */
+        boolean overlay(int[] entries) {
+            if (!this.fixed || entries == null || entries.length != 256) return false;
+            boolean changed = false;
+            for (int i = 0; i < 256; i++) {
+                if (entries[i] < 0) continue;
+                final int c = entries[i] & 0xFFFFFF;
+                this.file[i] = c;
+                if (this.rgb[i] != c) {
+                    this.rgb[i] = c;
+                    changed = true;
+                }
+            }
+            if (changed) {
+                indexExact();
+                this.nearest.clear();
+                this.lastRgb = -1;
+                this.lastMiss = false;
+            }
+            return changed;
         }
 
         /**

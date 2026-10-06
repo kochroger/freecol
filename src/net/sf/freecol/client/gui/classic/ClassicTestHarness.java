@@ -148,6 +148,9 @@ final class ClassicTestHarness {
             sb.append(" flow=").append(this.gui.turnFlowState());
         }
         sb.append(" dlg=").append(this.gui.isDialogShowing());
+        final ClassicAdvisorLayer boxes = this.gui.boxLayer();
+        final String box = (boxes == null) ? null : boxes.probe();
+        if (box != null) sb.append(" box=").append(box);
         for (Window w : Window.getWindows()) {
             if (w instanceof Dialog && w.isShowing()) {
                 sb.append(" [").append(((Dialog)w).getTitle()).append(']');
@@ -203,6 +206,9 @@ final class ClassicTestHarness {
 
     /** The component a real key press would reach now (EDT). */
     private Component keyTarget() {
+        // An advisor box takes the keys while it is up or due (W7).
+        final ClassicAdvisorLayer boxes = this.gui.boxLayer();
+        if (boxes != null && boxes.isBusy() && boxes.isShowing()) return boxes;
         final Component owner = KeyboardFocusManager
             .getCurrentKeyboardFocusManager().getFocusOwner();
         if (owner != null && owner.isShowing()) return owner;
@@ -253,7 +259,8 @@ final class ClassicTestHarness {
                     final ClassicMapViewer mv = gui.currentMapViewer();
                     return gui.currentHudPane() != null && mv != null
                         && !mv.isAnimating() && fcc.currentPlayerIsMyPlayer()
-                        && !gui.isDialogShowing() && modalDialog() == null
+                        && !gui.isDialogShowing() && !gui.boxBusy()
+                        && modalDialog() == null
                         && !gui.turnFlowBusy();
                 }, false);
         }

@@ -59,6 +59,17 @@ import java.util.List;
  *       (FONTINTR 10, FONTKING 8).</li>
  * </ul>
  *
+ * <p><b>The advisor boxes</b> ({@link ClassicAdvisorBox}, FONTTINY at
+ * pitch 6) wrap by another measure ({@link #BOX}): the plain advance width
+ * of the line, spaces collapsed, the braces taking no room, at most
+ * {@code W - 6}.  Checked on the 161 line ends of the landfall clip's 21
+ * GAME.TXT boxes ({@code landfall 05-dialogs-and-events.md} section 3.1:
+ * every line that stands, and every line plus the next word that broke):
+ * one exception, {@code @TUTORIAL13}'s first line, which the original keeps
+ * at 216 px of a 214-px measure.  The page rule above misses four of them
+ * ({@code @INDIANWELCOME}, {@code @VILLAGESAVAGE}, {@code @LEARNSTAY},
+ * {@code @TUTORIAL13}).
+ *
  * <p>{@link ClassicFont#wrap} is deliberately not used: it wraps at plain
  * width {@code <= max}, which breaks the 066 page differently (the two
  * counter-examples above).
@@ -88,6 +99,27 @@ final class ClassicTextLayout {
         }
     }
 
+    /** How a line is measured against the message's width. */
+    interface Fit {
+
+        /**
+         * @param f The font.
+         * @param marked The candidate line, markup kept.
+         * @param width W, the message's {@code @width}.
+         * @return Whether the line fits.
+         */
+        boolean fits(ClassicFont f, String marked, int width);
+    }
+
+    /** The text pages' rule ({@link #fits}), the default of {@link #layout}. */
+    static final Fit PAGE = ClassicTextLayout::fits;
+
+    /**
+     * The advisor boxes' rule (class comment): the plain width at most
+     * {@code W - 6}.
+     */
+    static final Fit BOX = (f, marked, width) -> f.markedWidth(marked) <= width - 6;
+
     private ClassicTextLayout() {}
 
     /**
@@ -105,6 +137,19 @@ final class ClassicTextLayout {
      */
     static List<Line> layout(ClassicFont f, List<String> raw, int width,
                              Integer left, Integer top, int pitch) {
+        return layout(f, raw, width, left, top, pitch, PAGE);
+    }
+
+    /**
+     * Lay out a message with a given wrap rule ({@link #PAGE},
+     * {@link #BOX}), otherwise as
+     * {@link #layout(ClassicFont, List, int, Integer, Integer, int)}.
+     *
+     * @param fit The wrap rule.
+     * @return The lines, top to bottom.
+     */
+    static List<Line> layout(ClassicFont f, List<String> raw, int width,
+                             Integer left, Integer top, int pitch, Fit fit) {
         if (raw == null || raw.isEmpty()) return Collections.emptyList();
         final int l = (left != null) ? left : (SCREEN_W - width) / 2;
         // {x, text} pairs before vertical placement.
@@ -114,7 +159,7 @@ final class ClassicTextLayout {
             final String s = r.replace("_", "");
             if (s.startsWith("^")) {
                 if (para != null) {
-                    flow(f, para.toString(), width, l, rows);
+                    flow(f, para.toString(), width, l, rows, fit);
                     para = null;
                 }
                 if (s.startsWith("^^")) {
@@ -133,7 +178,7 @@ final class ClassicTextLayout {
                 }
             }
         }
-        if (para != null) flow(f, para.toString(), width, l, rows);
+        if (para != null) flow(f, para.toString(), width, l, rows, fit);
 
         final int y0 = (top != null) ? top : (SCREEN_H - pitch * rows.size()) / 2;
         final List<Line> out = new ArrayList<>(rows.size());
@@ -164,7 +209,7 @@ final class ClassicTextLayout {
 
     /** Greedy wrap of one joined paragraph into left-aligned rows. */
     private static void flow(ClassicFont f, String para, int width, int left,
-                             List<Object[]> rows) {
+                             List<Object[]> rows, Fit fit) {
         final String p = para.trim();
         if (p.isEmpty()) return;
         final String[] words = p.split(" +");
@@ -176,7 +221,7 @@ final class ClassicTextLayout {
                 continue;
             }
             final String cand = line + " " + w;
-            if (fits(f, cand, width)) {
+            if (fit.fits(f, cand, width)) {
                 line.setLength(0);
                 line.append(cand);
             } else {
