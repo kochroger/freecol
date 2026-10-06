@@ -65,12 +65,18 @@ import net.sf.freecol.common.model.Unit;
  *
  * Where {@code SwingGUI}'s {@link net.sf.freecol.client.gui.mapviewer.MapViewer}
  * paints isometric diamonds, this paints a plain rectangular grid of tiles
- * centred on a focus tile, mirroring the look of the original 1994 Colonization.
- * The per-tile <em>image selection</em> logic is reused from {@link ImageLibrary}
- * (terrain / settlement / unit lookups); only the projection is different:
+ * from an explicit view origin, mirroring the look of the original 1994
+ * Colonization.  The per-tile <em>image selection</em> logic is reused from
+ * {@link ImageLibrary} (terrain / settlement / unit lookups); only the
+ * projection is different.  On the HUD grid ({@link #setFixedScale}) the
+ * origin {@code (vx, vy)} is the tile in the top-left cell:
  *
- * <pre>screenX = centreX + (tileX - focusX) * tileW - tileW/2
- * screenY = centreY + (tileY - focusY) * tileH - tileH/2</pre>
+ * <pre>screenX = (tileX - vx) * tileW
+ * screenY = (tileY - vy) * tileH</pre>
+ *
+ * and it moves only by the original's jumps ({@link #jumpIfNeeded}, build
+ * spec W4).  The adaptive layout centres the origin's cell
+ * ({@link ClassicHud#UNIT_COL}, {@link ClassicHud#UNIT_ROW}) instead.
  *
  * <p><b>Phase 1.</b> Terrain is drawn from the original Colonization
  * {@code TERRAIN.SS} sprites — square 16&times;16 tiles, aliased onto FreeCol's
@@ -83,9 +89,9 @@ import net.sf.freecol.common.model.Unit;
  * the pack is absent the same keys fall back to FreeCol's own (isometric) art,
  * shrunk into the square cells. See CLASSIC_UI_PLAN.md ("Phase 1").
  *
- * <p>This panel owns the classic view state (view mode, focus, selected tile,
- * active unit); {@link ClassicGUI} delegates the corresponding {@code GUI}
- * facade methods to it.
+ * <p>This panel owns the classic view state (view mode, view origin,
+ * selected tile, active unit); {@link ClassicGUI} delegates the
+ * corresponding {@code GUI} facade methods to it.
  */
 final class ClassicMapViewer extends JPanel {
 
@@ -216,7 +222,16 @@ final class ClassicMapViewer extends JPanel {
 
     // Classic view state (owned here; ClassicGUI delegates to these).
     private GUI.ViewMode viewMode = GUI.ViewMode.END_TURN;
-    private Tile focus;
+
+    /**
+     * The view origin {x, y}: the map tile in the view's top-left cell,
+     * within {@link ClassicHud#clampView}'s range (one step past it only
+     * to show a unit on the map's outer ring, {@link ClassicHud#viewFor});
+     * null before the first view.  Replaced, never changed in place (the
+     * recorder's probe reads it from another thread, {@link #peekViewOrigin}).
+     */
+    private volatile int[] origin;
+
     private Tile selectedTile;
     private Unit activeUnit;
 
@@ -288,7 +303,7 @@ final class ClassicMapViewer extends JPanel {
     private TileType oceanType;
 
     /**
-     * Repeating timer that drives edge scrolling; it pans the focus by
+     * Repeating timer that drives edge scrolling; it pans the view by
      * {@link #edgeDX}/{@link #edgeDY} each tick while the mouse sits in an edge
      * hot zone, and is stopped whenever that direction is zero.
      */
@@ -367,7 +382,7 @@ final class ClassicMapViewer extends JPanel {
         this.edgeScrollTimer = new Timer(EDGE_SCROLL_INTERVAL_MS, e -> {
                 if (inputBlocked()) return;
                 if (this.edgeDX != 0 || this.edgeDY != 0) {
-                    panFocus(this.edgeDX, this.edgeDY);
+                    panView(this.edgeDX, this.edgeDY);
                 }
             });
         installKeyBindings();
@@ -604,7 +619,7 @@ final class ClassicMapViewer extends JPanel {
 
     /**
      * Handle a movement key: move the active unit (MOVE_UNITS), step the
-     * selected-tile cursor (TERRAIN), or raw-grid pan the focus when nothing is
+     * selected-tile cursor (TERRAIN), or raw-grid pan the view when nothing is
      * selected.  Mirrors {@code MoveAction.actionPerformed}.
      */
     private void handleMoveKey(Intent intent, int panDx, int panDy) {
@@ -628,9 +643,8 @@ final class ClassicMapViewer extends JPanel {
                     ClassicFrameRecorder.event("move-done", "unit=" + u.getId()
                         + " at=" + xy(u.getTile()) + " moves=" + u.getMovesLeft());
                 }
-                // Focus follows the (possibly moved) unit — but only jumps
-                // when it nears the view edge (view-follows-the-action).
-                if (u.getTile() != null) ensureTileVisible(u.getTile());
+                // No view test on arrival: the view rule ran on the source
+                // tile before the slide (animateMove, build spec W4).
                 // The slide's final draw now that the model has the move
                 // and its reveal, not when the event queue gets to it.
                 if (this.finalDrawPending) {
@@ -653,7 +667,7 @@ final class ClassicMapViewer extends JPanel {
         if (ClassicFrameRecorder.on()) {
             ClassicFrameRecorder.event("pan", intent + " mode=" + this.viewMode);
         }
-        panFocus(panDx, panDy);
+        panView(panDx, panDy);
     }
 
     /** "x,y" of a tile for the recorder's events, "-" for none. */
@@ -677,21 +691,32 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
-     * Get the focus tile, lazily defaulting to a sensible starting tile the
-     * first time it is needed (a settlement, a unit, the player's entry tile,
-     * or the map centre).
+     * Get the focus tile: the tile in the view's cell
+     * ({@link ClassicHud#UNIT_COL}, {@link ClassicHud#UNIT_ROW}), where a
+     * recentred unit sits unless the view is clamped at the map's edge.
+     * The first view is chosen lazily ({@link #viewOrigin}).
      *
      * @return The current focus {@code Tile}, or null if there is no map yet.
      */
     Tile getFocus() {
-        if (this.focus == null) {
-            this.focus = defaultFocus();
-        }
-        return this.focus;
+        final Map map = getMap();
+        final int[] o = viewOrigin();
+        if (map == null || o == null) return null;
+        return map.getTile(
+            ClassicHud.clamp(o[0] + ClassicHud.UNIT_COL, 0, map.getWidth() - 1),
+            ClassicHud.clamp(o[1] + ClassicHud.UNIT_ROW, 0, map.getHeight() - 1));
     }
 
+    /**
+     * Centre the view on a tile, clamped to the map ({@link ClassicHud#viewFor}):
+     * the game's start and a reconnect (the start ship at (56,42) of the
+     * 58x72 map in cell (14,6), landfall #340), the centre command, a
+     * minimap click.
+     *
+     * @param tile The tile, or null to keep the view.
+     */
     void setFocus(Tile tile) {
-        this.focus = tile;
+        centreOn(tile, "focus");
         repaint();
     }
 
@@ -720,16 +745,6 @@ final class ClassicMapViewer extends JPanel {
         return this.minimapPPT;
     }
 
-    /** Half the tile columns currently visible in the main view (viewport box). */
-    int getViewHalfCols() {
-        return Math.max(0, getWidth() / tileW() / 2);
-    }
-
-    /** Half the tile rows currently visible in the main view (viewport box). */
-    int getViewHalfRows() {
-        return Math.max(0, getHeight() / tileH() / 2);
-    }
-
     /** Recentre the main view on the given map tile (clamped to the map). */
     void recenterOnTile(int tileX, int tileY) {
         final Map map = getMap();
@@ -740,48 +755,117 @@ final class ClassicMapViewer extends JPanel {
         if (t != null) this.gui.setFocus(t);
     }
 
-    /** TERRAIN view mode: a tile is selected (see {@code GUI.changeView(Tile)}). */
+    /**
+     * TERRAIN view mode: a tile is selected (see {@code GUI.changeView(Tile)}).
+     * The view follows the cursor by the same jumps as a unit
+     * ({@link #jumpIfNeeded}; I: the original's view mode was not recorded).
+     */
     void changeToTerrain(Tile tile) {
         this.viewMode = GUI.ViewMode.TERRAIN;
         this.selectedTile = tile;
         this.activeUnit = null;
-        if (tile != null) this.focus = tile;
+        jumpIfNeeded(tile, "terrain");
         rearmBlink("terrain");
         repaint();
     }
 
     /**
-     * MOVE_UNITS mode: an active unit is selected (make sure it is
-     * visible).  Its blink starts ON, the first OFF one half-period after
+     * MOVE_UNITS mode: an active unit is selected.  When it becomes active
+     * the view jumps to it if it is in the view's margin or off the view
+     * (build spec W4 (a): the turn start and the next unit, landfall jumps
+     * #4-#13; the soldier at (14,1) in #5).  The controller also selects
+     * the active unit again after each of its moves
+     * ({@code InGameController.moveDirection}'s redisplay): that is the
+     * arrival, so the view is not tested then (landfall #10077: the ship
+     * reached row 10 and blinked there, the view jumped only at its next
+     * move).  A jump paints the map and the minimap (its ring) at once, as
+     * one cut.  The blink starts ON, the first OFF one half-period after
      * the panel refresh (build spec W3).
      */
     void changeToMoveUnits(Unit unit) {
+        final boolean activated = unit != this.activeUnit
+            || this.viewMode != GUI.ViewMode.MOVE_UNITS;
         this.viewMode = GUI.ViewMode.MOVE_UNITS;
         this.activeUnit = unit;
+        boolean jumped = false;
         if (unit != null && unit.getTile() != null) {
             this.selectedTile = unit.getTile();
-            ensureTileVisible(unit.getTile());
+            if (activated) jumped = jumpIfNeeded(unit.getTile(), "activate");
         }
         rearmBlink("activate");
-        repaint();
+        if (jumped) {
+            paintNow(null);
+            if (this.gui != null) this.gui.paintBlinkDot();
+        } else {
+            repaint();
+        }
     }
 
     /**
-     * Recentre the focus on {@code tile} unless it already sits comfortably
-     * inside the visible span (more than one cell from every edge) — the
-     * original's view-follows-the-action rule: the player never scrolls to
-     * find the unit that is up, but the view also does not jump when the
-     * action is already well on screen.
+     * The original's view rule (build spec W4, landfall 02 section 9): the
+     * view jumps, putting {@code tile} in cell (7,6) clamped to the map
+     * ({@link ClassicHud#viewFor}), when the tile is in the view's margin
+     * on a side where the map goes on ({@link ClassicHud#needsRecentre});
+     * else it stays.  Tested on activation, and on the source tile when a
+     * move is accepted (own and foreign, {@link #animateMove}), never on
+     * arrival and never at the end of the turn.  The first view of a game
+     * is centred on the tile.  A plain state change: the caller paints.
+     *
+     * @param tile The tile the unit (or the cursor) is on.
+     * @param reason What asks (for the recorder's {@code view-jump}).
+     * @return True if the view moved.
      */
-    private void ensureTileVisible(Tile tile) {
-        final Tile f = getFocus();
-        if (tile == null || f == null) return;
-        final int hc = Math.max(0, getViewHalfCols() - 2);
-        final int hr = Math.max(0, getViewHalfRows() - 2);
-        if (Math.abs(tile.getX() - f.getX()) > hc
-            || Math.abs(tile.getY() - f.getY()) > hr) {
-            this.focus = tile;
+    boolean jumpIfNeeded(Tile tile, String reason) {
+        if (tile == null) return false;
+        final Map map = tile.getMap();
+        final int[] o = this.origin;
+        if (map == null) return false;
+        if (o != null && !ClassicHud.needsRecentre(map.getWidth(),
+                map.getHeight(), o[0], o[1], tile.getX(), tile.getY())) {
+            return false;
         }
+        return centreOn(tile, reason);
+    }
+
+    /**
+     * Put {@code tile} in cell (7,6) of the view, clamped to the map.
+     *
+     * @param tile The tile, or null to keep the view.
+     * @param reason What asks (for the recorder).
+     * @return True if the view moved.
+     */
+    private boolean centreOn(Tile tile, String reason) {
+        final Map map = (tile == null) ? null : tile.getMap();
+        if (map == null) return false;
+        return moveView(ClassicHud.viewFor(map.getWidth(), map.getHeight(),
+                                           tile.getX(), tile.getY()),
+                        reason, tile);
+    }
+
+    /**
+     * Set the view origin; a hard cut, the next paint shows the new view
+     * (landfall 02 section 5: the view never scrolls).
+     *
+     * @param v The new origin {x, y}, already clamped.
+     * @param reason What moves it (for the recorder).
+     * @param tile The tile it centres on, or null (a pan).
+     * @return True if the view moved.
+     */
+    private boolean moveView(int[] v, String reason, Tile tile) {
+        final int[] o = this.origin;
+        if (o != null && o[0] == v[0] && o[1] == v[1]) return false;
+        this.origin = v;
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("view-jump", reason + " "
+                + ((o == null) ? "-" : o[0] + "," + o[1]) + " -> "
+                + v[0] + "," + v[1]
+                + ((tile == null) ? "" : " tile=" + xy(tile)
+                    + ((o == null) ? "" : " cell=" + (tile.getX() - o[0])
+                        + "," + (tile.getY() - o[1]))
+                    + " now=" + (tile.getX() - v[0]) + ","
+                    + (tile.getY() - v[1])));
+        }
+        return true;
     }
 
     /**
@@ -842,13 +926,14 @@ final class ClassicMapViewer extends JPanel {
             }
         }
         final boolean shown = isShownAt(unit, srcTile);
-        // The original moves the view on the key press, before the first
-        // step (the jump frame, then offset 1).
-        final int[] before = viewOrigin();
-        ensureTileVisible(dstTile);
+        // The view rule on the SOURCE tile, now the move is accepted and
+        // before the first step (build spec W4 (b)/(c), also for native
+        // moves): a jump is the slide's offset 0, the whole map and the
+        // minimap ring, and offset 1 follows one step later (landfall
+        // #10269 -> #10270, #17712 -> #17714).
+        final boolean jumped = jumpIfNeeded(srcTile,
+                                            own ? "move" : "foreign-move");
         final int[] v = viewOrigin();
-        final boolean jumped = before != null && v != null
-            && (before[0] != v[0] || before[1] != v[1]);
         final boolean redraw = startsAtOffsetZero(jumped, own, shown);
         final boolean fast = ClassicPrefs.get().is(ClassicPrefs.MOVE_ACCELERATOR);
         final long step = ClassicSlide.stepNanos(fast);
@@ -866,8 +951,9 @@ final class ClassicMapViewer extends JPanel {
         }
         // The slide shows the unit ON: the blink holds until it ends.  A key
         // that came while OFF gets offset 0 at once (the slide's own paint),
-        // and the minimap dot turns back to the nation colour right after it.
-        final boolean dotOff = this.blinkOff;
+        // and the minimap dot turns back to the nation colour right after it;
+        // after a jump the minimap (its ring) is painted with offset 0.
+        final boolean minimap = this.blinkOff || jumped;
         this.blinkOff = false;
         final int dotStep = redraw ? 0 : 1;
         this.animUnit = unit;
@@ -881,7 +967,7 @@ final class ClassicMapViewer extends JPanel {
                     this.animHidden = k == 0 && !own && !shown;
                     // Offset 0 may come with a view jump: the whole map.
                     paintNow((k == 0) ? null : slideBounds());
-                    if (dotOff && k == dotStep && this.gui != null) {
+                    if (minimap && k == dotStep && this.gui != null) {
                         this.gui.paintBlinkDot();
                     }
                     if (rec) {
@@ -928,16 +1014,16 @@ final class ClassicMapViewer extends JPanel {
      * (and every cell between, for the isometric model's two-row steps),
      * plus the icon's reach past them ({@link #ICON_MARGIN}).
      *
-     * @return The area, or null (the whole map) without a focus.
+     * @return The area, or null (the whole map) without a view.
      */
     private Rectangle slideBounds() {
-        final Tile f = getFocus();
+        final int[] o = this.origin;
         final Tile a = this.animFrom, b = this.animTo;
-        if (f == null || a == null || b == null) return null;
-        final Rectangle r = new Rectangle(screenX(a.getX(), f.getX()),
-            screenY(a.getY(), f.getY()), tileW(), tileH());
-        r.add(new Rectangle(screenX(b.getX(), f.getX()),
-            screenY(b.getY(), f.getY()), tileW(), tileH()));
+        if (o == null || a == null || b == null) return null;
+        final Rectangle r = new Rectangle(screenX(a.getX(), o[0]),
+            screenY(a.getY(), o[1]), tileW(), tileH());
+        r.add(new Rectangle(screenX(b.getX(), o[0]),
+            screenY(b.getY(), o[1]), tileW(), tileH()));
         final int m = ICON_MARGIN * scale();
         r.grow(m, m);
         return r;
@@ -1149,15 +1235,15 @@ final class ClassicMapViewer extends JPanel {
      */
     private void paintBlinkCell() {
         final Unit u = this.activeUnit;
-        final Tile f = this.focus;
+        final int[] o = this.origin;
         if (this.finalDrawPending || u == null || u.getTile() == null
-            || f == null) {
+            || o == null) {
             repaint();
             return;
         }
         final Tile t = u.getTile();
-        final Rectangle r = new Rectangle(screenX(t.getX(), f.getX()),
-            screenY(t.getY(), f.getY()), tileW(), tileH());
+        final Rectangle r = new Rectangle(screenX(t.getX(), o[0]),
+            screenY(t.getY(), o[1]), tileW(), tileH());
         final int m = ICON_MARGIN * scale();
         r.grow(m, m);
         paintNow(r);
@@ -1198,7 +1284,8 @@ final class ClassicMapViewer extends JPanel {
     // Internals
 
     private Map getMap() {
-        return (this.freeColClient.getGame() == null) ? null
+        return (this.freeColClient == null
+                || this.freeColClient.getGame() == null) ? null
             : this.freeColClient.getGame().getMap();
     }
 
@@ -1207,7 +1294,8 @@ final class ClassicMapViewer extends JPanel {
      * their first unit, else their entry tile, else the map centre.
      */
     private Tile defaultFocus() {
-        final Player player = this.freeColClient.getMyPlayer();
+        final Player player = (this.freeColClient == null) ? null
+            : this.freeColClient.getMyPlayer();
         if (player != null) {
             final List<Settlement> settlements = player.getSettlementList();
             if (!settlements.isEmpty() && settlements.get(0).getTile() != null) {
@@ -1244,10 +1332,9 @@ final class ClassicMapViewer extends JPanel {
      * Put the viewer on the in-game HUD's 320x200 grid
      * ({@link ClassicHudPane}): tiles of exactly {@code 16 * s} pixels,
      * bypassing {@link #MIN_SCALE}, so the 240x192 map area shows the
-     * original's 15x12 tiles at the same scale as the strip and the panel;
-     * the focus tile then sits in view column {@link ClassicHud#UNIT_COL}
-     * and row {@link ClassicHud#UNIT_ROW} (the original keeps the unit in
-     * row 6; 083/032) instead of the half-tile-centred adaptive layout.
+     * original's 15x12 tiles at the same scale as the strip and the panel,
+     * the view origin in the top-left cell, instead of the
+     * half-tile-centred adaptive layout.
      *
      * @param s The HUD scale, or 0 for the adaptive scale.
      */
@@ -1257,25 +1344,29 @@ final class ClassicMapViewer extends JPanel {
         repaint();
     }
 
-    /** The top-left tile of the 15x12 HUD view, {x, y}; null without a focus. */
+    /**
+     * The view origin: the top-left tile of the 15x12 HUD view, {x, y}.
+     * Before the first view it is centred on a default tile (a settlement,
+     * a unit, the entry tile, the map centre; {@link #setFocus} and the
+     * first activation centre it on the unit).
+     *
+     * @return A copy of the origin, or null without a map.
+     */
     int[] viewOrigin() {
-        final Tile f = getFocus();
-        if (f == null) return null;
-        return new int[] { f.getX() - ClassicHud.UNIT_COL,
-                           f.getY() - ClassicHud.UNIT_ROW };
+        if (this.origin == null) centreOn(defaultFocus(), "default");
+        final int[] o = this.origin;
+        return (o == null) ? null : o.clone();
     }
 
     /**
-     * {@link #viewOrigin} without choosing a default focus: a plain read,
+     * {@link #viewOrigin} without choosing a default view: a plain read,
      * for the recorder's probe on another thread.
      *
-     * @return {x, y}, or null while there is no focus yet.
+     * @return {x, y}, or null while there is no view yet.
      */
     int[] peekViewOrigin() {
-        final Tile f = this.focus;
-        if (f == null) return null;
-        return new int[] { f.getX() - ClassicHud.UNIT_COL,
-                           f.getY() - ClassicHud.UNIT_ROW };
+        final int[] o = this.origin;
+        return (o == null) ? null : o.clone();
     }
 
     /** On-screen tile cell width (square, like the original game). */
@@ -1288,40 +1379,48 @@ final class ClassicMapViewer extends JPanel {
         return TILE_SRC * scale();
     }
 
-    /** Screen x of the left edge of the cell for map column {@code x}. */
-    private int screenX(int x, int focusX) {
-        if (this.fixedScale > 0) {
-            return (x - focusX + ClassicHud.UNIT_COL) * tileW();
-        }
-        return getWidth() / 2 + (x - focusX) * tileW() - tileW() / 2;
+    /**
+     * Screen x of the left edge of the cell for map column {@code x}: on
+     * the HUD grid the origin's column is cell 0; the adaptive layout
+     * centres the origin's cell {@link ClassicHud#UNIT_COL}.
+     *
+     * @param x The map column.
+     * @param vx The view origin's column.
+     * @return The screen x.
+     */
+    private int screenX(int x, int vx) {
+        if (this.fixedScale > 0) return (x - vx) * tileW();
+        return getWidth() / 2 + (x - vx - ClassicHud.UNIT_COL) * tileW()
+            - tileW() / 2;
     }
 
-    /** Screen y of the top edge of the cell for map row {@code y}. */
-    private int screenY(int y, int focusY) {
-        if (this.fixedScale > 0) {
-            return (y - focusY + ClassicHud.UNIT_ROW) * tileH();
-        }
-        return getHeight() / 2 + (y - focusY) * tileH() - tileH() / 2;
+    /** Screen y of the top edge of the cell for map row {@code y} ({@link #screenX}). */
+    private int screenY(int y, int vy) {
+        if (this.fixedScale > 0) return (y - vy) * tileH();
+        return getHeight() / 2 + (y - vy - ClassicHud.UNIT_ROW) * tileH()
+            - tileH() / 2;
     }
 
     /**
-     * Pan the focus by {@code (dx, dy)} raw grid cells, clamped to the map.
+     * Pan the view by {@code (dx, dy)} raw grid cells, clamped to the view
+     * origins the map allows ({@link ClassicHud#clampView}: never past the
+     * map's edge, build spec W4.7).
      *
      * <p>The classic viewer draws on a plain rectangular grid keyed on raw map
      * coordinates, so panning steps by raw {@code x}/{@code y} — not via
      * {@link net.sf.freecol.common.model.Direction} (whose isometric N/S steps
-     * two rows), so the grid recentres exactly one cell in the pressed
+     * two rows), so the grid moves exactly one cell in the pressed
      * direction.
+     *
+     * @param dx The columns to pan.
+     * @param dy The rows to pan.
      */
-    private void panFocus(int dx, int dy) {
+    void panView(int dx, int dy) {
         final Map map = getMap();
-        final Tile f = getFocus();
-        if (map == null || f == null) return;
-        final int nx = Math.max(0, Math.min(map.getWidth() - 1, f.getX() + dx));
-        final int ny = Math.max(0, Math.min(map.getHeight() - 1, f.getY() + dy));
-        final Tile tile = map.getTile(nx, ny);
-        if (tile != null && tile != this.focus) {
-            this.focus = tile;
+        final int[] o = viewOrigin();
+        if (map == null || o == null) return;
+        if (moveView(ClassicHud.clampView(map.getWidth(), map.getHeight(),
+                                          o[0] + dx, o[1] + dy), "pan", null)) {
             repaint();
         }
     }
@@ -1372,13 +1471,13 @@ final class ClassicMapViewer extends JPanel {
     /** Resolve the map {@link Tile} under a screen point, or null if off-map. */
     private Tile tileAt(int px, int py) {
         final Map map = getMap();
-        final Tile f = getFocus();
-        if (map == null || f == null) return null;
-        // The inverse of screenX/screenY: the focus cell's top-left corner.
-        final int fx = screenX(f.getX(), f.getX());
-        final int fy = screenY(f.getY(), f.getY());
-        final int x = f.getX() + Math.floorDiv(px - fx, tileW());
-        final int y = f.getY() + Math.floorDiv(py - fy, tileH());
+        final int[] o = viewOrigin();
+        if (map == null || o == null) return null;
+        // The inverse of screenX/screenY: the origin cell's top-left corner.
+        final int ox = screenX(o[0], o[0]);
+        final int oy = screenY(o[1], o[1]);
+        final int x = o[0] + Math.floorDiv(px - ox, tileW());
+        final int y = o[1] + Math.floorDiv(py - oy, tileH());
         return map.getTile(x, y);
     }
 
@@ -1430,16 +1529,24 @@ final class ClassicMapViewer extends JPanel {
                            RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
 
         final Map map = getMap();
-        final Tile f = getFocus();
-        if (map == null || f == null) {
+        final int[] o = viewOrigin();
+        if (map == null || o == null) {
             paintWaiting(g);
             return;
         }
 
-        final int focusX = f.getX();
-        final int focusY = f.getY();
-        final int cols = getWidth() / tileW() + 2;
-        final int rows = getHeight() / tileH() + 2;
+        final int vx = o[0];
+        final int vy = o[1];
+        final boolean hud = this.fixedScale > 0;
+        // The tiles to paint: on the HUD grid the 15x12 view and the ring
+        // around it, whose icons may reach in; in the adaptive layout all
+        // the panel can show around the origin's centre cell.
+        final int cols = hud ? 0 : getWidth() / tileW() + 2;
+        final int rows = hud ? 0 : getHeight() / tileH() + 2;
+        final int x0 = hud ? vx - 1 : vx + ClassicHud.UNIT_COL - cols;
+        final int x1 = hud ? vx + ClassicHud.VIEW_COLS : vx + ClassicHud.UNIT_COL + cols;
+        final int y0 = hud ? vy - 1 : vy + ClassicHud.UNIT_ROW - rows;
+        final int y1 = hud ? vy + ClassicHud.VIEW_ROWS : vy + ClassicHud.UNIT_ROW + rows;
         // A slide step repaints only the cells it crosses: skip the cells
         // whose terrain and icon cannot reach the clip.
         final Rectangle clip = g.getClipBounds();
@@ -1449,22 +1556,22 @@ final class ClassicMapViewer extends JPanel {
         // units, so an icon's shadow or overhang lies on its neighbour's
         // terrain (the original: the 21-px village 1 px into the next cell).
         for (int pass = 0; pass < 2; pass++) {
-            for (int dy = -rows; dy <= rows; dy++) {
-                for (int dx = -cols; dx <= cols; dx++) {
-                    final int tx = focusX + dx;
-                    final int ty = focusY + dy;
-                    final int sx = screenX(tx, focusX);
-                    final int sy = screenY(ty, focusY);
+            for (int ty = y0; ty <= y1; ty++) {
+                for (int tx = x0; tx <= x1; tx++) {
+                    final int sx = screenX(tx, vx);
+                    final int sy = screenY(ty, vy);
                     if (clip != null && !clip.intersects(sx - m, sy - m,
                             tileW() + 2 * m, tileH() + 2 * m)) continue;
                     final Tile tile = map.getTile(tx, ty);
                     if (pass == 1) {
                         if (tile != null) paintOccupant(g, tile, sx, sy);
                     } else if (tile == null) {
-                        // Beyond the map edge: endless open sea, as the
-                        // original reads — never a black band against the
-                        // last column.
-                        paintOpenSea(g, tx, ty, sx, sy);
+                        // Beyond the map edge.  The HUD's clamped view
+                        // never gets there (the original draws nothing
+                        // past it, landfall 02 section 6); the adaptive
+                        // layout shows endless open sea, never a black
+                        // band against the last column.
+                        if (!hud) paintOpenSea(g, tx, ty, sx, sy);
                     } else {
                         paintTile(g, map, tile, sx, sy);
                     }
@@ -1472,10 +1579,10 @@ final class ClassicMapViewer extends JPanel {
             }
         }
 
-        paintAnimatedUnit(g, focusX, focusY);
+        paintAnimatedUnit(g, vx, vy);
         // The original draws no box around the active unit; the cursor
         // marks only a selected tile (TERRAIN).
-        if (this.viewMode == GUI.ViewMode.TERRAIN) paintCursor(g, focusX, focusY);
+        if (this.viewMode == GUI.ViewMode.TERRAIN) paintCursor(g, vx, vy);
         if (this.finalDrawPending && this.animUnit == null) {
             this.finalDrawPending = false;
             this.lastFinalNanos = System.nanoTime();
@@ -1488,15 +1595,15 @@ final class ClassicMapViewer extends JPanel {
      * {@link #animateMove}): {@link #animOffset} native pixels from the
      * source cell toward the destination, on top of everything.
      */
-    private void paintAnimatedUnit(Graphics2D g, int focusX, int focusY) {
+    private void paintAnimatedUnit(Graphics2D g, int vx, int vy) {
         final Unit u = this.animUnit;
         final Tile from = this.animFrom;
         final Tile to = this.animTo;
         if (u == null || from == null || to == null || this.animHidden) return;
         final int s = scale();
-        final int sx = screenX(from.getX(), focusX)
+        final int sx = screenX(from.getX(), vx)
             + ClassicSlide.screenOffset(this.animOffset, s, this.animDx);
-        final int sy = screenY(from.getY(), focusY)
+        final int sy = screenY(from.getY(), vy)
             + ClassicSlide.screenOffset(this.animOffset, s, this.animDy);
         paintUnit(g, u, sx, sy, carriesUnits(u)
                   ? ClassicHud.CARGO_MARKER : ClassicHud.NO_MARKER);
@@ -1965,11 +2072,11 @@ final class ClassicMapViewer extends JPanel {
      * Highlight the selected tile (TERRAIN mode) with a cursor.  Not the
      * active unit: the original draws no box around it (build spec W2).
      */
-    private void paintCursor(Graphics2D g, int focusX, int focusY) {
+    private void paintCursor(Graphics2D g, int vx, int vy) {
         final Tile cursor = this.selectedTile;
         if (cursor == null) return;
-        final int sx = screenX(cursor.getX(), focusX);
-        final int sy = screenY(cursor.getY(), focusY);
+        final int sx = screenX(cursor.getX(), vx);
+        final int sy = screenY(cursor.getY(), vy);
         final Stroke old = g.getStroke();
         g.setColor(Color.WHITE);
         g.setStroke(new BasicStroke(2f));

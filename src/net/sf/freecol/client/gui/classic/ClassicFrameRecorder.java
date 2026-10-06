@@ -87,6 +87,9 @@ import javax.swing.JComponent;
  * {@code menu-open/close}, {@code blink} (W3: {@code arm <reason>},
  * {@code rebase panel}, {@code off n=..}, {@code on n=..},
  * {@code hold <reason>}, {@code stop <reason>}),
+ * {@code view-jump} (W4: {@code <reason> <old> -> <new> tile=.. cell=..
+ * now=..}, the reason {@code activate}, {@code move}, {@code foreign-move},
+ * {@code terrain}, {@code focus}, {@code pan} or {@code default}),
  * {@code music-request}, {@code music-mode} (the jukebox switched to the
  * title or the in-game playlist), {@code pref}.  Reserved for
  * the M1 work items: {@code endturn-timer-start/fire}

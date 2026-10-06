@@ -58,10 +58,14 @@ public class ClassicHudTest extends TestCase {
         assertEquals(7, ClassicHud.minimapOriginY(H, 20));
     }
 
-    /** The view is clamped to columns/rows 1 .. size-2. */
+    /**
+     * The view is clamped to columns/rows 1 .. size-2; only a tile on the
+     * outer ring itself moves it just far enough to show that tile.
+     */
     public void testViewClamped() {
         assertTrue(Arrays.equals(new int[] { 1, 1 }, ClassicHud.viewFor(W, H, 2, 2)));
-        assertTrue(Arrays.equals(new int[] { 42, 59 }, ClassicHud.viewFor(W, H, 57, 71)));
+        assertTrue(Arrays.equals(new int[] { 42, 59 }, ClassicHud.viewFor(W, H, 56, 70)));
+        assertTrue(Arrays.equals(new int[] { 43, 60 }, ClassicHud.viewFor(W, H, 57, 71)));
         assertTrue(Arrays.equals(new int[] { 20, 30 }, ClassicHud.viewFor(W, H, 27, 36)));
     }
 

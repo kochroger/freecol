@@ -97,9 +97,9 @@ fastest way to the in-game view. It starts at sea: the ship on an ocean patch.
 ## `ClassicMapViewer` — the map
 
 A `JPanel` that renders the map on a **plain rectangular grid** (where
-`SwingGUI`'s `MapViewer` paints isometric diamonds) centred on a focus tile,
+`SwingGUI`'s `MapViewer` paints isometric diamonds) from a stored view origin,
 mirroring the original game. It owns the view state
-(`viewMode`/`focus`/`selectedTile`/`activeUnit`) and holds a back-reference to
+(`viewMode`/view origin/`selectedTile`/`activeUnit`) and holds a back-reference to
 `ClassicGUI` so clicks/keys route through the `GUI`/controller path exactly as
 `SwingGUI.clickAt`/`MoveAction` do.
 
@@ -169,8 +169,9 @@ stone `002`. See the "Settlements" block of `aliases.properties` for the full ta
 
 **Edge scrolling.** A mouse-motion listener sets an edge direction when the
 cursor enters a ~1-tile hot zone at any window edge/corner; a repeating `Timer`
-pans the focus by a **raw** rectangular-grid step while the mouse stays there
-(stopped on `mouseExited`). Raw `(x,y)` steps, *not* `Direction.step` — the
+pans the view by a **raw** rectangular-grid step while the mouse stays there
+(stopped on `mouseExited`), clamped like every view origin (see "The view
+rule"). Raw `(x,y)` steps, *not* `Direction.step` — the
 isometric N/S step jumps two raw rows. Suppressed while the mouse is over the
 minimap box.
 
@@ -186,8 +187,8 @@ minimap box.
   7-9-1-3 & Home/PageUp/End/PageDown diagonal, bound `WHEN_IN_FOCUSED_WINDOW`.
   MOVE_UNITS → `InGameController.moveUnit(activeUnit, dir)`; TERRAIN → step the
   selected-tile cursor to `getNeighbourOrNull(dir)`; nothing selected (END_TURN)
-  → raw-grid free pan so the map stays navigable. After a unit move the focus
-  follows the unit.
+  → raw-grid free pan so the map stays navigable. The view follows the
+  original's jump rule (see "The view rule"), never the arrival of a move.
 - **⚠️ Isometric-vs-rectangular caveat (resolved; isometric maps only).** On an
   isometric map, model `Direction` is isometric (`Direction.N` steps two raw
   rows), but this viewer draws a raw grid.
@@ -226,11 +227,11 @@ minimap box.
 - **Next-active-unit at turn start (caveat).** After `endTurn`, whether a fresh
   active unit is auto-selected is up to the controller's `setCurrentPlayer` →
   `updateActiveUnit` → `changeView(unit)` path, which the classic `GUI` already
-  delegates to `changeToMoveUnits` (so it *does* re-centre on the next active unit
-  when `player.hasNextActiveUnit()`). Movement was verified live post-end-turn
-  (the active ship moves and the focus follows it); note that panning the focus
-  away (e.g. a minimap click) leaves the active unit's cursor off-screen until a
-  movement key re-centres on it.
+  delegates to `changeToMoveUnits` (so the view jumps to the next active unit
+  when it is in the margin or off the view, `player.hasNextActiveUnit()`).
+  Movement was verified live post-end-turn; note that panning the view away
+  (e.g. a minimap click) leaves the active unit off-screen until its next move
+  starts, whose source-tile test brings the view back.
 
 **Minimap raster.** A whole-map overview: a plain rectangular
 `map.getWidth() × map.getHeight()` raster — **no** isometric projection (unlike
@@ -251,8 +252,8 @@ the original does. (It began as a bottom-left overlay on the map itself; the
   settlements, unit moves). `getMinimapImage()` returns the cache, rebuilding if
   stale; the panel blits it every repaint, so no per-repaint tile iteration.
 - **Accessors for the panel:** `getMinimapImage()`, `getMinimapPixelsPerTile()`,
-  `getViewHalfCols()`/`getViewHalfRows()` (the visible tile span, for the panel's
-  viewport box) and `recenterOnTile(x,y)` (a minimap click → `setFocus`). The old
+  `viewOrigin()` (the panel's viewport ring) and `recenterOnTile(x,y)` (a
+  minimap click → `setFocus`). The old
   in-viewer `paintMinimap`/`minimapClick`/`minimapBounds` and the edge-scroll
   suppression over the overlay box were removed with the move.
 
@@ -546,6 +547,56 @@ toggles dropped), the thread on the real clock, and the minimap dot;
 `ClassicMapViewerTest.testBlink` the viewer's states (bare tile, hold, resume,
 stop, the dot).
 
+### The view rule (`ClassicMapViewer.jumpIfNeeded`; build spec W4)
+
+The view is the original's fixed 15x12 window. It never scrolls: it moves
+only by a hard jump, which redraws the whole map at once (landfall 02).
+
+- **Stored origin.** The viewer keeps the view origin `(vx, vy)` (the tile in
+  the top-left cell) itself; `viewOrigin()` returns it, `screenX/screenY`
+  and `tileAt` project with it (HUD: `(x - vx) * 16s`), and `getFocus()` is
+  just the tile in cell (7,6). The origin is clamped to
+  `vx in [1, W-16]`, `vy in [1, H-13]` (`ClassicHud.clampView`; 42 and 59
+  on 58x72), so the map's outer ring and anything beyond the edge never show:
+  in HUD mode no open sea is painted past the edge any more. One exception,
+  for a FreeCol case the original never has: a unit standing **on** the outer
+  ring (FreeCol's entry location can be column 57, live run `m1-w4-west`) is
+  off the clamped view, so it always makes the view jump, and `viewFor` moves
+  the origin one step past the clamp just to show it (vx 43; the minimap ring
+  then lies on the frame's last column).
+- **Recentre** = `ClassicHud.viewFor`: the unit in cell (7,6), clamped. It
+  reproduces all 14 measured origins V1-V14, including both east clamps.
+- **Jump test** = `ClassicHud.needsRecentre`: the unit's cell is in column 0-1
+  or 13-14 or row 0-1 or 10-11, on a side where the origin is not yet at its
+  clamp, or the unit is off the view; any violation recentres **both** axes.
+- **Where:** (a) on activation (`changeToMoveUnits`: turn start, next unit;
+  not when the controller selects the moving unit again after each of its
+  moves, `InGameController.moveDirection`'s redisplay -- that is its arrival;
+  a jump paints the map and the minimap at once);
+  (b) when a move is accepted (`animateMove`), on the **source** tile before
+  the first step -- the jump is the slide's offset-0 frame, with the minimap
+  ring painted at once, and offset 1 follows one step later; (c) the same for
+  every animated foreign move, natives included (spec delta W4; the marker and
+  the 250-ms pause before such a jump are W19). Never on arrival, never at the
+  end of the turn.
+- **Other moves of the view:** `setFocus` (the start and a reconnect, the
+  centre command, a minimap click, a click on an unexplored or foreign tile)
+  centres clamped: the start ship at (56,42) sits in cell (14,6) with the
+  ring at y 22-33 (landfall #340). The TERRAIN cursor follows the same jumps
+  as a unit (**I**: the original's view mode was not recorded). The free pan
+  (arrow keys with nothing selected, the mouse at the window edge) moves the
+  origin by one cell, clamped.
+- Recorder event: `view-jump <reason> <old> -> <new> tile=.. cell=.. now=..`.
+
+`ClassicViewRuleTest` replays the landfall clip -- its 86 slide starts and 27
+selections, in order, on 58x72 -- and gets exactly the 13 jumps of 02 section
+4.1 and V1-V14, once on the rule alone and once through the viewer's stored
+origin; plus the named cases (#10269 row 10, #15010 column 1, #19506 at (14,1),
+none at #10077 row 9, #14876 column 2 or the five east-clamp starts), the
+margins and clamps, the outer ring, the start view with its ring, and that
+the controller's re-selection of the moving unit after each move (its
+arrival) never tests the view while a newly active unit always does.
+
 ## In-game HUD (menu strip, dropdowns, right panel)
 
 (`ClassicHudPane`, `ClassicMenuStrip`, `ClassicMenuBar`, `ClassicMenuModel`,
@@ -575,11 +626,10 @@ pane, so the scene lies exactly on it).  In 320x200 pixels:
 
 `ClassicMapViewer.setFixedScale` makes `scale()` return S (bypassing
 `MIN_SCALE`), so the map shows the original's **15x12 tiles of 16 px** on the
-same grid as strip and panel, and anchors the focus tile in view column 7,
-row 6 (`ClassicHud.UNIT_COL/UNIT_ROW`; the original keeps the unit in row 6,
-083/032) instead of the half-tile-centred adaptive layout; `tileAt` follows.
-The original's edge clamping of the view and its unit shadow/flags on the
-map are still a follow-up (see "Open" below).
+same grid as strip and panel, with the view origin in the top-left cell
+instead of the half-tile-centred adaptive layout; `tileAt` follows. A
+recentred unit sits in view column 7, row 6 (`ClassicHud.UNIT_COL/UNIT_ROW`),
+clamped at the map's edges (see "The view rule").
 
 Strip, dropdown and panel each paint their 320x200 pixels into an off-screen
 picture with the static painters and blit it up nearest-neighbour
@@ -852,8 +902,7 @@ the older guesses.
   offsets, unit tables, the HUD layout, the key map: no duplicate, no map
   key, P/G/M/V rules, U/O context, Ctrl+N), `ClassicTextTest` (`menu`,
   `label`).
-- Open / assumed: the map viewer's original framing (edge clamping), unit
-  shadow and order flags on the map; minimap land colours and horizontal
+- Open / assumed: minimap land colours and horizontal
   scrolling; fractional moves; the position line's coordinate base; list overflow;
   COLONIPÄDIE position and groups; the second fortify line; whether the
   keyboard bar skips greyed rows and Left/Right switch menus; the four
@@ -2614,9 +2663,9 @@ shows the original scene instead.
   (`ClassicHudPane`, see "In-game HUD"; same scale and letterbox, no
   `JMenuBar`), the band lies exactly on the strip, the scene's panel on the
   live panel and the map area exactly over the map viewer, which is on the
-  HUD's grid (15×12 tiles of 16 px, the unit in column 7, row 6; the
-  original's edge clamping that puts 083's ship in column 11 is still a
-  follow-up). Any part of the map area not over the live map viewer is
+  HUD's grid (15×12 tiles of 16 px, the unit in column 7, row 6, clamped at
+  the map's edges like the scene's own view, so 083's ship sits in column 11
+  on both). Any part of the map area not over the live map viewer is
   still painted black, as a guard. The strip ignores menu input while the
   scene is up, and `showFirstScene` closes an open dropdown first. Rendered
   once per show (`ClassicFirstScene.render`, a 320×200 ARGB picture), so
@@ -2662,10 +2711,7 @@ shows the original scene instead.
   minimap scrolling incl. clamps, minimap painting, status lines and
   `ClassicText.label`, the strip chrome, the layer's canvas and its black
   uncovered map area).
-- **Open items:** the map under the scene is on the original's grid (15×12
-  tiles of 16 px, unit in row 6) but not yet its framing (ship in column 11,
-  clamped at the map edge) nor its unit drawing (the (−2,0) shadow and the
-  order flag) — the map viewer follow-up; the original's dismiss rule; the original's land
+- **Open items:** the original's dismiss rule; the original's land
   colours on the minimap (FreeCol's minimap terrain colours stand in);
   France/Spain unit colours on the minimap are FreeCol's (not measured); the
   meaning of TUTORIAL1's `@x`/`@y`; the original's starting soldier is a

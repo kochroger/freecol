@@ -103,12 +103,21 @@ final class ClassicHud {
     static final int VIEW_COLS = 15, VIEW_ROWS = 12;
 
     /**
-     * The original keeps the active unit in view column 7 and row 6 of the
-     * 15x12 map (ring and ship in 083: column 11 only because the view is
-     * clamped at the map's right edge).  Assumed for the column, measured
-     * for the row.
+     * The original puts the unit it recentres on in view column 7 and row
+     * 6 of the 15x12 map (ring and ship in 083: column 11 only because the
+     * view is clamped at the map's right edge).  Both measured: landfall
+     * 02 section 4.1, column 7 in 12 of 12 unclamped jumps, row 6 in 13 of
+     * 13.
      */
     static final int UNIT_COL = 7, UNIT_ROW = 6;
+
+    /**
+     * The view's margin in cells: a unit in the outer two columns or rows
+     * makes the view jump (landfall 02 section 4.2, V: columns 2..12 and
+     * rows 2..9 are safe; column 1 and row 10 jumped, column 2 and row 9
+     * never did).
+     */
+    static final int VIEW_MARGIN = 2;
 
     /** The minimap row at which the viewport ring sits unless clamped. */
     static final int RING_ROW = 13;
@@ -393,9 +402,68 @@ final class ClassicHud {
      */
     static int[] viewFor(int mapWidth, int mapHeight, int x, int y) {
         return new int[] {
-            clamp(x - UNIT_COL, 1, mapWidth - VIEW_COLS - 1),
-            clamp(y - UNIT_ROW, 1, mapHeight - VIEW_ROWS - 1)
+            cover(clamp(x - UNIT_COL, 1, maxViewX(mapWidth)), x, VIEW_COLS),
+            cover(clamp(y - UNIT_ROW, 1, maxViewY(mapHeight)), y, VIEW_ROWS)
         };
+    }
+
+    /**
+     * A view origin moved just far enough that tile {@code t} is inside
+     * its {@code n} cells.  Changes nothing for the tiles the clamped view
+     * can show; it only reaches the map's outer ring, where the original
+     * never puts a unit but FreeCol can (its entry location may be the
+     * last column, x = 57 of 58).
+     */
+    private static int cover(int v, int t, int n) {
+        return Math.max(t - n + 1, Math.min(v, t));
+    }
+
+    /**
+     * The largest view origin column: the view's right edge on map column
+     * {@code mapWidth - 2}, the outer ring is never shown (landfall 02
+     * section 6: 42 on the original's 58 columns, V).
+     */
+    static int maxViewX(int mapWidth) {
+        return mapWidth - VIEW_COLS - 1;
+    }
+
+    /** The largest view origin row (59 on 72 rows; I, by symmetry). */
+    static int maxViewY(int mapHeight) {
+        return mapHeight - VIEW_ROWS - 1;
+    }
+
+    /**
+     * {@code (c0, r0)} clamped to the view origins a map allows
+     * ({@link #viewFor}'s range).
+     *
+     * @return {c0, r0}.
+     */
+    static int[] clampView(int mapWidth, int mapHeight, int c0, int r0) {
+        return new int[] { clamp(c0, 1, maxViewX(mapWidth)),
+                           clamp(r0, 1, maxViewY(mapHeight)) };
+    }
+
+    /**
+     * The original's jump test (build spec W4, landfall 02 section 9): a
+     * unit on map tile {@code (x, y)} makes the view {@code (c0, r0)}
+     * jump when its cell is in the margin ({@link #VIEW_MARGIN}) on a side
+     * where the map goes on.  A side whose origin is already at its clamp
+     * does not count (landfall #1147/#1385/#7497/#8357/#8782: columns 13
+     * and 14 at the east clamp never jumped); a unit off the view always
+     * makes it jump (in the clip every such side was free; at a clamp only
+     * a unit on FreeCol's outer ring can be off the view).  Whoever calls
+     * it recentres both axes ({@link #viewFor}).
+     *
+     * @return True if the view must jump.
+     */
+    static boolean needsRecentre(int mapWidth, int mapHeight, int c0, int r0,
+                                 int x, int y) {
+        final int c = x - c0, r = y - r0;
+        if (c < 0 || c >= VIEW_COLS || r < 0 || r >= VIEW_ROWS) return true;
+        return (c < VIEW_MARGIN && c0 > 1)
+            || (c > VIEW_COLS - 1 - VIEW_MARGIN && c0 < maxViewX(mapWidth))
+            || (r < VIEW_MARGIN && r0 > 1)
+            || (r > VIEW_ROWS - 1 - VIEW_MARGIN && r0 < maxViewY(mapHeight));
     }
 
     /** {@code v} clamped to [lo, hi]; {@code lo} wins when hi &lt; lo. */

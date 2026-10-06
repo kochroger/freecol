@@ -1517,8 +1517,10 @@ public class ClassicGUI extends GUI {
             } else if (tile != null) {
                 this.mapViewer.changeToTerrain(tile);
             }
-            // Prefer an active unit for the initial focus: the original
-            // always opens looking at the piece that is up. Checked against
+            // Prefer an active unit for the initial view: the original
+            // always opens looking at the piece that is up, centred and
+            // clamped to the map's edge (build spec W4.6: the start ship at
+            // (56,42) of the 58x72 map in cell (14,6)). Checked against
             // both the passed-in unit AND the viewer's current active unit,
             // because the controller's own updateActiveUnit → changeView
             // races this reconnect at startup — whichever runs last must not
