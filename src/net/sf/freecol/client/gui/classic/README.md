@@ -531,7 +531,8 @@ recorder's `Thread.sleep` plus spin, never `parkNanos`) and run on the EDT
   one it stays at the arm. Each arm is a new generation; a toggle of an older
   one (queued behind a slide or a box) is dropped.
 - **Held ON** while a slide runs, a menu, a modal box, the first scene or a
-  classic screen is up, or it is not our turn (`ClassicGUI.blinkHoldReason`).
+  classic screen is up (in front: see W5a), or it is not our turn
+  (`ClassicGUI.blinkHoldReason`).
   A box that opens while OFF redraws the unit ON first (`holdBlink`, landfall
   #11146 -> #11151 -> #11154). Goto steps never blink: each step's slide ends
   with a re-arm and the next one starts 100 ms later. A hold without a close
@@ -633,7 +634,13 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   When it fires it ends the turn (`endTurn(false)`) only if it is still our
   turn, no box, menu, first scene or classic screen is up, and no unit can
   move; a box keeps it from firing and its close arms it again (a screen
-  without a close hook: the 50-ms poll). FreeCol's `autoEndTurn` is forced off
+  without a close hook: the 50-ms poll). A classic screen counts only while
+  the player can be looking at it (`ClassicGUI.classicScreenUp`): not
+  minimized, and not behind the map -- windowed, a click on the map puts it in
+  front of an open screen, and with the main frame active the screens behind
+  it hold nothing (the blink, the hand-over, the turn start). A high-score
+  window an ended game left over the title closes with the next game view
+  (`installInGameHud`). FreeCol's `autoEndTurn` is forced off
   for the session (`SESSION_OPTIONS`, restored at teardown): it ends at once.
   With the classic pref `endTurnPrompt` on -- read at this idle decision, not
   at the turn start -- the Spielzugende mode follows at **500 ms** (813 after a
@@ -653,8 +660,18 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   not shown yet (its turn-start boxes are up), and with the **next** player's
   in the paint just before our end request goes out (the request blocks the
   EDT; the server's answer and the player change come in either order, so the
-  prediction holds until the player changes or 1.5 s pass). A 50-ms Swing
-  poll (`tick`) repaints the box when the colour changes. The order is
+  prediction holds until the player or the turn number changes or 1.5 s
+  pass). A 50-ms Swing poll (`tick`) repaints the box when the colour
+  changes. Our end request is settled (`settleEnding`, first in `tick`,
+  `unitChosen` and `noUnitLeft`) when the current player **or the turn
+  number** has changed: native slides are queued on the EDT while the model
+  runs ahead, so the whole AI phase can pass between two polls and the next
+  `changeView(unit)` is already our new turn's first unit, which then gets its
+  wipe and turn start. After 1.5 s with neither it counts as refused; its turn
+  is kept, so a later turn change still ends the old turn, and a task posted
+  behind the queue asks the controller for the next unit unless one or a
+  pause came meanwhile (`recoverRefused`): the unit it re-selected during the
+  end, or its end view arming the idle end again. The order is
   FreeCol's (dutch, iroquois, tupi, sioux, french, arawak, english, apache,
   inca, aztec, spanish in the runs), not the original's natives first; the
   European dark sub-phase is left out (spec: optional, its trigger is I).
@@ -687,17 +704,19 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   pass) are ignored; no unit comes up until our next turn.
 - Recorder events: `endturn-timer-start <why> <kind> <stages> due=.. base=..`,
   `endturn-timer-fire <kind> <stage> late=..` (also `held` / `kept`),
-  `endturn-timer-cancel`, `end-turn <auto|key|refused>`, `indicator <rgb|off>
-  cur=.. [predicted]`, `turn-wait`, `turn-wipe`, `handover ...`,
-  `endturn-prompt`, `endturn-village`, `key-blocked`, `key-ignored`,
-  `click-blocked`; the `state` probe has `flow=<kind>/<stage> [waiting]
-  [prompt] [goto]`, and `waitIdle` waits while the flow is busy.
+  `endturn-timer-cancel`, `end-turn <auto|key|refused|settled late|refused:
+  next unit>`, `indicator <rgb|off> cur=.. [predicted]`, `turn-wait`,
+  `turn-wipe`, `handover ...`, `endturn-prompt`, `endturn-village`,
+  `key-blocked`, `key-ignored`, `click-blocked`; the `state` probe has
+  `flow=<kind>/<stage> [waiting] [prompt] [goto]`, and `waitIdle` waits while
+  the flow is busy.
 
 `ClassicTurnFlowTest` runs the flow on a fake clock and host: the pauses and
 stages, the 485-ms end and its re-basing, the conditions, a box holding it,
 the village pause, the Spielzugende hand-off, the hand-over with and without
-its jump, the turn start (with a box, with a jump, without units), goto units
-first, the indicator's colours and its poll, and `ClassicOneShot` (replace,
+its jump, the turn start (with a box, with a jump, without units, after an
+AI phase no poll saw, after a refusal), goto units first, a screen behind
+the map, the indicator's colours and its poll, and `ClassicOneShot` (replace,
 cancel, stale posts, the thread on the real clock).
 `ClassicMapViewerTest.testAfterTheLastMove` covers the blink stop with no
 moves, the stale-block rule and the jump question; `ClassicHudTest.
@@ -2296,9 +2315,9 @@ differing pixels.
   - `showLoadingSavegameDialog` returns a single-player info. A null return
     silently aborted some loads.
   - `teardownInGame` closes the sub-windows, but keeps an open high-score
-    window. It stops the map's edge-scroll timer (`ClassicMapViewer.dispose`),
-    removes the menu bar and nulls `mapViewer`/`infoPanel`, so `reconnectGUI`
-    rebuilds the HUD.
+    window (the next game view closes it, `installInGameHud`). It stops the
+    map's edge-scroll timer (`ClassicMapViewer.dispose`), removes the menu bar
+    and nulls `mapViewer`/`infoPanel`, so `reconnectGUI` rebuilds the HUD.
 - **Side fix:** `FreeColServer` writes the configuration (user paths) as an XML
   comment. A path containing `--` (every sandbox scratchpad path does) made the
   save unreadable, so a space now follows every dash that another dash

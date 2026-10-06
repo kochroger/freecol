@@ -133,11 +133,14 @@ final class ClassicTurnFlow {
     static final double WIPE_GRACE_MS = 3000.0;
 
     /**
-     * How long our end-of-turn request may wait for the current player to
-     * change before it counts as refused (the server's answer and the
-     * player change can come in either order).
+     * How long our end-of-turn request may wait for the current player
+     * or the turn to change before it counts as refused (the server's
+     * answer and the player change can come in either order).
      */
     static final double ENDING_TIMEOUT_MS = 1500.0;
+
+    /** {@link #endingTurn} without an end request to settle. */
+    private static final int NO_TURN = Integer.MIN_VALUE;
 
     /** The indicator poll's interval (ms). */
     static final int POLL_MS = 50;
@@ -375,6 +378,17 @@ final class ClassicTurnFlow {
     /** When {@link #ending} began. */
     private long endingSince = 0L;
 
+    /**
+     * The turn our last end-of-turn request was made in, until the flow
+     * sees it go through ({@link #settleEnding}); kept after a refusal, so
+     * that a turn change that comes late still ends the old turn.
+     * {@link #NO_TURN} for none.
+     */
+    private int endingTurn = NO_TURN;
+
+    /** The flow is stopped for good ({@link #dispose}). */
+    private boolean disposed = false;
+
     /** Goto orders run, the controller's view changes are dropped ({@link #ignoring}). */
     private int gotoRuns = 0;
 
@@ -512,6 +526,7 @@ final class ClassicTurnFlow {
      * our turn with nothing left to move, the idle pause is armed.
      */
     void noUnitLeft() {
+        settleEnding();   // our end may have gone through unseen
         final Pending p = this.pending;
         if (p != null && p.kind == Kind.PROMPT_END) return;   // the end is out
         cancel("no-unit");
@@ -535,6 +550,10 @@ final class ClassicTurnFlow {
      *     make it active at once.
      */
     boolean unitChosen(Unit unit, Unit previous) {
+        // Our end may have gone through without the poll seeing another
+        // player (the event thread busy with queued native slides): then
+        // this is our new turn's first unit, with its wipe.
+        settleEnding();
         final Pending p = this.pending;
         if (unit == null) {
             if (p == null || p.kind != Kind.PROMPT_END) cancel("no-unit");
@@ -615,6 +634,7 @@ final class ClassicTurnFlow {
         ClassicFrameRecorder.event("end-turn", why);
         this.ending = true;
         this.endingSince = this.clock.now();
+        this.endingTurn = this.host.turnNumber();
         this.host.paintIndicator();
         this.host.endTurn();
         settleEnding();
@@ -654,22 +674,55 @@ final class ClassicTurnFlow {
     }
 
     /**
-     * Our end-of-turn request is settled once the current player has
-     * changed (the server's answer and the player change come in either
-     * order), or it counts as refused after {@link #ENDING_TIMEOUT_MS}.
+     * Our end-of-turn request is settled once the current player or the
+     * turn number has changed (the server's answer and the player change
+     * come in either order; with native slides queued on the event thread
+     * the whole AI phase can pass between two polls, and our next turn is
+     * then current again with a new number), or it counts as refused after
+     * {@link #ENDING_TIMEOUT_MS}.  A refusal keeps the request's turn, so
+     * a turn change that comes later still ends the old turn here, and it
+     * leaves a live state ({@link #recoverRefused}).  Called first by
+     * every entry that reads {@link #ending}.
      */
     private void settleEnding() {
-        if (!this.ending) return;
-        if (!this.host.myTurn()) {
+        if (this.endingTurn == NO_TURN) return;
+        if (!this.host.myTurn() || this.host.turnNumber() != this.endingTurn) {
+            final boolean late = !this.ending;
             this.ending = false;
+            this.endingTurn = NO_TURN;
+            if (late) ClassicFrameRecorder.event("end-turn", "settled late");
+            cancel("end-settled");
+            leavePrompt();
+            this.idleWanted = false;
+            this.afterGoto = false;
             waiting();
-            this.host.paintIndicator();
-        } else if (this.clock.now() - this.endingSince
+            if (!late) this.host.paintIndicator();   // the prediction ends
+        } else if (this.ending && this.clock.now() - this.endingSince
                    >= nanos(ENDING_TIMEOUT_MS)) {
             this.ending = false;
             ClassicFrameRecorder.event("end-turn", "refused");
             this.host.paintIndicator();
+            this.host.post(this::recoverRefused);
         }
+    }
+
+    /**
+     * After a refused end, behind what is queued (a turn change that was
+     * queued settles first): unless a unit or a pause came meanwhile, ask
+     * the controller for the next unit, so the flow never sits with no
+     * unit, no pause and nothing scheduled.  It brings the unit it
+     * re-selected while the end was out (doEndTurn's goto and trade-route
+     * pass), or its end view arms the idle end again.
+     */
+    private void recoverRefused() {
+        if (this.disposed) return;
+        settleEnding();
+        if (this.pending != null || this.ending || !this.turnStarted
+            || this.prompt || this.gotoRuns > 0 || !this.host.myTurn()
+            || this.host.activeUnit() != null) return;
+        ClassicFrameRecorder.event("end-turn", "refused: next unit");
+        this.host.nextActiveUnit();
+        updateProbe();
     }
 
     /**
@@ -812,6 +865,7 @@ final class ClassicTurnFlow {
 
     /** Stop the flow for good (the game view is going). */
     void dispose() {
+        this.disposed = true;
         this.pending = null;
         this.timer.close();
     }

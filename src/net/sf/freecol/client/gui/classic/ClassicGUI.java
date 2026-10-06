@@ -1584,6 +1584,13 @@ public class ClassicGUI extends GUI {
      * no menu titles, the keys bound as usual.
      */
     private void installInGameHud() {
+        // A high-score window that an ended game left over the title
+        // (teardownInGame) belongs to that game: it goes with the new view,
+        // rather than linger behind the map.
+        if (this.reportFrame != null && this.reportFrame.getContentPane()
+                instanceof ClassicReportHighScoresPanel) {
+            closeReportPanel();
+        }
         final ClassicPackFiles pack = ClassicPackFiles.runtime();
         final ClassicText text = ClassicText.load(pack);
         final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
@@ -1704,10 +1711,7 @@ public class ClassicGUI extends GUI {
         if (this.sceneShowing) return "scene";
         if (this.menuStrip != null && this.menuStrip.isMenuOpen()) return "menu";
         if (modalDialogShowing()) return "dialog";
-        for (Window w : new Window[] { this.colonyFrame, this.europeFrame,
-                                        this.reportFrame, this.buildQueueFrame }) {
-            if (w != null && w.isShowing()) return "screen";
-        }
+        if (classicScreenUp()) return "screen";
         final FreeColClient fcc = getFreeColClient();
         if (fcc == null || !fcc.currentPlayerIsMyPlayer()) return "ai";
         return null;
@@ -1916,11 +1920,41 @@ public class ClassicGUI extends GUI {
     private boolean turnBlocked() {
         if (this.sceneShowing || modalDialogShowing()) return true;
         if (this.menuStrip != null && this.menuStrip.isMenuOpen()) return true;
+        return classicScreenUp();
+    }
+
+    /**
+     * Whether a classic screen (colony, Europe, report, build queue) is up
+     * where the player can be looking at it ({@link #screenUp}).  While
+     * windowed the player can bring the map in front of an open screen by
+     * clicking it (see {@link #dialogOwner}), and the map's keys work then;
+     * a screen behind the active map, or a minimized one, must not hold the
+     * hand-overs, the turn start, the map's input and the blink.  EDT only.
+     *
+     * @return True if one is up.
+     */
+    private boolean classicScreenUp() {
+        final boolean mapActive = this.frame != null && this.frame.isActive();
         for (Window w : new Window[] { this.colonyFrame, this.europeFrame,
                                         this.reportFrame, this.buildQueueFrame }) {
-            if (w != null && w.isShowing()) return true;
+            if (w != null && screenUp(w.isShowing(), w instanceof Frame
+                    && (((Frame) w).getExtendedState() & Frame.ICONIFIED) != 0,
+                    mapActive)) return true;
         }
         return false;
+    }
+
+    /**
+     * The rule of {@link #classicScreenUp} for one screen.
+     *
+     * @param showing The screen's window is showing.
+     * @param minimized It is minimized.
+     * @param mapActive The main frame (the map) is the active window.
+     * @return True if the screen holds the turn flow and the blink.
+     */
+    static boolean screenUp(boolean showing, boolean minimized,
+                            boolean mapActive) {
+        return showing && !minimized && !mapActive;
     }
 
     /** What the turn flow drives: the controller, the map and the panel. */

@@ -40,7 +40,9 @@ import net.sf.freecol.util.test.FreeColTestCase;
  * conditions it fires under, the 756-ms pause after a cancelled village
  * box, the Spielzugende hand-off, the 500-ms hand-over with its jump at
  * 280 ms, the turn start (wipe, block at 300 ms or jump at 500 ms), the
- * goto units first, the input block and the turn indicator's colours.
+ * goto units first, the input block and the turn indicator's colours;
+ * an end settled by the new turn number, a refused end, and a screen
+ * behind the map.
  */
 public class ClassicTurnFlowTest extends FreeColTestCase {
 
@@ -656,6 +658,172 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertTrue(r.flow.unitChosen(b, g));    // g has moves, still a hand-over
         r.advanceMs(500);
         assertEquals(1, r.count("activate " + b.getId()));
+    }
+
+    /**
+     * Our end goes through without a poll seeing another player: the
+     * event thread plays queued native slides while the AI phase runs,
+     * and our next turn is current again when it gets to the queue.  The
+     * new turn number settles the end, and the controller's first unit of
+     * the new turn gets the wipe and the turn start (not dropped as "not
+     * our turn").
+     */
+    public void testEndSettledByTheTurnNumber() {
+        final Unit a = ship(5, 5);
+        // A poll runs after the turn change, then the controller's unit.
+        final Rig r = new Rig(this.game);
+        r.host.onEndTurn = null;                // the answer: still our turn ...
+        r.flow.endTurnNow("auto");
+        assertTrue(r.flow.isInputBlocked());
+        r.clock.advanceMs(300);
+        r.host.turn = 2;                        // ... and the AI phase is over
+        r.flow.tick();
+        assertTrue(r.flow.isWaiting());
+        assertEquals(0xFF7100, r.flow.indicatorRgb());   // ours, not shown yet
+        r.clock.advanceMs(400);
+        assertTrue(r.flow.unitChosen(a, null));
+        assertEquals(1, r.count("wipe"));
+        assertFalse(r.flow.isWaiting());
+        assertEquals(ClassicTurnFlow.Kind.TURN_START, r.flow.pending().kind);
+        r.advanceMs(299.9);
+        assertEquals(0, r.count("activate " + a.getId()));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("activate " + a.getId()));
+        assertFalse(r.flow.isInputBlocked());
+        r.advanceMs(5000);
+        r.flow.tick();
+        assertEquals(1, r.count("endTurn"));
+        assertEquals(0, r.count("next"));
+
+        // No poll in between: the unit itself settles the end.
+        final Rig q = new Rig(this.game);
+        q.host.onEndTurn = null;
+        q.flow.endTurnNow("auto");
+        q.clock.advanceMs(700);
+        q.host.turn = 2;
+        assertTrue(q.flow.unitChosen(a, null));
+        assertEquals(1, q.count("wipe"));
+        q.advanceMs(300);
+        assertEquals(1, q.count("activate " + a.getId()));
+
+        // A new turn with no unit to move: the wipe, then the automatic end.
+        final Rig n = new Rig(this.game);
+        n.host.onEndTurn = null;
+        n.flow.endTurnNow("auto");
+        n.clock.advanceMs(700);
+        n.host.turn = 2;
+        n.flow.noUnitLeft();
+        assertEquals(1, n.count("wipe"));
+        assertEquals(ClassicTurnFlow.Kind.END_TURN, n.flow.pending().kind);
+        n.advanceMs(485);
+        assertEquals(2, n.count("endTurn"));
+    }
+
+    /**
+     * A refused end (the controller did not send it, e.g. for a goto or
+     * trade-route unit to look at) leaves a live state: behind what is
+     * queued the controller is asked for a unit, unless one came
+     * meanwhile.  A turn change after the refusal still ends the old turn,
+     * with a real wipe and the turn start's own pause.
+     */
+    public void testRefusedEndLeavesALiveState() {
+        final Unit a = ship(5, 5);
+        final Rig r = new Rig(this.game);
+        r.host.onEndTurn = null;
+        r.flow.endTurnNow("auto");
+        r.clock.advanceMs(1499);
+        r.flow.tick();
+        assertTrue(r.flow.isInputBlocked());
+        r.clock.advanceMs(1);
+        r.flow.tick();                          // refused
+        assertFalse(r.flow.isInputBlocked());
+        assertEquals(0, r.count("next"));
+        r.run();                                // the task behind the queue
+        assertEquals(1, r.count("next"));
+
+        // A unit came up meanwhile: nothing is asked.
+        final Rig u = new Rig(this.game);
+        u.host.onEndTurn = null;
+        u.flow.endTurnNow("auto");
+        u.clock.advanceMs(1500);
+        u.flow.tick();
+        assertFalse(u.flow.unitChosen(a, null));   // made active at once
+        u.host.active = a;
+        u.run();
+        assertEquals(0, u.count("next"));
+
+        // The new turn was queued behind the slides: it settles first.
+        final Rig q = new Rig(this.game);
+        q.host.onEndTurn = null;
+        q.flow.endTurnNow("auto");
+        q.clock.advanceMs(1500);
+        q.flow.tick();
+        q.host.turn = 2;
+        q.run();
+        assertEquals(0, q.count("next"));
+        assertTrue(q.flow.isWaiting());
+        q.clock.advanceMs(200);
+        assertTrue(q.flow.unitChosen(a, null));
+        assertEquals(1, q.count("wipe"));
+        q.advanceMs(299.9);
+        assertEquals(0, q.count("activate " + a.getId()));
+        q.advanceMs(0.2);
+        assertEquals(1, q.count("activate " + a.getId()));
+
+        // The slides outlasted the timeout and the recovery: the late turn
+        // change still wipes, and the block keeps its 300 ms.
+        final Rig s = new Rig(this.game);
+        s.host.onEndTurn = null;
+        s.flow.endTurnNow("auto");
+        s.clock.advanceMs(1500);
+        s.flow.tick();
+        s.run();
+        assertEquals(1, s.count("next"));
+        s.clock.advanceMs(2000);
+        s.host.turn = 2;
+        assertTrue(s.flow.unitChosen(a, null));
+        assertEquals(1, s.count("wipe"));
+        s.advanceMs(299.9);
+        assertEquals(0, s.count("activate " + a.getId()));
+        s.advanceMs(0.2);
+        assertEquals(1, s.count("activate " + a.getId()));
+    }
+
+    /**
+     * A classic screen counts only while the player can be looking at it
+     * ({@link ClassicGUI#screenUp}): behind the active map or minimized it
+     * holds nothing.  A hand-over held by a screen in front comes up as
+     * soon as the player clicks the map, with no close.
+     */
+    public void testScreenBehindTheMap() {
+        assertTrue(ClassicGUI.screenUp(true, false, false));
+        assertFalse(ClassicGUI.screenUp(true, false, true));     // behind the map
+        assertFalse(ClassicGUI.screenUp(true, true, false));     // minimized
+        assertFalse(ClassicGUI.screenUp(false, false, false));   // closed
+
+        final Unit a = ship(5, 5), b = ship(7, 5);
+        final Rig r = new Rig(this.game);
+        r.host.active = a;
+        a.setMovesLeft(0);
+        r.host.blocked = ClassicGUI.screenUp(true, false, false);   // in front
+        assertTrue(r.flow.unitChosen(b, a));
+        r.advanceMs(500);
+        assertTrue(r.flow.pending().held);
+        assertTrue(r.flow.isInputBlocked());
+        r.host.blocked = ClassicGUI.screenUp(true, false, true);    // map clicked
+        r.flow.tick();
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertFalse(r.flow.isInputBlocked());
+
+        // The screen stays behind the map: the next turn starts as usual.
+        r.flow.endTurnNow("key");
+        r.host.turn = 2;
+        r.host.myTurn = true;
+        r.host.current = r.host.me;
+        assertTrue(r.flow.unitChosen(b, null));
+        assertEquals(1, r.count("wipe"));
+        r.advanceMs(300);
+        assertEquals(2, r.count("activate " + b.getId()));
     }
 
     /** The indicator's colours: the table, the prediction, ours, none. */
