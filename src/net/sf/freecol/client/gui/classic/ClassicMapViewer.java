@@ -739,7 +739,8 @@ final class ClassicMapViewer extends JPanel {
             final Direction d = intentToDirection(intent, this.selectedTile);
             if (d != null) {
                 final Tile n = this.selectedTile.getNeighbourOrNull(d);
-                if (n != null) this.gui.changeView(n);
+                // The cursor stays on the drawn map, off the outer ring.
+                if (n != null && !n.isOuterRing()) this.gui.changeView(n);
             }
             return;
         }

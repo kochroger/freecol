@@ -829,7 +829,11 @@ public class TerrainGenerator {
 
         Map map = new Map(game, width, height);
         game.changeMap(map);
-        
+        // A square map is the Classic UI's, which never draws the outer
+        // ring, so no unit may use it.  An imported map keeps its own.
+        map.setOuterRing((importMap != null) ? importMap.hasOuterRing()
+            : map.getTopology() == Topology.SQUARE);
+
         int minimumLatitude = mapOptions
             .getInteger(MapGeneratorOptions.MINIMUM_LATITUDE);
         int maximumLatitude = mapOptions

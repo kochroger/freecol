@@ -45,10 +45,12 @@ import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileImprovement;
 import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Turn;
+import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.option.MapGeneratorOptions;
 import net.sf.freecol.common.option.OptionGroup;
 import net.sf.freecol.common.util.LogBuilder;
 import net.sf.freecol.server.FreeColServer;
+import net.sf.freecol.server.ServerTestHelper;
 import net.sf.freecol.server.model.ServerGame;
 import net.sf.freecol.server.model.ServerPlayer;
 import net.sf.freecol.server.model.ServerUnit;
@@ -286,6 +288,175 @@ public class MapGeneratorTest extends FreeColTestCase {
                 assertEquals(58, game.getMap().getWidth());
             }
         } finally {
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
+     * A new game for the map generator, with every European nation
+     * available, as a Classic UI new game sets it up: under the square
+     * topology with the square map options (58x72).
+     *
+     * @return The new {@code Game}, without a map.
+     */
+    private static Game makeNewGame() {
+        Specification spec = FreeCol.loadSpecification(
+            FreeColRules.getFreeColRulesFile("freecol"), null,
+            "model.difficulty.medium");
+        spec.setFile(MapGeneratorOptions.IMPORT_FILE, null);
+        MapGeneratorOptions.applyTopologyDefaults(spec.getMapGeneratorOptions());
+        Game game = new ServerGame(spec);
+        NationOptions nationOptions = new NationOptions(spec);
+        for (Nation n : spec.getEuropeanNations()) {
+            nationOptions.setNationState(n,
+                NationOptions.NationState.AVAILABLE);
+        }
+        game.setNationOptions(nationOptions);
+        for (Nation n : spec.getNations()) {
+            if (n.isUnknownEnemy()) continue;
+            Player p = new ServerPlayer(game, false, n);
+            boolean ai = !n.getType().isEuropean() || n.getType().isREF();
+            p.setAI(ai);
+            if (ai || game.canAddNewPlayer()) game.addPlayer(p);
+        }
+        return game;
+    }
+
+    /**
+     * A square map (the Classic UI's) has the outer ring, which the
+     * Classic UI never draws: the European ships start in the column
+     * just inside it, on a tile that leads to Europe; nothing stands on
+     * the ring, and no native settlement or rumour is put there.  An
+     * isometric map has no ring, and its ships start on FreeCol's
+     * innermost high seas tile of their row, as before.
+     */
+    public void testStartsKeepOffTheOuterRing() {
+        final Topology saved = Topology.current();
+        try {
+            for (Topology topology : Topology.values()) {
+                Topology.setCurrent(topology);
+                final boolean square = topology == Topology.SQUARE;
+                for (int seed = 1; seed <= 3; seed++) {
+                    final String what = topology + " seed " + seed;
+                    Game game = makeNewGame();
+                    new SimpleMapGenerator(new Random(seed))
+                        .generateMap(game, null, true, new LogBuilder(-1));
+                    final Map map = game.getMap();
+                    assertEquals(what, square, map.hasOuterRing());
+                    int ships = 0;
+                    for (Player p : game.getLiveEuropeanPlayerList()) {
+                        for (Unit u : p.getUnitSet()) {
+                            if (!u.isNaval() || !u.hasTile()) continue;
+                            final Tile t = u.getTile();
+                            final String at = what + " " + p.getNationId()
+                                + " " + t.getX() + "," + t.getY();
+                            assertTrue(at, t.isDirectlyHighSeasConnected());
+                            assertEquals(at, t, p.getEntryTile());
+                            final boolean east = t.getX() > map.getWidth() / 2;
+                            if (square) {
+                                assertEquals(at, (east) ? map.getWidth() - 2
+                                    : 1, t.getX());
+                            } else {
+                                // FreeCol's rule: the innermost high seas
+                                // tile of the row, counted from the edge.
+                                final int step = (east) ? 1 : -1;
+                                for (int x = t.getX(); x >= 0
+                                         && x < map.getWidth(); x += step) {
+                                    assertTrue(at, map.getTile(x, t.getY())
+                                        .isDirectlyHighSeasConnected());
+                                }
+                                assertFalse(at, map.getTile(t.getX() - step,
+                                    t.getY()).isDirectlyHighSeasConnected());
+                            }
+                            ships++;
+                        }
+                    }
+                    assertTrue(what + " ships " + ships, ships >= 4);
+                    for (Tile t : map.getTileList(Tile::isOuterRing)) {
+                        assertEquals(what + " " + t, 0, t.getUnitCount());
+                        assertFalse(what + " " + t, t.hasSettlement());
+                        assertFalse(what + " " + t, t.hasLostCityRumour());
+                    }
+                }
+            }
+        } finally {
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
+     * The terrain of a map and the tiles of the European ships, as text.
+     *
+     * @param game The {@code Game} with the map.
+     * @return The map's fingerprint.
+     */
+    private static String fingerprint(Game game) {
+        StringBuilder sb = new StringBuilder();
+        for (Tile t : game.getMap()) sb.append(t.getType().getSuffix()).append(' ');
+        for (Player p : game.getLiveEuropeanPlayerList()) {
+            for (Unit u : p.getUnitSet()) {
+                if (u.isNaval() && u.hasTile()) {
+                    sb.append(p.getNationId()).append('@')
+                        .append(u.getTile().getX()).append(',')
+                        .append(u.getTile().getY()).append(' ');
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * A new game on a server started with a seed (--seed N): the map
+     * generator and the start positions take the server's random
+     * numbers, so two servers with the same seed make the same map and
+     * put the ships on the same tiles (master plan N18).  Without a
+     * seed, two servers make different maps.
+     */
+    public void testSeedFixesTheNewGame() throws Exception {
+        final Topology saved = Topology.current();
+        final java.lang.reflect.Field seeded
+            = net.sf.freecol.common.FreeColSeed.class.getDeclaredField("seeded");
+        final java.lang.reflect.Field seed
+            = net.sf.freecol.common.FreeColSeed.class.getDeclaredField("freeColSeed");
+        seeded.setAccessible(true);
+        seed.setAccessible(true);
+        final boolean wasSeeded = seeded.getBoolean(null);
+        final long oldSeed = seed.getLong(null);
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            // The first game in a JVM also shuffles FreeCol's static name
+            // lists (NameCache) with the server's random numbers, so it
+            // draws more of them than a later game: game 0 warms up.
+            final String[] prints = new String[5];
+            for (int i = 0; i < prints.length; i++) {
+                if (i < 3) {
+                    net.sf.freecol.common.FreeColSeed.setFreeColSeed("7");
+                } else {
+                    seeded.setBoolean(null, false);
+                }
+                Game template = makeNewGame();
+                FreeColServer server = ServerTestHelper.startServer(false,
+                    true, template.getSpecification());
+                Game game = server.getGame();
+                game.setNationOptions(template.getNationOptions());
+                for (Player p : template.getPlayers(p -> true)
+                         .collect(java.util.stream.Collectors.toList())) {
+                    Player q = new ServerPlayer(game, false, p.getNation());
+                    q.setAI(p.isAI());
+                    game.addPlayer(q);
+                }
+                server.getMapGenerator().generateMap(game, null, true,
+                                                     new LogBuilder(-1));
+                prints[i] = fingerprint(game);
+                assertTrue(prints[i].contains("@56,"));
+                ServerTestHelper.stopServer();
+            }
+            assertEquals("same seed, same map and start", prints[1], prints[2]);
+            assertFalse("no seed, another map", prints[3].equals(prints[4]));
+        } finally {
+            seeded.setBoolean(null, wasSeeded);
+            seed.setLong(null, oldSeed);
+            ServerTestHelper.stopServer();
             Topology.setCurrent(saved);
         }
     }

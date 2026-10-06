@@ -41,6 +41,9 @@
       <xs:attribute name="maximumLatitude" type="xs:int" use="optional" />
       <!-- Absent in maps saved before the topology was stored: isometric. -->
       <xs:attribute name="topology" type="MapTopologyType" use="optional"/>
+      <!-- Square maps only: is the outer ring of tiles off limits (the
+           Classic UI never draws it)?  Absent on a square map: true. -->
+      <xs:attribute name="outerRing" type="xs:boolean" use="optional"/>
      </xs:complexType>
   </xs:element>
 

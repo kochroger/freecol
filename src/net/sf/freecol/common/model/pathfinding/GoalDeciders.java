@@ -140,6 +140,7 @@ public final class GoalDeciders {
     /**
      * Gets a GoalDecider to find the closest high seas tile to a target.
      * Used when arriving on the map from Europe.
+     * Never a tile on the outer ring (no unit may stand there).
      *
      * @return The high seas goal decider.
      */
@@ -157,6 +158,7 @@ public final class GoalDeciders {
                 if (tile != null
                     && tile.isExploredBy(u.getOwner())
                     && tile.isDirectlyHighSeasConnected()
+                    && !tile.isOuterRing()
                     && (tile.getFirstUnit() == null
                         || u.getOwner().owns(tile.getFirstUnit()))) {
                     if (best == null || path.getCost() < best.getCost()) {
@@ -172,6 +174,7 @@ public final class GoalDeciders {
     /**
      * Build a simple goal decider to find the first high seas tile
      * without using the unit parameter.
+     * Never a tile on the outer ring (no unit may stand there).
      *
      * @return A {@code GoalDecider} that finds the nearest high seas tile.
      */
@@ -187,7 +190,8 @@ public final class GoalDeciders {
             public boolean check(Unit u, PathNode path) {
                 Tile tile = path.getTile();
                 if (tile != null
-                    && tile.isDirectlyHighSeasConnected()) {
+                    && tile.isDirectlyHighSeasConnected()
+                    && !tile.isOuterRing()) {
                     first = path;
                     return true;
                 }

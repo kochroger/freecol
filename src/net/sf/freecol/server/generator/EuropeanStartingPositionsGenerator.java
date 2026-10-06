@@ -164,10 +164,13 @@ class EuropeanStartingPositionsGenerator {
             final Area startingArea = game.getNationStartingArea(player.getNation());
             
             List<Tile> possibleStartingTiles = startingArea.getTiles().stream()
+                    .filter(t -> !t.isOuterRing())
                     .filter(t -> t.isLand() == prefersLand)
                     .collect(Collectors.toList());
             if (possibleStartingTiles.isEmpty()) {
-                possibleStartingTiles = startingArea.getTiles();
+                possibleStartingTiles = startingArea.getTiles().stream()
+                    .filter(t -> !t.isOuterRing())
+                    .collect(Collectors.toList());
             }
             
             while (!possibleStartingTiles.isEmpty()) { 
@@ -190,7 +193,8 @@ class EuropeanStartingPositionsGenerator {
         for (Player player : europeanPlayers) {
             final Area startingArea = game.getNationStartingArea(player.getNation());
             if (startingArea != null) {
-                tilesToChooseFrom.addAll(startingArea.getTiles());
+                tilesToChooseFrom.addAll(transform(startingArea.getTiles(),
+                        t -> !t.isOuterRing()));
             }
         }
         
@@ -398,7 +402,7 @@ class EuropeanStartingPositionsGenerator {
         }
         final int distance = 10;
         final List<Tile> refTiles = StreamSupport.stream(map.getCircleTiles(start, true, distance).spliterator(), false)
-                .filter(t -> !t.isLand())
+                .filter(t -> !t.isLand() && !map.isOuterRing(t))
                 .collect(Collectors.toList());
         final Tile startRef = getRandomMember(logger, ourREF + " start", refTiles, random);
             

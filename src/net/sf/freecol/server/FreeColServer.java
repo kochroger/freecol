@@ -322,7 +322,13 @@ public final class FreeColServer {
 
         this.setPublicServer(publicServer);
         this.singlePlayer = singlePlayer;
-        this.random = new Random();
+        // A seed from the command line makes a new game repeatable, as
+        // it does a loaded one: this one Random feeds the map
+        // generator, the start positions and the AI, so the same seed
+        // gives the same map and the same start.
+        this.random = (FreeColSeed.hasFreeColSeed())
+            ? new Random(FreeColSeed.getFreeColSeed())
+            : new Random();
         this.serverGame = new ServerGame(specification, random);
         this.inGameController.setRandom(this.random);
         this.mapGenerator = new SimpleMapGenerator(this.random);

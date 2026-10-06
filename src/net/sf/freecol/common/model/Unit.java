@@ -2314,12 +2314,17 @@ public class Unit extends GoodsLocation
      * to another, without checking if the unit has moves left or
      * logging errors.
      *
+     * A move onto the outer ring of a map that has one
+     * ({@link Map#hasOuterRing}) is illegal, as a move off the map is:
+     * the ring stands for the edge of the world.
+     *
      * @param from The origin {@code Tile} of the move.
      * @param target The target {@code Tile} of the move.
      * @return The move type, which will be one of the extended illegal move
      *         types on failure.
      */
     public MoveType getSimpleMoveType(Tile from, Tile target) {
+        if (target != null && target.isOuterRing()) return MoveType.MOVE_ILLEGAL;
         return (isNaval()) ? getNavalMoveType(from, target)
             : getLandMoveType(from, target);
     }
@@ -4196,6 +4201,12 @@ public class Unit extends GoodsLocation
         if (newLocation != null && !newLocation.canAdd(this)) {
             logger.warning("Can not add " + this + " to " + newLocation);
             return false;
+        }
+        if (newLocation instanceof Tile && ((Tile)newLocation).isOuterRing()) {
+            // "Should not happen": no move, start or arrival uses the
+            // outer ring (Map.hasOuterRing).
+            logger.warning("Putting " + this + " on the outer ring at "
+                + newLocation);
         }
 
         // If the unit either starts or ends this move in a colony

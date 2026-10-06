@@ -22,6 +22,7 @@ package net.sf.freecol.common.model;
 import static net.sf.freecol.common.model.Constants.INFINITY;
 import static net.sf.freecol.common.model.Constants.UNDEFINED;
 import static net.sf.freecol.common.util.CollectionUtils.alwaysTrue;
+import static net.sf.freecol.common.util.CollectionUtils.any;
 import static net.sf.freecol.common.util.CollectionUtils.cachingIntComparator;
 import static net.sf.freecol.common.util.CollectionUtils.find;
 import static net.sf.freecol.common.util.CollectionUtils.matchKeyEquals;
@@ -277,6 +278,20 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
      * is, as in old saves and the bundled maps).
      */
     private Topology topology = Topology.current();
+
+    /**
+     * Is the outer ring of tiles (columns 0 and width-1, rows 0 and
+     * height-1) off limits?  The Classic UI never draws it: its view
+     * clamps one tile inside every edge, as the original's does.  So on
+     * the maps it plays no unit may stand there, and the ring only
+     * stands for the edge of the world, beyond which a ship sails to
+     * Europe.  New square maps from the map generator (also the map
+     * editor's) have the ring, maps built otherwise (the tests' maps)
+     * do not.
+     * Saved with the map; a square save without the attribute, made
+     * before it existed, has the ring.
+     */
+    private boolean outerRing = false;
 
     /**
      * The latitude of the northern edge of the map. A negative value
@@ -545,6 +560,63 @@ public class Map extends FreeColGameObject implements Location, Iterable<Tile> {
             throw new IllegalArgumentException("Null topology: " + getId());
         }
         this.topology = topology;
+    }
+
+    /**
+     * Is the outer ring of tiles off limits on this map?
+     *
+     * @return True if no unit may stand on the outer ring.
+     * @see #isOuterRing(int, int)
+     */
+    public final boolean hasOuterRing() {
+        return this.outerRing;
+    }
+
+    /**
+     * Set whether the outer ring of tiles is off limits.
+     *
+     * @param outerRing The new outer ring state.
+     */
+    public final void setOuterRing(final boolean outerRing) {
+        this.outerRing = outerRing;
+    }
+
+    /**
+     * Is a map position on the outer ring, where no unit may stand?
+     * Always false on a map without the ring.
+     *
+     * @param x The x coordinate.
+     * @param y The y coordinate.
+     * @return True if the position is on this map's outer ring.
+     */
+    public boolean isOuterRing(int x, int y) {
+        return this.outerRing
+            && (x == 0 || y == 0 || x == getWidth() - 1 || y == getHeight() - 1);
+    }
+
+    /**
+     * Is a tile on the outer ring, where no unit may stand?
+     *
+     * @param tile The {@code Tile} to check.
+     * @return True if the tile is on this map's outer ring.
+     */
+    public boolean isOuterRing(Tile tile) {
+        return tile != null && isOuterRing(tile.getX(), tile.getY());
+    }
+
+    /**
+     * Get the nearest tile a unit may stand on, for a tile on the outer
+     * ring: the ring tile's neighbour one step inside.  A tile off the
+     * ring is returned as it is.
+     *
+     * @param tile The {@code Tile} to start from.
+     * @return The nearest tile off the outer ring.
+     */
+    public Tile getInnerTile(Tile tile) {
+        if (!isOuterRing(tile)) return tile;
+        final int x = Math.max(1, Math.min(getWidth() - 2, tile.getX()));
+        final int y = Math.max(1, Math.min(getHeight() - 2, tile.getY()));
+        return getTile(x, y);
     }
 
     /**
@@ -2304,12 +2376,28 @@ ok:     while (!openMap.isEmpty()) {
      */
     public void collectStartingTiles(List<Tile> eastTiles,
                                      List<Tile> westTiles) {
+        eastTiles.clear();
+        westTiles.clear();
+        if (this.outerRing) {
+            // A map with the outer ring starts its ships as the
+            // original does: in the outermost column a unit may use
+            // (the last one the Classic UI draws), on each row where
+            // that tile leads to Europe.  The view then clamps at the
+            // edge, and the ship sits at the right edge of the screen.
+            final int west = 1;
+            final int east = getWidth() - 2;
+            for (int y = 1; y < getHeight() - 1; y++) {
+                Tile t = getTile(east, y);
+                if (t.isDirectlyHighSeasConnected()) eastTiles.add(t);
+                t = getTile(west, y);
+                if (t.isDirectlyHighSeasConnected()) westTiles.add(t);
+            }
+            return;
+        }
         // Find the innermost high seas connected tile on each row (if
         // any) on the east and west sides of the map
         final int west = 0;
         final int east = getWidth() - 1;
-        eastTiles.clear();
-        westTiles.clear();
         for (int y = 0; y < getHeight(); y++) {
             int x;
             Tile ok = getTile(east, y);
@@ -2423,6 +2511,9 @@ ok:     while (!openMap.isEmpty()) {
      * Sets the high seas count for all tiles connected to the high seas.
      * Any ocean tiles on the map vertical edges that do not have an
      * explicit false moveToEurope attribute are given a true one.
+     * On a map with the outer ring the vertical edges are the columns
+     * just inside it, and the ring itself is left out: no unit may use
+     * it, so it neither leads to Europe nor connects other tiles.
      *
      * Set all high seas counts negative, then start with a count of
      * zero for tiles with the moveToEurope attribute or of a type
@@ -2437,10 +2528,13 @@ ok:     while (!openMap.isEmpty()) {
         List<Tile> curr = new ArrayList<>();
         List<Tile> next = new ArrayList<>();
         int hsc = 0;
+        final int west = (this.outerRing) ? 1 : 0;
+        final int east = getWidth() - 1 - west;
         for (Tile t : this.tileList) {
             t.setHighSeasCount(-1);
+            if (isOuterRing(t.getX(), t.getY())) continue;
             if (!t.isLand()) {
-                if ((t.getX() == 0 || t.getX() == getWidth()-1)
+                if ((t.getX() == west || t.getX() == east)
                     && t.getType() != null
                     && t.getType().isHighSeasConnected()
                     && !t.getType().isDirectlyHighSeasConnected()
@@ -2466,7 +2560,7 @@ ok:     while (!openMap.isEmpty()) {
                 Position position = new Position(tile.getX(), tile.getY());
                 for (Position p : transform(Direction.values(), alwaysTrue(),
                         d -> new Position(position, d))) {
-                    if (isValid(p)) {
+                    if (isValid(p) && !isOuterRing(p.x, p.y)) {
                         Tile t = getTile(p);
                         if (t.getHighSeasCount() < 0) {
                             t.setHighSeasCount(hsc);
@@ -2573,6 +2667,7 @@ ok:     while (!openMap.isEmpty()) {
         final Game game = getGame();
         Map ret = new Map(game, width, height);
         ret.setTopology(getTopology());
+        ret.setOuterRing(hasOuterRing());
         final int oldWidth = getWidth();
         final int oldHeight = getHeight();
         ret.populateTiles((x, y) -> {
@@ -2789,7 +2884,94 @@ ok:     while (!openMap.isEmpty()) {
                 result = result.combine(t.checkIntegrity(fix, lb));
             }
         }
+        if (this.outerRing) result = result.combine(checkOuterRing(fix, lb));
         return result;
+    }
+
+    /**
+     * Check that no unit stands on the outer ring, that no player or
+     * unit enters the map there from Europe, and that the ring leads
+     * nowhere.  Square saves made before the ring was kept free can
+     * have a ship on it, an entry tile on it, and the high seas counts
+     * of a map without it.  When fixing, such a unit moves to the
+     * nearest tile inside the ring that it could move to, an entry
+     * location on the ring moves to the nearest tile inside it of the
+     * same kind (land or water), and the high seas counts are made
+     * again ({@link #resetHighSeasCount}).
+     *
+     * @param fix Fix problems if possible.
+     * @param lb A {@code LogBuilder} to log to.
+     * @return The integrity of the outer ring.
+     */
+    private IntegrityType checkOuterRing(boolean fix, LogBuilder lb) {
+        IntegrityType result = IntegrityType.INTEGRITY_GOOD;
+        if (any(this.tileList, t -> isOuterRing(t)
+                && t.getHighSeasCount() >= 0)) {
+            lb.add("\n  High seas counts made without the outer ring");
+            if (fix) {
+                resetHighSeasCount();
+                result = result.fix();
+            } else {
+                result = result.fail();
+            }
+        }
+        for (Tile t : transform(this.tileList, t -> isOuterRing(t)
+                && t.getUnitCount() > 0)) {
+            for (Unit u : t.getUnitList()) {
+                lb.add("\n  Unit on the outer ring: ", u.getId(), " at ",
+                    t.getX(), ",", t.getY());
+                Tile inner = (fix) ? find(t.getSurroundingTiles(1, 3),
+                    n -> !isOuterRing(n) && u.isTileAccessible(n)
+                        && (n.getFirstUnit() == null
+                            || u.getOwner().owns(n.getFirstUnit()))
+                        && (!n.hasSettlement()
+                            || u.getOwner().owns(n.getSettlement())))
+                    : null;
+                if (inner == null) {
+                    result = result.fail();
+                } else {
+                    u.setLocation(inner);
+                    lb.add(", moved to ", inner.getX(), ",", inner.getY());
+                    result = result.fix();
+                }
+            }
+        }
+        for (Player p : getGame().getLivePlayerList()) {
+            if (isOuterRing(p.getEntryTile())) {
+                lb.add("\n  Entry tile on the outer ring: ", p.getId());
+                if (fix) {
+                    p.setEntryTile(getInnerEntryTile(p.getEntryTile()));
+                    result = result.fix();
+                } else {
+                    result = result.fail();
+                }
+            }
+            for (Unit u : transform(p.getUnits(), u -> u.getEntryLocation() != null
+                    && isOuterRing(u.getEntryLocation().getTile()))) {
+                lb.add("\n  Entry location on the outer ring: ", u.getId());
+                if (fix) {
+                    u.setEntryLocation(getInnerEntryTile(u.getEntryLocation().getTile()));
+                    result = result.fix();
+                } else {
+                    result = result.fail();
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * The tile an entry location on the outer ring moves to: the
+     * nearest tile inside the ring of the same kind, so that a ship
+     * coming from Europe still arrives on water.
+     *
+     * @param tile The entry {@code Tile} on the ring.
+     * @return The new entry {@code Tile}.
+     */
+    private Tile getInnerEntryTile(Tile tile) {
+        final Tile inner = find(tile.getSurroundingTiles(1, 3),
+            n -> !isOuterRing(n) && n.isLand() == tile.isLand());
+        return (inner != null) ? inner : getInnerTile(tile);
     }
 
 
@@ -2808,6 +2990,7 @@ ok:     while (!openMap.isEmpty()) {
         // The other map was read from a stream, which put its topology
         // in use already.
         this.topology = o.getTopology();
+        this.outerRing = o.hasOuterRing();
         // Allow creating new regions in first map update
         clearRegions();
         for (Region r : o.getRegions()) addRegion(game.update(r, true));
@@ -2829,6 +3012,7 @@ ok:     while (!openMap.isEmpty()) {
     private static final String LAYER_TAG = "layer";
     private static final String MAXIMUM_LATITUDE_TAG = "maximumLatitude";
     private static final String MINIMUM_LATITUDE_TAG = "minimumLatitude";
+    private static final String OUTER_RING_TAG = "outerRing";
     private static final String TOPOLOGY_TAG = "topology";
     private static final String WIDTH_TAG = "width";
 
@@ -2841,6 +3025,13 @@ ok:     while (!openMap.isEmpty()) {
         super.writeAttributes(xw);
 
         xw.writeAttribute(TOPOLOGY_TAG, topology);
+
+        // Only square maps can have the outer ring.  They always say
+        // whether they have it, since a square map without the
+        // attribute has it (see readAttributes).
+        if (topology == Topology.SQUARE) {
+            xw.writeAttribute(OUTER_RING_TAG, outerRing);
+        }
 
         xw.writeAttribute(WIDTH_TAG, getWidth());
 
@@ -2883,6 +3074,11 @@ ok:     while (!openMap.isEmpty()) {
         setTopology(xr.getAttribute(TOPOLOGY_TAG, Topology.class,
                                     Topology.ISOMETRIC));
         Topology.setCurrent(this.topology);
+
+        // Square saves made before the attribute existed come from
+        // Classic UI games, which never draw the ring.
+        outerRing = xr.getAttribute(OUTER_RING_TAG,
+                                    this.topology == Topology.SQUARE);
 
         String err = updateTiles(xr.getAttribute(WIDTH_TAG, -1), xr.getAttribute(HEIGHT_TAG, -1));
         if (err != null) throw new XMLStreamException("Map.readAttributes failure, " + err);

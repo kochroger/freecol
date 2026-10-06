@@ -1239,6 +1239,17 @@ public final class Tile extends UnitLocation implements Named, Ownable {
     }
 
     /**
+     * Is this tile on the outer ring of its map, where no unit may
+     * stand ({@link Map#hasOuterRing})?
+     *
+     * @return True if the {@code Tile} is on the outer ring.
+     */
+    public boolean isOuterRing() {
+        final Map map = getMap();
+        return map != null && map.isOuterRing(this.x, this.y);
+    }
+
+    /**
      * Is this tile land locked?
      *
      * @return True if land locked.
@@ -1405,7 +1416,8 @@ public final class Tile extends UnitLocation implements Named, Ownable {
 
     /**
      * Finds a safe tile to put a unit on, near to this one.
-     * Useful on return from Europe.
+     * Useful on return from Europe.  Never a tile on the outer ring
+     * ({@link #isOuterRing}).
      *
      * @param player The owner of the unit to place (may be null).
      * @param random An optional pseudo-random number source.
@@ -1413,7 +1425,8 @@ public final class Tile extends UnitLocation implements Named, Ownable {
      */
     public Tile getSafeTile(Player player, Random random) {
         if ((getFirstUnit() == null || getFirstUnit().getOwner() == player)
-            && (!hasSettlement() || getSettlement().getOwner() == player)) {
+            && (!hasSettlement() || getSettlement().getOwner() == player)
+            && !isOuterRing()) {
             return this;
         }
 
@@ -1424,6 +1437,7 @@ public final class Tile extends UnitLocation implements Named, Ownable {
                 randomShuffle(logger, "Safe tile", tiles, random);
             }
             for (Tile t : tiles) {
+                if (t.isOuterRing()) continue;
                 if ((t.getFirstUnit() == null
                         || t.getFirstUnit().getOwner() == player)
                     && (t.getSettlement() == null

@@ -195,6 +195,7 @@ public class SimpleMapGenerator implements MapGenerator {
             for (int tries = 0; tries < 100; tries++) {
                 Tile t = map.getRandomLandTile(random);
                 if (t.isPolar()) continue; // No polar lost cities
+                if (t.isOuterRing()) continue; // Nobody could reach it
                 if (t.isLand() && !t.hasLostCityRumour()
                     && !t.hasSettlement() && t.getUnitCount() == 0) {
                     LostCityRumour r = new LostCityRumour(t.getGame(), t);
@@ -336,7 +337,7 @@ public class SimpleMapGenerator implements MapGenerator {
         
         final Set<Tile> settlementTiles = new LinkedHashSet<>();
         for (Tile tile : allTiles) {
-            if (tile.isPolar()) {
+            if (tile.isPolar() || tile.isOuterRing()) {
                 continue;
             }
             if (!suitableForNativeSettlement(tile)) {

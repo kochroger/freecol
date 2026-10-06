@@ -571,11 +571,13 @@ only by a hard jump, which redraws the whole map at once (landfall 02).
   `vx in [1, W-16]`, `vy in [1, H-13]` (`ClassicHud.clampView`; 42 and 59
   on 58x72), so the map's outer ring and anything beyond the edge never show:
   in HUD mode no open sea is painted past the edge any more. One exception,
-  for a FreeCol case the original never has: a unit standing **on** the outer
-  ring (FreeCol's entry location can be column 57, live run `m1-w4-west`) is
-  off the clamped view, so it always makes the view jump, and `viewFor` moves
-  the origin one step past the clamp just to show it (vx 43; the minimap ring
-  then lies on the frame's last column).
+  for a case the original never has: a unit standing **on** the outer ring
+  is off the clamped view, so it always makes the view jump, and `viewFor`
+  moves the origin one step past the clamp just to show it (vx 43; the
+  minimap ring then lies on the frame's last column). On the square maps the
+  Classic UI makes no unit can stand there any more (next section); before,
+  FreeCol's start and entry location could be column 57 (live run
+  `m1-w4-west`, F1).
 - **Recentre** = `ClassicHud.viewFor`: the unit in cell (7,6), clamped. It
   reproduces all 14 measured origins V1-V14, including both east clamps.
 - **Jump test** = `ClassicHud.needsRecentre`: the unit's cell is in column 0-1
@@ -608,6 +610,60 @@ none at #10077 row 9, #14876 column 2 or the five east-clamp starts), the
 margins and clamps, the outer ring, the start view with its ring, and that
 the controller's re-selection of the moving unit after each move (its
 arrival) never tests the view while a newly active unit always does.
+
+### The outer ring and the start (master plan N16, N18)
+
+The view clamp never shows columns 0 and W-1 or rows 0 and H-1 (EUQ section
+3). So a square map from the map generator has the **outer ring**
+(`Map.hasOuterRing`; saved as the map's `outerRing` attribute, and a square
+save without it, made before, has it), and no unit of any player may stand
+there. The map editor's new square maps come from the same generator and
+have it too. Isometric maps, and maps built otherwise (the tests'
+`MapBuilder` maps), have no ring and behave as before.
+
+- **Moves.** A move onto the ring is illegal, as a move off the map is
+  (`Unit.getSimpleMoveType`: `MOVE_ILLEGAL`). So paths, the AI's missions and
+  the server's move check keep off it. At the east edge Roger's Europe
+  question (W8a, below) comes first; any other key toward the ring does
+  nothing. A unit already on the ring could move off it, but not along it.
+- **The way to Europe.** The ring leads nowhere: `Map.resetHighSeasCount`
+  leaves it out, and FreeCol's rule that water on the map's vertical edges
+  leads to Europe (`moveToEurope`) applies to the columns just inside it
+  (1 and W-2). So every water tile of the last drawn column leads to Europe,
+  as the original's light-water edge does, and a sea that used to reach Europe
+  over the ring still does. The high seas goal deciders (the way to Europe,
+  the entry tile of a ship coming back, the REF and the intervention force)
+  never pick a ring tile, and `Tile.getSafeTile` (a ship arriving at a taken
+  entry tile) never returns one.
+- **Placement.** No European start, REF entry tile, native settlement or
+  rumour is put on the ring. Loading an older square save moves a unit found
+  on the ring inside it, moves an entry location on it to the nearest tile
+  inside of the same kind (water for a ship), and makes the high seas counts
+  again, so the column inside the ring leads to Europe there too
+  (`Map.checkIntegrity`; the C1 saves had an entry tile at (57,60)).
+  `Unit.setLocation` logs a warning should anything still put a unit there.
+- **The start** (W4, landfall #340): on such a map
+  `Map.collectStartingTiles` takes the column inside the ring (x = W-2 = 56)
+  on every row whose tile there leads to Europe. The start view (activation
+  clamped, `viewFor`) then puts the ship in cell (14,6), at the right edge of
+  the screen as in the original: (56,42) gives the origin (42,36). FreeCol's
+  own rule, kept for maps without the ring, takes the innermost high seas
+  tile of the row: x 42-57 on our maps, whose high seas are several columns
+  wide, so the ship started anywhere from cell (7,6) to one column past the
+  clamp (FINAL F1). At the original's start the high seas are one column
+  wide: (56,42) is Seeweg, (55,42) is ocean (EUQ move M1), so there the
+  innermost high seas tile is the last drawn column.
+- **Repeatable starts (N18).** `--seed N` now also seeds a new game's server
+  random numbers (`FreeColServer`; before, only a loaded game's), and that one
+  `Random` feeds the map generator, the start positions and the AI: the same
+  seed gives the same map and the same start tile. The acceptance launcher
+  (`run-scripted.ps1 -Save`) can also start from a copy of a fixed save.
+
+Tests: `OuterRingTest` (the ring, moves, paths to and from Europe, the edge
+columns, start tiles, the safe tile, the attribute, the load fixes),
+`MapGeneratorTest.testStartsKeepOffTheOuterRing` (both topologies) and
+`testSeedFixesTheNewGame`, `ClassicViewRuleTest.testNewGamesStartInCell14x6`,
+`InGameControllerTest.testMoveOntoTheOuterRingIsRefused` (the server).
 
 ### End of turn and hand-over (`ClassicTurnFlow`, `ClassicOneShot`; build spec W5)
 

@@ -59,10 +59,12 @@ import net.sf.freecol.common.model.Tension.Level;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileImprovementType;
 import net.sf.freecol.common.model.TileType;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitChangeType;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.common.model.WorkLocation;
+import net.sf.freecol.common.networking.MoveMessage;
 import net.sf.freecol.common.option.GameOptions;
 import net.sf.freecol.server.ServerTestHelper;
 import net.sf.freecol.server.model.ServerBuilding;
@@ -189,6 +191,40 @@ public class InGameControllerTest extends FreeColTestCase {
                      expectedDutchTension, currDutchTension);
         assertEquals("Wrong french tension",
                      expectedFrenchTension, currFrenchTension);
+    }
+
+    /**
+     * The server refuses a client's move onto the outer ring of a
+     * Classic UI map (Map.hasOuterRing): the unit stays where it is with
+     * its moves.  A move along the column inside the ring goes ahead.
+     */
+    public void testMoveOntoTheOuterRingIsRefused() {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            final Game game = ServerTestHelper.startServerGame(
+                getCoastTestMap(plains, true));
+            final Map map = game.getMap();
+            map.setOuterRing(true);
+            map.resetHighSeasCount();
+            ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+            ServerUnit ship = new ServerUnit(game, map.getTile(18, 7), dutch,
+                                             caravelType);
+            final int moves = ship.getMovesLeft();
+
+            for (Direction d : new Direction[] { Direction.E, Direction.NE,
+                                                 Direction.SE }) {
+                new MoveMessage(ship, d)
+                    .serverHandler(ServerTestHelper.getServer(), dutch);
+                assertEquals(d.toString(), map.getTile(18, 7), ship.getTile());
+                assertEquals(d.toString(), moves, ship.getMovesLeft());
+            }
+            new MoveMessage(ship, Direction.N)
+                .serverHandler(ServerTestHelper.getServer(), dutch);
+            assertEquals(map.getTile(18, 6), ship.getTile());
+        } finally {
+            Topology.setCurrent(saved);
+        }
     }
 
     /**

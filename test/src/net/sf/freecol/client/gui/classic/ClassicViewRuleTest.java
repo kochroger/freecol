@@ -23,12 +23,24 @@ import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
 
+import net.sf.freecol.FreeCol;
+import net.sf.freecol.common.io.FreeColRules;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Map;
+import net.sf.freecol.common.model.Nation;
+import net.sf.freecol.common.model.NationOptions;
 import net.sf.freecol.common.model.Player;
+import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.Tile;
+import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
+import net.sf.freecol.common.option.MapGeneratorOptions;
+import net.sf.freecol.common.util.LogBuilder;
+import net.sf.freecol.server.generator.SimpleMapGenerator;
+import net.sf.freecol.server.model.ServerGame;
+import net.sf.freecol.server.model.ServerPlayer;
 import net.sf.freecol.server.model.ServerUnit;
 import net.sf.freecol.util.test.FreeColTestCase;
 
@@ -377,6 +389,64 @@ public class ClassicViewRuleTest extends FreeColTestCase {
         assertEquals(new Rectangle(276, 23, 15, 12), ring(25, 46));
         assertEquals(new Rectangle(281, 23, 15, 12), ring(30, 46));
         assertEquals(22, ring(40, 39).y);
+    }
+
+    /**
+     * The start of new games (N16, build spec W4 #340): on a square map
+     * from the map generator every European ship starts in the last
+     * drawn column, so the start view (activation, then the focus, as
+     * {@code ClassicGUI.reconnectGUI}) clamps at the east edge with the
+     * ship in cell (14,6); for a ship at (56,42) that is the origin
+     * (42,36) of the original.
+     */
+    public void testNewGamesStartInCell14x6() {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            int ships = 0;
+            for (int seed = 1; seed <= 3; seed++) {
+                Specification spec = FreeCol.loadSpecification(
+                    FreeColRules.getFreeColRulesFile("freecol"), null,
+                    "model.difficulty.medium");
+                spec.setFile(MapGeneratorOptions.IMPORT_FILE, null);
+                MapGeneratorOptions.applyTopologyDefaults(
+                    spec.getMapGeneratorOptions());
+                Game game = new ServerGame(spec);
+                game.setNationOptions(new NationOptions(spec));
+                for (Nation n : spec.getNations()) {
+                    if (n.isUnknownEnemy()) continue;
+                    Player p = new ServerPlayer(game, false, n);
+                    boolean ai = !n.getType().isEuropean() || n.getType().isREF();
+                    p.setAI(ai);
+                    if (ai || game.canAddNewPlayer()) game.addPlayer(p);
+                }
+                new SimpleMapGenerator(new Random(seed))
+                    .generateMap(game, null, true, new LogBuilder(-1));
+                final Map map = game.getMap();
+                assertEquals(W, map.getWidth());
+                assertEquals(H, map.getHeight());
+                for (Player p : game.getLiveEuropeanPlayerList()) {
+                    for (Unit u : p.getUnitSet()) {
+                        if (!u.isNaval() || !u.hasTile()) continue;
+                        final Tile t = u.getTile();
+                        final ClassicMapViewer mv
+                            = new ClassicMapViewer(null, null, null, false);
+                        mv.changeToMoveUnits(u);
+                        mv.setFocus(t);
+                        final int[] v = mv.peekViewOrigin();
+                        final String at = "seed " + seed + " " + p.getNationId()
+                            + " at " + t.getX() + "," + t.getY()
+                            + " view " + Arrays.toString(v);
+                        assertEquals(at, 14, t.getX() - v[0]);
+                        assertEquals(at, 6, t.getY() - v[1]);
+                        ships++;
+                    }
+                }
+            }
+            assertTrue("ships " + ships, ships >= 12);
+        } finally {
+            Topology.setCurrent(saved);
+        }
     }
 
     private static Rectangle ring(int c0, int r0) {
