@@ -22,6 +22,7 @@ package net.sf.freecol.client.gui.classic;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.util.function.IntConsumer;
 
 import net.sf.freecol.client.gui.ImageLibrary;
 import net.sf.freecol.common.model.Direction;
@@ -29,15 +30,19 @@ import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Resource;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileImprovement;
+import net.sf.freecol.common.model.TileType;
 import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.resources.ResourceManager;
 
 
 /**
- * Composites the per-tile terrain-feature overlays (Phase 1 item (e)) —
- * forest trees, hills, mountains, rivers, roads, plowed fields, the
- * lost-city rumour and resource markers — onto a square classic map cell,
- * on top of the base terrain drawn by {@link ClassicMapViewer#paintTile}.
+ * The per-tile terrain-feature overlays (Phase 1 item (e)) — forest trees,
+ * hills, mountains, rivers, roads, plowed fields, the lost-city rumour and
+ * resource markers — of a square classic map cell: which {@code PHYS0.SS}
+ * frames a tile shows ({@link #overlayFrames}), and drawing them over the
+ * base terrain in the RGBA fallback ({@link #paintOverlays}).  The index
+ * composer ({@link ClassicTerrainComposer}, M1c design 10 §6, W6a) copies
+ * the same frames as palette indices.
  *
  * <h2>Why {@code PHYS0.SS}, not {@code TERRAIN.SS}</h2>
  * The 1994 game drew a map cell as a base terrain tile plus <em>overlay</em>
@@ -67,28 +72,29 @@ import net.sf.freecol.common.resources.ResourceManager;
  *       resource markers {@code 89..102}.</li>
  * </ul>
  *
- * <h2>Coastline — no longer sourced from frames {@code 108..139}</h2>
- * The 1994 game's own coast quarter-tiles were originally re-implemented here
- * (32 small 8&times;8 sprites, {@code 4 corners &times; 8 configs}, composited
- * onto the four quadrants of each water cell). Live comparison against the
- * original reference screenshots (see {@code screenshots/initial/}) found the
- * <em>extracted</em> frames render a scattered green fleck along the wave crest
- * that the original never shows (a clean grey/white foam fringe instead) — a
- * likely palette/extraction fidelity issue in the asset pack, not a rendering
- * bug in this class. Rather than ship a fringe that doesn't match the source
- * material, the water side of the coastline is now painted procedurally, the
- * same call made for the land side after Q7 found no faithful land-land border
- * sprite either — see {@code ClassicMapViewer.blendWaterBorders}. The estuary/
- * river-mouth pieces ({@code 140..147} ocean corner-hints, {@code 150..153}
- * diagonal sand strips) were never wired regardless.
+ * <h2>Coastline: the frames {@code 108..139} are right</h2>
+ * The original's coast quarter-tiles (32 small 8&times;8 sprites,
+ * {@code 4 corners &times; 8 configs}) were once drawn here from the PNGs
+ * and then removed, because they showed a "green fleck" along the wave
+ * crest that a reference screenshot seemed to lack.  That fleck is the
+ * original's own rim (indices 67-71, landfall 04 section 5.2), not an
+ * extraction fault: the frames are index-exact against the clips (M1c
+ * design 10 F6).  They come back as palette indices in the composer with
+ * the beach corners {@code 150..153} (item W6b, quarter {@code q} is
+ * {@code P(108 + 4c + q)}); until then explored water next to land shows
+ * the land's side-mask blend only.  The river mouths {@code 140..147} are
+ * not drawn (O9).
  *
  * <h2>Connectivity on the classic grid</h2>
  * Connectivity is computed from <em>raw-grid</em> neighbours (the tiles drawn
  * directly up/down/left/right and at the corners) rather than FreeCol's
  * isometric {@link net.sf.freecol.common.model.Direction}s, so features blend
  * with whatever is <em>visually</em> adjacent on the square grid.  Area
- * features (forest / hills / mountains) use the four cardinal neighbours.
- * Rivers are linear and — because FreeCol lays them out along the isometric
+ * features (forest / hills / mountains) use the four cardinal neighbours,
+ * whose types come from a {@link TypeLookup}: the composer's reaches into
+ * the fog ring with the true terrain (design 10 O8), the fallback's
+ * ({@link #modelTypes}) knows only the client's explored tiles.  Rivers are
+ * linear and — because FreeCol lays them out along the isometric
  * long-sides, which flatten to raw diagonals — fold each diagonal neighbour
  * into its two adjacent cardinal bits so a diagonal river still reads as
  * connected (on the square {@link Topology} the model's own N/E/S/W river
@@ -96,6 +102,20 @@ import net.sf.freecol.common.resources.ResourceManager;
  * of the eight raw neighbours that has a road.
  */
 final class ClassicTileArt {
+
+    /**
+     * The terrain type at a raw map position, for the area features'
+     * connectivity.
+     */
+    interface TypeLookup {
+
+        /**
+         * @param x The column.
+         * @param y The row.
+         * @return The type, or null (unknown, off the map).
+         */
+        TileType typeAt(int x, int y);
+    }
 
     // PHYS0.SS frame bases for each directional feature set.
     private static final int RIVER_MINOR = 0;
@@ -160,76 +180,86 @@ final class ClassicTileArt {
         if (img != null) g.drawImage(img, sx, sy, w, h, null);
     }
 
+    /**
+     * The types of the client's map: an unexplored tile has none.
+     *
+     * @param map The map.
+     * @return The lookup.
+     */
+    static TypeLookup modelTypes(final Map map) {
+        return (x, y) -> {
+            final Tile t = map.getTile(x, y);
+            return (t == null) ? null : t.getType();
+        };
+    }
+
 
     /**
      * Composite every terrain-feature overlay for {@code tile} into the cell at
      * {@code (sx, sy)} sized {@code w}&times;{@code h}, on top of the already-drawn
-     * base terrain and below the settlement/unit sprite.
+     * base terrain and below the settlement/unit sprite (the RGBA fallback).
      */
     void paintOverlays(Graphics2D g, Map map, Tile tile, int sx, int sy,
                        int w, int h) {
         if (this.packPresent) {
-            paintFromPack(g, map, tile, sx, sy, w, h);
+            overlayFrames(map, tile, modelTypes(map),
+                          f -> drawFrame(g, f, sx, sy, w, h));
         } else {
             paintFallback(g, tile, sx, sy, w, h);
         }
     }
 
-    /** The classic path: composite the square {@code PHYS0.SS} overlays. */
-    private void paintFromPack(Graphics2D g, Map map, Tile tile, int sx, int sy,
-                               int w, int h) {
+    /**
+     * The {@code PHYS0.SS} overlay frames of a tile, in drawing order:
+     * relief (forest, else mountains, else hills), plowed field, river,
+     * road hub and spokes, resource marker, lost-city rumour.
+     *
+     * @param map The map (rivers, roads).
+     * @param tile The tile.
+     * @param types The types for the area features' connectivity.
+     * @param frames Receives each frame number.
+     */
+    static void overlayFrames(Map map, Tile tile, TypeLookup types,
+                              IntConsumer frames) {
         final int x = tile.getX();
         final int y = tile.getY();
-
-        // Coastline feathering used to be drawn here from the extracted 8x8 beach
-        // quarter-tiles (frames 108..139); that mechanism was removed after live
-        // comparison against the original reference screenshots showed the
-        // extracted frames render a green-flecked fringe the original never had
-        // (a likely palette/extraction fidelity issue, not a rendering bug in this
-        // class). The water-side coastline is now handled procedurally instead --
-        // see ClassicMapViewer.blendWaterBorders.
+        final TileType type = tile.getType();
 
         // Terrain relief: forest trees, or the hill/mountain massif.  These are
         // area features, so connectivity is over the four cardinal neighbours.
-        if (tile.isForested()) {
-            drawFrame(g, FOREST + areaMask(map, x, y, Feature.FOREST), sx, sy, w, h);
-        } else if (isType(tile, "model.tile.mountains")) {
-            drawFrame(g, MOUNTAINS + areaMask(map, x, y, Feature.MOUNTAINS), sx, sy, w, h);
-        } else if (isType(tile, "model.tile.hills")) {
-            drawFrame(g, HILLS + areaMask(map, x, y, Feature.HILLS), sx, sy, w, h);
+        if (type != null && type.isForested()) {
+            frames.accept(FOREST + areaMask(types, x, y, Feature.FOREST));
+        } else if (isType(type, "model.tile.mountains")) {
+            frames.accept(MOUNTAINS + areaMask(types, x, y, Feature.MOUNTAINS));
+        } else if (isType(type, "model.tile.hills")) {
+            frames.accept(HILLS + areaMask(types, x, y, Feature.HILLS));
         }
 
         // A plowed field sits on open, cleared ground.
-        if (isPlowed(tile)) {
-            drawFrame(g, PLOWED, sx, sy, w, h);
-        }
+        if (isPlowed(tile)) frames.accept(PLOWED);
 
         // River: minor (magnitude 1) or major (>= 2), connectivity folded from
         // the raw-grid neighbours (see class comment).
         final TileImprovement river = tile.getRiver();
         if (river != null) {
             final int base = (river.getMagnitude() >= 2) ? RIVER_MAJOR : RIVER_MINOR;
-            drawFrame(g, base + riverMask(map, x, y), sx, sy, w, h);
+            frames.accept(base + riverMask(map, x, y));
         }
 
         // Road: centre hub plus a spoke toward each raw neighbour with a road.
         if (tile.hasRoad()) {
-            drawFrame(g, ROAD_HUB, sx, sy, w, h);
+            frames.accept(ROAD_HUB);
             for (int[] spoke : ROAD_SPOKES) {
-                if (hasRoad(map, x + spoke[0], y + spoke[1])) {
-                    drawFrame(g, spoke[2], sx, sy, w, h);
-                }
+                if (hasRoad(map, x + spoke[0], y + spoke[1])) frames.accept(spoke[2]);
             }
         }
 
         // Resource marker, then a lost-city rumour on top of everything.
         if (tile.hasResource()) {
             final int r = resourceFrame(tile.getResource());
-            if (r >= 0) drawFrame(g, r, sx, sy, w, h);
+            if (r >= 0) frames.accept(r);
         }
-        if (tile.hasLostCityRumour()) {
-            drawFrame(g, LOST_CITY, sx, sy, w, h);
-        }
+        if (tile.hasLostCityRumour()) frames.accept(LOST_CITY);
     }
 
     /**
@@ -259,8 +289,9 @@ final class ClassicTileArt {
     private enum Feature { FOREST, HILLS, MOUNTAINS }
 
     /** True if the raw cell {@code (x, y)} carries {@code feature}. */
-    private boolean hasFeature(Map map, int x, int y, Feature feature) {
-        final Tile t = map.getTile(x, y);
+    private static boolean hasFeature(TypeLookup types, int x, int y,
+                                      Feature feature) {
+        final TileType t = types.typeAt(x, y);
         if (t == null) return false;
         switch (feature) {
         case FOREST:    return t.isForested();
@@ -271,16 +302,16 @@ final class ClassicTileArt {
     }
 
     /** 4-bit cardinal-neighbour connectivity mask for an area feature. */
-    private int areaMask(Map map, int x, int y, Feature feature) {
+    private static int areaMask(TypeLookup types, int x, int y, Feature feature) {
         int m = 0;
-        if (hasFeature(map, x, y - 1, feature)) m |= N;
-        if (hasFeature(map, x + 1, y, feature)) m |= E;
-        if (hasFeature(map, x, y + 1, feature)) m |= S;
-        if (hasFeature(map, x - 1, y, feature)) m |= W;
+        if (hasFeature(types, x, y - 1, feature)) m |= N;
+        if (hasFeature(types, x + 1, y, feature)) m |= E;
+        if (hasFeature(types, x, y + 1, feature)) m |= S;
+        if (hasFeature(types, x - 1, y, feature)) m |= W;
         return m;
     }
 
-    private boolean hasRiver(Map map, int x, int y) {
+    private static boolean hasRiver(Map map, int x, int y) {
         final Tile t = map.getTile(x, y);
         return t != null && t.hasRiver();
     }
@@ -295,7 +326,7 @@ final class ClassicTileArt {
      * across the four sides of a cell, so its own connections (including a
      * mouth into the sea) are the frame bits.
      */
-    private int riverMask(Map map, int x, int y) {
+    private static int riverMask(Map map, int x, int y) {
         if (Topology.current() == Topology.SQUARE) {
             final Tile tile = map.getTile(x, y);
             final TileImprovement river = (tile == null) ? null : tile.getRiver();
@@ -319,7 +350,7 @@ final class ClassicTileArt {
         return m;
     }
 
-    private boolean hasRoad(Map map, int x, int y) {
+    private static boolean hasRoad(Map map, int x, int y) {
         final Tile t = map.getTile(x, y);
         return t != null && t.hasRoad();
     }
@@ -327,8 +358,8 @@ final class ClassicTileArt {
 
     // Tile-feature predicates.
 
-    private static boolean isType(Tile tile, String typeId) {
-        return tile.getType() != null && typeId.equals(tile.getType().getId());
+    private static boolean isType(TileType type, String typeId) {
+        return type != null && typeId.equals(type.getId());
     }
 
     private static boolean isPlowed(Tile tile) {

@@ -1553,6 +1553,12 @@ public class ClassicGUI extends GUI {
                 if (ClassicFrameRecorder.on()) {
                     ClassicFrameRecorder.note("oracle", this.terrainOracle.census());
                 }
+                // The terrain as the original's palette indices (W6a); a
+                // pack without them keeps the RGBA tiles (installInGameHud
+                // logs and notes which).
+                this.mapViewer.setTerrain(
+                    ClassicTerrainLayer.create(ClassicPackFiles.runtime()),
+                    this.terrainOracle);
                 installInGameHud();
             }
             if (active != null) {

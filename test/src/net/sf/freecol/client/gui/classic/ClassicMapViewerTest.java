@@ -477,4 +477,131 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         assertTrue(bare.isCursorShown());
         bare.dispose();
     }
+
+    /** A server game: an all-ocean 30x30 map, a Dutch ship on (15,15), its 3x3 explored. */
+    private static Game seaGame() {
+        final Game server = getStandardGame();
+        final Map map = new MapBuilder(server).setDimensions(30, 30)
+            .setBaseTileType(spec().getTileType("model.tile.ocean")).build();
+        server.changeMap(map);
+        final net.sf.freecol.server.model.ServerPlayer dutch
+            = (net.sf.freecol.server.model.ServerPlayer)server
+            .getPlayerByNationId("model.nation.dutch");
+        final Unit ship = new ServerUnit(server, map.getTile(15, 15), dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        assertNotNull(ship);
+        // The raw 3x3 in any topology (the square grid's line of sight 1).
+        final java.util.List<Tile> seen = new java.util.ArrayList<>();
+        for (int y = 14; y <= 16; y++) {
+            for (int x = 14; x <= 16; x++) seen.add(map.getTile(x, y));
+        }
+        dutch.exploreTiles(seen);
+        return server;
+    }
+
+    /** The colour the layer draws at a native view pixel. */
+    private static int rgbAt(ClassicTerrainLayer l, int x, int y) {
+        return l.palette().rgb(l.phase(), l.index(x, y));
+    }
+
+    /**
+     * Critic 5 and 4 (design 10 §6.1, W6a): the layer reads the explored
+     * state as shown.  A slide whose model already holds the reveal (a
+     * server-pushed move) paints no new tile before its final draw, not
+     * even in its 3-px margins; the final draw shows it and paints the
+     * panel's minimap in the same pass, once; a unit on a tile the map
+     * does not show explored is not drawn.
+     */
+    public void testTheRevealComesWithTheFinalDraw() throws Exception {
+        final Game server = seaGame();
+        final Player sDutch = server.getPlayerByNationId("model.nation.dutch");
+        final Game client = ClassicTerrainOracleTest.clientView(server, sDutch);
+        final Map map = client.getMap();
+        final Tile src = map.getTile(15, 15), dst = map.getTile(14, 15);
+        final Unit ship = src.getFirstUnit();
+        assertNotNull(ship);
+        assertTrue(src.isExplored() && dst.isExplored());
+        assertFalse(map.getTile(13, 15).isExplored());
+        final int[] dots = { 0 };
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                void paintBlinkDot() {
+                    dots[0]++;
+                }
+            };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        final ClassicTerrainLayer layer = ClassicTerrainLayerTest.layer();
+        mv.setFixedScale(1);
+        mv.setTerrain(layer, ClassicTerrainOracleTest.oracle(client, true, server));
+        final java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+            240, 192, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        mv.paintOffscreen(img);
+        mv.setFocus(src);
+        final int[] o = mv.peekViewOrigin();
+        assertEquals(7, 15 - o[0]);
+        assertEquals(6, 15 - o[1]);
+        // The first paint takes the explored state.
+        final java.awt.Graphics2D g = img.createGraphics();
+        mv.paintComponent(g);
+        g.dispose();
+        // (13,15) is cell (5,6): its in-cell pixel (14,4) is dark, its E
+        // side the fringe of the explored (14,15).
+        final int px = 5 * 16 + 14, py = 6 * 16 + 4;
+        final int darkRgb = rgbAt(layer, px, py);
+        assertEquals(img.getRGB(px, py) & 0xFFFFFF, darkRgb);
+        assertEquals(200 + (4 * 16 + 14) % 3, layer.index(px, py));
+
+        // The server pushes the move W: its reveal (x = 13) is in the
+        // model before the slide.
+        for (int y = 14; y <= 16; y++) {
+            map.getTile(13, y).setType(spec().getTileType("model.tile.ocean"));
+        }
+        final Tile revealed = map.getTile(13, 15);
+        assertTrue(revealed.isExplored());
+        assertFalse("not shown yet", mv.shownExplored(revealed));
+        final int before = dots[0];
+        mv.animateMove(ship, src, dst);
+        // The slide's margins reach into (13,15): still dark there.
+        assertEquals(darkRgb, img.getRGB(px, py) & 0xFFFFFF);
+        assertFalse(mv.shownExplored(revealed));
+        // The model runs on: the ship's next move puts it on the revealed
+        // tile, which the map does not show explored yet: not drawn there.
+        ship.setLocation(revealed);
+        assertFalse(mv.isShownAt(ship, revealed));
+        // The final draw: the reveal, and the minimap once.
+        mv.finalDraw();
+        assertTrue(mv.shownExplored(revealed));
+        assertTrue(mv.isShownAt(ship, revealed));
+        assertEquals(10 * 8 + (14 + 2 * 4) % 8, layer.index(px, py));
+        assertEquals(rgbAt(layer, px, py), img.getRGB(px, py) & 0xFFFFFF);
+        assertEquals(before + 1, dots[0]);
+        mv.finalDraw();   // nothing pending: nothing painted
+        assertEquals(before + 1, dots[0]);
+        mv.dispose();
+    }
+
+    /**
+     * Without the pack's index sheets (and in the adaptive layout) the map
+     * draws the RGBA fallback: an unexplored tile flat in the dark sea's
+     * colour, VICEROY's index 61 (design 10 §4).
+     */
+    public void testFallbackDrawsUnexploredDark() {
+        final Game server = seaGame();
+        final Game client = ClassicTerrainOracleTest.clientView(server,
+            server.getPlayerByNationId("model.nation.dutch"));
+        final Map map = client.getMap();
+        final ClassicMapViewer mv = new ClassicMapViewer(null, null, null, false);
+        mv.setFixedScale(1);
+        final java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+            240, 192, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        mv.paintOffscreen(img);
+        mv.setFocus(map.getTile(15, 15));
+        assertNull(mv.terrainLayer());
+        final java.awt.Graphics2D g = img.createGraphics();
+        mv.paintComponent(g);
+        g.dispose();
+        assertEquals(0x181C7D, img.getRGB(8, 8) & 0xFFFFFF);   // (8,9): dark
+        assertEquals(0x181C7D, ClassicMapViewer.DARK_SEA.getRGB() & 0xFFFFFF);
+        mv.dispose();
+    }
 }

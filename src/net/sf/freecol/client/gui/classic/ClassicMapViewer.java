@@ -34,9 +34,11 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
 import java.awt.image.BufferedImage;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.WeakHashMap;
+import java.util.function.IntConsumer;
 
 import javax.swing.AbstractAction;
 import javax.swing.ActionMap;
@@ -78,16 +80,24 @@ import net.sf.freecol.common.model.Unit;
  * spec W4).  The adaptive layout centres the origin's cell
  * ({@link ClassicHud#UNIT_COL}, {@link ClassicHud#UNIT_ROW}) instead.
  *
- * <p><b>Phase 1.</b> Terrain is drawn from the original Colonization
- * {@code TERRAIN.SS} sprites — square 16&times;16 tiles, aliased onto FreeCol's
- * {@code image.tile.<type>.center} keys by the {@code classic_original} pack
- * (see {@code tools/classic_assets/aliases.properties}) — so the rectangular
- * grid fills cleanly with no diamond-shaped gaps. The native 16&times;16 tiles
- * are fetched at source size and up-scaled by the adaptive integer factor
- * {@code scale()} (targeting the original's ~15 visible tile columns) with
- * nearest-neighbour interpolation to keep the chunky classic pixels crisp. When
- * the pack is absent the same keys fall back to FreeCol's own (isometric) art,
- * shrunk into the square cells. See CLASSIC_UI_PLAN.md ("Phase 1").
+ * <p><b>Terrain.</b> On the HUD grid the terrain is the original's as palette
+ * indices (M1c design 10 §6, W6a): {@link ClassicTerrainLayer} composes the
+ * 15x12 view from the {@code TERRAIN.SS} and {@code PHYS0.SS} index sheets
+ * ({@link ClassicTerrainComposer}: the dark unexplored tile, its 3-px fog
+ * fringe from explored neighbours, the side-mask blends, the overlays) and
+ * draws it through the game palette.  It reads the explored state <em>as
+ * shown</em> ({@link #shownExplored}): taken from the model by full paints
+ * outside a slide, so a reveal the model already holds appears with the
+ * slide's final draw, not in its margins (Critic 5); the true terrain of
+ * the fog ring comes from {@link ClassicTerrainOracle}.  Without the pack's
+ * index sheets, and in the adaptive layout, the RGBA fallback draws the
+ * {@code TERRAIN.SS} PNGs (aliased onto FreeCol's
+ * {@code image.tile.<type>.center} keys, see
+ * {@code tools/classic_assets/aliases.properties}; FreeCol's own art without
+ * the pack) with their overlays and no blends, and unexplored tiles flat in
+ * the dark sea's colour; the native 16&times;16 tiles are up-scaled by the
+ * integer factor {@code scale()} with nearest-neighbour interpolation to keep
+ * the chunky classic pixels crisp.
  *
  * <p>This panel owns the classic view state (view mode, view origin,
  * selected tile, active unit); {@link ClassicGUI} delegates the
@@ -127,63 +137,11 @@ final class ClassicMapViewer extends JPanel {
     private static final Dimension SRC_SIZE = new Dimension(TILE_SRC, TILE_SRC);
 
     /**
-     * Width, in native ({@link #TILE_SRC}-scale) pixels, of the dithered
-     * land-land border blend (see {@link #blendLandBorders}).
+     * The colour of an unexplored tile in the RGBA fallback: VICEROY.PAL's
+     * index 61, the dark sea's main colour ({@code PHYS0.SS.148} is 165 of
+     * its 256 px; design 10 §4).
      */
-    private static final int BORDER_BAND = 3;
-
-    /**
-     * Probability a pixel right at the shared edge blends toward the
-     * neighbour, tapering linearly to 0 over {@link #BORDER_BAND} rows.
-     * Kept deliberately low -- the reference original renders land-land
-     * borders as sparse, uneven speckling, not a dense band -- see
-     * {@link #hashNoise} for why the pattern is per-pixel noise rather than
-     * a small repeating ordered-dither matrix. Land-land only: see
-     * {@link #COAST_GAP_PROBABILITY} for the land-water case.
-     */
-    private static final float BORDER_DENSITY = 0.45f;
-
-    /**
-     * Probability a given lateral position along a land/water edge gets only
-     * a single-pixel-deep water incursion, rather than a deeper reach of up
-     * to {@link #BORDER_BAND} rows (see {@link #blendCoastEdge}). Unlike
-     * land-land ({@link #BORDER_DENSITY}), land/water pixels are not
-     * independently scattered: water is such a high-contrast colour swap
-     * from any land texture that isolated water pixels deep in solid land
-     * read as unnatural "flooded" potholes rather than texture noise, so
-     * each lateral position instead gets one contiguous run from the edge --
-     * a wavy but solid boundary line -- and row 0 (right at the shared edge)
-     * is never skipped, so the coastline never gaps back to a hard land/water
-     * step; only how far past row 0 it reaches varies.
-     */
-    private static final float COAST_GAP_PROBABILITY = 0.5f;
-
-    /**
-     * Approximate colour of the original's coastal foam/wave-crest fringe --
-     * sampled directly from the shoreline in {@code screenshots/initial/
-     * opening_007.png} (a fairly desaturated light grey, not a saturated
-     * white or blue), used by {@link #foamEdge} in place of the sprite-based
-     * coast quarter-tiles removed from {@link ClassicTileArt} (their
-     * extracted colours didn't match this).
-     */
-    private static final int FOAM_R = 150, FOAM_G = 155, FOAM_B = 160;
-
-    /**
-     * Depth, in native pixels, of the procedural foam blend on the water side
-     * of a coastline (see {@link #foamEdge}). Narrower than the land-side
-     * {@link #BORDER_BAND} -- sampled against the reference screenshot, the
-     * original's own foam fringe reads as a thin highlight, not a wide band.
-     */
-    private static final int FOAM_BAND = 2;
-
-    /**
-     * Peak alpha (right at the shared edge) of the foam blend, tapering to 0
-     * over {@link #FOAM_BAND} rows.
-     */
-    private static final float FOAM_MAX_ALPHA = 0.6f;
-
-    /** Raw-grid cardinal offsets checked for a land-land border blend. */
-    private static final int[][] BORDER_EDGES = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };
+    static final Color DARK_SEA = new Color(0x181C7D);
 
     /**
      * Fraction of the cell an up-scaled classic unit/settlement sprite fills
@@ -364,8 +322,49 @@ final class ClassicMapViewer extends JPanel {
     private final WeakHashMap<BufferedImage, BufferedImage> fitted
         = new WeakHashMap<>();
 
-    /** Cached spec lookup for plain ocean (unexplored-area art), lazy. */
+    /** Cached spec lookup for plain ocean (the adaptive layout's off-map sea), lazy. */
     private TileType oceanType;
+
+    /**
+     * The terrain as palette indices on the HUD grid (W6a), or null: the
+     * RGBA fallback ({@link #paintTile}).
+     */
+    private ClassicTerrainLayer layer = null;
+
+    /** The true terrain of the fog ring for the layer, or null (unknown). */
+    private ClassicTerrainOracle oracle = null;
+
+    /** The layer's view of the map ({@link ShownTerrain}). */
+    private final ShownTerrain shownTerrain = new ShownTerrain();
+
+    /**
+     * The explored state as shown, by {@code y * width + x} of
+     * {@link #shownMap} (Critic 5): taken from the model by every full
+     * paint outside a slide (the final draw included), kept through a
+     * slide.  Server-pushed moves are animated after their update, so
+     * the model can already hold a move's reveal while it slides; the
+     * map shows it with the final draw.  Null before the first paint.
+     */
+    private BitSet shown = null;
+
+    /** The map {@link #shown} belongs to. */
+    private Map shownMap = null;
+
+    /** {@link #shown} at the last final draw (the recorder's reveal event). */
+    private BitSet shownAtFinal = null;
+
+    /**
+     * The map without a client (tests, the preview harness): the map of
+     * the tile the view was last centred on.
+     */
+    private Map viewMap = null;
+
+    /**
+     * Tests only: the viewer is never shown headless, so its immediate
+     * paints ({@link #paintNow}) go into this image instead; null on the
+     * screen.
+     */
+    private BufferedImage offscreen = null;
 
     /**
      * Repeating timer that drives edge scrolling; it pans the view by
@@ -994,6 +993,7 @@ final class ClassicMapViewer extends JPanel {
     private boolean centreOn(Tile tile, String reason) {
         final Map map = (tile == null) ? null : tile.getMap();
         if (map == null) return false;
+        this.viewMap = map;
         return moveView(ClassicHud.viewFor(map.getWidth(), map.getHeight(),
                                            tile.getX(), tile.getY()),
                         reason, tile);
@@ -1076,7 +1076,7 @@ final class ClassicMapViewer extends JPanel {
         try {
             final boolean rec = ClassicFrameRecorder.on();
             if (unit == null || srcTile == null || dstTile == null
-                || !isShowing()
+                || (!isShowing() && this.offscreen == null)
                 // Fog: only animate moves the player can actually see.
                 || (!srcTile.isExplored() && !dstTile.isExplored())) {
                 if (rec) {
@@ -1096,7 +1096,7 @@ final class ClassicMapViewer extends JPanel {
             // A chained slide: draw the previous slide's final frame if no
             // paint has yet (this unit still at its source, F5), then keep
             // the pause after it.
-            if (this.finalDrawPending) paintNow(null);
+            finalDraw();
             // A native move whose source fails the view rule gets its cue
             // first (build spec W19), 2-4 frames after the final draw.
             final boolean cue = needsNativeCue(own, isNative(unit),
@@ -1182,7 +1182,15 @@ final class ClassicMapViewer extends JPanel {
                 // The blink restarts ON at the end of every slide; the panel
                 // refresh after the final draw re-bases it (build spec W3).
                 rearmBlink("slide");
-                repaint();
+                // The final draw: a key move paints it as soon as the model
+                // has the move (handleMoveKey), a chained slide before its
+                // own start, else the event queue does, with the minimap in
+                // the same pass (Critic 4).
+                if (SwingUtilities.isEventDispatchThread()) {
+                    SwingUtilities.invokeLater(this::finalDraw);
+                } else {
+                    repaint();
+                }
                 if (promptGone && this.gui != null) this.gui.paintBlinkDot();
             }
         } finally {
@@ -1413,11 +1421,46 @@ final class ClassicMapViewer extends JPanel {
      */
     private void paintNow(Rectangle r) {
         final Rectangle a = (r == null) ? new Rectangle(0, 0, getWidth(), getHeight()) : r;
-        if (SwingUtilities.isEventDispatchThread()) {
+        final BufferedImage off = this.offscreen;
+        if (off != null) {
+            final Graphics2D g = off.createGraphics();
+            try {
+                g.setClip(a);
+                paintComponent(g);
+            } finally {
+                g.dispose();
+            }
+        } else if (SwingUtilities.isEventDispatchThread()) {
             paintImmediately(a);
         } else {
             repaint(a);
         }
+    }
+
+    /**
+     * The final draw of the last slide, if no paint has shown it yet: the
+     * whole map now (offset 16, with what the move revealed), then the
+     * panel's minimap in the same pass, so it lights with the reveal
+     * (fog-start: the same frame in 63 of 80 reveals, one later in 17).
+     * Every path that ends a slide comes here (Critic 4) but the key
+     * move's, which paints the minimap in {@link ClassicGUI#panelAfterFinalDraw}.
+     * EDT only.
+     */
+    void finalDraw() {
+        if (!this.finalDrawPending) return;
+        paintNow(null);
+        if (!this.finalDrawPending && this.gui != null) this.gui.paintBlinkDot();
+    }
+
+    /**
+     * Tests: paint into an image instead of the screen ({@link #offscreen}),
+     * the viewer sized to it.
+     *
+     * @param img The image, or null for the screen.
+     */
+    void paintOffscreen(BufferedImage img) {
+        this.offscreen = img;
+        if (img != null) setSize(img.getWidth(), img.getHeight());
     }
 
     /**
@@ -1459,7 +1502,8 @@ final class ClassicMapViewer extends JPanel {
 
     /** Whether a unit is the player's own. */
     private boolean isOwn(Unit unit) {
-        final Player me = this.freeColClient.getMyPlayer();
+        final Player me = (this.freeColClient == null) ? null
+            : this.freeColClient.getMyPlayer();
         return me != null && unit.getOwner() == me;
     }
 
@@ -1472,7 +1516,7 @@ final class ClassicMapViewer extends JPanel {
      * @return True if the unit's icon is on screen there.
      */
     boolean isShownAt(Unit unit, Tile tile) {
-        if (tile.getSettlement() != null || !tile.isExplored()) return false;
+        if (tile.getSettlement() != null || !shownExplored(tile)) return false;
         if (this.blinkOff && this.activeUnit != null
             && this.activeUnit.getTile() == tile) return false;
         return displayUnit(tile) == unit;
@@ -1898,8 +1942,8 @@ final class ClassicMapViewer extends JPanel {
     // Internals
 
     private Map getMap() {
-        return (this.freeColClient == null
-                || this.freeColClient.getGame() == null) ? null
+        if (this.freeColClient == null) return this.viewMap;
+        return (this.freeColClient.getGame() == null) ? null
             : this.freeColClient.getGame().getMap();
     }
 
@@ -2081,6 +2125,12 @@ final class ClassicMapViewer extends JPanel {
         stopEdgeScroll();
         this.blink.close();
         this.promptBlink.close();
+        this.layer = null;
+        this.oracle = null;
+        this.shown = null;
+        this.shownMap = null;
+        this.shownAtFinal = null;
+        this.viewMap = null;
         synchronized (this.queuedMoves) {
             this.queuedMoves.clear();
         }
@@ -2186,11 +2236,26 @@ final class ClassicMapViewer extends JPanel {
         // whose terrain and icon cannot reach the clip.
         final Rectangle clip = g.getClipBounds();
         final int m = ICON_MARGIN * scale();
+        // The explored state as shown: from the model on every full paint
+        // outside a slide, kept through one (Critic 5).
+        final boolean finalPaint = this.finalDrawPending && this.animUnit == null;
+        if (this.shown == null || this.shownMap != map
+            || (this.animUnit == null && (clip == null
+                || clip.contains(0, 0, getWidth(), getHeight())))) {
+            takeShown(map);
+        }
+        if (finalPaint) noteReveal();
 
         // Two passes: every cell's terrain first, then settlements and
         // units, so an icon's shadow or overhang lies on its neighbour's
         // terrain (the original: the 21-px village 1 px into the next cell).
-        for (int pass = 0; pass < 2; pass++) {
+        // On the HUD grid with the pack's index sheets the terrain is the
+        // layer's, the 15x12 view in one blit (W6a).
+        final boolean layered = hud && this.layer != null;
+        if (layered) {
+            this.layer.paint(g, this.shownTerrain.of(map), vx, vy, clip, scale());
+        }
+        for (int pass = (layered) ? 1 : 0; pass < 2; pass++) {
             for (int ty = y0; ty <= y1; ty++) {
                 for (int tx = x0; tx <= x1; tx++) {
                     final int sx = screenX(tx, vx);
@@ -2267,7 +2332,7 @@ final class ClassicMapViewer extends JPanel {
      * blink is OFF on this tile).
      */
     private void paintOccupant(Graphics2D g, Tile tile, int sx, int sy) {
-        if (!tile.isExplored()) return;
+        if (!shownExplored(tile)) return;
         final Settlement settlement = tile.getSettlement();
         if (settlement != null) {
             paintSettlement(g, settlement, sx, sy);
@@ -2337,6 +2402,7 @@ final class ClassicMapViewer extends JPanel {
      */
     private void paintUnit(Graphics2D g, Unit unit, int sx, int sy,
                            int[] marker) {
+        if (this.lib == null) return;   // no art (tests)
         final BufferedImage img = this.lib.getScaledUnitImage(unit);
         if (this.fixedScale <= 0) {
             drawCentered(g, img, sx, sy);
@@ -2369,6 +2435,7 @@ final class ClassicMapViewer extends JPanel {
      */
     private void paintSettlement(Graphics2D g, Settlement settlement,
                                  int sx, int sy) {
+        if (this.lib == null) return;   // no art (tests)
         final BufferedImage img = this.lib.getScaledSettlementImage(settlement);
         if (img == null) return;
         if (this.fixedScale <= 0) {
@@ -2392,52 +2459,47 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
-     * Paint one tile's ground: base terrain, then the terrain-feature
-     * overlays (forest / hills / mountains / river / road / plow / resource
-     * / lost-city — item (e), composited by {@link ClassicTileArt}).  What
-     * stands on it comes in the second pass ({@link #paintOccupant}).
+     * Paint one tile's ground in the RGBA fallback (no index sheets, or
+     * the adaptive layout; Critic 6): an unexplored tile flat in the dark
+     * sea's colour ({@link #DARK_SEA}), else the base terrain and the
+     * terrain-feature overlays (forest / hills / mountains / river / road /
+     * plow / resource / lost-city -- item (e), {@link ClassicTileArt}),
+     * without blends.  What stands on it comes in the second pass
+     * ({@link #paintOccupant}).
      */
     private void paintTile(Graphics2D g, Map map, Tile tile, int sx, int sy) {
-        if (!tile.isExplored()) {
-            // The original never shows black fog on the main map: unexplored
-            // area reads as plain open ocean (reference: the expert's
-            // opening_032 capture — the whole screen is sea around the start
-            // ship, with no black anywhere). The minimap keeps black for
-            // unexplored, as the original's minimap does.
-            paintOpenSea(g, tile.getX(), tile.getY(), sx, sy);
+        if (!shownExplored(tile) || tile.getType() == null) {
+            g.setColor(DARK_SEA);
+            g.fillRect(sx, sy, tileW(), tileH());
             return;
         }
+        if (this.lib == null) return;   // no art (tests)
         // Fetch the tile at its native 16x16 size and let the (nearest-neighbour)
         // scaling in paintComponent up-scale it, so classic pixels stay crisp.
         final BufferedImage terrain = this.lib.getTerrainImage(
             tile.getType(), tile.getX(), tile.getY(), SRC_SIZE);
-        if (terrain != null) {
-            final BufferedImage blended = tile.isLand()
-                ? blendLandBorders(map, tile, terrain)
-                : blendWaterBorders(map, tile, terrain);
-            g.drawImage(blended, sx, sy, tileW(), tileH(), null);
-        }
+        if (terrain != null) g.drawImage(terrain, sx, sy, tileW(), tileH(), null);
 
         // Composite the physical-feature overlays on top of the base terrain.
         this.tileArt.paintOverlays(g, map, tile, sx, sy, tileW(), tileH());
     }
 
     /**
-     * Paint the endless-ocean filler used for unexplored tiles and for cells
-     * beyond the map edge.  The coordinates may lie off-map; they only seed
-     * the per-tile texture variation ({@code floorMod} keeps them positive).
+     * Paint the endless-ocean filler of the adaptive layout's cells beyond
+     * the map edge.  The coordinates lie off-map; they only seed the
+     * per-tile texture variation ({@code floorMod} keeps them positive).
      */
     private void paintOpenSea(Graphics2D g, int x, int y, int sx, int sy) {
         final TileType ocean = oceanType();
-        if (ocean == null) return;
+        if (ocean == null || this.lib == null) return;
         final BufferedImage sea = this.lib.getTerrainImage(
             ocean, Math.floorMod(x, 1000), Math.floorMod(y, 1000), SRC_SIZE);
         if (sea != null) g.drawImage(sea, sx, sy, tileW(), tileH(), null);
     }
 
-    /** The spec's plain ocean type, used to paint unexplored area (lazy). */
+    /** The spec's plain ocean type, for the adaptive layout's off-map sea (lazy). */
     private TileType oceanType() {
-        if (this.oceanType == null
+        if (this.oceanType == null && this.freeColClient != null
             && this.freeColClient.getGame() != null
             && this.freeColClient.getGame().getSpecification() != null) {
             this.oceanType = this.freeColClient.getGame().getSpecification()
@@ -2446,249 +2508,137 @@ final class ClassicMapViewer extends JPanel {
         return this.oceanType;
     }
 
+
+    // The terrain layer (M1c design 10 §6, W6a)
+
     /**
-     * Blend a {@link #BORDER_BAND}-pixel-wide dithered band into {@code terrain}
-     * along each raw-grid edge that faces a neighbour of a <em>different</em>
-     * {@link net.sf.freecol.common.model.TileType} -- land or water -- so a
-     * land-land boundary reads as organic dithering rather than the flat
-     * rectangular edge two differently-coloured base textures otherwise
-     * produce (see {@code classic_ui_plan/land-tile-borders.md}, Q7), and so
-     * the land side of a coastline softens toward the water's own colour
-     * instead of ending in a hard square. This is independent of, and drawn
-     * before, {@link #blendWaterBorders} (which feathers the <em>water</em>
-     * side of the same boundary with a procedural foam highlight) -- the two
-     * are complementary, each softening their own side of the edge.
+     * Draw the HUD grid's terrain from palette indices: the layer of the
+     * pack ({@link ClassicTerrainLayer#create}; null keeps the RGBA
+     * fallback) and the true terrain of the fog ring
+     * ({@code ClassicGUI.terrainOracle}).
      *
-     * @return {@code terrain} unchanged when {@code tile} is not land or no
-     *     neighbour needs blending (the common case, kept cheap); otherwise a
-     *     new image, leaving the shared cached source untouched.
+     * @param layer The layer, or null.
+     * @param oracle The oracle, or null (the ring unknown, F-W6d-MP).
      */
-    private BufferedImage blendLandBorders(Map map, Tile tile, BufferedImage terrain) {
-        if (!tile.isLand()) return terrain;
-        BufferedImage blended = null;
-        for (int[] edge : BORDER_EDGES) {
-            final int nx = tile.getX() + edge[0];
-            final int ny = tile.getY() + edge[1];
-            final Tile neighbour = map.getTile(nx, ny);
-            if (neighbour == null) continue;
-            // An unexplored neighbour has no usable type/art of its own, but
-            // it is *painted* as open sea (see paintTile) — so blend toward
-            // ocean, not toward the black its null type would sample (which
-            // drew black fringes along coasts facing unexplored water).
-            final boolean nExplored = neighbour.isExplored();
-            final TileType nType = nExplored ? neighbour.getType()
-                : oceanType();
-            if (nType == null || nType == tile.getType()) continue;
-            final BufferedImage neighbourImg =
-                this.lib.getTerrainImage(nType, nx, ny, SRC_SIZE);
-            if (neighbourImg == null) continue;
-            if (blended == null) blended = copyImage(terrain);
-            if (nExplored && neighbour.isLand()) {
-                ditherEdge(blended, neighbourImg, tile.getX(), tile.getY(), edge[0], edge[1]);
-            } else {
-                blendCoastEdge(blended, neighbourImg, tile.getX(), tile.getY(), edge[0], edge[1]);
-            }
-        }
-        return (blended != null) ? blended : terrain;
+    void setTerrain(ClassicTerrainLayer layer, ClassicTerrainOracle oracle) {
+        this.layer = layer;
+        this.oracle = oracle;
+        repaint();
+    }
+
+    /** @return The terrain layer, or null (the RGBA fallback). */
+    ClassicTerrainLayer terrainLayer() {
+        return this.layer;
     }
 
     /**
-     * Blend a soft foam highlight into {@code terrain} along each raw-grid
-     * edge of a <em>water</em> tile that faces land. Replaces the sprite-
-     * based coast quarter-tiles removed from {@link ClassicTileArt} (see its
-     * class comment): those extracted frames rendered a scattered green fleck
-     * along the wave crest that the real 1994 game never shows (compared
-     * directly against {@code screenshots/initial/opening_007.png}, which
-     * shows a clean, fairly desaturated grey/white foam fringe hugging the
-     * coast). Rather than ship a fringe that doesn't match the source
-     * material, this paints that fringe procedurally instead -- the same call
-     * Q7 already made for the land side after it turned out there was no
-     * faithful land-land border sprite to source either.
+     * Whether a tile is drawn explored: the explored state as shown
+     * ({@link #shown}), the model's before the first paint.
      *
-     * @return {@code terrain} unchanged when {@code tile} is not water or no
-     *     neighbour is land; otherwise a new image.
+     * @param tile The tile.
+     * @return True if it is drawn explored.
      */
-    private BufferedImage blendWaterBorders(Map map, Tile tile, BufferedImage terrain) {
-        if (tile.isLand()) return terrain;
-        BufferedImage blended = null;
-        for (int[] edge : BORDER_EDGES) {
-            final int nx = tile.getX() + edge[0];
-            final int ny = tile.getY() + edge[1];
-            final Tile neighbour = map.getTile(nx, ny);
-            if (neighbour == null || !neighbour.isLand()) continue;
-            if (blended == null) blended = copyImage(terrain);
-            foamEdge(blended, tile.getX(), tile.getY(), edge[0], edge[1]);
-        }
-        return (blended != null) ? blended : terrain;
-    }
-
-    /** Return a mutable {@code TYPE_INT_ARGB} copy of {@code src}. */
-    private static BufferedImage copyImage(BufferedImage src) {
-        final BufferedImage copy = new BufferedImage(
-            src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB);
-        final Graphics2D g = copy.createGraphics();
-        g.drawImage(src, 0, 0, null);
-        g.dispose();
-        return copy;
+    boolean shownExplored(Tile tile) {
+        final BitSet b = this.shown;
+        final Map m = this.shownMap;
+        if (b == null || m == null || tile.getMap() != m) return tile.isExplored();
+        return b.get(tile.getY() * m.getWidth() + tile.getX());
     }
 
     /**
-     * Deterministic pseudo-random value in {@code [0,1)} for the pixel at
-     * world-space native coordinate {@code (x, y)}. Stable across repaints
-     * (no flicker), but -- unlike a small repeating ordered-dither matrix
-     * such as a 2&times;2 Bayer pattern -- does not read as a regular grid,
-     * and is seeded per <em>world</em> pixel rather than per in-tile
-     * position, so different tile boundaries scatter differently instead of
-     * all looking stamped from the same template (see {@link #ditherEdge}).
-     */
-    private static float hashNoise(int x, int y) {
-        int h = x * 0x27d4eb2d ^ y * 0x165667b1;
-        h = (h ^ (h >>> 15)) * 0x85ebca6b;
-        h = (h ^ (h >>> 13)) * 0xc2b2ae35;
-        h ^= (h >>> 16);
-        return (h & 0x7fffffff) / (float) 0x7fffffff;
-    }
-
-    /**
-     * Map band row {@code row} (0 = right at the shared edge) and lateral
-     * position {@code i} along a {@code (dx, dy)}-facing edge of a
-     * {@code w}&times;{@code h} image to {@code {ox, oy, nxp, nyp}}: the
-     * pixel to overwrite in the tile's own image, and the mirrored pixel to
-     * read from an {@code nw}&times;{@code nh} neighbour image.
+     * Take the explored state as shown from the model.  For a new map the
+     * recorder notes it ({@code explored}: at the start the 3x3 around the
+     * ship, design 10 §3), and it is the base of the first reveal.
      *
-     * <p>{@code neighbour} is <em>not</em> assumed to share {@code img}'s
-     * dimensions: {@link ImageLibrary#getTerrainImage} only honours the
-     * requested size when the source sprite's aspect ratio already matches
-     * it ({@code ImageUtils.wildcardDimension} otherwise preserves the
-     * source's own aspect ratio to avoid distortion) -- true for every
-     * square {@code TERRAIN.SS} land frame, but not guaranteed for water,
-     * whose source art need not be square. The along-edge axis is scaled
-     * proportionally into the neighbour's own span and the depth axis is
-     * clamped into it, so an odd-shaped neighbour degrades to a coarser
-     * sample rather than an out-of-bounds read.
+     * @param map The map.
      */
-    private static int[] edgeCoords(int w, int h, int nw, int nh, int dx, int dy,
-                                    int row, int i) {
-        final int ox, oy, nxp, nyp;
-        if (dx != 0) {
-            oy = i;
-            nyp = Math.min(nh - 1, i * nh / h);
-            if (dx < 0) { ox = row;         nxp = Math.max(0, nw - 1 - row); }
-            else        { ox = w - 1 - row; nxp = Math.min(nw - 1, row);      }
-        } else {
-            ox = i;
-            nxp = Math.min(nw - 1, i * nw / w);
-            if (dy < 0) { oy = row;         nyp = Math.max(0, nh - 1 - row); }
-            else        { oy = h - 1 - row; nyp = Math.min(nh - 1, row);      }
+    private void takeShown(Map map) {
+        final int w = map.getWidth(), h = map.getHeight();
+        final BitSet b = new BitSet(w * h);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                final Tile t = map.getTile(x, y);
+                if (t != null && t.isExplored()) b.set(y * w + x);
+            }
         }
-        return new int[] { ox, oy, nxp, nyp };
-    }
-
-    /**
-     * Replace a sparse, noise-selected subset of the pixels along the edge of
-     * {@code img} facing raw-grid offset {@code (dx, dy)} with the mirrored
-     * pixel from a <em>land</em> {@code neighbour}, so the blend reads as the
-     * neighbour's actual (dithered) texture, scattered unevenly (via
-     * {@link #hashNoise}, seeded by the tile's world position
-     * {@code (tileX, tileY)} so adjacent boundaries don't repeat the same
-     * pattern) with density falling off over {@link #BORDER_BAND} native
-     * pixels from the shared edge. Independent per-pixel scatter reads fine
-     * here because neighbouring land textures are close enough in value that
-     * it looks like organic noise -- for the water case, see
-     * {@link #blendCoastEdge}, which needs a stricter, contiguous fill.
-     */
-    private static void ditherEdge(BufferedImage img, BufferedImage neighbour,
-                                   int tileX, int tileY, int dx, int dy) {
-        final int w = img.getWidth(), h = img.getHeight();
-        final int nw = neighbour.getWidth(), nh = neighbour.getHeight();
-        final int span = (dx != 0) ? h : w;
-        for (int row = 0; row < BORDER_BAND; row++) {
-            final float density = BORDER_DENSITY * (BORDER_BAND - row) / BORDER_BAND;
-            for (int i = 0; i < span; i++) {
-                final int[] c = edgeCoords(w, h, nw, nh, dx, dy, row, i);
-                final int gx = tileX * TILE_SRC + c[0], gy = tileY * TILE_SRC + c[1];
-                if (hashNoise(gx, gy) >= density) continue;
-                img.setRGB(c[0], c[1], neighbour.getRGB(c[2], c[3]));
+        final boolean fresh = this.shownMap != map;
+        this.shown = b;
+        this.shownMap = map;
+        if (fresh) {
+            this.shownAtFinal = (BitSet)b.clone();
+            if (ClassicFrameRecorder.on()) {
+                ClassicFrameRecorder.event("explored", tileList(b, w));
             }
         }
     }
 
     /**
-     * Blend the edge of {@code img} facing {@code (dx, dy)} toward a
-     * <em>water</em> {@code neighbour}. Unlike {@link #ditherEdge}'s
-     * independently-scattered pixels, water is such a high-contrast colour
-     * swap from any land texture that isolated water pixels deep in solid
-     * land read as unnatural "flooded" potholes rather than texture noise --
-     * flagged by the expert from a side-by-side screenshot comparison against
-     * the reference art (see {@code classic_ui_plan/land-tile-borders.md}).
-     * Instead, each lateral position {@code i} along the edge gets one
-     * noise-derived incursion depth in {@code [1, BORDER_BAND]} -- row 0 (the
-     * pixel right at the shared edge) is <em>always</em> replaced, so the
-     * coastline itself is a continuously-present line rather than gapping
-     * back to a hard land/water step at {@link #COAST_GAP_PROBABILITY} of all
-     * lateral positions; that probability instead only gates how much
-     * <em>further</em> a given position reaches inland (1 row the rest of the
-     * time, up to {@code BORDER_BAND} rows the other {@code 1 -
-     * COAST_GAP_PROBABILITY}), keeping the reach jagged and uneven without
-     * ever opening a gap. Every pixel from the edge up to the chosen depth is
-     * replaced, so the boundary itself is a wavy but <em>solid</em> line:
-     * strictly water beyond it, strictly land before it.
+     * The final draw's reveal for the recorder ({@code reveal n= tiles=}):
+     * the tiles shown explored now and not at the last final draw (design
+     * 10 §9.2.5; the staircase, fog-start §2.1).
      */
-    private static void blendCoastEdge(BufferedImage img, BufferedImage neighbour,
-                                       int tileX, int tileY, int dx, int dy) {
-        final int w = img.getWidth(), h = img.getHeight();
-        final int nw = neighbour.getWidth(), nh = neighbour.getHeight();
-        final int span = (dx != 0) ? h : w;
-        for (int i = 0; i < span; i++) {
-            final int worldPerp = (dx != 0) ? tileY * TILE_SRC + i : tileX * TILE_SRC + i;
-            final float n = hashNoise(worldPerp, dx * 7 + dy * 13);
-            final int depth;
-            if (n < COAST_GAP_PROBABILITY) {
-                depth = 1;
-            } else {
-                final float fraction = (n - COAST_GAP_PROBABILITY) / (1f - COAST_GAP_PROBABILITY);
-                depth = Math.min(BORDER_BAND, 1 + (int) (fraction * BORDER_BAND));
-            }
-            for (int row = 0; row < depth; row++) {
-                final int[] c = edgeCoords(w, h, nw, nh, dx, dy, row, i);
-                img.setRGB(c[0], c[1], neighbour.getRGB(c[2], c[3]));
-            }
+    private void noteReveal() {
+        final BitSet now = this.shown;
+        if (now == null || this.shownMap == null) return;
+        if (ClassicFrameRecorder.on()) {
+            final BitSet add = (BitSet)now.clone();
+            if (this.shownAtFinal != null) add.andNot(this.shownAtFinal);
+            ClassicFrameRecorder.event("reveal", tileList(add, this.shownMap.getWidth()));
         }
+        this.shownAtFinal = (BitSet)now.clone();
+    }
+
+    /** "n=count tiles=x,y;x,y..." of a tile set, every tile listed (the analysis needs them). */
+    private static String tileList(BitSet b, int w) {
+        final StringBuilder sb = new StringBuilder("n=").append(b.cardinality())
+            .append(" tiles=");
+        for (int i = b.nextSetBit(0); i >= 0; i = b.nextSetBit(i + 1)) {
+            if (sb.charAt(sb.length() - 1) != '=') sb.append(';');
+            sb.append(i % w).append(',').append(i / w);
+        }
+        return sb.toString();
     }
 
     /**
-     * Alpha-blend the foam colour ({@link #FOAM_R}/{@link #FOAM_G}/
-     * {@link #FOAM_B}) into the edge of {@code img} facing raw-grid offset
-     * {@code (dx, dy)}, peaking at {@link #FOAM_MAX_ALPHA} right at the
-     * shared edge and tapering to 0 over {@link #FOAM_BAND} rows. Blends
-     * (rather than replaces, unlike {@link #ditherEdge}/{@link
-     * #blendCoastEdge}) because there is no neighbour art to stay faithful to
-     * here -- the water tile has no land-coloured pixels to sample, only its
-     * own base ocean texture -- so lightening the existing water colour reads
-     * as a foam highlight sitting on top of it, the same way the original's
-     * own fringe looks like whitecaps over water rather than a separate
-     * layer. A per-pixel {@link #hashNoise} factor varies the alpha slightly
-     * so the line reads as an uneven natural highlight rather than a
-     * ruler-straight stripe, without gapping back to nothing anywhere along
-     * the edge -- unlike the land side, this has no "flooded" failure mode to
-     * guard against (a lighter-than-usual water pixel never reads as a hole),
-     * so there is no need for {@link #blendCoastEdge}'s gap/depth machinery.
+     * The map as the layer composes it: the explored state as shown, the
+     * client's types of explored tiles, the oracle's for the fog ring.
      */
-    private static void foamEdge(BufferedImage img, int tileX, int tileY, int dx, int dy) {
-        final int w = img.getWidth(), h = img.getHeight();
-        final int span = (dx != 0) ? h : w;
-        for (int row = 0; row < FOAM_BAND; row++) {
-            final float rowAlpha = FOAM_MAX_ALPHA * (FOAM_BAND - row) / FOAM_BAND;
-            for (int i = 0; i < span; i++) {
-                final int[] c = edgeCoords(w, h, w, h, dx, dy, row, i);
-                final int gx = tileX * TILE_SRC + c[0], gy = tileY * TILE_SRC + c[1];
-                final float alpha = rowAlpha * (0.7f + 0.3f * hashNoise(gx, gy));
-                final int argb = img.getRGB(c[0], c[1]);
-                final int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
-                final int nr = Math.round(r * (1 - alpha) + FOAM_R * alpha);
-                final int ng = Math.round(g * (1 - alpha) + FOAM_G * alpha);
-                final int nb = Math.round(b * (1 - alpha) + FOAM_B * alpha);
-                img.setRGB(c[0], c[1], (argb & 0xFF000000) | (nr << 16) | (ng << 8) | nb);
+    private final class ShownTerrain implements ClassicTerrainComposer.TerrainSource {
+
+        /** The map painted. */
+        private Map map;
+
+        /** @return This, for {@code m}. */
+        ShownTerrain of(Map m) {
+            this.map = m;
+            return this;
+        }
+
+        @Override
+        public boolean onMap(int x, int y) {
+            return this.map.getTile(x, y) != null;
+        }
+
+        @Override
+        public boolean explored(int x, int y) {
+            final Tile t = this.map.getTile(x, y);
+            return t != null && shownExplored(t);
+        }
+
+        @Override
+        public TileType type(int x, int y) {
+            final Tile t = this.map.getTile(x, y);
+            if (t == null) return null;
+            if (t.getType() != null && shownExplored(t)) return t.getType();
+            final ClassicTerrainOracle o = ClassicMapViewer.this.oracle;
+            return (o == null) ? null : o.trueType(x, y);
+        }
+
+        @Override
+        public void overlays(int x, int y, IntConsumer frames) {
+            final Tile t = this.map.getTile(x, y);
+            if (t != null && t.getType() != null) {
+                ClassicTileArt.overlayFrames(this.map, t, this::type, frames);
             }
         }
     }

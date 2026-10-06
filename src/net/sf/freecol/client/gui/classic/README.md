@@ -122,12 +122,15 @@ screenY = height/2 + (tileY - focusY) * TILE_H - TILE_H/2
 `tileAt(px,py)` is the inverse (via `Math.floorDiv`).
 
 **Terrain rendering.** The original rectangular `TERRAIN.SS` tiles fill the grid
-cleanly (no diamond gaps). Tiles are fetched at native 16×16 via
-`ImageLibrary.getTerrainImage(type, x, y, SRC_SIZE)` and up-scaled
+cleanly (no diamond gaps). On the HUD grid the terrain is composed from the
+original's palette indices ("The dark map, the fog fringe and the blends"
+below). The RGBA fallback (a pack without index sheets, the adaptive layout)
+fetches the tiles at native 16×16 via
+`ImageLibrary.getTerrainImage(type, x, y, SRC_SIZE)` and up-scales them
 nearest-neighbour (`VALUE_INTERPOLATION_NEAREST_NEIGHBOR`) so the chunky classic
-pixels stay crisp. Unexplored tiles are left black (classic fog). The
-key→frame mapping lives in `tools/classic_assets/aliases.properties`. When the
-asset pack is absent the same keys fall back to FreeCol's own (isometric) art.
+pixels stay crisp, unexplored tiles flat dark blue. The key→frame mapping lives
+in `tools/classic_assets/aliases.properties`. When the asset pack is absent the
+same keys fall back to FreeCol's own (isometric) art.
 
 **Palette indices (M1c design 10 §4, W6e).** The pack also keeps every SS file
 as the original's palette indices, `ssidx/<NAME>.idx` (`ClassicIndexSheet`,
@@ -138,8 +141,8 @@ phase p, `P_p[120+i] = B[120 + ((i-p) mod 8)]` and an `IndexColorModel` to draw
 indices through; the clips' fog-start #19 is phase 0, its #0 phase 7, landfall
 #0 phase 1. Why: the PNGs are coloured with each SS file's own palette, and
 `TERRAIN.SS`'s differs from the game's in 121-126 (the sea lane's PNG shows 4
-colours the game never shows). The composed map (W6a) and the water cycling
-(W6c) are built on these indices; today's map still draws the PNGs.
+colours the game never shows). The map is composed from these indices (W6a);
+the water cycling (W6c) will swap the colour model.
 `ClassicPackFiles` reads them (`indexSheet`, `gamePalette`, `cycleSpec`, and
 `terrainSpriteFor` from the alias lines). A pack converted before W6e has none:
 `indexStatus` says `fallback no ssidx/TERRAIN.SS.idx`, logs one warning, and the
@@ -169,6 +172,63 @@ them) and `ClassicTerrainGoldenTest`, which reads the fixtures in
 `-Dclassic.clips=<video/recordings>` and a converted pack, compares the
 fringe, blend and quarter sprites that follow from the true terrain with the
 clip frames' indices (all 0 px off; the multiplayer fallback fails each).
+
+**The dark map, the fog fringe and the blends (M1c design 10 §6, W6a).** On the
+HUD grid the terrain is the original's palette indices: `ClassicTerrainLayer`
+holds the 15x12 view as one 240x192 index buffer, wrapped in a raster that 8
+images share, one per cycling phase (`ClassicGamePalette.colorModel`); a paint
+composes only the cells its clip touches, rounded out to whole cells, and
+blits them scaled by the HUD scale (dst = src x S, nearest neighbour). The
+rules are `ClassicTerrainComposer`, pure code over the index sheets:
+
+- **Unexplored:** `PHYS0.SS.148` (TERRAIN.SS.010 + 2, indices 60/61/62), nothing
+  else on it (no overlay, coast, unit). For each side whose neighbour is
+  **explored** (N, E, S, W; never a diagonal) its **fringe**: the 15 px of that
+  side's mask `PHYS0.SS.104-107` (3 px deep, 7 + 4 + 4, inside the dark tile
+  only), the sides a union (15 / 29 adjacent / 30 opposite / 43 / 56 px). The
+  fringe shows the neighbour's sprite where it bleeds in; water never bleeds
+  into land, so dark land next to explored water shows **its own true
+  terrain** (the oracle above): the first island shows a move before it is
+  explored. An unknown own type (multiplayer) takes the neighbour's.
+- **Explored:** its TERRAIN.SS sprite, then for each side whose neighbour's
+  type is known (explored, or the true type of the dark ring) and bleeds in,
+  that sprite through the side's mask; an explored neighbour with the own
+  sprite is skipped, a dark one is copied all the same (`DARK_SIDES_ALWAYS`:
+  it shows only at the 4 px where two masks overlap, pinned by fog-start #1042
+  (42,46)). Then the overlays as `PHYS0.SS` indices (0xFD transparent, 0
+  black), the area features connected through the true terrain of the ring.
+  An explored tile is never darkened.
+- **T008 (sand with cacti) draws T001 into its neighbours** (`BLEND_BASE`,
+  fog-start §3.3); no FreeCol type uses T008 yet. Side order N, E, S, W
+  (`SIDE_ORDER`; the clips need W after N and S, E is free).
+- **Least knowledge:** the composer asks the oracle only within Chebyshev 1 of
+  an explored tile; the minimap keeps `isExplored`.
+- **The explored state as shown** (Critic 5): the viewer takes it from the
+  model on every full paint outside a slide and keeps it through a slide, so a
+  reveal that a server-pushed move already put in the model shows with the
+  slide's final draw, not in its 3-px margins; units are drawn only on tiles
+  shown explored. Every path that ends a slide paints the final draw with the
+  panel's minimap in the same pass (`finalDraw`; a key move through
+  `panelAfterFinalDraw`). The recorder logs `explored n= tiles=` for a new map
+  (the start's 3x3) and `reveal n= tiles=` at each final draw (the staircase).
+- **The start** needs no server change: on the square grid FreeCol explores
+  exactly the 3x3 around each European start ship (line of sight 1,
+  Chebyshev distance), passengers add nothing, and every move adds the 3x3 of
+  its target (`ClassicViewRuleTest.testStartExploresTheThreeByThree`, classic
+  and freecol rules). At the edge start 6 cells are explored, 7 carry a fringe
+  and 167 are plain dark (landfall #341).
+- **Fallback:** a pack without `ssidx/` (and the adaptive, non-HUD layout, which
+  only shows before the first layout and in tests) draws the RGBA tiles and
+  their overlays without blends, unexplored tiles flat in `DARK_SEA` #181C7D
+  (VICEROY's 61).
+
+Tests: `ClassicTerrainComposerTest` and `ClassicTerrainLayerTest` (synthetic
+sheets, `ClassicTerrainSheets`), `ClassicMapViewerTest` (the reveal with the
+final draw, the fallback), and `ClassicTerrainGoldenTest`, whose `compare` lines
+compose whole clip frames from the pack's index sheets and compare them index
+for index: fog-start #19 (46,080/46,080 px), #718, #876, #1042 and landfall
+#341, #345, #1407 all 0 px off (the mouse arrow and the unit cells excused, and
+until W6b the explored water cells with land around them).
 
 **Unit & goods sprites.** The original *Colonization* unit map-sprites and goods
 icons come from `ICONS.SS`, aliased onto FreeCol's own resource keys in the same
@@ -307,10 +367,13 @@ the original does. (It began as a bottom-left overlay on the map itself; the
   in-viewer `paintMinimap`/`minimapClick`/`minimapBounds` and the edge-scroll
   suppression over the overlay box were removed with the move.
 
-**Feature overlays (item (e)).** On top of the base terrain, `paintTile`
-composites the per-tile *physical features* — forest trees, hills, mountains,
-rivers, roads, plowed fields, resource markers and the lost-city rumour — via
-`ClassicTileArt`, before the settlement/unit sprite. This is the last
+**Feature overlays (item (e)).** On top of the base terrain the map draws the
+per-tile *physical features* — forest trees, hills, mountains, rivers, roads,
+plowed fields, resource markers and the lost-city rumour — before the
+settlement/unit sprite: `ClassicTileArt.overlayFrames` picks the `PHYS0.SS`
+frames, the composer copies them as indices (W6a; the area features connect
+through the true terrain of the fog ring), the RGBA fallback draws the PNGs
+(`paintOverlays`). This is the last
 map-fidelity slice, and its crux was **asset shape, not code**:
 
 - **The overlays live in `PHYS0.SS`, not `TERRAIN.SS`.** `TERRAIN.SS` holds
@@ -352,143 +415,27 @@ map-fidelity slice, and its crux was **asset shape, not code**:
   via a reconnect the classic UI does not fully reload), so inland features are
   reached by sailing rather than revealed.
 
-**Coastline (beach feathering) — replaced with a procedural foam blend
-(2026-08-06), no longer sprite-based.** The water side of the coastline was
-originally fed by the original game's own `PHYS0.SS` coast quarter-tiles (32
-8×8 sprites, `4 corners × 8 configs`, one drawn per cell quadrant based on
-which raw-grid neighbours were land — see git history prior to this change for
-the full decode: frame layout, the black colour-key transparency quirk, the
-`COAST_CORNERS` per-corner offset table). That reverse-engineering was real,
-but a live side-by-side comparison against the actual reference screenshots
-(`screenshots/initial/opening_007.png`) found the *extracted* frames render a
-scattered green fleck along the wave crest that the original never shows — it
-draws a clean, fairly desaturated grey/white foam fringe hugging the coast
-instead. That's a likely palette/extraction fidelity issue in the asset pack
-rather than a bug in the compositing code (confirmed live: short-circuiting
-the land-side blend entirely left the green fleck pixel-for-pixel unchanged,
-proving it wasn't coming from this package's own blending logic).
+**Coastline and tile borders: the original's own sprites (M1c W6a, W6b).**
+The map used to draw its borders procedurally (2026-08-05/06): a dithered
+land-land band (`blendLandBorders`/`ditherEdge`, Q7), a contiguous land-water
+incursion (`blendCoastEdge`) and a grey foam line on the water side
+(`blendWaterBorders`/`foamEdge`), after the coast quarter-tiles had been removed
+from `ClassicTileArt` for a "green fleck" along the wave crest. All of that is
+gone with W6a: the original has no procedural border, and the fleck is its own
+rim (indices 67-71, landfall 04 §5.2). The original's borders are sprites:
 
-Rather than ship a fringe that doesn't match the source material, `paintCoast`
-and its supporting `COAST_CORNERS`/`COAST_BASE`/`COAST_LAST`/`keyOutBlack`
-were removed from `ClassicTileArt`, and the water side of the coastline is now
-painted procedurally by `ClassicMapViewer.blendWaterBorders`/`foamEdge` — the
-same call Q7 already made for the land side once it turned out there was no
-faithful land-land border sprite to source either (see below). The
-estuary/river-mouth pieces (`140..147` ocean corner-hints, `150..153` diagonal
-sand strips) were never wired regardless of this change.
+- **Side-mask blends** (W6a): a neighbour's terrain bleeds 3 px into the tile
+  through the masks `PHYS0.SS.104-107` (`ClassicTerrainComposer`, above). That
+  is the land-land border and the land side of the coast.
+- **Coast quarters** `PHYS0.SS.108-139` (8x8, quarter `q` = `108 + 4c + q`, `c`
+  from the three land bits around the corner; index 0 = keep, 0xFD = land
+  fill) and the **beach corners** `150-153`, on explored water, drawn after
+  the blends (W6b, next; fog-start #876 and landfall #1407/#14247 pin them).
+  Until W6b explored water next to land shows the land's blend only.
 
-**Land/land and land/water tile borders — dithered edge-blend (Q7, fixed
-2026-08-05, retuned through 2026-08-06).** `paintCoast` only ever ran for water
-cells; two adjacent **land** tiles of different `TileType` got no feathering at
-all, so a bare (non-forest/hill) tile like Prairie rendered as a perfectly flat,
-hard-edged 48px rectangle against its neighbours — see
-`screenshots/ui-square-tiles-bug.png` for the original live capture (four adjacent
-tiles, each a flat unblended square) versus any original reference shot (e.g.
-`screenshots/initial/opening_007.png`), which never showed this. Live-clicking through
-`--classic` confirmed the root cause: a "Prärie" tile (zero overlay) sat next to a
-"Mischwald" tile whose substituted base texture
-(`image.tile.model.tile.mixedForest.center` → `TERRAIN.SS.002`, plains) is visually
-near-identical to Prairie's own (`TERRAIN.SS.003`) — so what read as one large
-hard-edged block was actually two different `TileType`s with no blending between
-them, not a forest-connectivity issue.
-
-No dedicated land-land border/transition sprite sheet exists to source (every
-extracted `.SS` archive under `tools/classic_assets` output was checked — `TERRAIN.SS`
-is 12 base frames only, `PHYS0.SS` covers forest/hills/mountains/rivers/roads/
-resources/coast and nothing else), so the fix is procedural rather than a sprite
-lookup: `ClassicMapViewer.blendLandBorders`, called from `paintTile` right after the
-base terrain is fetched and before `ClassicTileArt.paintOverlays` composites the
-feature layer, checks each raw-grid cardinal neighbour for land of a *different*
-`TileType` (or water) and, where true, replaces up to a `BORDER_BAND`-pixel-wide band
-along that edge (in native 16×16 sprite space, before the ×3 `CLASSIC_SCALE`
-up-scale) with the mirrored pixel from the neighbour's own base texture. Only a land
-tile's own cached terrain image copy is touched (`copyImage`); the overlay
-compositing is untouched (the water-side coastline mechanism this paragraph
-originally cross-referenced, `paintCoast`, no longer exists — see "Coastline
-(beach feathering)" above).
-
-**Two blend mechanisms, not one — split by how forgiving the colour contrast is.**
-`blendLandBorders` branches on `neighbour.isLand()`:
-
-- **`ditherEdge` (land-land).** Each candidate pixel is gated independently on
-  `hashNoise` (a cheap integer hash of its *world* pixel coordinate, so the scatter
-  is stable across repaints — no flicker — without repeating tile-to-tile) against
-  `BORDER_DENSITY` (`0.45`, tapering to 0 over `BORDER_BAND` rows). The first cut
-  used a 2×2 Bayer matrix, but side-by-side comparison against the expert's
-  reference shots showed the original's land borders as sparse, uneven speckling —
-  a small repeating matrix instead read as a visibly regular checkerboard band,
-  denser and more uniform than the reference — hence the switch to per-pixel noise.
-  Independent per-pixel scatter reads as organic texture noise here because
-  neighbouring *land* textures are close enough in colour value that an isolated
-  swapped pixel still looks like part of the texture.
-- **`blendCoastEdge` (land-water).** The same independent-scatter approach, tried
-  first for water neighbours too, read badly: water is such a high-contrast colour
-  swap from any land tone that isolated swapped pixels showed up as "flooded"
-  potholes — scattered water-coloured pixels sitting alone inside solid land,
-  disconnected from the actual coastline, flagged by the expert from a
-  side-by-side screenshot against the original. So the land-water case gates *per
-  lateral position along the edge* instead of per pixel: each position gets one
-  noise-derived incursion depth in `[1, BORDER_BAND]`, filled solid from the edge
-  inward, so the result is a wavy but *contiguous* line — strictly water past it,
-  strictly land before it — never an isolated pixel. `COAST_GAP_PROBABILITY`
-  (`0.5`) controls how often a position gets only the minimal 1-pixel depth versus
-  reaching further inland; row 0 (the pixel right at the shared edge) is **never**
-  skipped, so the coastline can vary how far it reaches but never gaps back to a
-  hard land/water step — an early version gated row 0 on this probability too,
-  which left roughly half of all edge positions with a literal hard 1px step right
-  at the shore (confirmed both by a standalone reproduction of the algorithm
-  against synthetic tiles, and by a before/after pixel diff of a live coastline
-  screenshot showing the fix landing exactly on the edge row, nowhere else) before
-  being corrected to always touch row 0.
-- Both share `edgeCoords`, the row/lateral-position → own-pixel/neighbour-pixel
-  coordinate math, deduplicated out of the original single-mechanism `ditherEdge`.
-  It does **not** assume the neighbour's returned sprite shares the tile's own
-  width/height: `ImageLibrary.getTerrainImage` only honours the requested size when
-  the source sprite's aspect ratio already matches it — `ImageUtils.wildcardDimension`
-  otherwise preserves the *source's* own aspect ratio to avoid distortion, true for
-  every square `TERRAIN.SS` land frame but not guaranteed for water's source art.
-  Reading a differently-shaped neighbour with the tile's own indices threw
-  `ArrayIndexOutOfBoundsException` on every repaint of a coastal tile in an earlier
-  round — caught by `FreeColClient`'s uncaught-exception handler (so the process
-  didn't crash outright, but the map view never advanced past its loading
-  placeholder) and found live via `FreeCol.log`, not by inspection. `edgeCoords`
-  now scales the along-edge axis proportionally into the neighbour's own span and
-  clamps the depth axis into it, so an odd-shaped neighbour degrades to a coarser
-  sample instead of an out-of-bounds read.
-
-**Water side — `blendWaterBorders`/`foamEdge` (2026-08-06).** Mirrors the land
-side's `blendLandBorders`, called from the same `paintTile` step for water
-tiles instead: for each raw-grid cardinal neighbour that is land,
-`foamEdge` blends the sampled foam colour (`FOAM_R`/`FOAM_G`/`FOAM_B`, `(150,
-155, 160)`, sampled directly from the coastline in
-`screenshots/initial/opening_007.png`) into the water tile's own edge pixels,
-peaking at `FOAM_MAX_ALPHA` (`0.6`) right at the shared edge and tapering to 0
-over `FOAM_BAND` (`2`) native pixels — narrower than the land side's
-`BORDER_BAND`, matching how thin the original's own fringe reads at native
-resolution. Unlike the land-side blends, this **alpha-blends over** the
-existing water pixel rather than replacing it outright: there is no neighbour
-art to stay faithful to (a water tile has no land-coloured pixels worth
-sampling), so lightening the existing water colour reads as a foam highlight
-sitting on top of it, the same way the original's fringe looks like
-whitecaps over water rather than a distinct layer. A per-pixel `hashNoise`
-factor varies the alpha (within `0.7×`–`1.0×` of the row's peak) so the line
-reads as an uneven natural highlight instead of a ruler-straight stripe;
-unlike `blendCoastEdge`'s land-side incursion, there's no "flooded" failure
-mode to guard against here — a lighter-than-usual water pixel never reads as
-an isolated hole — so `foamEdge` has no gap/depth machinery, just a
-continuous line of varying intensity.
-
-Verified live against `screenshots/ui-square-tiles-fixed.png`/`-crop.png`/`-coast.png`
-at the same map location as the original bug capture: coastline feathering,
-forest/hill overlays and the composited tree canopy all render unchanged on top of
-the blended base, land-land dithering still reads as the same sparse, approved
-speckling, the land/water boundary is a continuous line with no isolated pixels, the
-water-side foam line reads clean with no green fleck, and
-0 uncaught exceptions in `FreeCol.log` for the session. See
-[land-tile-borders.md](../../../../../../../classic_ui_plan/land-tile-borders.md) for
-the full history (including the round-by-round expert feedback that produced the
-split-mechanism design and the coast-frame removal) and
-[Q7, Resolved](../../../../../../../classic_ui_plan/ui-phases.md#open-questions-for-the-expert).
+The history of the procedural attempts is in git and
+[land-tile-borders.md](../../../../../../../classic_ui_plan/land-tile-borders.md)
+([Q7](../../../../../../../classic_ui_plan/ui-phases.md#open-questions-for-the-expert)).
 
 ### Unit icons and the slide (`ClassicSlide`; build spec W2, spec delta W2)
 

@@ -449,6 +449,111 @@ public class ClassicViewRuleTest extends FreeColTestCase {
         }
     }
 
+    /**
+     * The start state at game start (M1c design 10 §3, W6a; Critic 9): on a
+     * square map from the generator, with the classic and the freecol
+     * rules, every European player's client view (the game as the login
+     * sends it) has explored exactly the 3x3 around its start ship --
+     * Chebyshev distance 1, the never-drawn ring column x = 57 included --
+     * its passengers add nothing, and each move then adds the 3x3 of the
+     * target minus what was explored (the staircase of fog-start §2.1).
+     */
+    public void testStartExploresTheThreeByThree() {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            int starts = 0, moves = 0;
+            for (String rules : new String[] { "classic", "freecol" }) {
+                for (int seed = 1; seed <= 3; seed++) {
+                    Specification spec = FreeCol.loadSpecification(
+                        FreeColRules.getFreeColRulesFile(rules), null,
+                        "model.difficulty.medium");
+                    spec.setFile(MapGeneratorOptions.IMPORT_FILE, null);
+                    MapGeneratorOptions.applyTopologyDefaults(spec.getMapGeneratorOptions());
+                    Game game = new ServerGame(spec);
+                    game.setNationOptions(new NationOptions(spec));
+                    for (Nation n : spec.getNations()) {
+                        if (n.isUnknownEnemy()) continue;
+                        Player p = new ServerPlayer(game, false, n);
+                        boolean ai = !n.getType().isEuropean() || n.getType().isREF();
+                        p.setAI(ai);
+                        if (ai || game.canAddNewPlayer()) game.addPlayer(p);
+                    }
+                    new SimpleMapGenerator(new Random(seed))
+                        .generateMap(game, null, true, new LogBuilder(-1));
+                    for (Player p : game.getLiveEuropeanPlayerList()) {
+                        Unit ship = null;
+                        for (Unit u : p.getUnitSet()) {
+                            if (u.isNaval() && u.hasTile()) ship = u;
+                        }
+                        if (ship == null) continue;
+                        final String at = rules + " seed " + seed + " " + p.getNationId();
+                        final Tile start = ship.getTile();
+                        assertEquals(at + " start", explored(game, p), around(start));
+                        final Map cm = ClassicTerrainOracleTest.clientView(game, p).getMap();
+                        int seen = 0;
+                        for (Tile t : cm.getTileList(t0 -> true)) {
+                            if (!t.isExplored()) continue;
+                            seen++;
+                            assertTrue(at + " client " + t, around(start)
+                                .contains(t.getX() + "," + t.getY()));
+                        }
+                        assertEquals(at + " client", 9, seen);
+                        for (Unit passenger : ship.getUnitList()) {
+                            assertTrue(at + " passenger", ((ServerPlayer)p)
+                                .exploreForUnit(passenger).isEmpty());
+                        }
+                        starts++;
+                        // The staircase: SW, SW, SW, W, NW while at sea.
+                        final int[][] steps = { { -1, 1 }, { -1, 1 }, { -1, 1 },
+                                                { -1, 0 }, { -1, -1 } };
+                        for (int[] s : steps) {
+                            final Tile from = ship.getTile();
+                            final Tile to = game.getMap().getTile(from.getX() + s[0],
+                                                                  from.getY() + s[1]);
+                            if (to == null || to.isLand() || to.hasSettlement()) break;
+                            final java.util.Set<String> before = explored(game, p);
+                            final java.util.Set<String> want = around(to);
+                            want.removeAll(before);
+                            ((ServerUnit)ship).csMove(to, new Random(seed),
+                                new net.sf.freecol.common.networking.ChangeSet());
+                            final java.util.Set<String> added = explored(game, p);
+                            added.removeAll(before);
+                            assertEquals(at + " move to " + to, want, added);
+                            moves++;
+                        }
+                    }
+                }
+            }
+            assertTrue("starts " + starts, starts >= 24);
+            assertTrue("moves " + moves, moves >= 60);
+        } finally {
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /** "x,y" of every tile a player has explored (the server's view). */
+    private static java.util.Set<String> explored(Game game, Player p) {
+        final java.util.Set<String> s = new java.util.TreeSet<>();
+        for (Tile t : game.getMap().getTileList(t0 -> true)) {
+            if (t.isExploredBy(p)) s.add(t.getX() + "," + t.getY());
+        }
+        return s;
+    }
+
+    /** "x,y" of the tiles within Chebyshev distance 1 of a tile, on the map. */
+    private static java.util.Set<String> around(Tile c) {
+        final java.util.Set<String> s = new java.util.TreeSet<>();
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (c.getMap().getTile(c.getX() + dx, c.getY() + dy) != null) {
+                    s.add((c.getX() + dx) + "," + (c.getY() + dy));
+                }
+            }
+        }
+        return s;
+    }
+
     private static Rectangle ring(int c0, int r0) {
         final int[] rgb = new int[W * H];
         Arrays.fill(rgb, ClassicHud.UNEXPLORED);

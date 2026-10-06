@@ -82,6 +82,13 @@ default model.tile.ocean
 # Water: E fringes at #1042 show ocean, which land would not.
 41,45 model.tile.ocean
 42,43 model.tile.ocean
+# W6a, FS #1042 (freecol-spike-results/d/w6a/tools CellDump, PxProbe):
+# (42,46)'s forest is PHYS0 67 = E+W (184/184), so its W neighbour is forest,
+# and the 3 W-mask px its overlay leaves open show T005: tropical forest.
+41,46 model.tile.tropicalForest
+# The S-mask px it leaves open show T002 (11/11) and its forest has no S
+# bit: plains, hills or mountains (the type cannot matter otherwise).
+42,47 model.tile.plains
 
 # FS #876: the unexplored land's own N fringes (FS §3.1).
 fringe 876 43,46 N T003 truth
@@ -101,3 +108,25 @@ quarter 876 44,45 NE -
 fringe 1042 45,46 N T004 truth
 fringe 1042 45,46 W T001
 blend 1042 44,46 E T004 truth
+
+# W6a whole frames (design 10 §6.4, §12.2), ClassicTerrainGoldenTest:
+#   compare <frame> px=<compared> pointer=<excused> cells=<explored>,<fringe>,<dark>
+#           [exclude=<x>,<y>;...] [w6b=<cells>]
+# all 180 cells of the view composed and compared index for index, 0 px off;
+# pointer = clip px of the mouse arrow (0/7/15) where we differ; exclude = the
+# unit cells; w6b = explored water cells with land among their 8 neighbours,
+# whose coast quarters are W6b's (not compared yet).
+# FS #19: the start, the ship blinked off: every pixel.
+compare 19 px=46080 pointer=0 cells=9,12,159
+# The sea lane under the fog shows in the start's fringes (§12.2).
+cycling 19 46,40 4
+cycling 19 47,40 4
+cycling 19 48,41 3
+cycling 19 48,42 3
+# FS #718: move 1's reveal; the ship on (45,43).
+compare 718 px=45762 pointer=62 cells=14,14,152 exclude=45,43
+# FS #876: move 2's reveal, the first land in the fringe; the ship on (44,44).
+compare 876 px=44994 pointer=62 cells=19,16,145 exclude=44,44 w6b=3
+# FS #1042: move 3's reveal, 24 tiles: the 3-wide diagonal band (img/01-02);
+# the ship on (43,45), a native brave on (43,46).
+compare 1042 px=44482 pointer=62 cells=24,18,138 exclude=43,45;43,46 w6b=4

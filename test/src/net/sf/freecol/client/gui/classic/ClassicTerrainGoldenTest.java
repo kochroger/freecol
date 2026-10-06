@@ -26,10 +26,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.IntConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -37,7 +40,7 @@ import javax.imageio.ImageIO;
 
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Map;
-import net.sf.freecol.common.model.Player;
+import net.sf.freecol.common.model.Resource;
 import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileType;
@@ -49,28 +52,36 @@ import net.sf.freecol.util.test.FreeColTestCase;
  * Golden checks of the terrain against named frames of the original
  * (M1c design 10 §12), driven by the fixtures in
  * {@code test/expected-data/classic-terrain/} (§12.1, Critic 10(b)).
+ * For each check frame the fixture's map becomes a server game, the tiles
+ * explored by then are explored for the Dutch player, and the client view
+ * is the game as the login sends it
+ * ({@link ClassicTerrainOracleTest#clientView}); the terrain composer
+ * ({@link ClassicTerrainComposer}) reads it through the oracle, as the map
+ * viewer does.
  *
- * <p>Item <b>W6d</b> (§5 acceptance): the fog ring's <b>true terrain</b>
- * in the LF #1407 and FS #876 situations, plus FS #1042.  For each check
- * frame the fixture's map becomes a server game, the tiles explored by
- * then are explored for the Dutch player, and the client view is the
- * game as the login sends it ({@link ClassicTerrainOracleTest#clientView}).
- * Then:
  * <ul>
- *   <li><b>oracle</b> (always): every explored tile gives the client's
- *       type, every unexplored tile of the ring the fixture's true type,
- *       every other tile null (least knowledge);</li>
- *   <li><b>derivation</b> (always): the fringe, blend and coast-quarter
- *       sprites of the fixture's check lines follow from those types by
- *       the design's rules (§6.1, §8.1; reference code here until W6a's
- *       composer exists), and the multiplayer fallback (unknown ring,
- *       F-W6d-MP) gets every {@code truth} line wrong;</li>
- *   <li><b>pixels</b> (with the converted pack and {@code -Dclassic.clips},
- *       else skipped with a note, Critic 10(a)(d)): those sprites' pixels
- *       equal the clip frame's indices at the mask or quarter, 0 px off;
- *       "frame n" is the last PNG at or before n (Critic 10(c)).</li>
+ *   <li><b>W6d, the fog ring's true terrain</b> (§5 acceptance, LF #1407,
+ *       FS #876 and #1042): the oracle gives every explored tile the
+ *       client's type, every unexplored ring tile the fixture's true type,
+ *       every other tile null (least knowledge); the fixture's
+ *       {@code fringe}/{@code blend} lines name the sprite the composer
+ *       puts at that side (always, with tag sheets), the {@code quarter}
+ *       lines the coast quarter of the rule {@code 108 + 4c + q}
+ *       (reference code until W6b), and the multiplayer fallback (unknown
+ *       ring, F-W6d-MP) gets every {@code truth} line wrong.</li>
+ *   <li><b>W6a, whole frames</b> (§6.4, §12.2): each {@code compare} line
+ *       composes all 180 cells of the view with the pack's index sheets and
+ *       compares them with the clip frame index for index: 0 px off, the
+ *       counted pointer pixels (indices 0/7/15 where we differ) excused,
+ *       the unit cells excluded, and until W6b the explored water cells
+ *       with land around them (the coast quarters).  Plus the
+ *       {@code histogram} and {@code cycling} cell lines.</li>
+ *   <li>The pixel checks need the converted pack and
+ *       {@code -Dclassic.clips}, else they are skipped with a note (Critic
+ *       10(a)(d)); "frame n" is the last PNG at or before n (Critic
+ *       10(c)).</li>
  * </ul>
- * W6a and W6b extend this class with the composer's whole-frame checks.
+ * W6b extends this class with the coast quarters and the beach corners.
  */
 public class ClassicTerrainGoldenTest extends FreeColTestCase {
 
@@ -81,7 +92,7 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
     static final String CLIPS_PROPERTY = "classic.clips";
 
     /** The TERRAIN.SS frame of every FreeCol tile type (design 10 §6.1). */
-    private static final java.util.Map<String, Integer> ALIAS = new HashMap<>();
+    static final java.util.Map<String, Integer> ALIAS = new HashMap<>();
     static {
         final Object[][] table = {
             { 0, "tundra", "borealForest" }, { 1, "desert", "scrubForest" },
@@ -99,7 +110,7 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
     }
 
     /** The sides N, E, S, W: offsets (the side masks are PHYS0 104 + d). */
-    private static final int[][] SIDES = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };
+    private static final int[][] SIDES = ClassicTerrainComposer.SIDES;
     private static final String SIDE_NAMES = "NESW";
 
     /** The quarters NW, NE, SE, SW: their 3 neighbours, clockwise (§8.1). */
@@ -111,6 +122,9 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
     };
     private static final String[] QUARTER_NAMES = { "NW", "NE", "SE", "SW" };
 
+    /** The view: 15x12 cells, the map area at y = 8 of the 320x200 screen. */
+    private static final int COLS = 15, ROWS = 12, MAP_Y = 8;
+
 
     // The fixture
 
@@ -119,11 +133,13 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
         final String type;   // null for '?'
         final int explored;  // the first frame showing it explored, or -1
         final int base;      // the original's own TERRAIN frame, or -1
+        final String resource; // a resource type id, or null
 
-        FixtureTile(String type, int explored, int base) {
+        FixtureTile(String type, int explored, int base, String resource) {
             this.type = type;
             this.explored = explored;
             this.base = base;
+            this.resource = resource;
         }
     }
 
@@ -147,13 +163,56 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
         }
     }
 
-    /** A fixture file (§12.1, plus the W6d check lines). */
+    /**
+     * One whole-frame line: {@code compare <frame> px=<n> pointer=<n>
+     * cells=<explored>,<fringe>,<dark> [exclude=<x>,<y>;...] [w6b=<n>]}.
+     */
+    static final class Compare {
+        final int frame, px, pointer, explored, fringe, dark, w6b;
+        final Set<Long> exclude = new HashSet<>();
+        final String line;
+
+        Compare(int frame, int px, int pointer, int[] cells, int w6b, String line) {
+            this.frame = frame;
+            this.px = px;
+            this.pointer = pointer;
+            this.explored = cells[0];
+            this.fringe = cells[1];
+            this.dark = cells[2];
+            this.w6b = w6b;
+            this.line = line;
+        }
+    }
+
+    /**
+     * One cell line: {@code histogram <frame> <c>,<r> <index>x<n> ...} (the
+     * composed cell's indices) or {@code cycling <frame> <x>,<y> <n>} (the
+     * composed cell's pixels in 120-127).
+     */
+    static final class CellCheck {
+        final String kind, line;
+        final int frame, a, b;
+        final TreeMap<Integer, Integer> counts = new TreeMap<>();
+        int cycling = -1;
+
+        CellCheck(String kind, int frame, int a, int b, String line) {
+            this.kind = kind;
+            this.frame = frame;
+            this.a = a;
+            this.b = b;
+            this.line = line;
+        }
+    }
+
+    /** A fixture file (§12.1, plus the W6d check lines and W6a's frames). */
     static final class Fixture {
         final String name;
         String clip, defaultType;
         int width, height, vx, vy;
         final java.util.Map<Long, FixtureTile> tiles = new LinkedHashMap<>();
         final List<Check> checks = new ArrayList<>();
+        final List<Compare> compares = new ArrayList<>();
+        final List<CellCheck> cells = new ArrayList<>();
 
         Fixture(String name) {
             this.name = name;
@@ -179,11 +238,33 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
             return t != null && t.explored >= 0 && t.explored <= frame;
         }
 
-        /** @return The frames the checks look at, in order. */
+        /** @return The frames the W6d checks look at, in order. */
         TreeSet<Integer> frames() {
             final TreeSet<Integer> s = new TreeSet<>();
             for (Check c : this.checks) s.add(c.frame);
             return s;
+        }
+
+        /**
+         * The alias table of this fixture: the design's, with a tile's
+         * {@code base=} for its type (the T008 tile gets a type mapped to
+         * 8, §12.1; the fixture must give every tile of that type the same
+         * base).
+         *
+         * @return Tile type id to TERRAIN frame.
+         */
+        java.util.Map<String, Integer> alias() {
+            final java.util.Map<String, Integer> a = new HashMap<>(ALIAS);
+            for (FixtureTile t : this.tiles.values()) {
+                if (t.base >= 0 && t.type != null) a.put(t.type, t.base);
+            }
+            for (FixtureTile t : this.tiles.values()) {
+                if (t.type != null && t.base < 0 && a.get(t.type) != (int)ALIAS.get(t.type)) {
+                    throw new IllegalStateException(this.name + ": type " + t.type
+                        + " has a base= on another tile");
+                }
+            }
+            return a;
         }
 
         static Fixture load(File f) throws IOException {
@@ -226,18 +307,62 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                                             expected, truth, line));
                     break;
                 }
+                case "compare": {
+                    final java.util.Map<String, String> kv = keyValues(w, 2, at);
+                    if (!kv.containsKey("px") || !kv.containsKey("pointer")
+                        || !kv.containsKey("cells")) {
+                        throw new IOException(at + "compare needs px=, pointer=, cells=");
+                    }
+                    final String[] cs = kv.get("cells").split(",");
+                    final Compare c = new Compare(Integer.parseInt(w[1]),
+                        Integer.parseInt(kv.get("px")),
+                        Integer.parseInt(kv.get("pointer")),
+                        new int[] { Integer.parseInt(cs[0]), Integer.parseInt(cs[1]),
+                                    Integer.parseInt(cs[2]) },
+                        Integer.parseInt(kv.getOrDefault("w6b", "0")), line);
+                    if (kv.containsKey("exclude")) {
+                        for (String e : kv.get("exclude").split(";")) {
+                            final int[] xy = xy(e);
+                            c.exclude.add(key(xy[0], xy[1]));
+                        }
+                    }
+                    fx.compares.add(c);
+                    break;
+                }
+                case "histogram": {
+                    final int[] cr = xy(w[2]);
+                    final CellCheck c = new CellCheck(w[0], Integer.parseInt(w[1]),
+                                                      cr[0], cr[1], line);
+                    for (int i = 3; i < w.length; i++) {
+                        final String[] p = w[i].split("x");
+                        c.counts.put(Integer.parseInt(p[0]), Integer.parseInt(p[1]));
+                    }
+                    fx.cells.add(c);
+                    break;
+                }
+                case "cycling": {
+                    final int[] xy = xy(w[2]);
+                    final CellCheck c = new CellCheck(w[0], Integer.parseInt(w[1]),
+                                                      xy[0], xy[1], line);
+                    c.cycling = Integer.parseInt(w[3]);
+                    fx.cells.add(c);
+                    break;
+                }
                 default: {
                     final int[] xy = xy(w[0]);
                     int explored = -1, base = -1;
+                    String res = null;
                     for (int i = 2; i < w.length; i++) {
                         if (w[i].startsWith("explored@")) {
                             explored = Integer.parseInt(w[i].substring(9));
                         } else if (w[i].startsWith("base=")) {
                             base = Integer.parseInt(w[i].substring(5));
+                        } else if (w[i].startsWith("res=")) {
+                            res = w[i].substring(4);
                         }
                     }
                     fx.tiles.put(key(xy[0], xy[1]), new FixtureTile(
-                        ("?".equals(w[1])) ? null : w[1], explored, base));
+                        ("?".equals(w[1])) ? null : w[1], explored, base, res));
                     break;
                 }
                 }
@@ -246,6 +371,18 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                 throw new IOException(f + ": needs clip, map and default lines");
             }
             return fx;
+        }
+
+        private static java.util.Map<String, String> keyValues(String[] w, int from,
+                                                               String at)
+            throws IOException {
+            final java.util.Map<String, String> kv = new HashMap<>();
+            for (int i = from; i < w.length; i++) {
+                final int eq = w[i].indexOf('=');
+                if (eq <= 0) throw new IOException(at + "expected key=value: " + w[i]);
+                kv.put(w[i].substring(0, eq), w[i].substring(eq + 1));
+            }
+            return kv;
         }
 
         private static int[] xy(String s) {
@@ -277,6 +414,13 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                 b.setTileType(x, y, type(spec, fx.typeAt(x, y)));
             }
             this.server.changeMap(b.build());
+            for (java.util.Map.Entry<Long, FixtureTile> e : fx.tiles.entrySet()) {
+                if (e.getValue().resource == null) continue;
+                final int x = (int)(e.getKey() >> 32), y = (int)(long)e.getKey();
+                final Tile t = this.server.getMap().getTile(x, y);
+                t.addResource(new Resource(this.server, t,
+                    spec.getResourceType(e.getValue().resource)));
+            }
             final ServerPlayer dutch = (ServerPlayer)this.server
                 .getPlayerByNationId("model.nation.dutch");
             final List<Tile> seen = new ArrayList<>();
@@ -299,10 +443,69 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
         String at() {
             return this.fx.name + " #" + this.frame;
         }
+
+        /** @return The client's map as the composer reads it, through an oracle. */
+        Source source(ClassicTerrainOracle o) {
+            return new Source(this.client.getMap(), o);
+        }
+    }
+
+    /**
+     * The map as the viewer's layer reads it: the client's explored state
+     * and types, the oracle's types for the fog ring.
+     */
+    static final class Source implements ClassicTerrainComposer.TerrainSource {
+        final Map map;
+        final ClassicTerrainOracle oracle;
+
+        Source(Map map, ClassicTerrainOracle oracle) {
+            this.map = map;
+            this.oracle = oracle;
+        }
+
+        @Override
+        public boolean onMap(int x, int y) {
+            return this.map.getTile(x, y) != null;
+        }
+
+        @Override
+        public boolean explored(int x, int y) {
+            final Tile t = this.map.getTile(x, y);
+            return t != null && t.isExplored();
+        }
+
+        @Override
+        public TileType type(int x, int y) {
+            return this.oracle.trueType(x, y);
+        }
+
+        @Override
+        public void overlays(int x, int y, IntConsumer frames) {
+            final Tile t = this.map.getTile(x, y);
+            if (t != null && t.isExplored()) {
+                ClassicTileArt.overlayFrames(this.map, t, this::type, frames);
+            }
+        }
     }
 
 
-    // The rules (design 10 §6.1, §8.1) -- reference code until W6a
+    // The rules
+
+    /** A composer over sheets with the fixture's alias table. */
+    private static ClassicTerrainComposer composer(Fixture fx, ClassicIndexSheet terrain,
+                                                   ClassicIndexSheet phys) {
+        return composer(fx, terrain, phys, ClassicTerrainComposer.DARK_SIDES_ALWAYS);
+    }
+
+    /** The same with a choice of the pinned rule. */
+    private static ClassicTerrainComposer composer(Fixture fx, ClassicIndexSheet terrain,
+                                                   ClassicIndexSheet phys,
+                                                   boolean darkSidesAlways) {
+        final java.util.Map<String, Integer> alias = fx.alias();
+        return new ClassicTerrainComposer(terrain, phys,
+                                          id -> alias.getOrDefault(id, -1),
+                                          darkSidesAlways, ClassicTerrainComposer.SIDE_ORDER);
+    }
 
     /** The sprite results of one check. */
     private static final class Derived {
@@ -311,55 +514,30 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
         int[][] compare;           // the {px, py} the check compares
     }
 
-    /**
-     * The own sprite of a type at a tile: the fixture's base where it
-     * overrides the alias table for that tile's own type (T008), else the
-     * alias table; -1 for null.
-     */
-    private static int own(Fixture fx, int x, int y, TileType t) {
-        if (t == null) return -1;
-        final FixtureTile ft = fx.tile(x, y);
-        if (ft != null && ft.base >= 0 && t.getId().equals(fx.typeAt(x, y))) return ft.base;
-        final Integer s = ALIAS.get(t.getId());
-        assertNotNull(t.getId(), s);
-        return s;
-    }
-
-    /** blendSpr: the own sprite with BLEND_BASE {8: 1} (FS §3.3). */
-    private static int blendSpr(Fixture fx, int x, int y, TileType t) {
-        final int s = own(fx, x, y, t);
-        return (s == 8) ? 1 : s;
-    }
-
-    /** bleeds(n -> t): water never bleeds into land. */
-    private static boolean bleeds(TileType n, TileType t) {
-        return !(n.isWater() && !t.isWater());
-    }
-
     private static boolean isLand(TileType t) {
         return t != null && !t.isWater();
     }
 
     /**
-     * Derive one check's sprite (and, with sheets, the composed pixels)
-     * from an oracle.
+     * Derive one check's sprite (with the tag composer) and, with the
+     * pack's sheets, the composed pixels it compares.
      *
      * @param f The frame's games.
      * @param o The oracle (truth or unknown).
      * @param c The check.
-     * @param terrain TERRAIN.SS indices, or null.
-     * @param phys PHYS0.SS indices, or null.
+     * @param tag The composer over the tag sheets.
+     * @param real The composer over the pack's sheets, or null.
+     * @param phys The pack's PHYS0.SS, or null.
      * @return The result.
      */
     private static Derived derive(Frame f, ClassicTerrainOracle o, Check c,
-                                  ClassicIndexSheet terrain, ClassicIndexSheet phys) {
-        final Fixture fx = f.fx;
+                                  ClassicTerrainComposer tag,
+                                  ClassicTerrainComposer real, ClassicIndexSheet phys) {
         final Map map = f.client.getMap();
         final Tile tile = map.getTile(c.x, c.y);
-        final TileType tt = o.trueType(c.x, c.y);
         final Derived d = new Derived();
-        final boolean sheets = terrain != null && phys != null;
         if ("quarter".equals(c.kind)) {
+            // The coast quarter rule, reference code until W6b.
             assertTrue(f.at() + " " + c.line + ": explored water",
                        tile.isExplored() && tile.getType().isWater());
             int bits = 0;
@@ -368,7 +546,7 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                 if (isLand(o.trueType(c.x + nb[0], c.y + nb[1]))) bits |= 1 << k;
             }
             d.sprite = (bits == 0) ? -1 : 108 + 4 * bits + c.part;
-            if (sheets && d.sprite >= 0) {
+            if (phys != null && d.sprite >= 0) {
                 final int qx = (c.part == 1 || c.part == 2) ? 8 : 0;
                 final int qy = (c.part >= 2) ? 8 : 0;
                 d.pixels = new int[256];
@@ -387,52 +565,37 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
             }
             return d;
         }
-        final boolean dark = !tile.isExplored();
         assertEquals(f.at() + " " + c.line + ": " + ("fringe".equals(c.kind)
-                ? "a dark tile" : "an explored tile"), "fringe".equals(c.kind), dark);
-        final int base = (dark) ? 148 : own(fx, c.x, c.y, tt);
-        if (sheets) {
+                ? "a dark tile" : "an explored tile"), "fringe".equals(c.kind),
+            !tile.isExplored());
+        final Source src = f.source(o);
+        // The sprite: the tag at the side's own mask pixels (not those it
+        // shares with another side).
+        final byte[] t = new byte[256];
+        tag.composeCell(src, c.x, c.y, t, 0, 16);
+        int sprite = -2;
+        for (int k : tag.mask(c.part)) {
+            boolean shared = false;
+            for (int s = 0; s < 4; s++) {
+                if (s == c.part) continue;
+                for (int k2 : tag.mask(s)) shared |= k2 == k;
+            }
+            if (shared) continue;
+            final int v = t[k] & 0xFF;
+            final int s = (v >= ClassicTerrainSheets.TAG
+                && v < ClassicTerrainSheets.TAG + 12) ? v - ClassicTerrainSheets.TAG : -1;
+            assertTrue(f.at() + " " + c.line + ": one sprite on the side",
+                       sprite == -2 || sprite == s);
+            sprite = s;
+        }
+        d.sprite = sprite;
+        if (real != null) {
+            final byte[] px = new byte[256];
+            real.composeCell(src, c.x, c.y, px, 0, 16);
             d.pixels = new int[256];
-            for (int k = 0; k < 256; k++) {
-                d.pixels[k] = (dark) ? phys.index(148, k % 16, k / 16)
-                    : terrain.index(base, k % 16, k / 16);
-            }
-        }
-        for (int s = 0; s < 4; s++) {
-            final int nx = c.x + SIDES[s][0], ny = c.y + SIDES[s][1];
-            final Tile n = map.getTile(nx, ny);
-            if (n == null) continue;
-            // §6.1 unexplored cell: only explored neighbours open a side
-            // (and only those may be asked: least knowledge).
-            if (dark && !n.isExplored()) continue;
-            final TileType tn = o.trueType(nx, ny);
-            int src;
-            if (dark) {
-                src = (tt == null || bleeds(tn, tt)) ? blendSpr(fx, nx, ny, tn)
-                    : blendSpr(fx, c.x, c.y, tt);
-            } else {
-                // §6.1 explored cell: any neighbour of known type blends in.
-                if (tn == null) continue;
-                src = blendSpr(fx, nx, ny, tn);
-                if (src == base || !bleeds(tn, tt)) continue;
-            }
-            if (s == c.part) d.sprite = src;
-            if (sheets) {
-                for (int k = 0; k < 256; k++) {
-                    if (phys.index(104 + s, k % 16, k / 16) != ClassicIndexSheet.TRANSPARENT) {
-                        d.pixels[k] = terrain.index(src, k % 16, k / 16);
-                    }
-                }
-            }
-        }
-        if (!dark && d.sprite < 0) d.sprite = base; // no blend: the own sprite
-        if (sheets) {
+            for (int k = 0; k < 256; k++) d.pixels[k] = px[k] & 0xFF;
             final List<int[]> cmp = new ArrayList<>();
-            for (int k = 0; k < 256; k++) {
-                if (phys.index(104 + c.part, k % 16, k / 16) != ClassicIndexSheet.TRANSPARENT) {
-                    cmp.add(new int[] { k % 16, k / 16 });
-                }
-            }
+            for (int k : real.mask(c.part)) cmp.add(new int[] { k % 16, k / 16 });
             d.compare = cmp.toArray(new int[0][]);
         }
         return d;
@@ -444,7 +607,7 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
      * @return { matching px, compared px }.
      */
     private static int[] match(Derived d, Raster r, Fixture fx, Check c) {
-        final int ox = 16 * (c.x - fx.vx), oy = 8 + 16 * (c.y - fx.vy);
+        final int ox = 16 * (c.x - fx.vx), oy = MAP_Y + 16 * (c.y - fx.vy);
         int ok = 0;
         for (int[] p : d.compare) {
             if (r.getSample(ox + p[0], oy + p[1], 0) == d.pixels[p[1] * 16 + p[0]]) ok++;
@@ -455,6 +618,35 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
     private static String sprite(Check c, int s) {
         return (s < 0) ? "-" : (("quarter".equals(c.kind)) ? "P" : "T")
             + String.format("%03d", s);
+    }
+
+    /**
+     * Whether an explored water tile carries a coast quarter: a land tile
+     * among its 8 neighbours (W6b draws it; until then the cell is not
+     * compared).
+     */
+    private static boolean coastCell(Frame f, int x, int y) {
+        final Tile tile = f.client.getMap().getTile(x, y);
+        if (tile == null || !tile.isExplored() || !tile.getType().isWater()) return false;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if ((dx != 0 || dy != 0) && isLand(f.truth.trueType(x + dx, y + dy))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** @return 0 explored, 1 fringe (an explored orthogonal neighbour), 2 plain dark. */
+    private static int cellClass(Map map, int x, int y) {
+        final Tile t = map.getTile(x, y);
+        if (t.isExplored()) return 0;
+        for (int[] s : SIDES) {
+            final Tile n = map.getTile(x + s[0], y + s[1]);
+            if (n != null && n.isExplored()) return 1;
+        }
+        return 2;
     }
 
 
@@ -521,16 +713,25 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
 
     /** The fixtures parse, and every check names a tile of its view. */
     public void testFixturesParse() throws IOException {
+        int compares = 0;
         for (Fixture fx : fixtures()) {
             assertEquals(fx.name, 58, fx.width);
             assertEquals(fx.name, 72, fx.height);
             assertFalse(fx.name, fx.checks.isEmpty());
+            assertFalse(fx.name, fx.compares.isEmpty());
+            fx.alias();
             for (Check c : fx.checks) {
                 final int cx = c.x - fx.vx, cy = c.y - fx.vy;
-                assertTrue(fx.name + " " + c.line, cx >= 0 && cx < 15 && cy >= 0 && cy < 12);
+                assertTrue(fx.name + " " + c.line, cx >= 0 && cx < COLS && cy >= 0 && cy < ROWS);
                 assertTrue(fx.name + " " + c.line, ALIAS.containsKey(fx.typeAt(c.x, c.y)));
             }
+            for (Compare c : fx.compares) {
+                assertEquals(fx.name + " " + c.line, COLS * ROWS,
+                             c.explored + c.fringe + c.dark);
+            }
+            compares += fx.compares.size();
         }
+        assertTrue("compare lines " + compares, compares >= 6);
         // Frame lookup: the last PNG at or before n.
         final File tmp = Files.createTempDirectory("clips").toFile();
         try {
@@ -590,9 +791,10 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
     }
 
     /**
-     * The W6d acceptance: with the true terrain the check lines' sprites
-     * follow, and the clip's pixels agree (with the pack and the clips);
-     * the multiplayer fallback gets every {@code truth} line wrong.
+     * The W6d acceptance, now through the composer: with the true terrain
+     * the check lines' sprites follow, and the clip's pixels agree (with
+     * the pack and the clips); the multiplayer fallback gets every
+     * {@code truth} line wrong.
      */
     public void testTrueTerrainMatchesTheOriginal() throws IOException {
         final ClassicPackFiles pack = pack();
@@ -608,7 +810,12 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
         }
         int checks = 0, truthChecks = 0, pixelChecks = 0;
         final StringBuilder report = new StringBuilder();
+        final List<String> failures = new ArrayList<>();
         for (Fixture fx : fixtures()) {
+            final ClassicTerrainComposer tag = composer(fx,
+                ClassicTerrainSheets.tagTerrain(), ClassicTerrainSheets.tagPhys());
+            final ClassicTerrainComposer real = (pack == null) ? null
+                : composer(fx, terrain, phys);
             for (int frame : fx.frames()) {
                 final Frame f = new Frame(fx, frame);
                 Raster r = null;
@@ -622,8 +829,8 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                     checks++;
                     final String at = f.at() + " " + c.line;
                     final int refused = f.truth.refusals();
-                    final Derived t = derive(f, f.truth, c, terrain, phys);
-                    final Derived u = derive(f, f.unknown, c, terrain, phys);
+                    final Derived t = derive(f, f.truth, c, tag, real, phys);
+                    final Derived u = derive(f, f.unknown, c, tag, real, phys);
                     // The rules ask nothing beyond the ring (least knowledge).
                     assertEquals(at + ": refusals", refused, f.truth.refusals());
                     assertEquals(at + ": refusals", 0, f.unknown.refusals());
@@ -660,5 +867,261 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
         System.out.println("ClassicTerrainGoldenTest: " + checks + " checks, "
             + truthChecks + " need the truth, " + pixelChecks + " compared with the"
             + " clips\n" + report);
+    }
+
+    /**
+     * W6a's whole frames (design 10 §6.4, §12.2): every {@code compare}
+     * line's view composed cell by cell from the pack's index sheets
+     * equals the clip frame, 0 px off.  Always: the cell classes
+     * (explored, fringe, plain dark) and the least-knowledge rule over the
+     * whole view; with the pack and the clips: the pixels.
+     */
+    public void testWholeFramesMatchTheOriginal() throws IOException {
+        final ClassicPackFiles pack = pack();
+        final File clips = clips();
+        final ClassicIndexSheet terrain = (pack == null) ? null
+            : pack.indexSheet(ClassicPackFiles.TERRAIN_SS);
+        final ClassicIndexSheet phys = (pack == null) ? null
+            : pack.indexSheet(ClassicPackFiles.PHYS0_SS);
+        final StringBuilder report = new StringBuilder();
+        final List<String> failures = new ArrayList<>();
+        int frames = 0, pixelFrames = 0, altOff = 0;
+        final StringBuilder altAt = new StringBuilder();
+        for (Fixture fx : fixtures()) {
+            final ClassicTerrainComposer tag = composer(fx,
+                ClassicTerrainSheets.tagTerrain(), ClassicTerrainSheets.tagPhys());
+            final ClassicTerrainComposer real = (pack == null) ? null
+                : composer(fx, terrain, phys);
+            // The alternative of the pinned rule DARK_SIDES_ALWAYS.
+            final ClassicTerrainComposer alt = (pack == null) ? null
+                : composer(fx, terrain, phys, !ClassicTerrainComposer.DARK_SIDES_ALWAYS);
+            for (Compare cmp : fx.compares) {
+                frames++;
+                final Frame f = new Frame(fx, cmp.frame);
+                final Map map = f.client.getMap();
+                final String at = f.at() + " " + cmp.line;
+                final Source src = f.source(f.truth);
+                final int[] classes = new int[3];
+                for (int r = 0; r < ROWS; r++) {
+                    for (int c = 0; c < COLS; c++) {
+                        classes[cellClass(map, fx.vx + c, fx.vy + r)]++;
+                    }
+                }
+                final String cells = "cells=" + classes[0] + "," + classes[1]
+                    + "," + classes[2];
+                final String wantCells = "cells=" + cmp.explored + "," + cmp.fringe
+                    + "," + cmp.dark;
+                if (!wantCells.equals(cells)) failures.add(at + ": " + cells);
+                // Least knowledge over the whole view.
+                final byte[] cell = new byte[256];
+                for (int r = 0; r < ROWS; r++) {
+                    for (int c = 0; c < COLS; c++) {
+                        tag.composeCell(src, fx.vx + c, fx.vy + r, cell, 0, 16);
+                    }
+                }
+                if (f.truth.refusals() != 0) failures.add(at + ": refusals");
+                if (real == null || clips == null) continue;
+                final File png = frameFile(new File(clips, fx.clip), cmp.frame);
+                assertNotNull(fx.clip + " #" + cmp.frame, png);
+                final Raster ras = ImageIO.read(png).getRaster();
+                int compared = 0, off = 0, pointer = 0, excluded = 0, w6b = 0;
+                final StringBuilder bad = new StringBuilder();
+                for (int r = 0; r < ROWS; r++) {
+                    for (int c = 0; c < COLS; c++) {
+                        final int x = fx.vx + c, y = fx.vy + r;
+                        if (cmp.exclude.contains(Fixture.key(x, y))) {
+                            excluded++;
+                            continue;
+                        }
+                        if (coastCell(f, x, y)) {
+                            w6b++;
+                            continue;
+                        }
+                        alt.composeCell(src, x, y, cell, 0, 16);
+                        for (int k = 0; k < 256; k++) {
+                            final int v = ras.getSample(16 * c + k % 16,
+                                                        MAP_Y + 16 * r + k / 16, 0);
+                            if (v != (cell[k] & 0xFF) && v != 0 && v != 7 && v != 15) {
+                                altOff++;
+                                altAt.append(" ").append(f.at()).append(" (").append(x)
+                                    .append(',').append(y).append(") (").append(k % 16)
+                                    .append(',').append(k / 16).append(')');
+                            }
+                        }
+                        real.composeCell(src, x, y, cell, 0, 16);
+                        int cellOff = 0;
+                        final StringBuilder first = new StringBuilder();
+                        for (int k = 0; k < 256; k++) {
+                            final int v = ras.getSample(16 * c + k % 16,
+                                                        MAP_Y + 16 * r + k / 16, 0);
+                            final int ours = cell[k] & 0xFF;
+                            if (v == ours) {
+                                compared++;
+                            } else if (v == 0 || v == 7 || v == 15) {
+                                pointer++;
+                            } else {
+                                compared++;
+                                off++;
+                                if (++cellOff <= 4) {
+                                    first.append(" (").append(k % 16).append(',')
+                                        .append(k / 16).append(") ").append(ours)
+                                        .append('/').append(v);
+                                }
+                            }
+                        }
+                        if (cellOff > 0) {
+                            bad.append(" (").append(x).append(',').append(y)
+                                .append(")=").append(cellOff).append(" [ours/clip")
+                                .append(first).append(']');
+                        }
+                    }
+                }
+                pixelFrames++;
+                final String line = "  " + at + ": " + cells + " px=" + compared
+                    + " off=" + off + " pointer=" + pointer + " excluded=" + excluded
+                    + " w6b=" + w6b + ((bad.length() > 0) ? ", off at" + bad : "");
+                report.append(line).append('\n');
+                if (off != 0 || cmp.px != compared || cmp.pointer != pointer
+                    || cmp.exclude.size() != excluded || cmp.w6b != w6b) failures.add(line);
+                if (f.truth.refusals() != 0) failures.add(at + ": refusals");
+            }
+        }
+        System.out.println("ClassicTerrainGoldenTest: " + frames + " whole frames, "
+            + pixelFrames + " compared with the clips\n" + report);
+        System.out.println("ClassicTerrainGoldenTest: DARK_SIDES_ALWAYS="
+            + !ClassicTerrainComposer.DARK_SIDES_ALWAYS + " would be " + altOff
+            + " px off:" + altAt);
+        assertTrue("whole frames: " + failures, failures.isEmpty());
+        if (pixelFrames > 0) {
+            assertTrue("DARK_SIDES_ALWAYS is pinned by the clips", altOff > 0);
+        }
+        assertTrue("compare lines " + frames, frames >= 6);
+    }
+
+    /**
+     * Open item O3, the side order (design 10 §8.2, pin by golden): every
+     * order of the 4 sides on the whole frames.  The committed
+     * {@link ClassicTerrainComposer#SIDE_ORDER} must give the fewest
+     * mismatches; the orders that give as few are reported (the clips do
+     * not tell them apart where no two different sprites meet at an
+     * overlap pixel).
+     */
+    public void testSideOrderCandidates() throws IOException {
+        final ClassicPackFiles pack = pack();
+        final File clips = clips();
+        if (pack == null || clips == null) return;
+        final ClassicIndexSheet terrain = pack.indexSheet(ClassicPackFiles.TERRAIN_SS);
+        final ClassicIndexSheet phys = pack.indexSheet(ClassicPackFiles.PHYS0_SS);
+        final List<int[]> orders = new ArrayList<>();
+        permute(new int[] { 0, 1, 2, 3 }, 0, orders);
+        assertEquals(24, orders.size());
+        final int[] off = new int[orders.size()];
+        final byte[] cell = new byte[256];
+        for (Fixture fx : fixtures()) {
+            final java.util.Map<String, Integer> alias = fx.alias();
+            final List<ClassicTerrainComposer> comps = new ArrayList<>();
+            for (int[] o : orders) {
+                comps.add(new ClassicTerrainComposer(terrain, phys,
+                    id -> alias.getOrDefault(id, -1),
+                    ClassicTerrainComposer.DARK_SIDES_ALWAYS, o));
+            }
+            for (Compare cmp : fx.compares) {
+                final Frame f = new Frame(fx, cmp.frame);
+                final Source src = f.source(f.truth);
+                final Raster ras = ImageIO.read(frameFile(new File(clips, fx.clip),
+                                                          cmp.frame)).getRaster();
+                for (int r = 0; r < ROWS; r++) {
+                    for (int c = 0; c < COLS; c++) {
+                        final int x = fx.vx + c, y = fx.vy + r;
+                        if (cmp.exclude.contains(Fixture.key(x, y))
+                            || coastCell(f, x, y)) continue;
+                        for (int i = 0; i < comps.size(); i++) {
+                            comps.get(i).composeCell(src, x, y, cell, 0, 16);
+                            for (int k = 0; k < 256; k++) {
+                                final int v = ras.getSample(16 * c + k % 16,
+                                                            MAP_Y + 16 * r + k / 16, 0);
+                                if (v != (cell[k] & 0xFF) && v != 0 && v != 7 && v != 15) {
+                                    off[i]++;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        int best = Integer.MAX_VALUE, committed = -1;
+        for (int i = 0; i < orders.size(); i++) {
+            best = Math.min(best, off[i]);
+            if (java.util.Arrays.equals(orders.get(i), ClassicTerrainComposer.SIDE_ORDER)) {
+                committed = off[i];
+            }
+        }
+        final StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < orders.size(); i++) {
+            final StringBuilder name = new StringBuilder();
+            for (int d : orders.get(i)) name.append(SIDE_NAMES.charAt(d));
+            sb.append(' ').append(name).append('=').append(off[i]);
+        }
+        System.out.println("ClassicTerrainGoldenTest: side orders, px off on the whole"
+            + " frames:" + sb);
+        assertEquals("SIDE_ORDER gives the fewest mismatches:" + sb, best, committed);
+    }
+
+    private static void permute(int[] a, int k, List<int[]> out) {
+        if (k == a.length) {
+            out.add(a.clone());
+            return;
+        }
+        for (int i = k; i < a.length; i++) {
+            int t = a[k]; a[k] = a[i]; a[i] = t;
+            permute(a, k + 1, out);
+            t = a[k]; a[k] = a[i]; a[i] = t;
+        }
+    }
+
+    /**
+     * The cell lines: the dark tile's histogram (LF #345 cell (0,0), with
+     * the clip) and the sea lane's sparkles in the start's fringes (FS
+     * #19), with the pack.
+     */
+    public void testCellChecks() throws IOException {
+        final ClassicPackFiles pack = pack();
+        if (pack == null) return;
+        final File clips = clips();
+        final ClassicIndexSheet terrain = pack.indexSheet(ClassicPackFiles.TERRAIN_SS);
+        final ClassicIndexSheet phys = pack.indexSheet(ClassicPackFiles.PHYS0_SS);
+        int n = 0;
+        for (Fixture fx : fixtures()) {
+            final ClassicTerrainComposer real = composer(fx, terrain, phys);
+            for (CellCheck cc : fx.cells) {
+                n++;
+                final Frame f = new Frame(fx, cc.frame);
+                final byte[] cell = new byte[256];
+                final int x = ("histogram".equals(cc.kind)) ? fx.vx + cc.a : cc.a;
+                final int y = ("histogram".equals(cc.kind)) ? fx.vy + cc.b : cc.b;
+                real.composeCell(f.source(f.truth), x, y, cell, 0, 16);
+                final TreeMap<Integer, Integer> counts = new TreeMap<>();
+                int cyc = 0;
+                for (byte b : cell) {
+                    counts.merge(b & 0xFF, 1, Integer::sum);
+                    if ((b & 0xFF) >= 120 && (b & 0xFF) < 128) cyc++;
+                }
+                final String at = f.at() + " " + cc.line;
+                if ("histogram".equals(cc.kind)) {
+                    assertEquals(at, cc.counts, counts);
+                    if (clips != null) {
+                        final Raster ras = ImageIO.read(frameFile(
+                            new File(clips, fx.clip), cc.frame)).getRaster();
+                        for (int k = 0; k < 256; k++) {
+                            assertEquals(at + " px " + k, cell[k] & 0xFF, ras.getSample(
+                                16 * cc.a + k % 16, MAP_Y + 16 * cc.b + k / 16, 0));
+                        }
+                    }
+                } else {
+                    assertEquals(at, cc.cycling, cyc);
+                }
+            }
+        }
+        assertTrue("cell lines " + n, n >= 5);
     }
 }

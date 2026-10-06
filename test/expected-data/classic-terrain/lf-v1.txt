@@ -65,3 +65,14 @@ quarter 1407 53,43 NW P116 truth
 quarter 1407 53,41 NW -
 quarter 1407 53,43 SW -
 quarter 1407 53,42 NE -
+
+# W6a whole frames (design 10 §6.4, §12.2; the format: see fs-v1.txt).
+# LF #341/#345: the edge start, the ship on (56,42) in cell (14,6); x = 57 is
+# explored but never drawn.
+compare 341 px=45785 pointer=39 cells=6,7,167 exclude=56,42
+compare 345 px=45785 pointer=39 cells=6,7,167 exclude=56,42
+# The dark tile: PHYS0.SS.148 = TERRAIN.SS.010 + 2 (04 §2).
+histogram 345 0,0 60x56 61x165 62x35
+# LF #1407: x = 53 revealed, the island (52,42) dark with its own E fringe;
+# the ship on (54,42).
+compare 1407 px=45017 pointer=39 cells=12,11,157 exclude=54,42 w6b=3
