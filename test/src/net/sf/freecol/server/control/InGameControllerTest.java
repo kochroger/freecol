@@ -63,6 +63,7 @@ import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitChangeType;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.common.model.WorkLocation;
+import net.sf.freecol.common.option.GameOptions;
 import net.sf.freecol.server.ServerTestHelper;
 import net.sf.freecol.server.model.ServerBuilding;
 import net.sf.freecol.server.model.ServerColony;
@@ -188,6 +189,91 @@ public class InGameControllerTest extends FreeColTestCase {
                      expectedDutchTension, currDutchTension);
         assertEquals("Wrong french tension",
                      expectedFrenchTension, currFrenchTension);
+    }
+
+    /**
+     * The house rule {@code model.option.cancelKeepsMove} (on by default):
+     * asking about a native settlement's skill costs a human player's
+     * unit no move, so declining, or finding nothing to learn, keeps it;
+     * learning spends it.  With the rule off, and always for the AI, the
+     * question spends the move, as before.
+     */
+    public void testLearnSkillQuestionKeepsTheMove() {
+        final Game game = ServerTestHelper.startServerGame(getTestMap());
+        final InGameController igc = ServerTestHelper.getInGameController();
+        final Specification spec = game.getSpecification();
+        assertTrue("The house rule is on by default",
+                   spec.getBoolean(GameOptions.CANCEL_KEEPS_MOVE));
+
+        ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+        dutch.setAI(false);   // a human player (the test server has only AIs)
+        FreeColTestCase.IndianSettlementBuilder builder
+            = new FreeColTestCase.IndianSettlementBuilder(game);
+        ServerIndianSettlement camp = (ServerIndianSettlement)builder.build();
+        Player.makeContact(camp.getOwner(), dutch);
+        camp.setContacted(dutch);
+        final UnitType skill = camp.getLearnableSkill();
+        assertNotNull(skill);
+        Tile tile = camp.getTile().getNeighbourOrNull(Direction.N);
+        ServerUnit colonist = new ServerUnit(game, tile, dutch, colonistType);
+        final int moves = colonist.getInitialMovesLeft();
+        assertEquals(moves, colonist.getMovesLeft());
+
+        // The question costs nothing: a cancel keeps the move, and the
+        // unit could ask again.
+        igc.askLearnSkill(dutch, colonist, camp);
+        assertEquals("Asking keeps the moves", moves, colonist.getMovesLeft());
+        assertEquals(colonistType, colonist.getType());
+        igc.askLearnSkill(dutch, colonist, camp);
+        assertEquals(moves, colonist.getMovesLeft());
+
+        // Learning spends the move.
+        igc.learnFromIndianSettlement(dutch, colonist, camp);
+        assertEquals(skill, colonist.getType());
+        assertEquals("Learning spends the moves", 0, colonist.getMovesLeft());
+
+        // A settlement with nothing left to teach: the answer has no
+        // effect, so it costs nothing either.
+        assertNull(camp.getLearnableSkill());
+        ServerUnit second = new ServerUnit(game, tile, dutch, colonistType);
+        igc.askLearnSkill(dutch, second, camp);
+        assertEquals("Nothing to learn keeps the moves",
+                     moves, second.getMovesLeft());
+
+        // The AI always spends the move on the question.
+        ServerPlayer french = getServerPlayer(game, "model.nation.french");
+        Player.makeContact(camp.getOwner(), french);
+        camp.setContacted(french);
+        ServerUnit frenchColonist = new ServerUnit(game,
+            camp.getTile().getNeighbourOrNull(Direction.S), french, colonistType);
+        assertEquals(moves, frenchColonist.getMovesLeft());
+        assertTrue(french.isAI());
+        igc.askLearnSkill(french, frenchColonist, camp);
+        assertEquals("The AI spends the moves", 0,
+                     frenchColonist.getMovesLeft());
+
+        // The rule off: the question spends the move, as the original.
+        spec.setBoolean(GameOptions.CANCEL_KEEPS_MOVE, false);
+        try {
+            ServerUnit third = new ServerUnit(game, tile, dutch, colonistType);
+            igc.askLearnSkill(dutch, third, camp);
+            assertEquals("Without the rule asking spends the moves",
+                         0, third.getMovesLeft());
+
+            // The scout's box (the only other village box the server
+            // sees before the choice) never costs a move: its cancel
+            // keeps it, rule or not.  The armed unit's and the
+            // missionary's boxes ask the server only after the choice.
+            ServerUnit scout = new ServerUnit(game, tile, dutch, colonistType,
+                                              scoutRole);
+            final int scoutMoves = scout.getMovesLeft();
+            assertTrue(scoutMoves > 0);
+            igc.scoutIndianSettlement(dutch, scout, camp);
+            assertEquals("The scout's question keeps the moves",
+                         scoutMoves, scout.getMovesLeft());
+        } finally {
+            spec.setBoolean(GameOptions.CANCEL_KEEPS_MOVE, true);
+        }
     }
 
     public void testCreateMission() {

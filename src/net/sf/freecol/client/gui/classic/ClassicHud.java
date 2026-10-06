@@ -30,6 +30,7 @@ import java.util.List;
 import net.sf.freecol.client.gui.ImageLibrary;
 import net.sf.freecol.common.i18n.Messages;
 import net.sf.freecol.common.model.AbstractGoods;
+import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.ResourceType;
 import net.sf.freecol.common.model.Role;
@@ -627,6 +628,32 @@ final class ClassicHud {
     /** The largest view origin row (59 on 72 rows; I, by symmetry). */
     static int maxViewY(int mapHeight) {
         return mapHeight - VIEW_ROWS - 1;
+    }
+
+    /**
+     * The last map column the view ever shows, the right screen edge at
+     * the east clamp: {@code mapWidth - 2} (56 of 58, {@link #maxViewX}).
+     */
+    static int lastViewColumn(int mapWidth) {
+        return mapWidth - 2;
+    }
+
+    /**
+     * Whether a step goes east past the last column the view shows: E, NE
+     * or SE (6, 9, 3) from that column (or the never-drawn ring beyond it)
+     * onto the ring or off the map.  It is the step Roger's Europe question
+     * answers (build spec W8a, {@code ClassicGUI.asksSailHome}).
+     *
+     * @param mapWidth The map's width.
+     * @param d The direction.
+     * @param fromX The unit's column.
+     * @param toX The target tile's column, or -1 off the map.
+     * @return True if the step leaves the drawn map eastward.
+     */
+    static boolean eastPastView(int mapWidth, Direction d, int fromX, int toX) {
+        if (d != Direction.E && d != Direction.NE && d != Direction.SE) return false;
+        final int last = lastViewColumn(mapWidth);
+        return fromX >= last && (toX < 0 || toX > last);
     }
 
     /**

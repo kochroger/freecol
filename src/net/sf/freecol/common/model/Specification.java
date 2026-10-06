@@ -3081,6 +3081,12 @@ public final class Specification implements OptionContainer {
                 GameOptions.GAMEOPTIONS_MAP,
                 Boolean.TRUE, BooleanOption.class);        
         // end @compat 1.1.0
+
+        // House rule: a save made before it existed gets it on, as a new
+        // game does.
+        ret |= checkOp(GameOptions.CANCEL_KEEPS_MOVE,
+                       GameOptions.GAMEOPTIONS_MAP,
+                       Boolean.TRUE, BooleanOption.class);
         
         // SAVEGAME_VERSION == 14
         return ret;

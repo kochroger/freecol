@@ -630,7 +630,9 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   controller's "no unit left") arm it if it is our turn and no unit can move
   or go to its destination: **485 ms** after the last change, **756 ms**
   after a cancelled village box (`villageChoice`; FreeCol keeps the unit and
-  its move, Roger's house rule, so today this only matters once W8 skips it).
+  its move, Roger's house rule, so today this only matters once W8 skips it;
+  the learn question keeps it too, see "Escape, the high seas and the Europe
+  question").
   When it fires it ends the turn (`endTurn(false)`) only if it is still our
   turn, no box, menu, first scene or classic screen is up, and no unit can
   move; a box keeps it from firing and its close arms it again (a screen
@@ -782,6 +784,65 @@ request, the pref off in the mode, leaving by a unit, the village tile),
 what clears it, the minimap pixel), `ClassicHudTest.testTileMode*` (lines,
 layout, word and square pixels, live tile facts), `ClassicBlinkTest.
 testArmDelayed`.
+
+### Escape, the high seas and the Europe question (build spec W0e, W0f, W8a; house rule D1)
+
+- **Escape answers "no" (W0e).** In every yes/no box (`modalConfirmDialog`,
+  so every `GUI.confirm*` and every controller confirm) Escape, the close
+  button and a box that could not open answer **no**, whatever the
+  controller's `defaultOk`; `defaultOk` only picks the option Enter takes.
+  Before, Escape answered `defaultOk`: "learn" at a village, "found" at the
+  site warnings, "sail to Europe" on the high seas. The event boxes
+  (`askEvent`) and the choice lists (`modalChoiceDialog`: the village boxes,
+  which unit lands; `chooseFromList`) already answered Escape with "no" /
+  null, the controllers' cancel. All questions and lists go through
+  `ClassicGUI.Prompter` (`BOXES` in the game), so the tests answer them
+  headless.
+- **FreeCol's high-seas question is never shown (W0f).**
+  `InGameController.moveHighSeas` asks `highseas.text` when a ship sails from
+  coastal water onto the high seas; `modalConfirmDialog` answers it "no" at
+  once (`silentNo`, recorder event `dialog-silent`), so the controller makes
+  the plain move. A ship with Europe as its destination (a goto order, a
+  trade route) still leaves the map on entering the high seas, as the
+  original's "Ziel Amsterdam" ship does (landfall #25713).
+- **The Europe question, by Roger's rule (W8a, a stopgap until the
+  in-canvas box W7).** A ship on the high seas in the last column the view
+  shows (`ClassicHud.lastViewColumn`: x = W-2 = 56 of 58) ordered E, NE or
+  SE (6, 9, 3) past it, onto the never-drawn ring or off the map
+  (`ClassicHud.eastPastView`, `ClassicGUI.asksSailHome`), gets the original's
+  @SAILHOME question instead of a move: `ClassicMapViewer.handleMoveKey`
+  asks `ClassicGUI.sailHomeKey` before the controller. Its words are GAME.TXT
+  `@SAILHOME` read from the pack (the gold braces dropped; without the pack
+  FreeCol's `highseas.*` strings), with the admiral as the icon, in a
+  `ClassicDialog`. The first row ("Jawohl, ...", Enter's: `@default=1`) sails
+  the ship to Europe (`InGameController.moveTo(unit, europe)`): it leaves its
+  tile with no slide, as in the original (c8 #44179), and the controller
+  brings the next unit. The second row and Escape do nothing: the ship keeps
+  its moves and stays the active unit; the box's close restarts its blink ON
+  and the turn flow's clock. Every other move is a plain one: entering the
+  light water, leaving it, moving along it, and every move at the west edge.
+  The original also asks one column earlier (EUQ, C5 #21226); we do not
+  (master plan section 10). Recorder event: `sail-home unit=.. at=x,y <dir>
+  chosen=<0|1|-1>`, and the key's `move-done ... question`.
+- **"Handlung abbrechen" keeps the move (house rule D1).** The game option
+  `model.option.cancelKeepsMove` (classic spec, `gameOptions.map`, default
+  **on**; older saves get it on, `Specification.fixGameOptions`): the server's
+  `askLearnSkill` no longer spends a human player's moves before the learn
+  question. Accepting spends them as before (`learnFromIndianSettlement`);
+  declining (or Escape) and a settlement with nothing (more) to teach
+  ("info.noMoreSkill") cost nothing, so the unit stays active and keeps
+  blinking, and no automatic end starts while it can move
+  (`ClassicTurnFlow.armIdle` asks `hasNextActiveUnit`). The AI, and the rule
+  off, spend the moves at the question as before. The scout, the armed unit
+  and the missionary boxes never cost a move on a cancel (FreeCol asks the
+  server only after the choice). An expert never gets the learn question
+  (`MOVE_NO_ACCESS_SKILL`, no server call).
+
+Tests: `ClassicGUISeamTest` (`testEscapeAnswersNo`, `testEscapeCancelsAChoice`,
+`testHighSeasQuestionIsSilent`, `testEastPastView`,
+`testEuropeQuestionAtTheEastEdge`, `testSailHomeText`),
+`ClassicTurnFlowTest.testCancelKeepsTheUnitUp`,
+`InGameControllerTest.testLearnSkillQuestionKeepsTheMove` (server).
 
 ## In-game HUD (menu strip, dropdowns, right panel)
 
@@ -1971,7 +2032,9 @@ otherwise a reassuring picture:
 - `modalConfirmDialog(Tile, StringTemplate, ImageIcon, …)` — replaces the plain
   `JOptionPane` stopgap. The `(…, Unit, …)` and `(…, FreeColObject, …)`
   overloads in `GUI` are `final` and delegate here, so every confirm in the game
-  lands on this one override. A dismissed popup falls back to `defaultOk`.
+  lands on this one override. A dismissed popup (Escape, close) answers no
+  (W0e; until 2026-10-06 it fell back to `defaultOk`), and FreeCol's
+  `highseas.text` is answered no without a box (W0f).
   Window title is `colony(tile)` — the tile's colony, else **"FreeCol"**.
 - `showErrorPanel(String, Runnable)` — the audit's find. All five `showErrorPanel`
   overloads are `final` and funnel into this one non-final seam, so a no-op meant
@@ -3393,7 +3456,8 @@ Hard-won details, each of which silently wastes a run:
   The log shows `Classic key map: N keys bound.` once per game view.
 - **Drive states that actually produce output.** An idle unit generates no
   notices at all. Populated saves, ending turns, `B` (found colony) and sailing
-  a ship east into the high seas (fires the `highseas.text` confirm) do.
+  a ship east past the last drawn column (the Europe question; FreeCol's own
+  `highseas.text` confirm is silent since W0f) do.
 - **Screenshot a popup by the handle you enumerated**, not by re-finding it by
   title: `GetWindowText` raced against dialog creation returns a truncated title
   (a "FreeCol" dialog read as "F"), and the re-find then misses.

@@ -702,6 +702,17 @@ final class ClassicMapViewer extends JPanel {
                         + " unit=" + u.getId() + " at=" + xy(u.getTile())
                         + " moves=" + u.getMovesLeft());
                 }
+                // Roger's Europe question takes a ship's order east past
+                // the last drawn column instead of a move (build spec W8a).
+                if (this.gui != null && this.gui.sailHomeKey(u, d)) {
+                    if (ClassicFrameRecorder.on()) {
+                        ClassicFrameRecorder.event("move-done", "unit=" + u.getId()
+                            + " at=" + xy(u.getTile()) + " moves=" + u.getMovesLeft()
+                            + " question");
+                    }
+                    repaint();
+                    return;
+                }
                 this.keyMoveUnit = u;
                 try {
                     this.freeColClient.getInGameController().moveUnit(u, d);

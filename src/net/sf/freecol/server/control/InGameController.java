@@ -830,6 +830,13 @@ public final class InGameController extends Controller {
     /**
      * Ask about learning a skill at a native settlement.
      *
+     * The question is not answered yet.  With the house rule
+     * {@code GameOptions.CANCEL_KEEPS_MOVE} a human player's unit keeps
+     * its moves here: accepting spends them
+     * ({@link #learnFromIndianSettlement}), declining or a settlement with
+     * nothing (more) to teach costs nothing.  Otherwise, and always for
+     * the AI, the moves are spent now, as before.
+     *
      * @param serverPlayer The {@code ServerPlayer} that is learning.
      * @param unit The {@code Unit} that is learning.
      * @param is The {@code IndianSettlement} to learn from.
@@ -843,9 +850,12 @@ public final class InGameController extends Controller {
         Tile tile = is.getTile();
         tile.updateIndianSettlement(serverPlayer);
         cs.add(See.only(serverPlayer), tile);
-        unit.setMovesLeft(0);
-        cs.addPartial(See.only(serverPlayer), unit,
-            "movesLeft", String.valueOf(unit.getMovesLeft()));
+        if (serverPlayer.isAI() || !getGame().getSpecification()
+                .getBoolean(GameOptions.CANCEL_KEEPS_MOVE)) {
+            unit.setMovesLeft(0);
+            cs.addPartial(See.only(serverPlayer), unit,
+                "movesLeft", String.valueOf(unit.getMovesLeft()));
+        }
 
         // Do not update others, nothing to see yet.
         return cs;

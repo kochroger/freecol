@@ -62,6 +62,14 @@ public class GameOptions {
     public static final String SETTLEMENT_ACTIONS_CONTACT_CHIEF
         = "model.option.settlementActionsContactChief";
 
+    /**
+     * House rule: a human player's unit asked whether to learn at a
+     * native settlement keeps its moves until it accepts, so declining
+     * (or a settlement with nothing to teach) costs no move.
+     */
+    public static final String CANCEL_KEEPS_MOVE
+        = "model.option.cancelKeepsMove";
+
     /** Do missionaries provide extra benefits. */
     public static final String ENHANCED_MISSIONARIES
         = "model.option.enhancedMissionaries";

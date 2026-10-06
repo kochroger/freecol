@@ -398,6 +398,44 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     }
 
     /**
+     * The house rule "Handlung abbrechen" keeps the move (D1): after a
+     * cancelled learn question or village box the unit can still move,
+     * so no automatic end starts (nor the Spielzugende mode), however
+     * long the player waits and whatever view change the controller
+     * reports; the map takes keys.  Its last move later ends the turn
+     * after the normal 485 ms.
+     */
+    public void testCancelKeepsTheUnitUp() {
+        final Tile village = this.map.getTile(6, 5);
+        for (boolean promptPref : new boolean[] { false, true }) {
+            final Rig r = new Rig(this.game);
+            r.host.promptPref = promptPref;
+            r.host.active = ship(5, 5);
+            r.host.nextActive = true;        // the unit kept its moves
+            r.flow.villageBoxCancelled(village);
+            r.flow.boxClosed();
+            assertNull(r.flow.pending());
+            r.flow.noUnitLeft();             // e.g. the controller's view
+            assertNull(r.flow.pending());
+            r.advanceMs(5000);
+            r.flow.tick();
+            assertEquals(0, r.count("endTurn"));
+            assertEquals(0, r.count("prompt"));
+            assertFalse(r.flow.isInputBlocked());
+
+            // The unit's last move, long after the cancel: the normal pause.
+            r.host.nextActive = false;
+            r.flow.screenChanged();          // its final draw
+            r.flow.noUnitLeft();
+            assertNotNull(r.flow.pending());
+            r.advanceMs(promptPref ? 499 : 484);
+            assertEquals(0, r.count(promptPref ? "prompt" : "endTurn"));
+            r.advanceMs(1);
+            assertEquals(1, r.count(promptPref ? "prompt" : "endTurn"));
+        }
+    }
+
+    /**
      * The pref is read at the idle decision: on, the Spielzugende mode
      * comes at 500 ms and waits; the player ends the turn (Enter).
      */

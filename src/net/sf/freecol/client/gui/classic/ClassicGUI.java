@@ -71,6 +71,7 @@ import net.sf.freecol.client.gui.panel.FreeColPanel;
 import net.sf.freecol.common.FreeColException;
 import net.sf.freecol.common.i18n.Messages;
 import net.sf.freecol.common.model.Colony;
+import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.FreeColGameObject;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.GoodsType;
@@ -249,6 +250,13 @@ public class ClassicGUI extends GUI {
      * want a separately scaled one later.
      */
     private final ImageLibrary imageLibrary;
+
+    /**
+     * Puts every question and choice of the classic boxes
+     * ({@link Prompter#BOXES}); a test puts its own in, as no box can open
+     * headless.
+     */
+    Prompter prompter = Prompter.BOXES;
 
 
     /**
@@ -3143,7 +3151,8 @@ public class ClassicGUI extends GUI {
      * {@code invokeLater}, so blocking the classic popup on the EDT (which pumps
      * events) is fine; the handler fires with the result the instant it closes.
      * The handler runs in a {@code finally} so the server exchange still resolves
-     * (as a reject) if the popup throws, rather than dangling.
+     * (as a reject) if the popup throws, rather than dangling.  Escape and the
+     * close button reject too ({@link #confirmed}).
      */
     private void askEvent(java.awt.Image icon, String title,
                           StringTemplate message, String yesKey, String noKey,
@@ -3157,10 +3166,10 @@ public class ClassicGUI extends GUI {
         onEventThread(() -> {
                 int chosen = -1;
                 try {
-                    chosen = ClassicDialog.ask(dialogOwner(), title, page, options,
-                                               options.length - 1);
+                    chosen = this.prompter.ask(dialogOwner(), title, page,
+                                               options, options.length - 1);
                 } finally {
-                    final boolean accept = (yes != null && chosen == 0);
+                    final boolean accept = (yes != null && confirmed(chosen));
                     if (handler != null) handler.handle(accept);
                 }
                 return null;
@@ -3272,23 +3281,109 @@ public class ClassicGUI extends GUI {
      *
      * <p>Phase 3: put the question in the classic wood-framed popup shared with
      * every other classic dialog ({@link ClassicDialog}), replacing the plain
-     * Swing stopgap this shipped as.  A dismissed popup ({@code -1}) is neither
-     * option, so fall back to {@code defaultOk} — the same answer Escape gave
-     * before.
+     * Swing stopgap this shipped as.  {@code defaultOk} only decides which
+     * option Enter takes.  A dismissed popup ({@code -1}: Escape, the close
+     * button, a box that failed to open) answers "no", whatever the default
+     * (build spec W0e): Escape had answered {@code defaultOk}, so it chose
+     * "learn" at a village and "found" at the site warnings.
+     *
+     * <p>FreeCol's own question on sailing from coastal water onto the high
+     * seas ({@code InGameController.moveHighSeas}) is never shown: it is
+     * answered "no" at once, so that move is a plain one (W0f).  The
+     * original asks only at the map's east edge ({@link #sailHomeKey}).
      */
     @Override
     public boolean modalConfirmDialog(Tile tile, StringTemplate template,
                                       ImageIcon icon, String okKey,
                                       String cancelKey, boolean defaultOk) {
+        if (silentNo(template)) {
+            ClassicFrameRecorder.event("dialog-silent", template.getId() + " no");
+            return false;
+        }
         final String[] options = {
             Messages.message(okKey), Messages.message(cancelKey)
         };
         final ClassicDialog.Page page = new ClassicDialog.Page(
             Messages.message(template), (icon == null) ? null : icon.getImage());
-        final int chosen = onEventThread(() -> ClassicDialog.ask(dialogOwner(),
+        final int chosen = onEventThread(() -> this.prompter.ask(dialogOwner(),
                 colony(tile), page, options, (defaultOk ? 0 : 1)),
             -1);
-        return (chosen < 0) ? defaultOk : (chosen == 0);
+        return confirmed(chosen);
+    }
+
+    /** FreeCol's question on crossing onto the high seas, never shown (W0f). */
+    static final String HIGH_SEAS_QUESTION = "highseas.text";
+
+    /**
+     * Whether a confirm is answered "no" without a box: FreeCol's high-seas
+     * question (W0f).
+     *
+     * @param template The question.
+     * @return True if it is never shown.
+     */
+    static boolean silentNo(StringTemplate template) {
+        return template != null && HIGH_SEAS_QUESTION.equals(template.getId());
+    }
+
+    /**
+     * The answer of a yes/no box: only its first option is "yes"; the other,
+     * Escape and the close button ({@code -1}) are "no" (build spec W0e).
+     *
+     * @param chosen The option index the box returned, -1 if dismissed.
+     * @return True for "yes".
+     */
+    static boolean confirmed(int chosen) {
+        return chosen == 0;
+    }
+
+    /**
+     * What puts the classic boxes' questions: {@link #BOXES} in the game, a
+     * fake in the tests.  EDT only.
+     */
+    interface Prompter {
+
+        /**
+         * Put a question ({@link ClassicDialog#ask}).
+         *
+         * @param owner The window it belongs over.
+         * @param title The window title.
+         * @param page The question.
+         * @param options The option plates.
+         * @param defaultIndex The option Enter takes.
+         * @return The option chosen, -1 if dismissed (Escape, close).
+         */
+        int ask(Window owner, String title, ClassicDialog.Page page,
+                String[] options, int defaultIndex);
+
+        /**
+         * Pick one item from a list ({@link ClassicGUI#chooseFromList}).
+         *
+         * @param owner The window it belongs over.
+         * @param title The window title.
+         * @param message The prompt.
+         * @param icon An optional icon, or null.
+         * @param options The items.
+         * @return The item chosen, or null on Cancel, Escape or close.
+         */
+        Object choose(Window owner, String title, Object message, Icon icon,
+                      Object[] options);
+
+        /** The real boxes. */
+        Prompter BOXES = new Prompter() {
+                @Override
+                public int ask(Window owner, String title,
+                               ClassicDialog.Page page, String[] options,
+                               int defaultIndex) {
+                    return ClassicDialog.ask(owner, title, page, options,
+                                             defaultIndex);
+                }
+
+                @Override
+                public Object choose(Window owner, String title, Object message,
+                                     Icon icon, Object[] options) {
+                    return chooseFromList(owner, title, message, icon, options);
+                }
+            };
     }
 
     /**
@@ -3318,8 +3413,8 @@ public class ClassicGUI extends GUI {
         final String text = Messages.message(template);
         final ChoiceItem<T>[] options = choices.toArray(new ChoiceItem[0]);
         final ChoiceItem<T> chosen = onEventThread(() ->
-            (ChoiceItem<T>) chooseFromList(dialogOwner(), colony(tile), text,
-                                           icon, options), null);
+            (ChoiceItem<T>) this.prompter.choose(dialogOwner(), colony(tile),
+                                                 text, icon, options), null);
         return (chosen == null) ? null : chosen.getObject();
     }
 
@@ -3386,6 +3481,124 @@ public class ClassicGUI extends GUI {
                 });
         }
         return choice;
+    }
+
+    // The Europe question, by Roger's rule (build spec W8a).  A ClassicDialog
+    // until the original's in-canvas box (W7).
+
+    /** GAME.TXT's Europe question (@SAILHOME). */
+    static final String SAIL_HOME_SECTION = "SAILHOME";
+
+    /**
+     * Whether a move order gets the Europe question instead of a move, by
+     * Roger's rule (master plan section 1): a ship on the high seas in the
+     * last column the view shows, ordered east (6, 9 or 3) past it
+     * ({@link ClassicHud#eastPastView}).  Entering the light water, leaving
+     * it and moving along it are plain moves, and so is every move at the
+     * west edge (master plan section 10).
+     *
+     * @param unit The unit ordered.
+     * @param direction The direction ordered.
+     * @return True if the order asks the question.
+     */
+    static boolean asksSailHome(Unit unit, Direction direction) {
+        if (unit == null || direction == null || !unit.isNaval()
+            || !unit.hasTile() || unit.getMovesLeft() <= 0
+            || !unit.getType().canMoveToHighSeas()
+            || unit.getOwner() == null || unit.getOwner().getEurope() == null) {
+            return false;
+        }
+        final Tile tile = unit.getTile();
+        if (!tile.isDirectlyHighSeasConnected() || tile.getMap() == null) return false;
+        final Tile target = tile.getNeighbourOrNull(direction);
+        return ClassicHud.eastPastView(tile.getMap().getWidth(), direction,
+            tile.getX(), (target == null) ? -1 : target.getX());
+    }
+
+    /**
+     * A map key's move order, if it is the Europe question's
+     * ({@link #asksSailHome}): ask it.  The first row (Enter's, GAME.TXT
+     * {@code @default=1}) sails the ship to Europe ({@link #sailHome}): it
+     * leaves the map with no slide, as in the original.  The second row and
+     * Escape do nothing: the ship keeps its moves and stays the active unit,
+     * and the box's close restarts its blink and the turn flow's clock
+     * ({@link ClassicDialog.Watcher}).  EDT only.
+     *
+     * @param unit The unit ordered.
+     * @param direction The direction ordered.
+     * @return True if the order was the question's (whatever the answer),
+     *     false if it is a plain move.
+     */
+    boolean sailHomeKey(Unit unit, Direction direction) {
+        if (!asksSailHome(unit, direction)) return false;
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final SailHomeText q = sailHomeText(ClassicText.load(pack), unit);
+        final BufferedImage admiral = (pack == null) ? null
+            : pack.image(ClassicPackFiles.ssKey(ClassicFirstScene.PORTRAIT));
+        final int chosen = this.prompter.ask(dialogOwner(), colony(null),
+            new ClassicDialog.Page(q.text, admiral), q.options, q.defaultIndex);
+        ClassicFrameRecorder.event("sail-home", "unit=" + unit.getId()
+            + " at=" + unit.getTile().getX() + "," + unit.getTile().getY()
+            + " " + direction + " chosen=" + chosen);
+        if (confirmed(chosen)) sailHome(unit);
+        return true;
+    }
+
+    /**
+     * "Jawohl": the ship sails to Europe ({@code InGameController.moveTo}),
+     * taken off the map at once.
+     *
+     * @param unit The ship.
+     */
+    void sailHome(Unit unit) {
+        final FreeColClient fcc = getFreeColClient();
+        if (fcc == null || unit.getOwner().getEurope() == null) return;
+        fcc.getInGameController().moveTo(unit, unit.getOwner().getEurope());
+    }
+
+    /** The Europe question's text, its two rows and the row Enter takes. */
+    static final class SailHomeText {
+
+        final String text;
+        final String[] options;
+        final int defaultIndex;
+
+        SailHomeText(String text, String[] options, int defaultIndex) {
+            this.text = text;
+            this.options = options;
+            this.defaultIndex = defaultIndex;
+        }
+    }
+
+    /**
+     * The Europe question's words: GAME.TXT {@code @SAILHOME} from the pack
+     * (its gold markup dropped, the stopgap box draws one colour), else
+     * FreeCol's own high-seas strings.
+     *
+     * @param t The original texts, or null.
+     * @param unit The ship (its sailing time, for FreeCol's text).
+     * @return The words.
+     */
+    static SailHomeText sailHomeText(ClassicText t, Unit unit) {
+        final ClassicText.Message m = (t == null) ? null
+            : t.message(SAIL_HOME_SECTION);
+        if (m != null && !m.text.isEmpty() && m.options.size() >= 2) {
+            final int def = (m.defaultOption == null) ? 0
+                : ClassicHud.clamp(m.defaultOption - 1, 0, 1);
+            return new SailHomeText(unmarked(String.join(" ", m.text)),
+                new String[] { unmarked(m.options.get(0)),
+                               unmarked(m.options.get(1)) }, def);
+        }
+        return new SailHomeText(Messages.message(StringTemplate
+                .template("highseas.text")
+                .addAmount("%number%", (unit == null) ? 0 : unit.getSailTurns())),
+            new String[] { Messages.message("highseas.yes"),
+                           Messages.message("highseas.no") }, 0);
+    }
+
+    /** @return A GAME.TXT line without its colour braces, blanks collapsed. */
+    static String unmarked(String s) {
+        return s.replace("{", "").replace("}", "").replaceAll("\\s+", " ").trim();
     }
 
     /**
