@@ -193,4 +193,61 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         assertFalse(mv.isBlinkArmed());
         mv.dispose();
     }
+
+    /**
+     * Build spec W5: after its last move the unit stays on screen and does
+     * not blink (landfall 03 section 1); the panel keeps the block from
+     * before that move until another unit comes up (W5b); the hand-over
+     * asks whether the next unit needs a jump without making it.
+     */
+    public void testAfterTheLastMove() {
+        final Game game = getStandardGame();
+        final Map map = new MapBuilder(game).setDimensions(58, 72)
+            .setBaseTileType(spec().getTileType("model.tile.ocean"))
+            .setExploredByAll(true).build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile sea = map.getTile(30, 30);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, null, null, false);
+        final Unit ship = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        mv.setFocus(sea);
+        mv.changeToMoveUnits(ship);
+        assertTrue(mv.isBlinkArmed());
+        mv.blinkToggle(1);
+        assertTrue(mv.isBlinkOff());
+        // The last move: the re-selection with no moves left stops the
+        // clock ON, and a toggle still queued does nothing.
+        ship.setMovesLeft(0);
+        mv.changeToMoveUnits(ship);
+        assertFalse(mv.isBlinkArmed());
+        assertFalse(mv.isBlinkOff());
+        mv.blinkToggle(1);
+        assertFalse(mv.isBlinkOff());
+        assertTrue(mv.isShownAt(ship, sea));
+
+        // The stale block: live while it can move, remembered after.
+        assertTrue(ClassicInfoPanel.showsLive(ship, null));
+        assertFalse(ClassicInfoPanel.showsLive(ship, ship));
+        assertFalse(ClassicInfoPanel.showsLive(null, ship));
+        ship.setMovesLeft(3);
+        assertTrue(ClassicInfoPanel.showsLive(ship, ship));
+        final Unit other = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        other.setMovesLeft(0);
+        assertTrue(ClassicInfoPanel.showsLive(other, ship));
+
+        // The jump question: the origin stays; a tile in the margin or
+        // off the view would jump, one inside would not.
+        final int[] o = mv.viewOrigin();
+        assertFalse(mv.wouldJump(map.getTile(o[0] + 7, o[1] + 6)));
+        assertTrue(mv.wouldJump(map.getTile(o[0] + 7, o[1] + 10)));
+        assertTrue(java.util.Arrays.equals(o, mv.viewOrigin()));
+        assertFalse(mv.wouldJump(null));
+        assertTrue(mv.jumpTo(map.getTile(o[0] + 7, o[1] + 10), "test"));
+        assertFalse(java.util.Arrays.equals(o, mv.viewOrigin()));
+        assertFalse(mv.wouldJump(map.getTile(mv.viewOrigin()[0] + 7,
+                                             mv.viewOrigin()[1] + 6)));
+        mv.dispose();
+    }
 }

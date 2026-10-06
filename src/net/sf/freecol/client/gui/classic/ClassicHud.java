@@ -150,6 +150,35 @@ final class ClassicHud {
     private static final int[] NATION_FILL
         = { 0xFF0000, 0x5555FF, 0xFFFF55, 0xFF7100 };
 
+    /**
+     * The turn indicator (build spec W5c): a solid 5x3 box in the panel's
+     * bottom-right corner, over the wood, in the colour of the player
+     * whose turn it is ({@link #indicatorRgb}); the wood is back when it
+     * goes (landfall 03 section 2).
+     */
+    static final Rectangle INDICATOR = new Rectangle(315, 197, 5, 3);
+
+    /**
+     * The turn indicator's colours (landfall 03 section 2, V: the NAMES.TXT
+     * {@code @TRIBES} last column and {@code @COUNTRY} as DOSBox shows
+     * them), by FreeCol nation id.  Holland's is ours, shown while our
+     * turn-start boxes are up.
+     */
+    private static final java.util.Map<String, Integer> INDICATOR_RGB
+        = java.util.Map.ofEntries(
+            java.util.Map.entry("model.nation.inca", 0xF7F3C7),
+            java.util.Map.entry("model.nation.aztec", 0xC7A220),
+            java.util.Map.entry("model.nation.arawak", 0x698AC3),
+            java.util.Map.entry("model.nation.iroquois", 0x6D3C18),
+            java.util.Map.entry("model.nation.cherokee", 0x75A64D),
+            java.util.Map.entry("model.nation.apache", 0xC3AE86),
+            java.util.Map.entry("model.nation.sioux", 0x920000),
+            java.util.Map.entry("model.nation.tupi", 0x045D04),
+            java.util.Map.entry("model.nation.english", 0xFF0000),
+            java.util.Map.entry("model.nation.french", 0x5555FF),
+            java.util.Map.entry("model.nation.spanish", 0xFFFF55),
+            java.util.Map.entry("model.nation.dutch", 0xFF7100));
+
 
     /**
      * What the minimap shows: one colour per map tile plus where the map
@@ -221,6 +250,9 @@ final class ClassicHud {
         /** The unit list below it (cargo, or the tile's other units). */
         final List<UnitFacts> list;
 
+        /** The turn indicator's colour ({@link #INDICATOR}), or -1 for none. */
+        final int indicator;
+
         PanelModel(MinimapModel minimap, String season, String gold,
                    boolean scene) {
             this(minimap, season, gold, scene, null, null);
@@ -228,12 +260,19 @@ final class ClassicHud {
 
         PanelModel(MinimapModel minimap, String season, String gold,
                    boolean scene, UnitFacts active, List<UnitFacts> list) {
+            this(minimap, season, gold, scene, active, list, -1);
+        }
+
+        PanelModel(MinimapModel minimap, String season, String gold,
+                   boolean scene, UnitFacts active, List<UnitFacts> list,
+                   int indicator) {
             this.minimap = minimap;
             this.season = season;
             this.gold = gold;
             this.scene = scene;
             this.active = active;
             this.list = (list == null) ? new ArrayList<>() : list;
+            this.indicator = indicator;
         }
     }
 
@@ -552,7 +591,8 @@ final class ClassicHud {
 
     /**
      * The whole panel: chrome, minimap, status lines, and -- unless in scene
-     * mode -- the unit block and list ({@link #paintUnits}).
+     * mode -- the unit block and list ({@link #paintUnits}); last the turn
+     * indicator, if any ({@link #paintIndicator}).
      *
      * @param text The pack's texts for the unit lines, or null (then only
      *     the units' plain names are written).
@@ -563,6 +603,33 @@ final class ClassicHud {
         paintMinimap(g, p.minimap);
         paintStatus(g, font, p.season, p.gold);
         if (!p.scene) paintUnits(g, font, text, p.active, p.list);
+        paintIndicator(g, p.indicator);
+    }
+
+    /**
+     * The turn indicator (build spec W5c): {@link #INDICATOR} filled with
+     * {@code rgb}, over the wood and anything the unit list drew there.
+     *
+     * @param rgb The colour, or -1 for none (the wood stays).
+     */
+    static void paintIndicator(Graphics2D g, int rgb) {
+        if (rgb < 0) return;
+        g.setColor(new Color(rgb & 0xFFFFFF));
+        g.fillRect(INDICATOR.x, INDICATOR.y, INDICATOR.width, INDICATOR.height);
+    }
+
+    /**
+     * The turn indicator's colour for a player: the measured table for
+     * the original's twelve nations (natives, the three European rivals,
+     * Holland), else the player's minimap colour ({@link #nationRgb}).
+     *
+     * @param p The player, or null.
+     * @return The RGB, or -1 for no player.
+     */
+    static int indicatorRgb(Player p) {
+        if (p == null) return -1;
+        final Integer c = INDICATOR_RGB.get(p.getNationId());
+        return (c != null) ? c : nationRgb(p);
     }
 
 

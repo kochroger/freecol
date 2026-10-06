@@ -119,6 +119,8 @@ public class ClassicScriptTest extends TestCase {
         assertBad("pref nope on", "unknown pref");
         assertBad("pref moveAccelerator maybe", "on or off");
         assertBad("pref moveAccelerator", "name and on/off");
+        assertBad("goto 5", "goto needs x and y");
+        assertBad("goto 5 x", "not a number");
         assertBad("quit now", "no argument");
         assertBad("jump 3", "unknown command");
     }
@@ -185,6 +187,11 @@ public class ClassicScriptTest extends TestCase {
         }
 
         @Override
+        public void gotoTile(int x, int y) {
+            this.calls.add("goto " + x + "," + y);
+        }
+
+        @Override
         public void pref(String name, boolean value) {
             this.calls.add("pref " + name + "=" + value);
         }
@@ -213,12 +220,13 @@ public class ClassicScriptTest extends TestCase {
         final File r = resultFile();
         final long t0 = System.nanoTime();
         new ClassicScriptDriver(parse("waitGame 1000", "waitIdle 5000", "wait 100",
-                                      "key NUMPAD7", "click 1 2",
+                                      "key NUMPAD7", "click 1 2", "goto 36 44",
                                       "pref endTurnPrompt on", "waitTurn 5000", "quit"),
                                 h, r).run();
         final long ms = (System.nanoTime() - t0) / 1_000_000L;
         assertEquals(Arrays.asList("key pressed NUMPAD7 " + ClassicScriptDriver.KEY_HOLD_MS,
-                                   "click 1,2", "pref endTurnPrompt=true", "quit"),
+                                   "click 1,2", "goto 36,44", "pref endTurnPrompt=true",
+                                   "quit"),
                      h.calls);
         assertEquals("ok", result(r));
         // Two stable idle waits and the 100 ms sleep.

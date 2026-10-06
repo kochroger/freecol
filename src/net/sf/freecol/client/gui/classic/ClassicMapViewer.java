@@ -272,6 +272,14 @@ final class ClassicMapViewer extends JPanel {
     private long lastFinalNanos = 0L;
 
     /**
+     * The next paint shows a change the player sees: a view jump, a
+     * blink toggle, the cursor (the final draw counts by itself).  Told
+     * to the GUI's turn flow (build spec W5: the pauses run from the last
+     * change), while the many repaints that change nothing are not.
+     */
+    private boolean changeToShow = false;
+
+    /**
      * The active unit's blink is OFF: its tile is drawn bare, with no unit
      * at all, carrier and stack included (build spec W3).
      */
@@ -402,8 +410,8 @@ final class ClassicMapViewer extends JPanel {
      * in MOVE_UNITS mode they move the active unit via
      * {@link net.sf.freecol.client.control.InGameController#moveUnit}; in
      * TERRAIN mode they step the selected-tile cursor to a neighbour.  When
-     * nothing is selected (END_TURN mode) they fall back to the raw-grid free
-     * pan so the map stays navigable.
+     * nothing is selected (END_TURN mode) they do nothing, as in the
+     * original (build spec W5d).
      *
      * <p><b>Isometric vs. rectangular.</b> The model is isometric — a model
      * {@link Direction} steps in the diamond lattice, so {@code Direction.N}
@@ -418,14 +426,14 @@ final class ClassicMapViewer extends JPanel {
     private void installKeyBindings() {
         final InputMap im = getInputMap(WHEN_IN_FOCUSED_WINDOW);
         final ActionMap am = getActionMap();
-        bindMove(im, am, Intent.UP,    0, -1, "UP", "NUMPAD8");
-        bindMove(im, am, Intent.DOWN,  0,  1, "DOWN", "NUMPAD2");
-        bindMove(im, am, Intent.LEFT, -1,  0, "LEFT", "NUMPAD4");
-        bindMove(im, am, Intent.RIGHT, 1,  0, "RIGHT", "NUMPAD6");
-        bindMove(im, am, Intent.NW,   -1, -1, "HOME", "NUMPAD7");
-        bindMove(im, am, Intent.NE,    1, -1, "PAGE_UP", "NUMPAD9");
-        bindMove(im, am, Intent.SW,   -1,  1, "END", "NUMPAD1");
-        bindMove(im, am, Intent.SE,    1,  1, "PAGE_DOWN", "NUMPAD3");
+        bindMove(im, am, Intent.UP, "UP", "NUMPAD8");
+        bindMove(im, am, Intent.DOWN, "DOWN", "NUMPAD2");
+        bindMove(im, am, Intent.LEFT, "LEFT", "NUMPAD4");
+        bindMove(im, am, Intent.RIGHT, "RIGHT", "NUMPAD6");
+        bindMove(im, am, Intent.NW, "HOME", "NUMPAD7");
+        bindMove(im, am, Intent.NE, "PAGE_UP", "NUMPAD9");
+        bindMove(im, am, Intent.SW, "END", "NUMPAD1");
+        bindMove(im, am, Intent.SE, "PAGE_DOWN", "NUMPAD3");
         bindTurnControls(im, am);
     }
 
@@ -489,9 +497,14 @@ final class ClassicMapViewer extends JPanel {
      * {@code GUI} no-ops modal dialogs, so {@code endTurn(true)}'s "units still
      * active" confirmation would misbehave.  The server's new-turn response drives
      * the next active unit back through the {@code changeView}/{@code refresh}
-     * hooks {@link ClassicGUI} already delegates here.
+     * hooks {@link ClassicGUI} already delegates here.  Through the GUI's
+     * turn flow (build spec W5), which lights the turn indicator first.
      */
     private void endTurn() {
+        if (this.gui != null) {
+            this.gui.requestEndTurn("key");
+            return;
+        }
         ClassicFrameRecorder.event("end-turn", "request");
         this.freeColClient.getInGameController().endTurn(false);
     }
@@ -549,11 +562,12 @@ final class ClassicMapViewer extends JPanel {
     private enum Intent { UP, DOWN, LEFT, RIGHT, NW, NE, SW, SE }
 
     /**
-     * Bind the given keystrokes to the given {@link Intent}; {@code (panDx,
-     * panDy)} is the raw-grid pan used as a fallback when nothing is selected.
+     * Bind the given keystrokes to the given {@link Intent}.  A key the
+     * map must ignore now ({@link #inputBlocked}) is logged as
+     * {@code key-blocked} for the recorder.
      */
     private void bindMove(InputMap im, ActionMap am, Intent intent,
-                          int panDx, int panDy, String... keys) {
+                          String... keys) {
         final String name = "move_" + intent;
         for (String key : keys) {
             im.put(KeyStroke.getKeyStroke(key), name);
@@ -561,20 +575,28 @@ final class ClassicMapViewer extends JPanel {
         am.put(name, new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
-                    if (inputBlocked()) return;
-                    handleMoveKey(intent, panDx, panDy);
+                    if (inputBlocked()) {
+                        ClassicFrameRecorder.event("key-blocked", intent.toString());
+                        return;
+                    }
+                    handleMoveKey(intent);
                 }
             });
     }
 
     /**
-     * Whether the map's own keys must do nothing: while the first game scene
-     * is up ({@link ClassicGUI#isDialogShowing}).  The scene's layer holds
-     * the focus and consumes every key, so this is only the backstop for a
-     * key that reaches the map anyway (e.g. the focus was lost).
+     * Whether the map's own keys and clicks must do nothing: while the
+     * first game scene is up ({@link ClassicGUI#isDialogShowing}; the
+     * scene's layer holds the focus and consumes every key, so this is the
+     * backstop for a key that reaches the map anyway), and while the
+     * player waits (build spec W5d): not our turn, or the pause before the
+     * end of turn, the next unit or the turn's first unit is pending
+     * ({@link ClassicGUI#turnInputBlocked}).  Nothing on the screen reacts
+     * then (landfall 03 section 7).
      */
     private boolean inputBlocked() {
-        return this.gui != null && this.gui.isDialogShowing();
+        return this.gui != null
+            && (this.gui.isDialogShowing() || this.gui.turnInputBlocked());
     }
 
     /**
@@ -618,11 +640,13 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
-     * Handle a movement key: move the active unit (MOVE_UNITS), step the
-     * selected-tile cursor (TERRAIN), or raw-grid pan the view when nothing is
-     * selected.  Mirrors {@code MoveAction.actionPerformed}.
+     * Handle a movement key: move the active unit (MOVE_UNITS) or step the
+     * selected-tile cursor (TERRAIN).  Mirrors {@code MoveAction.actionPerformed}.
+     * With nothing selected the key does nothing: the original's arrows
+     * never moved the landscape while no unit was up (build spec W5d,
+     * landfall 03 section 7); the view moves only by its jumps.
      */
-    private void handleMoveKey(Intent intent, int panDx, int panDy) {
+    private void handleMoveKey(Intent intent) {
         if (this.viewMode == GUI.ViewMode.MOVE_UNITS
             && this.activeUnit != null && this.activeUnit.getTile() != null) {
             final Direction d = intentToDirection(intent, this.activeUnit.getTile());
@@ -663,11 +687,10 @@ final class ClassicMapViewer extends JPanel {
             }
             return;
         }
-        // Nothing selected: keep the map navigable with a raw-grid free pan.
+        // Nothing selected: nothing happens.
         if (ClassicFrameRecorder.on()) {
-            ClassicFrameRecorder.event("pan", intent + " mode=" + this.viewMode);
+            ClassicFrameRecorder.event("key-ignored", intent + " mode=" + this.viewMode);
         }
-        panView(panDx, panDy);
     }
 
     /** "x,y" of a tile for the recorder's events, "-" for none. */
@@ -761,6 +784,9 @@ final class ClassicMapViewer extends JPanel {
      * ({@link #jumpIfNeeded}; I: the original's view mode was not recorded).
      */
     void changeToTerrain(Tile tile) {
+        if (tile != this.selectedTile || this.viewMode != GUI.ViewMode.TERRAIN) {
+            this.changeToShow = true;   // the cursor moves
+        }
         this.viewMode = GUI.ViewMode.TERRAIN;
         this.selectedTile = tile;
         this.activeUnit = null;
@@ -828,6 +854,44 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
+     * Whether {@link #jumpIfNeeded} would move the view for {@code tile}
+     * now; a plain question (the hand-over plans its jump with it, build
+     * spec W5e).
+     *
+     * @param tile The tile, or null.
+     * @return True if the view would jump.
+     */
+    boolean wouldJump(Tile tile) {
+        final Map map = (tile == null) ? null : tile.getMap();
+        if (map == null) return false;
+        final int[] o = this.origin;
+        if (o != null && !ClassicHud.needsRecentre(map.getWidth(),
+                map.getHeight(), o[0], o[1], tile.getX(), tile.getY())) {
+            return false;
+        }
+        final int[] v = ClassicHud.viewFor(map.getWidth(), map.getHeight(),
+                                           tile.getX(), tile.getY());
+        return o == null || o[0] != v[0] || o[1] != v[1];
+    }
+
+    /**
+     * The hand-over's jump (build spec W5e): the view moves to the next
+     * unit's tile ahead of its panel block, the map and the minimap ring
+     * painted at once, as one cut; the active unit (and so the panel's
+     * block) stays as it is until the unit comes up.
+     *
+     * @param tile The next unit's tile.
+     * @param reason What asks (for the recorder).
+     * @return True if the view moved.
+     */
+    boolean jumpTo(Tile tile, String reason) {
+        if (!jumpIfNeeded(tile, reason)) return false;
+        paintNow(null);
+        if (this.gui != null) this.gui.paintBlinkDot();
+        return true;
+    }
+
+    /**
      * Put {@code tile} in cell (7,6) of the view, clamped to the map.
      *
      * @param tile The tile, or null to keep the view.
@@ -855,6 +919,7 @@ final class ClassicMapViewer extends JPanel {
         final int[] o = this.origin;
         if (o != null && o[0] == v[0] && o[1] == v[1]) return false;
         this.origin = v;
+        this.changeToShow = true;
         if (ClassicFrameRecorder.on()) {
             ClassicFrameRecorder.event("view-jump", reason + " "
                 + ((o == null) ? "-" : o[0] + "," + o[1]) + " -> "
@@ -1078,6 +1143,7 @@ final class ClassicMapViewer extends JPanel {
     void setBlinkOff(boolean off) {
         if (off == this.blinkOff) return;
         this.blinkOff = off;
+        this.changeToShow = true;
         paintBlinkCell();
         if (this.gui != null) this.gui.paintBlinkDot();
     }
@@ -1114,7 +1180,10 @@ final class ClassicMapViewer extends JPanel {
      * Restart the blink: ON now, the first OFF one half-period later (or
      * after the panel refresh that follows, {@link #blinkPanelPainted}).
      * The counter is reset, not resumed (landfall #7703 / #8163 / #8187).
-     * Without an active unit in MOVE_UNITS the clock stops instead.
+     * Without an active unit in MOVE_UNITS, or once it has no moves left,
+     * the clock stops instead: after its last move the unit stays on
+     * screen and does not blink, through the pause before the next unit or
+     * the end of turn (landfall 03 section 1, {@code ship_w1.png}).
      *
      * @param reason What re-arms it (for the recorder's events).
      */
@@ -1123,7 +1192,7 @@ final class ClassicMapViewer extends JPanel {
         setBlinkOff(false);
         final Unit u = this.activeUnit;
         if (this.viewMode == GUI.ViewMode.MOVE_UNITS && u != null
-            && u.getTile() != null) {
+            && u.getTile() != null && u.getMovesLeft() > 0) {
             this.blink.arm();
             if (ClassicFrameRecorder.on()) {
                 ClassicFrameRecorder.event("blink", "arm " + reason + " unit="
@@ -1204,7 +1273,7 @@ final class ClassicMapViewer extends JPanel {
     void blinkToggle(int n) {
         final Unit u = this.activeUnit;
         if (this.viewMode != GUI.ViewMode.MOVE_UNITS || u == null
-            || u.getTile() == null) {
+            || u.getTile() == null || u.getMovesLeft() <= 0) {
             rearmBlink("none");
             return;
         }
@@ -1491,6 +1560,10 @@ final class ClassicMapViewer extends JPanel {
      * double-click), which also arms the TERRAIN-mode cursor keys.
      */
     private void onClick(MouseEvent e) {
+        if (inputBlocked()) {
+            ClassicFrameRecorder.event("click-blocked", "");
+            return;
+        }
         final Tile tile = tileAt(e.getX(), e.getY());
         if (tile == null) return;
         requestFocusInWindow();
@@ -1583,11 +1656,15 @@ final class ClassicMapViewer extends JPanel {
         // The original draws no box around the active unit; the cursor
         // marks only a selected tile (TERRAIN).
         if (this.viewMode == GUI.ViewMode.TERRAIN) paintCursor(g, vx, vy);
+        boolean changed = this.changeToShow || this.animUnit != null;
+        this.changeToShow = false;
         if (this.finalDrawPending && this.animUnit == null) {
             this.finalDrawPending = false;
             this.lastFinalNanos = System.nanoTime();
             ClassicFrameRecorder.event("final-draw", "");
+            changed = true;
         }
+        if (changed && this.gui != null) this.gui.screenChanged();
     }
 
     /**

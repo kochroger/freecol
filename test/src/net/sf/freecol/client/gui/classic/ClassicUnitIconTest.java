@@ -252,10 +252,17 @@ public class ClassicUnitIconTest extends TestCase {
         return u;
     }
 
-    /** FreeCol's 300-ms sleep after a unit's last move is off while the classic map is up. */
+    /**
+     * FreeCol's 300-ms sleep after a unit's last move (W2) and its
+     * {@code autoEndTurn}, which ends at once (W5a: the Classic UI ends
+     * the turn itself, 485 ms after the last change), are off while the
+     * classic map is up.
+     */
     public void testSessionOptions() {
         assertEquals(Boolean.FALSE,
             ClassicGUI.SESSION_OPTIONS.get(ClientOptions.UNIT_LAST_MOVE_DELAY));
-        assertEquals(1, ClassicGUI.SESSION_OPTIONS.size());
+        assertEquals(Boolean.FALSE,
+            ClassicGUI.SESSION_OPTIONS.get(ClientOptions.AUTO_END_TURN));
+        assertEquals(2, ClassicGUI.SESSION_OPTIONS.size());
     }
 }

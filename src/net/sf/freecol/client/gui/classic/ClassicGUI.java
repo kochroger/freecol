@@ -172,6 +172,16 @@ public class ClassicGUI extends GUI {
     private ClassicInfoPanel infoPanel;
 
     /**
+     * The end of turn and the hand-over to the next unit (build spec W5),
+     * created with the in-game HUD ({@link #installInGameHud}) and dropped
+     * with it ({@link #teardownInGame}); null without a game view.
+     */
+    private ClassicTurnFlow turnFlow;
+
+    /** The turn flow's 50-ms poll (the turn indicator, W5c), with it. */
+    private javax.swing.Timer turnPoll;
+
+    /**
      * The title screen and main menu (EDT only).  Created by
      * {@link #startGUI}, it is the frame's content pane whenever no game is
      * shown: passive while a game loads, live after {@link #showMainPanel}.
@@ -1092,6 +1102,10 @@ public class ClassicGUI extends GUI {
                 instanceof ClassicReportHighScoresPanel)) {
             closeReportPanel();
         }
+        if (this.turnPoll != null) this.turnPoll.stop();
+        if (this.turnFlow != null) this.turnFlow.dispose();
+        this.turnPoll = null;
+        this.turnFlow = null;
         if (this.mapViewer != null) this.mapViewer.dispose();
         if (this.menuStrip != null) this.menuStrip.closeMenu();
         if (this.frame != null) this.frame.setJMenuBar(null);
@@ -1619,9 +1633,11 @@ public class ClassicGUI extends GUI {
                 public void menuClosed() {
                     ClassicFrameRecorder.event("menu-close", "");
                     if (mapViewer != null) mapViewer.resumeBlink("menu");
+                    if (turnFlow != null) turnFlow.boxClosed();
                 }
             }, tiny, wood, text);
-        // Every popup holds the map's blink ON and restarts it at its close.
+        // Every popup holds the map's blink ON and restarts it at its close;
+        // its close also restarts a pending end of turn (build spec W5a).
         ClassicDialog.setWatcher(new ClassicDialog.Watcher() {
                 @Override
                 public void opened() {
@@ -1631,8 +1647,16 @@ public class ClassicGUI extends GUI {
                 @Override
                 public void closed() {
                     if (mapViewer != null) mapViewer.resumeBlink("dialog");
+                    if (turnFlow != null) turnFlow.boxClosed();
                 }
             });
+        this.turnFlow = new ClassicTurnFlow(new TurnHost(), ClassicSlide.SYSTEM,
+            SwingUtilities::invokeLater, true);
+        this.infoPanel.setTurnFlow(this.turnFlow);
+        this.turnPoll = new javax.swing.Timer(ClassicTurnFlow.POLL_MS, e -> {
+                if (turnFlow != null) turnFlow.tick();
+            });
+        this.turnPoll.start();
         this.hudPane = new ClassicHudPane(this.menuStrip, this.mapViewer,
             this.infoPanel, arrowSprite(pack), () -> sceneShowing);
         ClassicKeyMap.install(this.hudPane, this.mapViewer,
@@ -1722,28 +1746,292 @@ public class ClassicGUI extends GUI {
         repaintHud();
     }
 
-    /** {@inheritDoc} */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The controller's fallback tile when no unit is left (and the
+     * player's own tile selections): the turn flow arms the automatic end
+     * if nothing can move any more (build spec W5a).
+     */
     @Override
     public void changeView(Tile tile) {
-        if (this.mapViewer != null) this.mapViewer.changeToTerrain(tile);
+        if (this.mapViewer != null) {
+            if (droppedViewChange("tile")) return;
+            this.mapViewer.changeToTerrain(tile);
+            if (this.turnFlow != null) this.turnFlow.noUnitLeft();
+        }
         repaintInfo();
         updateActions();
     }
 
-    /** {@inheritDoc} */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>A different unit after the previous one ran out of moves, and the
+     * first unit of our turn, come up after the original's pause (build
+     * spec W5e): the turn flow takes them over and activates them later.
+     */
     @Override
     public void changeView(Unit unit, boolean force) {
-        if (this.mapViewer != null) this.mapViewer.changeToMoveUnits(unit);
+        if (this.mapViewer != null) {
+            if (droppedViewChange("unit")) return;
+            final Unit previous = this.mapViewer.getActiveUnit();
+            if (this.turnFlow == null
+                || !this.turnFlow.unitChosen(unit, previous)) {
+                this.mapViewer.changeToMoveUnits(unit);
+            }
+        }
         repaintInfo();
         updateActions();
     }
 
-    /** {@inheritDoc} */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>No unit left: the turn flow ends the turn 485 ms after the last
+     * change (build spec W5a), never FreeCol's {@code autoEndTurn}.
+     */
     @Override
     public void changeView() {
-        if (this.mapViewer != null) this.mapViewer.changeToEndTurn();
+        if (this.mapViewer != null) {
+            if (droppedViewChange("end")) return;
+            this.mapViewer.changeToEndTurn();
+            if (this.turnFlow != null) this.turnFlow.noUnitLeft();
+        }
         repaintInfo();
         updateActions();
+    }
+
+    /**
+     * Whether a view change of the controller is dropped: while the goto
+     * orders of our turn start run, FreeCol queues one for each unit it
+     * moves, and they would arrive after the moves (build spec W5f,
+     * {@link ClassicTurnFlow#ignoring}).
+     *
+     * @param what Which change (for the recorder).
+     * @return True if dropped.
+     */
+    private boolean droppedViewChange(String what) {
+        if (this.turnFlow == null || !this.turnFlow.ignoring()) return false;
+        ClassicFrameRecorder.event("handover", "dropped view change " + what);
+        return true;
+    }
+
+    /**
+     * End the turn now on the player's request (Enter, or Space with no
+     * unit up), through the turn flow, which lights the turn indicator
+     * first (build spec W5c).
+     *
+     * @param why What asks (for the recorder).
+     */
+    void requestEndTurn(String why) {
+        if (this.turnFlow != null) {
+            this.turnFlow.endTurnNow(why);
+            return;
+        }
+        ClassicFrameRecorder.event("end-turn", why);
+        getFreeColClient().getInGameController().endTurn(false);
+    }
+
+    /**
+     * Whether the map must ignore keys and clicks because the player waits
+     * (build spec W5d, {@link ClassicTurnFlow#isInputBlocked}).
+     *
+     * @return True while blocked.
+     */
+    boolean turnInputBlocked() {
+        return this.turnFlow != null && this.turnFlow.isInputBlocked();
+    }
+
+    /** The player saw the map or the panel change: the pauses run from the last change. */
+    void screenChanged() {
+        if (this.turnFlow != null) this.turnFlow.screenChanged();
+    }
+
+    /**
+     * Whether the turn flow keeps the player waiting (the acceptance
+     * harness's idle test, {@link ClassicTurnFlow#isBusy}).
+     *
+     * @return True while a pause is pending or our new turn is not shown.
+     */
+    boolean turnFlowBusy() {
+        return this.turnFlow != null && this.turnFlow.isBusy();
+    }
+
+    /** @return The turn flow's state for the recorder's probe (any thread). */
+    String turnFlowState() {
+        final ClassicTurnFlow f = this.turnFlow;
+        return (f == null) ? "-" : f.probeState();
+    }
+
+    /**
+     * Whether anything is up that the end of turn and the next unit must
+     * wait for: the first scene, a menu, a modal box, a classic screen.
+     *
+     * @return True if so.
+     */
+    private boolean turnBlocked() {
+        if (this.sceneShowing || modalDialogShowing()) return true;
+        if (this.menuStrip != null && this.menuStrip.isMenuOpen()) return true;
+        for (Window w : new Window[] { this.colonyFrame, this.europeFrame,
+                                        this.reportFrame, this.buildQueueFrame }) {
+            if (w != null && w.isShowing()) return true;
+        }
+        return false;
+    }
+
+    /** What the turn flow drives: the controller, the map and the panel. */
+    private final class TurnHost implements ClassicTurnFlow.Host {
+
+        @Override
+        public boolean myTurn() {
+            final FreeColClient fcc = getFreeColClient();
+            return fcc != null && fcc.currentPlayerIsMyPlayer();
+        }
+
+        @Override
+        public boolean blocked() {
+            return turnBlocked();
+        }
+
+        @Override
+        public boolean hasNextActiveUnit() {
+            final Player p = getMyPlayer();
+            return p != null && p.hasNextActiveUnit();
+        }
+
+        @Override
+        public boolean hasNextGoingToUnit() {
+            final Player p = getMyPlayer();
+            return p != null && p.hasNextGoingToUnit();
+        }
+
+        @Override
+        public Unit firstGoingToUnit() {
+            final Player p = getMyPlayer();
+            if (p == null) return null;
+            return p.getUnits().filter(Unit::goingToDestination)
+                .sorted(Unit.locComparator).findFirst().orElse(null);
+        }
+
+        @Override
+        public int turnNumber() {
+            final Game g = getGame();
+            return (g == null || g.getTurn() == null) ? -1
+                : g.getTurn().getNumber();
+        }
+
+        @Override
+        public boolean promptPref() {
+            return ClassicPrefs.get().is(ClassicPrefs.END_TURN_PROMPT);
+        }
+
+        @Override
+        public Unit activeUnit() {
+            return (mapViewer == null) ? null : mapViewer.getActiveUnit();
+        }
+
+        @Override
+        public boolean wouldJump(Unit unit) {
+            return mapViewer != null && unit != null
+                && mapViewer.wouldJump(unit.getTile());
+        }
+
+        @Override
+        public void jumpTo(Unit unit) {
+            if (mapViewer != null) mapViewer.jumpTo(unit.getTile(), "handover");
+        }
+
+        @Override
+        public void activate(Unit unit) {
+            if (mapViewer == null) return;
+            mapViewer.changeToMoveUnits(unit);
+            // The block now, on time, in ONE panel paint: it is the panel
+            // refresh the blink's first OFF is timed from (W3), and a second
+            // one queued behind it would shift that phase.  So the actions
+            // are refreshed without updateActions' panel repaint.
+            if (infoPanel != null) infoPanel.paintNow();
+            try {
+                getFreeColClient().updateActions();
+            } catch (Exception e) {
+                logger.log(Level.WARNING, "ClassicGUI: updateActions failed.", e);
+            }
+            if (menuStrip != null) {
+                menuStrip.repaint();
+                menuStrip.dropLayer().repaint();
+            }
+            if (europePanel != null) europePanel.refresh();
+            if (colonyPanel != null) colonyPanel.refresh();
+        }
+
+        @Override
+        public void wipe() {
+            if (mapViewer != null && mapViewer.getActiveUnit() != null) {
+                mapViewer.changeToEndTurn();
+            }
+            if (infoPanel != null) {
+                infoPanel.clearStale();
+                infoPanel.paintNow();
+            }
+        }
+
+        @Override
+        public void paintIndicator() {
+            if (infoPanel != null) infoPanel.paintIndicatorNow();
+        }
+
+        @Override
+        public void endTurn() {
+            getFreeColClient().getInGameController().endTurn(false);
+        }
+
+        @Override
+        public void runGotoOrders() {
+            if (mapViewer == null) return;
+            final Unit first = firstGoingToUnit();
+            // The goto unit is the one up while it moves (its block counts
+            // its moves down); it moves first (doExecuteGotoOrders takes
+            // the active unit first).
+            if (first != null && mapViewer.getActiveUnit() != first) {
+                mapViewer.changeToMoveUnits(first);
+            }
+            getFreeColClient().getInGameController().executeGotoOrders();
+        }
+
+        @Override
+        public void nextActiveUnit() {
+            getFreeColClient().getInGameController().nextActiveUnit();
+        }
+
+        @Override
+        public void enterPrompt() {
+            // The Spielzugende mode's look (tile info, the word, the square)
+            // is build spec W17; until then the mode only waits for Enter
+            // or Space, with the arrows inert.
+            repaintInfo();
+        }
+
+        @Override
+        public Player currentPlayer() {
+            final Game g = getGame();
+            return (g == null) ? null : g.getCurrentPlayer();
+        }
+
+        @Override
+        public Player myPlayer() {
+            return getMyPlayer();
+        }
+
+        @Override
+        public Player nextPlayer() {
+            final Game g = getGame();
+            return (g == null) ? null : g.getNextPlayer();
+        }
+
+        @Override
+        public void post(Runnable r) {
+            SwingUtilities.invokeLater(r);
+        }
     }
 
     /**
@@ -1796,10 +2084,15 @@ public class ClassicGUI extends GUI {
      *   slide at offset 15 for 300 ms more (build spec W2: the final draw
      *   comes 72 ms after offset 15).  The pause before the next unit or the
      *   end of turn is the Classic UI's own (W5).</li>
+     *   <li>{@code autoEndTurn} off: FreeCol's automatic end comes at once,
+     *   inside the controller's last {@code updateActiveUnit}, with no
+     *   pause.  The Classic UI ends the turn itself, 485 ms after the last
+     *   change ({@link ClassicTurnFlow}, build spec section 2 and W5a).</li>
      * </ul>
      */
     static final Map<String, Boolean> SESSION_OPTIONS
-        = Map.of(ClientOptions.UNIT_LAST_MOVE_DELAY, Boolean.FALSE);
+        = Map.of(ClientOptions.UNIT_LAST_MOVE_DELAY, Boolean.FALSE,
+                 ClientOptions.AUTO_END_TURN, Boolean.FALSE);
 
     /** The values {@link #applySessionOptions} replaced, by option id. */
     private final Map<String, Boolean> replacedOptions = new HashMap<>();
@@ -2936,6 +3229,66 @@ public class ClassicGUI extends GUI {
             (ChoiceItem<T>) chooseFromList(dialogOwner(), colony(tile), text,
                                            icon, options), null);
         return (chosen == null) ? null : chosen.getObject();
+    }
+
+    // The village boxes.  Only their cancel is seen here: the original
+    // ends the turn 756 ms after a cancelled village box instead of 485
+    // (build spec W5a, delta W5a).  The boxes themselves are W8's; a
+    // cancel keeps the unit's move (Roger's house rule), as FreeCol does.
+
+    /** {@inheritDoc} */
+    @Override
+    public net.sf.freecol.common.model.Constants.ArmedUnitSettlementAction
+        getArmedUnitSettlementChoice(
+            net.sf.freecol.common.model.Settlement settlement) {
+        return villageChoice(super.getArmedUnitSettlementChoice(settlement));
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public net.sf.freecol.common.model.Constants.TradeAction
+        getIndianSettlementTradeChoice(
+            net.sf.freecol.common.model.Settlement settlement,
+            StringTemplate template, boolean canBuy, boolean canSell,
+            boolean canGift) {
+        return villageChoice(super.getIndianSettlementTradeChoice(settlement,
+                template, canBuy, canSell, canGift));
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public net.sf.freecol.common.model.Constants.MissionaryAction
+        getMissionaryChoice(Unit unit,
+            net.sf.freecol.common.model.IndianSettlement is,
+            boolean canEstablish, boolean canDenounce) {
+        return villageChoice(super.getMissionaryChoice(unit, is, canEstablish,
+                                                       canDenounce));
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public net.sf.freecol.common.model.Constants.ScoutIndianSettlementAction
+        getScoutIndianSettlementChoice(
+            net.sf.freecol.common.model.IndianSettlement is,
+            String numberString) {
+        return villageChoice(super.getScoutIndianSettlementChoice(is,
+                                                                  numberString));
+    }
+
+    /**
+     * Pass a village box's answer on, telling the turn flow of a cancel
+     * (null) so the next idle pause is the original's longer one.
+     *
+     * @param choice The answer, null for "Handlung abbrechen".
+     * @return {@code choice}.
+     */
+    private <T> T villageChoice(T choice) {
+        if (choice == null) {
+            invokeNowOrLater(() -> {
+                    if (this.turnFlow != null) this.turnFlow.villageBoxCancelled();
+                });
+        }
+        return choice;
     }
 
     /**

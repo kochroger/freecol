@@ -112,7 +112,9 @@ final class ClassicTestHarness {
     /**
      * The state the recorder logs whenever it changes: turn, whose turn,
      * view mode, the active unit (id, tile, moves left in thirds), the view
-     * origin, whether a dialog or the first scene is up and the open
+     * origin, the turn flow (build spec W5: its pending pause, waiting for
+     * our turn, the Spielzugende mode), whether a dialog or the first scene
+     * is up and the open
      * dialog windows.  Runs on the sampler thread: plain reads only.
      *
      * @return The state line.
@@ -143,6 +145,7 @@ final class ClassicTestHarness {
             final int[] v = mv.peekViewOrigin();
             if (v != null) sb.append(" view=").append(v[0]).append(',').append(v[1]);
             if (mv.isAnimating()) sb.append(" slide");
+            sb.append(" flow=").append(this.gui.turnFlowState());
         }
         sb.append(" dlg=").append(this.gui.isDialogShowing());
         for (Window w : Window.getWindows()) {
@@ -250,7 +253,8 @@ final class ClassicTestHarness {
                     final ClassicMapViewer mv = gui.currentMapViewer();
                     return gui.currentHudPane() != null && mv != null
                         && !mv.isAnimating() && fcc.currentPlayerIsMyPlayer()
-                        && !gui.isDialogShowing() && modalDialog() == null;
+                        && !gui.isDialogShowing() && modalDialog() == null
+                        && !gui.turnFlowBusy();
                 }, false);
         }
 
@@ -361,6 +365,33 @@ final class ClassicTestHarness {
                 co.getOption(id, BooleanOption.class).setValue(value);
             }
             ClassicFrameRecorder.event("pref", name + "=" + value + " (" + id + ")");
+        }
+
+        @Override
+        public void gotoTile(int x, int y) throws ClassicScriptDriver.ScriptException {
+            // Check on the EDT, then give the order there without waiting:
+            // the unit's first steps slide on the EDT (a waitIdle follows).
+            final String err = onEdt(() -> {
+                    final ClassicMapViewer mv = gui.currentMapViewer();
+                    final Unit u = (mv == null) ? null : mv.getActiveUnit();
+                    final Game g = fcc.getGame();
+                    final Tile t = (g == null || g.getMap() == null) ? null
+                        : g.getMap().getTile(x, y);
+                    if (u == null || t == null) {
+                        return "no active unit or no tile " + x + "," + y;
+                    }
+                    final net.sf.freecol.common.model.PathNode path
+                        = u.findPath(t);
+                    if (path == null) return "no path for " + u.getId() + " to " + x + "," + y;
+                    ClassicFrameRecorder.event("goto", u.getId() + " -> " + x + "," + y);
+                    SwingUtilities.invokeLater(() -> {
+                            if (!fcc.getInGameController().goToTile(u, path)) {
+                                ClassicFrameRecorder.event("goto", "refused");
+                            }
+                        });
+                    return null;
+                }, "the event thread did not answer");
+            if (err != null) throw new ClassicScriptDriver.ScriptException(err);
         }
 
         @Override

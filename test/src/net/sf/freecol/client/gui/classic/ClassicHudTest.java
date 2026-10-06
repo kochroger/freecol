@@ -353,6 +353,37 @@ public class ClassicHudTest extends TestCase {
         assertEquals(0xFFFFFF, ClassicHud.nationRgb(null));
     }
 
+    /**
+     * The turn indicator (build spec W5c): a solid 5x3 box at x 315-319,
+     * y 197-199 over the wood, nothing else touched, and no box at all
+     * without a colour.
+     */
+    public void testTurnIndicator() {
+        final BufferedImage on = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+        final BufferedImage off = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = on.createGraphics();
+        ClassicHud.paintPanel(g, null, null, null, new ClassicHud.PanelModel(
+            null, null, null, false, null, null, 0x6D3C18));
+        g.dispose();
+        g = off.createGraphics();
+        ClassicHud.paintPanel(g, null, null, null, new ClassicHud.PanelModel(
+            null, null, null, false, null, null, -1));
+        g.dispose();
+        int changed = 0;
+        for (int y = 0; y < 200; y++) {
+            for (int x = 0; x < 320; x++) {
+                if (on.getRGB(x, y) == off.getRGB(x, y)) continue;
+                changed++;
+                assertTrue(x + "," + y, x >= 315 && y >= 197);
+                assertEquals(0x6D3C18, rgb(on, x, y));
+            }
+        }
+        assertEquals(15, changed);
+        assertEquals(new Rectangle(315, 197, 5, 3), ClassicHud.INDICATOR);
+        // The old constructors paint no indicator.
+        assertEquals(-1, new ClassicHud.PanelModel(null, null, null, true).indicator);
+    }
+
     /** The HUD canvas at 1920x1080: scale 5, strip/map/panel on one grid. */
     public void testHudLayout() {
         final Rectangle[] r = ClassicHudPane.layout(1920, 1080);

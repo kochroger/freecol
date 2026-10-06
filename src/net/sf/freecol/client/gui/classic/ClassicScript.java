@@ -55,6 +55,10 @@ import javax.swing.KeyStroke;
  *       ({@link ClassicPrefs#DEFAULTS}) or one of the original's rows that
  *       are FreeCol options ({@link ClassicPrefs#CLIENT_OPTIONS});
  *       {@code true}/{@code false} work too.</li>
+ *   <li>{@code goto <x> <y>}: give the active unit FreeCol's goto order to
+ *       map tile (x, y) ({@code InGameController.goToTile}): it moves
+ *       there as far as it can now, and on at the start of later turns
+ *       (build spec W5f).</li>
  *   <li>{@code log <text>}: a marker in the recorder's events.</li>
  *   <li>{@code quit}: flush the recorder and quit FreeCol.</li>
  * </ul>
@@ -64,7 +68,8 @@ import javax.swing.KeyStroke;
 final class ClassicScript {
 
     /** The commands. */
-    enum Op { WAIT, KEY, CLICK, WAIT_GAME, WAIT_IDLE, WAIT_TURN, PREF, LOG, QUIT }
+    enum Op { WAIT, KEY, CLICK, WAIT_GAME, WAIT_IDLE, WAIT_TURN, PREF, LOG, QUIT,
+        GOTO }
 
     /** Default timeouts (ms) of the three waits. */
     static final long WAIT_GAME_TIMEOUT = 180_000L;
@@ -83,10 +88,10 @@ final class ClassicScript {
         /** The source text (comment stripped). */
         final String text;
 
-        /** WAIT: ms; the waits: timeout ms; CLICK: x. */
+        /** WAIT: ms; the waits: timeout ms; CLICK, GOTO: x. */
         final long number;
 
-        /** CLICK: y. */
+        /** CLICK, GOTO: y. */
         final int y;
 
         /** KEY: the key. */
@@ -185,6 +190,13 @@ final class ClassicScript {
                 throw new IllegalArgumentException("unknown pref " + nv[0]);
             }
             return new Command(Op.PREF, n, s, 0, 0, null, nv[0], bool(nv[1]));
+        }
+        case "goto": {
+            final String[] xy = rest.split("\\s+");
+            if (xy.length != 2) throw new IllegalArgumentException("goto needs x and y");
+            final int x = integer(xy[0], 10_000);
+            final int y = integer(xy[1], 10_000);
+            return new Command(Op.GOTO, n, s, x, y, null, null, false);
         }
         case "log":
             return new Command(Op.LOG, n, s, 0, 0, null, rest, false);

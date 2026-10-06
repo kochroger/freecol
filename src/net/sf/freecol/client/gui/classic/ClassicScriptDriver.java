@@ -102,6 +102,15 @@ final class ClassicScriptDriver {
          */
         void pref(String name, boolean value);
 
+        /**
+         * Give the active unit a goto order to a map tile.
+         *
+         * @param x The tile's column.
+         * @param y The tile's row.
+         * @exception ScriptException if there is no active unit or no path.
+         */
+        void gotoTile(int x, int y) throws ScriptException;
+
         /** Stop the recorder and quit the game (may not return). */
         void quit();
     }
@@ -225,6 +234,9 @@ final class ClassicScriptDriver {
         }
         case PREF:
             this.host.pref(c.name, c.value);
+            break;
+        case GOTO:
+            this.host.gotoTile((int)c.number, c.y);
             break;
         case LOG:
             ClassicFrameRecorder.event("log", c.name);

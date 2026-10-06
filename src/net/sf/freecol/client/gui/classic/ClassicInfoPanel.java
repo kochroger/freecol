@@ -86,6 +86,40 @@ final class ClassicInfoPanel extends JComponent {
     /** Scene mode: no unit block. */
     private boolean scene = false;
 
+    /**
+     * The end of turn and hand-over (build spec W5): the turn indicator's
+     * colour, whether the panel waits for our next turn, and where the
+     * panel's changes are reported; null until the game view has one.
+     */
+    private ClassicTurnFlow turnFlow = null;
+
+    /**
+     * The stale panel (build spec W5b): the unit block last built while
+     * its unit could still move, and that unit.  It is painted while no
+     * unit is active or the remembered unit has no moves left, so after a
+     * unit's last move the panel keeps its "Züge" and "Ort" from before
+     * that move -- through the pause, the hand-over and the AI phase --
+     * until another unit's block replaces it or the turn-start wipe
+     * forgets it ({@link #clearStale}).
+     */
+    private Unit staleUnit = null;
+    private ClassicHud.UnitFacts staleActive = null;
+    private List<ClassicHud.UnitFacts> staleList = new ArrayList<>();
+
+    /**
+     * The season line of the last paint in our turn: kept while the turn
+     * flow waits for our next turn, so the year changes in the paint of
+     * the wipe (W5b), not when FreeCol's turn changes.
+     */
+    private String shownSeason = null;
+
+    /**
+     * What the screen shows of this panel (80x192 RGB, as last blitted
+     * within each paint's clip), to tell the turn flow when a paint
+     * changed a pixel; null before the first paint.
+     */
+    private int[] shown = null;
+
     /** The minimap shown in the last paint (for click-to-recentre). */
     private ClassicHud.MinimapModel lastMinimap = null;
 
@@ -119,6 +153,51 @@ final class ClassicInfoPanel extends JComponent {
         repaint();
     }
 
+    /**
+     * Use the game view's turn flow (W5).
+     *
+     * @param flow The flow, or null.
+     */
+    void setTurnFlow(ClassicTurnFlow flow) {
+        this.turnFlow = flow;
+    }
+
+    /**
+     * Forget the remembered unit block (the turn-start wipe, W5b): until
+     * the next unit is up the panel shows no block, as in scene mode.
+     */
+    void clearStale() {
+        this.staleUnit = null;
+        this.staleActive = null;
+        this.staleList = new ArrayList<>();
+    }
+
+    /** Paint the whole panel at once (EDT), else ask for a repaint. */
+    void paintNow() {
+        if (SwingUtilities.isEventDispatchThread()) {
+            paintImmediately(0, 0, getWidth(), getHeight());
+        } else {
+            repaint();
+        }
+    }
+
+    /**
+     * Paint the turn indicator's box at once (EDT), else ask for a
+     * repaint of it ({@link ClassicHud#INDICATOR}).
+     */
+    void paintIndicatorNow() {
+        final int s = scale();
+        final Rectangle r = new Rectangle(
+            (ClassicHud.INDICATOR.x - ClassicHud.PANEL_X) * s,
+            (ClassicHud.INDICATOR.y - ClassicHud.PANEL_Y) * s,
+            ClassicHud.INDICATOR.width * s, ClassicHud.INDICATOR.height * s);
+        if (SwingUtilities.isEventDispatchThread()) {
+            paintImmediately(r);
+        } else {
+            repaint(r);
+        }
+    }
+
     /** The canvas scale: this component is 80 virtual pixels wide. */
     private int scale() {
         return Math.max(1, getWidth() / ClassicHud.PANEL_W);
@@ -149,6 +228,12 @@ final class ClassicInfoPanel extends JComponent {
                 season = Messages.message(game.getTurn().getLabel());
             }
         }
+        final ClassicTurnFlow flow = this.turnFlow;
+        if (flow != null && flow.isWaiting() && this.shownSeason != null) {
+            season = this.shownSeason;   // the year changes with the wipe
+        } else {
+            this.shownSeason = season;
+        }
         if (player != null) {
             gold = ClassicHud.goldLine(this.text, Math.max(0, player.getGold()),
                                        player.getTax());
@@ -158,9 +243,9 @@ final class ClassicInfoPanel extends JComponent {
             }
         }
         ClassicHud.UnitFacts active = null;
-        final List<ClassicHud.UnitFacts> list = new ArrayList<>();
+        List<ClassicHud.UnitFacts> list = new ArrayList<>();
         final Unit unit = this.mapViewer.getActiveUnit();
-        if (unit != null && unit.hasTile()) {
+        if (showsLive(unit, this.staleUnit)) {
             active = facts(unit);
             final List<Unit> others = new ArrayList<>();
             if (unit.isCarrier() && unit.hasCargo()) {
@@ -172,8 +257,33 @@ final class ClassicInfoPanel extends JComponent {
                 }
             }
             for (Unit u : others) list.add(facts(u));
+            this.staleUnit = unit;
+            this.staleActive = active;
+            this.staleList = list;
+        } else if (this.staleActive != null) {
+            active = this.staleActive;
+            list = new ArrayList<>(this.staleList);
         }
-        return new ClassicHud.PanelModel(mm, season, gold, this.scene, active, list);
+        final int indicator = (flow == null) ? -1 : flow.indicatorRgb();
+        if (flow != null) flow.indicatorShown(indicator);
+        return new ClassicHud.PanelModel(mm, season, gold, this.scene, active,
+                                         list, indicator);
+    }
+
+    /**
+     * Whether the panel shows the active unit as it is now (build spec
+     * W5b): a unit with moves left, or a unit other than the remembered
+     * one.  The remembered unit without moves left -- after its last move,
+     * through the pause and the hand-over -- and no active unit at all
+     * show the remembered block instead.
+     *
+     * @param unit The active unit, or null.
+     * @param remembered The unit of the remembered block, or null.
+     * @return True to build the block from the live unit.
+     */
+    static boolean showsLive(Unit unit, Unit remembered) {
+        return unit != null && unit.hasTile()
+            && (unit.getMovesLeft() > 0 || unit != remembered);
     }
 
     /**
@@ -240,10 +350,55 @@ final class ClassicInfoPanel extends JComponent {
         } finally {
             ig.dispose();
         }
-        ClassicMenuStrip.blit(g, img, 0, 0, scale());
+        final int s = scale();
+        ClassicMenuStrip.blit(g, img, 0, 0, s);
         // The panel refresh after a (re)activation starts the blink's
         // phase: now, as its pixels are on the screen.
         this.mapViewer.blinkPanelPainted();
+        if (noteShown(img, g.getClipBounds(), s) && this.turnFlow != null) {
+            this.turnFlow.screenChanged();
+        }
+    }
+
+    /**
+     * Record what this paint put on the screen and tell whether that
+     * changed a pixel the player sees, outside the turn indicator (whose
+     * changes are the turn flow's own).
+     *
+     * @param img The panel as painted, 80x192.
+     * @param clip The paint's clip in component pixels, or null for all.
+     * @param s The canvas scale.
+     * @return True if a pixel changed.
+     */
+    private boolean noteShown(BufferedImage img, Rectangle clip, int s) {
+        final int w = ClassicHud.PANEL_W, h = ClassicHud.PANEL_H;
+        final int[] now = img.getRGB(0, 0, w, h, null, 0, w);
+        int x0 = 0, y0 = 0, x1 = w, y1 = h;
+        if (clip != null) {
+            x0 = Math.max(0, clip.x / s);
+            y0 = Math.max(0, clip.y / s);
+            x1 = Math.min(w, (clip.x + clip.width + s - 1) / s);
+            y1 = Math.min(h, (clip.y + clip.height + s - 1) / s);
+        }
+        if (this.shown == null) {
+            this.shown = now;
+            return true;
+        }
+        final Rectangle ind = new Rectangle(
+            ClassicHud.INDICATOR.x - ClassicHud.PANEL_X,
+            ClassicHud.INDICATOR.y - ClassicHud.PANEL_Y,
+            ClassicHud.INDICATOR.width, ClassicHud.INDICATOR.height);
+        boolean changed = false;
+        for (int y = y0; y < y1; y++) {
+            for (int x = x0; x < x1; x++) {
+                final int i = y * w + x;
+                if (this.shown[i] != now[i]) {
+                    if (!ind.contains(x, y)) changed = true;
+                    this.shown[i] = now[i];
+                }
+            }
+        }
+        return changed;
     }
 
     /** A click in the minimap's interior recentres the map on that tile. */

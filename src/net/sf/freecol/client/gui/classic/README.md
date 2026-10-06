@@ -187,7 +187,9 @@ minimap box.
   7-9-1-3 & Home/PageUp/End/PageDown diagonal, bound `WHEN_IN_FOCUSED_WINDOW`.
   MOVE_UNITS → `InGameController.moveUnit(activeUnit, dir)`; TERRAIN → step the
   selected-tile cursor to `getNeighbourOrNull(dir)`; nothing selected (END_TURN)
-  → raw-grid free pan so the map stays navigable. The view follows the
+  → nothing (the original's arrows never moved the landscape with no unit up,
+  W5d; while the player waits every map key is blocked, see "End of turn and
+  hand-over"). The view follows the
   original's jump rule (see "The view rule"), never the arrival of a move.
 - **⚠️ Isometric-vs-rectangular caveat (resolved; isometric maps only).** On an
   isometric map, model `Direction` is isometric (`Direction.N` steps two raw
@@ -208,7 +210,10 @@ minimap box.
   - **Enter** → `endTurn(false)` — end the turn. `false` because the classic `GUI`
     no-ops modal dialogs, so `endTurn(true)`'s "units still active" confirm would
     misbehave. Verified live: the turn advances (AI players process, a new turn
-    begins) and the map/minimap refresh.
+    begins) and the map/minimap refresh. Through `ClassicGUI.requestEndTurn` ->
+    `ClassicTurnFlow.endTurnNow`, which lights the turn indicator first (W5c).
+    Without a key the turn ends by itself 485 ms after the last change once
+    nothing can move (W5a).
   - **Space** → "no orders": skip the active unit for this turn, mirroring
     `SkipUnitAction` (`changeState(unit, SKIPPED)` then `nextActiveUnit()`). With no
     active unit, Space ends the turn instead (as in the original, where Space
@@ -528,7 +533,9 @@ recorder's `Thread.sleep` plus spin, never `parkNanos`) and run on the EDT
   with a re-arm and the next one starts 100 ms later. A hold without a close
   hook (a screen closed by its window's close box) ends at the next toggle,
   which re-arms instead of toggling.
-- **Stopped** without an active unit in MOVE_UNITS (TERRAIN, END_TURN).
+- **Stopped** without an active unit in MOVE_UNITS (TERRAIN, END_TURN), and
+  once the active unit has no moves left (W5: after its last move it stays on
+  screen, unblinking, through the pause).
 - **OFF paint** = the bare tile: terrain and overlays, no unit at all, carrier
   and stack included (`paintOccupant`); a settlement stays (I). A toggle paints
   only the unit's cell plus the icon's reach (`paintBlinkCell`).
@@ -584,8 +591,8 @@ only by a hard jump, which redraws the whole map at once (landfall 02).
   centres clamped: the start ship at (56,42) sits in cell (14,6) with the
   ring at y 22-33 (landfall #340). The TERRAIN cursor follows the same jumps
   as a unit (**I**: the original's view mode was not recorded). The free pan
-  (arrow keys with nothing selected, the mouse at the window edge) moves the
-  origin by one cell, clamped.
+  (the mouse at the window edge) moves the origin by one cell, clamped; the
+  arrow keys with nothing selected no longer pan at all (W5d).
 - Recorder event: `view-jump <reason> <old> -> <new> tile=.. cell=.. now=..`.
 
 `ClassicViewRuleTest` replays the landfall clip -- its 86 slide starts and 27
@@ -596,6 +603,102 @@ none at #10077 row 9, #14876 column 2 or the five east-clamp starts), the
 margins and clamps, the outer ring, the start view with its ring, and that
 the controller's re-selection of the moving unit after each move (its
 arrival) never tests the view while a newly active unit always does.
+
+### End of turn and hand-over (`ClassicTurnFlow`, `ClassicOneShot`; build spec W5)
+
+What happens between the player's last screen change and what comes next,
+as measured in the landfall clip (13 turn ends, 6 hand-overs) and the
+landing-slow clip. `ClassicGUI` creates the flow with the HUD and routes the
+controller's `changeView` calls through it; its deadlines run on a
+`ClassicOneShot` (one task on an absolute deadline, a daemon thread with the
+recorder's sleep plus spin, posted to the EDT with generations -- not a
+`javax.swing.Timer`, whose queue waits with `parkNanos`).
+
+- **The last change.** The map reports the paints that show something new
+  (final draw, view jump, blink toggle, cursor; `changeToShow`), the panel
+  every paint that changed a pixel outside the turn indicator (it keeps what
+  the screen shows and compares within the clip, `noteShown`), a box or a
+  menu its close (`ClassicDialog.Watcher`, `ClassicMenuStrip.Host`). A pause
+  that is pending and has not started a stage yet is re-based on every such
+  change; the many repaints that change nothing do not count.
+- **Automatic end (W5a).** `changeView()` and `changeView(Tile)` (the
+  controller's "no unit left") arm it if it is our turn and no unit can move
+  or go to its destination: **485 ms** after the last change, **756 ms**
+  after a cancelled village box (`villageChoice`; FreeCol keeps the unit and
+  its move, Roger's house rule, so today this only matters once W8 skips it).
+  When it fires it ends the turn (`endTurn(false)`) only if it is still our
+  turn, no box, menu, first scene or classic screen is up, and no unit can
+  move; a box keeps it from firing and its close arms it again (a screen
+  without a close hook: the 50-ms poll). FreeCol's `autoEndTurn` is forced off
+  for the session (`SESSION_OPTIONS`, restored at teardown): it ends at once.
+  With the classic pref `endTurnPrompt` on -- read at this idle decision, not
+  at the turn start -- the Spielzugende mode follows at **500 ms** (813 after a
+  village cancel) instead and waits for Enter or Space; its look is W17's.
+- **Stale panel (W5b).** `ClassicInfoPanel` remembers the block it last built
+  for a unit and paints it while no unit is active or the remembered unit has
+  no moves left (`showsLive`): after the last move the panel keeps "Züge" and
+  "Ort" from before that move, through the pause, the hand-over and the AI
+  phase. Another unit's block replaces it; the turn-start wipe forgets it. The
+  season line is frozen from our end to the wipe, so the year changes in the
+  wipe's paint. The minimap stays live. Our boxes are separate windows and
+  never cover the panel, so a close leaves it exactly as before the box.
+- **Turn indicator (W5c).** `ClassicHud.INDICATOR` (315..319, 197..199) is
+  filled with the current player's colour while it is not our turn
+  (`ClassicHud.indicatorRgb`: the eight tribes, England, France, Spain from
+  NAMES.TXT; else the nation colour), with ours (#FF7100) while our new turn is
+  not shown yet (its turn-start boxes are up), and with the **next** player's
+  in the paint just before our end request goes out (the request blocks the
+  EDT; the server's answer and the player change come in either order, so the
+  prediction holds until the player changes or 1.5 s pass). A 50-ms Swing
+  poll (`tick`) repaints the box when the colour changes. The order is
+  FreeCol's (dutch, iroquois, tupi, sioux, french, arawak, english, apache,
+  inca, aztec, spanish in the runs), not the original's natives first; the
+  European dark sub-phase is left out (spec: optional, its trigger is I).
+- **Input (W5d).** `ClassicMapViewer.inputBlocked` also holds while it is not
+  our turn, our new turn is not shown yet, a pause is pending, our end request
+  is out or the turn start's goto orders run (`ClassicTurnFlow.isInputBlocked`):
+  arrows (logged `key-blocked`), Enter, Space, W, B and map clicks do nothing.
+  The arrows with nothing selected never pan (`key-ignored`); the TERRAIN
+  cursor still steps.
+- **Hand-over (W5e).** When the controller brings a different unit after the
+  previous one ran out of moves (or is gone), the flow keeps it: its block
+  comes **500 ms** after the last change, and a view jump it needs at
+  **280 ms** (`wouldJump`, `jumpTo`: the map and the minimap ring in one cut,
+  the old block still up). The controller's re-selection of the shown unit
+  meanwhile keeps the hand-over. A unit with no moves left does not blink
+  (`rearmBlink`), so nothing changes on the map during the pause.
+- **Turn start (W5e, W5g).** The controller's first view change of our new
+  turn wipes the panel (no block, new season line, no indicator, one paint),
+  unless a box is up -- FreeCol's turn-start report ("Rundenende") comes
+  before it, with the old year, the stale block and the orange indicator,
+  and the wipe comes with its close. The first unit's block follows **300 ms**
+  after the wipe, or with a jump the jump at **500 ms** and the block 21 ms
+  later.
+- **Goto first (W5f).** If a unit has a destination at the turn start, it is
+  the one that comes up, and its goto orders (`executeGotoOrders`) run 100 ms
+  after its block; the view changes FreeCol queues for the units it moves
+  arrive after the moves and are dropped until a marker posted behind them,
+  which then asks for the next unit -- a hand-over from the last goto step.
+- **Not our turn:** activations the controller sends then (doEndTurn's goto
+  pass) are ignored; no unit comes up until our next turn.
+- Recorder events: `endturn-timer-start <why> <kind> <stages> due=.. base=..`,
+  `endturn-timer-fire <kind> <stage> late=..` (also `held` / `kept`),
+  `endturn-timer-cancel`, `end-turn <auto|key|refused>`, `indicator <rgb|off>
+  cur=.. [predicted]`, `turn-wait`, `turn-wipe`, `handover ...`,
+  `endturn-prompt`, `endturn-village`, `key-blocked`, `key-ignored`,
+  `click-blocked`; the `state` probe has `flow=<kind>/<stage> [waiting]
+  [prompt] [goto]`, and `waitIdle` waits while the flow is busy.
+
+`ClassicTurnFlowTest` runs the flow on a fake clock and host: the pauses and
+stages, the 485-ms end and its re-basing, the conditions, a box holding it,
+the village pause, the Spielzugende hand-off, the hand-over with and without
+its jump, the turn start (with a box, with a jump, without units), goto units
+first, the indicator's colours and its poll, and `ClassicOneShot` (replace,
+cancel, stale posts, the thread on the real clock).
+`ClassicMapViewerTest.testAfterTheLastMove` covers the blink stop with no
+moves, the stale-block rule and the jump question; `ClassicHudTest.
+testTurnIndicator` the 15 pixels; `ClassicUnitIconTest.testSessionOptions`
+the forced options.
 
 ## In-game HUD (menu strip, dropdowns, right panel)
 
@@ -3271,7 +3374,9 @@ not with `parkNanos`.
 `NUMPAD7`, `ENTER`, `alt G`), `click <x> <y>` (canvas pixels), `waitGame`,
 `waitIdle`, `waitTurn` (optional timeout ms), `pref <name> on|off` (the classic
 prefs below, or `autoSave`/`combatAnalysis`/`tutorTips`, which set FreeCol's
-own options), `log <text>`, `quit`. It runs on its own thread. A key is a
+own options), `goto <x> <y>` (the active unit gets FreeCol's goto order to that
+tile, `InGameController.goToTile`; W5f's goto units), `log <text>`, `quit`. It
+runs on its own thread. A key is a
 press, 80 ms, a release (plus `KEY_TYPED` for a character), dispatched on the
 EDT with `Component.dispatchEvent` to the component a real key would reach:
 the focus owner, else the open modal dialog's or the frame's most recent focus
