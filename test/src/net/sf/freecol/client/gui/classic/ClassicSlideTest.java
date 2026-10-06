@@ -267,4 +267,45 @@ public class ClassicSlideTest extends TestCase {
         }
         return new int[] { last - first, repeats, jumps };
     }
+
+    /**
+     * The water cycle's servicing clock (M1c design 10 §7.2, W6c): a
+     * palette step due in the middle of a slide fires at its own deadline,
+     * between two slide steps, and every slide deadline stays exactly as
+     * without it (the slide's schedule is unchanged).
+     */
+    public void testServicingClockKeepsEverySlideDeadline() throws InterruptedException {
+        final long t0 = 9_000 * MS;
+        final FakeClock c = new FakeClock(t0);
+        final long s = ClassicSlide.stepNanos(false);
+        final List<long[]> events = new ArrayList<>();
+        final ClassicWaterCycle cycle = new ClassicWaterCycle(c, r -> fail("no post"),
+            () -> true, null, (p, k, due, sv) -> events.add(new long[] { -1, c.now, p }),
+            null, false);
+        // Start the cycle so that step 1 is due 100 ms into the slide.
+        final long p = Math.round(ClassicGamePalette.PERIOD_MS * MS);
+        c.now = t0 - p + 100 * MS;
+        cycle.start();
+        c.now = t0;
+        final ClassicSlide.Clock sc = cycle.servicing(c);
+        ClassicSlide.run(sc, s, false, k -> events.add(new long[] { k, c.now, 0 }));
+        assertEquals(16, events.size());
+        int at = -1;
+        for (int i = 0, k = 1; i < events.size(); i++) {
+            final long[] e = events.get(i);
+            if (e[0] < 0) {
+                at = i;
+                assertEquals("at its deadline", t0 + 100 * MS, e[1]);
+                assertEquals(1, e[2]);
+                continue;
+            }
+            assertEquals(k, e[0]);
+            assertEquals("slide deadline " + k, t0 + (k - 1) * s, e[1]);
+            k++;
+        }
+        // Between offsets 7 (98.58 ms) and 8 (115.01 ms).
+        assertEquals(7, at);
+        assertEquals(t0 + 302_020_000L, c.now);
+        assertEquals(1, cycle.phase());
+    }
 }

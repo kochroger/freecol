@@ -176,6 +176,16 @@ public class ClassicGUI extends GUI {
     private ClassicTerrainOracle terrainOracle;
 
     /**
+     * The water cycling (M1c design 10 §7, W6c): palette entries 120-127
+     * one step every 575.05 ms, the map viewer its listener.  Created with
+     * the map viewer in {@link #reconnectGUI} and started with the first
+     * in-game view, closed in {@link #teardownInGame}; null without a game
+     * view.  It runs under boxes, menus and the Europe screen; a woodcut
+     * (W9) holds it ({@link ClassicWaterCycle#hold}).  EDT only.
+     */
+    private ClassicWaterCycle waterCycle;
+
+    /**
      * The right-hand info / orders panel (Phase 2 HUD), created alongside the
      * map viewer in {@link #reconnectGUI}.  Repainted whenever the view state or
      * model changes so it tracks the active unit / selected tile / treasury.
@@ -1128,6 +1138,7 @@ public class ClassicGUI extends GUI {
         // The menu first: its close resumes the blink of a live viewer
         // (FINAL "Open" item 11).
         if (this.menuStrip != null) this.menuStrip.closeMenu();
+        if (this.waterCycle != null) this.waterCycle.close();
         if (this.mapViewer != null) this.mapViewer.dispose();
         if (this.terrainOracle != null) this.terrainOracle.dispose();
         if (this.frame != null) this.frame.setJMenuBar(null);
@@ -1135,6 +1146,7 @@ public class ClassicGUI extends GUI {
         restoreSessionOptions();
         this.mapViewer = null;
         this.terrainOracle = null;
+        this.waterCycle = null;
         this.infoPanel = null;
         this.menuStrip = null;
         this.hudPane = null;
@@ -1556,10 +1568,20 @@ public class ClassicGUI extends GUI {
                 // The terrain as the original's palette indices (W6a); a
                 // pack without them keeps the RGBA tiles (installInGameHud
                 // logs and notes which).
-                this.mapViewer.setTerrain(
-                    ClassicTerrainLayer.create(ClassicPackFiles.runtime()),
-                    this.terrainOracle);
+                final ClassicTerrainLayer layer
+                    = ClassicTerrainLayer.create(ClassicPackFiles.runtime());
+                this.mapViewer.setTerrain(layer, this.terrainOracle);
+                // The water cycling (W6c): the viewer's blocking waits and
+                // the panel's tick fire its steps on time.
+                this.waterCycle = new ClassicWaterCycle(ClassicSlide.SYSTEM,
+                    SwingUtilities::invokeLater, SwingUtilities::isEventDispatchThread,
+                    () -> ClassicPrefs.get().is(ClassicPrefs.WATER_CYCLING),
+                    this.mapViewer::paletteStep,
+                    (layer == null) ? null : layer.palette().cycle(), true);
+                this.mapViewer.setSlideClock(this.waterCycle.servicing(ClassicSlide.SYSTEM));
                 installInGameHud();
+                // Phase 0 at the first in-game view (fog-start #19).
+                this.waterCycle.start();
             }
             if (active != null) {
                 this.mapViewer.changeToMoveUnits(active);
@@ -1696,7 +1718,7 @@ public class ClassicGUI extends GUI {
                     if (turnFlow != null) turnFlow.boxClosed();
                 }
             });
-        this.turnFlow = new ClassicTurnFlow(new TurnHost(), ClassicSlide.SYSTEM,
+        this.turnFlow = new ClassicTurnFlow(new TurnHost(), waitClock(),
             SwingUtilities::invokeLater, true);
         this.infoPanel.setTurnFlow(this.turnFlow);
         this.turnPoll = new javax.swing.Timer(ClassicTurnFlow.POLL_MS, e -> {
@@ -1786,7 +1808,7 @@ public class ClassicGUI extends GUI {
         if (this.infoPanel == null) return;
         this.infoPanel.paintMinimapNow();
         try {
-            ClassicSlide.waitUntil(finalNanos + Math.round(PANEL_AFTER_FINAL_MS * 1e6));
+            waitClock().waitUntil(finalNanos + Math.round(PANEL_AFTER_FINAL_MS * 1e6));
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
         }
@@ -1927,6 +1949,29 @@ public class ClassicGUI extends GUI {
      */
     ClassicTerrainOracle terrainOracle() {
         return this.terrainOracle;
+    }
+
+    /**
+     * The water cycling of the game view (W6c), for the woodcuts' freeze
+     * (W9: {@code hold("woodcut")} / {@code release("woodcut")}) and the
+     * options box (W14: {@code setEnabled}).
+     *
+     * @return The cycle, or null without a game view.
+     */
+    ClassicWaterCycle waterCycle() {
+        return this.waterCycle;
+    }
+
+    /**
+     * The clock of the blocking waits on the event thread: the water
+     * cycle's servicing clock, so a palette step due meanwhile comes on
+     * time (design 10 §7.2), else the system clock.
+     *
+     * @return The clock.
+     */
+    ClassicSlide.Clock waitClock() {
+        final ClassicMapViewer mv = this.mapViewer;
+        return (mv == null) ? ClassicSlide.SYSTEM : mv.slideClock();
     }
 
     /** @return Whether the Spielzugende mode is on (build spec W17). */

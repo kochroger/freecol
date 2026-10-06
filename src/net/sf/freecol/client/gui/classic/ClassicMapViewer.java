@@ -367,6 +367,23 @@ final class ClassicMapViewer extends JPanel {
     private BufferedImage offscreen = null;
 
     /**
+     * The clock of the blocking waits on the event thread -- the slide
+     * ({@link ClassicSlide#run}), the gap before a chained slide, the
+     * native cue -- and the water cycle's servicing clock in the game
+     * ({@link ClassicWaterCycle#servicing}): a palette step due meanwhile is
+     * painted at its own deadline, between two slide steps (design 10 §7.2,
+     * Critic 15).  The slide's schedule is the same.
+     */
+    private ClassicSlide.Clock slideClock = ClassicSlide.SYSTEM;
+
+    /**
+     * True while a palette step paints the cycling cells: that paint shows
+     * no change of the game, so it takes no explored state, uses up no final
+     * draw and tells the turn flow nothing (Critic 3).
+     */
+    private boolean palettePaint = false;
+
+    /**
      * Repeating timer that drives edge scrolling; it pans the view by
      * {@link #edgeDX}/{@link #edgeDY} each tick while the mouse sits in an edge
      * hot zone, and is stopped whenever that direction is zero.
@@ -1103,7 +1120,7 @@ final class ClassicMapViewer extends JPanel {
                                                wouldJump(srcTile));
             if (unit != this.keyMoveUnit && this.lastFinalNanos != 0L) {
                 try {
-                    ClassicSlide.waitUntil(this.lastFinalNanos + ((cue)
+                    this.slideClock.waitUntil(this.lastFinalNanos + ((cue)
                             ? nanos(CUE_GAP_MS) : ClassicSlide.gapNanos(own)));
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
@@ -1155,7 +1172,7 @@ final class ClassicMapViewer extends JPanel {
                 // Offset 1 is due one step after offset 0's map paint (the
                 // jump frame), not after the minimap and the event behind it.
                 final long[] zeroShown = { 0L };
-                ClassicSlide.run(ClassicSlide.SYSTEM, step, redraw, k -> {
+                ClassicSlide.run(this.slideClock, step, redraw, k -> {
                         this.animOffset = k;
                         // Offset 0 may come with a view jump: the whole map.
                         paintNow((k == 0) ? null : slideBounds());
@@ -1275,7 +1292,7 @@ final class ClassicMapViewer extends JPanel {
                     : " cell=" + (src.getX() - o[0]) + "," + (src.getY() - o[1])));
         }
         try {
-            ClassicSlide.waitUntil(shownAt + nanos(CUE_MS));
+            this.slideClock.waitUntil(shownAt + nanos(CUE_MS));
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
         }
@@ -2237,10 +2254,13 @@ final class ClassicMapViewer extends JPanel {
         final Rectangle clip = g.getClipBounds();
         final int m = ICON_MARGIN * scale();
         // The explored state as shown: from the model on every full paint
-        // outside a slide, kept through one (Critic 5).
-        final boolean finalPaint = this.finalDrawPending && this.animUnit == null;
+        // outside a slide, kept through one (Critic 5) and through a
+        // palette step's paint (Critic 3).
+        final boolean palette = this.palettePaint;
+        final boolean finalPaint = !palette && this.finalDrawPending
+            && this.animUnit == null;
         if (this.shown == null || this.shownMap != map
-            || (this.animUnit == null && (clip == null
+            || (!palette && this.animUnit == null && (clip == null
                 || clip.contains(0, 0, getWidth(), getHeight())))) {
             takeShown(map);
         }
@@ -2296,6 +2316,10 @@ final class ClassicMapViewer extends JPanel {
             ClassicHud.paintPromptSquare(g, screenX(ct.getX(), vx),
                                          screenY(ct.getY(), vy), scale());
         }
+        // A palette step's paint changes nothing of the game: the original's
+        // palette frames have pixelsChanged=0 (W5a counts changed pixels),
+        // and the change or final draw still due stays due (Critic 3).
+        if (palette) return;
         boolean changed = this.changeToShow || this.animUnit != null;
         this.changeToShow = false;
         if (this.finalDrawPending && this.animUnit == null) {
@@ -2529,6 +2553,117 @@ final class ClassicMapViewer extends JPanel {
     /** @return The terrain layer, or null (the RGBA fallback). */
     ClassicTerrainLayer terrainLayer() {
         return this.layer;
+    }
+
+    /**
+     * The clock of this viewer's blocking waits on the event thread
+     * ({@link #slideClock}): the water cycle's servicing clock in the game.
+     *
+     * @param clock The clock, or null for the system clock.
+     */
+    void setSlideClock(ClassicSlide.Clock clock) {
+        this.slideClock = (clock == null) ? ClassicSlide.SYSTEM : clock;
+    }
+
+    /** @return The clock of the blocking waits ({@link #setSlideClock}). */
+    ClassicSlide.Clock slideClock() {
+        return this.slideClock;
+    }
+
+    /**
+     * A step of the water cycle (M1c design 10 §7.2, W6c; the event
+     * thread): draw the terrain at the new phase from now on and repaint
+     * the cells whose last composition holds a cycling index (sea lanes,
+     * rivers, swamps, beach corners and the fringes and blends next to
+     * them), with the units over them.  Only while the map is on the
+     * screen; behind a dialog, a menu or the Europe screen the clock runs
+     * on all the same.  Nothing is composed anew but those cells.
+     *
+     * <p>The paint is silent ({@link #palettePaint}).  While a slide's final
+     * draw is due, the step paints that final draw instead -- the whole map
+     * at the new phase, which is due anyway (Critic 3) -- so it never shows
+     * the unit at its target without the move's reveal.  With no cycling
+     * cell in the view nothing is painted: every phase looks alike there.
+     *
+     * @param phase The new phase.
+     * @param k The cycle's step (for the recorder).
+     * @param due When it was due ({@code System.nanoTime} in the game).
+     * @param serviced Fired by a blocking wait ({@link #slideClock}), not
+     *     by the cycle's post.
+     */
+    void paletteStep(int phase, long k, long due, boolean serviced) {
+        final ClassicTerrainLayer l = this.layer;
+        if (l == null || this.disposed) return;
+        final long start = System.nanoTime();
+        l.setPhase(phase);
+        final String how;
+        boolean painted = false;
+        if (!isShowing() && this.offscreen == null) {
+            how = "hidden";   // a full paint follows when it shows again
+        } else if (this.origin == null) {
+            l.markShown();
+            how = "no-view";
+        } else if (this.finalDrawPending && this.animUnit == null) {
+            finalDraw();
+            how = "final-draw";
+            painted = true;
+        } else {
+            final int[] c = l.cyclingCells();
+            if (c == null) {
+                l.markShown();
+                how = "none";
+            } else {
+                final int cs = TILE_SRC * scale();
+                this.palettePaint = true;
+                try {
+                    paintNow(new Rectangle(c[0] * cs, c[1] * cs,
+                        (c[2] - c[0]) * cs, (c[3] - c[1]) * cs));
+                } finally {
+                    this.palettePaint = false;
+                }
+                how = "cells=" + c[0] + "," + c[1] + "-" + (c[2] - 1) + ","
+                    + (c[3] - 1);
+                painted = true;
+            }
+        }
+        if (ClassicFrameRecorder.on()) {
+            final long end = System.nanoTime();
+            ClassicFrameRecorder.paletteStep(String.format(Locale.ROOT,
+                "p=%d k=%d late=%.2fms dur=%.2fms via=%s %s", phase, k,
+                (start - due) / 1e6, (end - start) / 1e6,
+                (serviced) ? "wait" : "post", how), end - start, start - due,
+                painted);
+        }
+    }
+
+    /**
+     * The phase the screen shows the terrain at (the recorder's frame
+     * palette, design 10 §9.2.1).
+     *
+     * @return The layer's painted phase, or -1 without a layer.
+     */
+    int paintedPhase() {
+        final ClassicTerrainLayer l = this.layer;
+        return (l == null) ? -1 : l.paintedPhase();
+    }
+
+    /**
+     * The recorder's index hint of the view (design 10 §9.2.4).
+     *
+     * @param out 240x192 bytes.
+     * @return False without a layer (out untouched).
+     */
+    boolean indexHint(byte[] out) {
+        final ClassicTerrainLayer l = this.layer;
+        if (l == null) return false;
+        l.indexHint(out);
+        return true;
+    }
+
+    /** @return The game palette the terrain is drawn with, or null without a layer. */
+    ClassicGamePalette gamePalette() {
+        final ClassicTerrainLayer l = this.layer;
+        return (l == null) ? null : l.palette();
     }
 
     /**

@@ -55,7 +55,9 @@ import javax.swing.JLayeredPane;
  *
  * <p>While the acceptance recorder runs ({@link ClassicFrameRecorder}),
  * this pane is the painting origin of all its children and paints through
- * the recorder's copy of the screen; otherwise it paints as any pane.
+ * the recorder's copy of the screen, and the recorder reads the map's
+ * terrain layer with each paint (its phase and index hint, M1c design 10
+ * §9.2); otherwise it paints as any pane.
  */
 final class ClassicHudPane extends JLayeredPane {
 
@@ -91,6 +93,26 @@ final class ClassicHudPane extends JLayeredPane {
         add(strip, PALETTE_LAYER);
         add(strip.dropLayer(), POPUP_LAYER);
         add(this.pointer, DRAG_LAYER);
+        // The recorder names each frame's palette by the map's phase and
+        // reads its index hint (M1c design 10 §9.2, W6c).
+        if (this.recorder != null) {
+            this.recorder.setTerrainProbe(new ClassicFrameRecorder.TerrainProbe() {
+                    @Override
+                    public int paintedPhase() {
+                        return map.paintedPhase();
+                    }
+
+                    @Override
+                    public ClassicGamePalette gamePalette() {
+                        return map.gamePalette();
+                    }
+
+                    @Override
+                    public boolean indexHint(byte[] out) {
+                        return map.indexHint(out);
+                    }
+                });
+        }
     }
 
     /** The arrow layer (to refresh it when the first scene goes). */

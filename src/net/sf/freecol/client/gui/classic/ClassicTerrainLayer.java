@@ -68,8 +68,15 @@ final class ClassicTerrainLayer {
     /** Per cell ({@code r * COLS + c}): its last composition holds 120-127. */
     private final boolean[] cycling = new boolean[COLS * ROWS];
 
-    /** The phase drawn. */
+    /** The phase drawn from the next paint on. */
     private int phase = 0;
+
+    /**
+     * The phase the screen shows the layer at: that of its last paint, or
+     * of a step with no cycling cell on the screen ({@link #markShown}).
+     * The recorder names each frame's palette by it (design 10 §9.2).
+     */
+    private int paintedPhase = 0;
 
 
     /**
@@ -142,6 +149,44 @@ final class ClassicTerrainLayer {
         this.phase = this.palette.normalise(p);
     }
 
+    /** @return The phase the screen shows the layer at ({@link #paintedPhase}). */
+    int paintedPhase() {
+        return this.paintedPhase;
+    }
+
+    /**
+     * The screen shows the current phase without a paint: no cell of the
+     * last composition holds a cycling index, so every phase looks alike
+     * (a palette step with nothing to repaint, item W6c).
+     */
+    void markShown() {
+        this.paintedPhase = this.phase;
+    }
+
+    /**
+     * The recorder's index hint (design 10 §9.2.4): a copy of the buffer
+     * with every index outside the cycle as 0.  At some phases a cycling
+     * pixel has the colour of 56 or 59, so the colour alone cannot name it.
+     *
+     * @param out At least {@code WIDTH * HEIGHT} bytes, {@code y * WIDTH + x}.
+     * @return The pixels holding a cycling index.
+     */
+    int indexHint(byte[] out) {
+        final int first = this.palette.cycle().first;
+        final int count = this.palette.cycle().count;
+        int n = 0;
+        for (int i = 0; i < this.buf.length; i++) {
+            final int v = (this.buf[i] & 0xFF) - first;
+            if (v >= 0 && v < count) {
+                out[i] = this.buf[i];
+                n++;
+            } else {
+                out[i] = 0;
+            }
+        }
+        return n;
+    }
+
     /**
      * Compose the cells a clip touches and draw them.
      *
@@ -163,6 +208,7 @@ final class ClassicTerrainLayer {
         g.drawImage(this.views[this.phase],
                     c[0] * cs, c[1] * cs, c[2] * cs, c[3] * cs,
                     c[0] * CELL, c[1] * CELL, c[2] * CELL, c[3] * CELL, null);
+        this.paintedPhase = this.phase;
         return c;
     }
 

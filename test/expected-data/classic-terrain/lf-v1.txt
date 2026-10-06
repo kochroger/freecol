@@ -76,3 +76,14 @@ histogram 345 0,0 60x56 61x165 62x35
 # LF #1407: x = 53 revealed, the island (52,42) dark with its own E fringe;
 # the ship on (54,42).
 compare 1407 px=45017 pointer=39 cells=12,11,157 exclude=54,42 w6b=3
+
+# W6c, the water cycling (design 10 §7.4, §12.2; the format: see fs-v1.txt).
+# LF #0 is phase 1 (F3).
+palette 0 1
+# LF #5420-#5702 (img/04-04): 8 consecutive palette steps, phases 3 4 5 6 7
+# 0 1 2, of the sea lane (56,42) = cell (14,6), 59 cycling px (T011's 62
+# less its W mask's 3, the ocean's there), and of the ocean (55,42) = cell
+# (13,6), 2 sea-lane px in its E mask; the cells are the same in all 8
+# frames (freecol-spike-results/d/w6c/tools/CellSame.java).
+phases 56,42 59 5420 5460 5500 5541 5581 5621 5661 5702
+phases 55,42 2 5420 5460 5500 5541 5581 5621 5661 5702

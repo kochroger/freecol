@@ -162,6 +162,62 @@ public class ClassicTerrainLayerTest extends FreeColTestCase {
         }
     }
 
+    /**
+     * W6c: the cycling cells' box is tight (each edge holds a cycling
+     * cell), the painted phase follows the paints (or a step with nothing
+     * to paint), and the recorder's index hint is the buffer's cycling
+     * indices with 0 elsewhere.
+     */
+    public void testPaintedPhaseAndIndexHint() {
+        final ClassicTerrainLayer l = layer();
+        final ClassicTerrainComposerTest.Grid g = view();
+        final BufferedImage img = new BufferedImage(240, 192, BufferedImage.TYPE_INT_RGB);
+        Graphics2D gr = img.createGraphics();
+        l.paint(gr, g, 0, 0, null, 1);
+        gr.dispose();
+        assertEquals(0, l.paintedPhase());
+        final int[] box = l.cyclingCells();
+        boolean c0 = false, c1 = false, r0 = false, r1 = false;
+        for (int r = 0; r < 12; r++) {
+            for (int c = 0; c < 15; c++) {
+                if (!l.cycles(c, r)) continue;
+                c0 |= c == box[0];
+                c1 |= c == box[2] - 1;
+                r0 |= r == box[1];
+                r1 |= r == box[3] - 1;
+            }
+        }
+        assertTrue("tight " + java.util.Arrays.toString(box), c0 && c1 && r0 && r1);
+        // The painted phase: set, not yet painted; painted; a step with no paint.
+        l.setPhase(3);
+        assertEquals(0, l.paintedPhase());
+        gr = img.createGraphics();
+        l.paint(gr, g, 0, 0, new Rectangle(0, 0, 1, 1), 1);
+        gr.dispose();
+        assertEquals(3, l.paintedPhase());
+        l.setPhase(5);
+        l.markShown();
+        assertEquals(5, l.paintedPhase());
+        // The hint.
+        final byte[] hint = new byte[240 * 192];
+        java.util.Arrays.fill(hint, (byte) 77);
+        int cyc = 0;
+        for (int y = 0; y < 192; y++) {
+            for (int x = 0; x < 240; x++) {
+                if (l.index(x, y) >= 120 && l.index(x, y) < 128) cyc++;
+            }
+        }
+        assertTrue(cyc > 0);
+        assertEquals(cyc, l.indexHint(hint));
+        for (int y = 0; y < 192; y++) {
+            for (int x = 0; x < 240; x++) {
+                final int v = l.index(x, y);
+                assertEquals(x + "," + y, (v >= 120 && v < 128) ? v : 0,
+                             hint[y * 240 + x] & 0xFF);
+            }
+        }
+    }
+
     /** No pack, no layer: the RGBA fallback. */
     public void testNoPackNoLayer() {
         assertNull(ClassicTerrainLayer.create(null));

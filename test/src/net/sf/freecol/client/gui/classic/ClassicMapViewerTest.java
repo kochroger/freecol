@@ -604,4 +604,199 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         assertEquals(0x181C7D, ClassicMapViewer.DARK_SEA.getRGB() & 0xFFFFFF);
         mv.dispose();
     }
+
+    /**
+     * A server game for the water cycle: {@link #seaGame} with a sea lane
+     * (high seas) at (16,14..16) and at the view's corners (8,9) and
+     * (22,20), all explored, so the cycling cells span the whole view of
+     * the ship at (15,15).
+     */
+    private static Game laneGame() {
+        final Game server = seaGame();
+        final Map map = server.getMap();
+        final net.sf.freecol.common.model.TileType lane
+            = spec().getTileType("model.tile.highSeas");
+        final java.util.List<Tile> seen = new java.util.ArrayList<>();
+        for (int[] xy : new int[][] { { 16, 14 }, { 16, 15 }, { 16, 16 }, { 8, 9 },
+                                      { 22, 20 } }) {
+            final Tile t = map.getTile(xy[0], xy[1]);
+            t.setType(lane);
+            seen.add(t);
+        }
+        ((net.sf.freecol.server.model.ServerPlayer)server
+            .getPlayerByNationId("model.nation.dutch")).exploreTiles(seen);
+        return server;
+    }
+
+    /**
+     * The water cycle on the map (M1c design 10 §7.2/§7.3, W6c; Critic 3):
+     * a palette step due in the middle of a slide is painted at its own
+     * deadline, between two slide steps, with the new colours at once; a
+     * step while the slide's final draw is due paints that final draw (the
+     * whole map, the minimap once); any other step paints the cycling
+     * cells silently -- no explored state taken, no change told to the turn
+     * flow, a pending change kept.
+     */
+    public void testPaletteSteps() throws Exception {
+        final Game server = laneGame();
+        final Player sDutch = server.getPlayerByNationId("model.nation.dutch");
+        final Game client = ClassicTerrainOracleTest.clientView(server, sDutch);
+        final Map map = client.getMap();
+        final Tile src = map.getTile(15, 15), dst = map.getTile(14, 15);
+        final Unit ship = src.getFirstUnit();
+        assertNotNull(ship);
+        final int[] dots = { 0 }, changes = { 0 };
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                void paintBlinkDot() {
+                    dots[0]++;
+                }
+
+                @Override
+                void screenChanged() {
+                    changes[0]++;
+                }
+            };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        final ClassicTerrainLayer layer = ClassicTerrainLayerTest.layer();
+        mv.setFixedScale(1);
+        mv.setTerrain(layer, ClassicTerrainOracleTest.oracle(client, true, server));
+        final java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+            240, 192, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        mv.paintOffscreen(img);
+        mv.setFocus(src);
+        assertEquals(-1, new ClassicMapViewer(null, null, null, false).paintedPhase());
+        java.awt.Graphics2D g = img.createGraphics();
+        mv.paintComponent(g);
+        g.dispose();
+        assertEquals(0, mv.paintedPhase());
+        assertSame(layer.palette(), mv.gamePalette());
+        // The sea lane (16,14) is cell (8,5); its offset 35 = (3,2), in no
+        // mask, is a sparkle: 123.
+        final int lx = 8 * 16 + 3, ly = 5 * 16 + 2;
+        assertEquals(123, layer.index(lx, ly));
+        assertEquals(layer.palette().rgb(0, 123), img.getRGB(lx, ly) & 0xFFFFFF);
+        // The whole view cycles: the lane at both corners.
+        assertTrue(java.util.Arrays.equals(new int[] { 0, 0, 15, 12 }, layer.cyclingCells()));
+        final byte[] hint = new byte[240 * 192];
+        assertTrue(mv.indexHint(hint));
+        assertEquals(123, hint[ly * 240 + lx] & 0xFF);
+        assertEquals(0, hint[1] & 0xFF);
+
+        // The cycle on a fake clock: step 1 is due 100 ms into the slide.
+        final ClassicWaterCycleTest.FakeClock clock
+            = new ClassicWaterCycleTest.FakeClock(System.nanoTime());
+        final java.util.List<long[]> seen = new java.util.ArrayList<>();
+        final java.util.List<Runnable> posts = new java.util.ArrayList<>();
+        final ClassicWaterCycle cycle = new ClassicWaterCycle(clock, posts::add,
+            () -> true, null, (p, k, due, sv) -> {
+                seen.add(new long[] { clock.now, p, k, sv ? 1 : 0 });
+                mv.paletteStep(p, k, due, sv);
+            }, null, false);
+        mv.setSlideClock(cycle.servicing(clock));
+        final long period = Math.round(ClassicGamePalette.PERIOD_MS * 1_000_000L);
+        final long t1 = clock.now;
+        clock.now = t1 - period + 100_000_000L;
+        cycle.start();
+        clock.now = t1;
+        mv.animateMove(ship, src, dst);
+        assertEquals(1, seen.size());
+        assertEquals("at its deadline", t1 + 100_000_000L, seen.get(0)[0]);
+        assertEquals(1, seen.get(0)[1]);
+        assertEquals(1, seen.get(0)[3]);
+        // Between offsets 7 and 8: the waits around it are slide deadlines.
+        final long s = ClassicSlide.stepNanos(false);
+        final int w = clock.waits.indexOf(t1 + 100_000_000L);
+        assertTrue(w > 0);
+        assertEquals(t1 + 6 * s, (long) clock.waits.get(w - 1));
+        assertEquals(t1 + 7 * s, (long) clock.waits.get(w + 1));
+        assertEquals(t1 + 302_020_000L, clock.now);
+        // The new colours were painted at once, outside the slide's cells.
+        assertEquals(1, layer.phase());
+        assertEquals(1, mv.paintedPhase());
+        assertEquals(layer.palette().rgb(1, 123), img.getRGB(lx, ly) & 0xFFFFFF);
+        assertFalse(layer.palette().rgb(0, 123) == layer.palette().rgb(1, 123));
+
+        // Step 2 while the slide's final draw is due: it is that final
+        // draw (Critic 3), the minimap once; then nothing is pending.
+        final int dots0 = dots[0], changes0 = changes[0];
+        ship.setLocation(dst);   // the model has the move
+        clock.now = t1 - period + 100_000_000L + 2 * period;
+        assertTrue(cycle.serviceDue());
+        assertEquals(2, layer.phase());
+        assertEquals(dots0 + 1, dots[0]);
+        assertEquals(changes0 + 1, changes[0]);
+        mv.finalDraw();
+        assertEquals("nothing pending", dots0 + 1, dots[0]);
+        assertTrue(mv.isShownAt(ship, dst));
+
+        // Step 3 with nothing pending: the cycling cells -- the whole view
+        // here -- silently.  A reveal the model already has stays dark, a
+        // pending change stays pending.
+        final Tile revealed = map.getTile(13, 15);
+        assertFalse(revealed.isExplored());
+        for (int y = 14; y <= 16; y++) {
+            map.getTile(13, y).setType(spec().getTileType("model.tile.ocean"));
+        }
+        assertTrue(revealed.isExplored());
+        assertFalse(mv.shownExplored(revealed));
+        mv.changeToEndTurn();
+        mv.setBlinkOff(true);   // no active unit: a change to show, no paint
+        final int changes1 = changes[0];
+        final int px = 5 * 16 + 8, py = 6 * 16 + 8;   // (13,15) = cell (5,6)
+        final int dark = img.getRGB(px, py);
+        clock.now += period;
+        assertTrue(cycle.serviceDue());
+        assertEquals(3, layer.phase());
+        assertEquals(layer.palette().rgb(3, 123), img.getRGB(lx, ly) & 0xFFFFFF);
+        assertEquals("silent", changes1, changes[0]);
+        assertFalse("no explored state taken", mv.shownExplored(revealed));
+        assertEquals(dark, img.getRGB(px, py));
+        // The next ordinary paint shows the reveal and the pending change.
+        g = img.createGraphics();
+        mv.paintComponent(g);
+        g.dispose();
+        assertTrue(mv.shownExplored(revealed));
+        assertEquals(changes1 + 1, changes[0]);
+        // The thread's posts of the steps the waits fired are stale.
+        for (Runnable r : posts) r.run();
+        assertEquals(3, seen.size());
+        mv.dispose();
+        cycle.close();
+    }
+
+    /**
+     * Nothing cycles in view: a palette step paints nothing, and the screen
+     * counts as shown at the new phase (every phase looks alike there).
+     */
+    public void testPaletteStepWithNothingCycling() {
+        final Game server = seaGame();
+        final Game client = ClassicTerrainOracleTest.clientView(server,
+            server.getPlayerByNationId("model.nation.dutch"));
+        final ClassicMapViewer mv = new ClassicMapViewer(null, null, null, false);
+        final ClassicTerrainLayer layer = ClassicTerrainLayerTest.layer();
+        mv.setFixedScale(1);
+        mv.setTerrain(layer, ClassicTerrainOracleTest.oracle(client, true, server));
+        final java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+            240, 192, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        mv.paintOffscreen(img);
+        mv.setFocus(client.getMap().getTile(15, 15));
+        final java.awt.Graphics2D g = img.createGraphics();
+        mv.paintComponent(g);
+        g.dispose();
+        assertNull(layer.cyclingCells());
+        final int[] before = img.getRGB(0, 0, 240, 192, null, 0, 240);
+        mv.paletteStep(5, 5, System.nanoTime(), false);
+        assertEquals(5, layer.phase());
+        assertEquals(5, mv.paintedPhase());
+        assertTrue(java.util.Arrays.equals(before, img.getRGB(0, 0, 240, 192, null, 0, 240)));
+        // Without a layer: nothing at all.
+        final ClassicMapViewer bare = new ClassicMapViewer(null, null, null, false);
+        bare.paletteStep(3, 3, 0L, false);
+        assertEquals(-1, bare.paintedPhase());
+        assertFalse(bare.indexHint(new byte[240 * 192]));
+        assertNull(bare.gamePalette());
+        mv.dispose();
+        bare.dispose();
+    }
 }

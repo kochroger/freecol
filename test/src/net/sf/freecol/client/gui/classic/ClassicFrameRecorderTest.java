@@ -237,6 +237,236 @@ public class ClassicFrameRecorderTest extends TestCase {
             ClassicFrameRecorder.timelineRow(28639, 0, 0, ""));
         assertEquals("1148,16379.805,0,0,138,4,frame_001148.png,0,ok\n",
             ClassicFrameRecorder.timelineRow(1148, 138, 4, "frame_001148.png"));
+        // W6c: palette steps, as the fog-start clip's rows #7 and #169.
+        assertEquals("7,99.877,0,1,0,0,frame_000007.png,8,ok\n",
+            ClassicFrameRecorder.timelineRow(7, 0, 0, "frame_000007.png", 8));
+        assertEquals("169,2411.313,0,1,127,4,frame_000169.png,8,ok\n",
+            ClassicFrameRecorder.timelineRow(169, 127, 4, "frame_000169.png", 8));
+        assertEquals("0,0.000,1,1,64000,260,frame_000000.png,256,ok\n",
+            ClassicFrameRecorder.timelineRow(0, 64000, 260, "frame_000000.png", 8));
+        final byte[] a = new byte[768], b = a.clone();
+        assertEquals(0, ClassicFrameRecorder.entriesChanged(a, b));
+        b[3 * 120 + 2] = 1;
+        b[3 * 127] = 1;
+        assertEquals(2, ClassicFrameRecorder.entriesChanged(a, b));
+    }
+
+    /**
+     * W6c (design 10 §9.2.2): the record palette's colour cycle rotates
+     * with the frame's phase -- the PLTE is the game palette at that phase
+     * whatever the file's own phase (landfall #0 is phase 1) -- and the
+     * colour to index map follows; a colour two entries hold takes the
+     * lower, as before.  An adaptive palette does not rotate.
+     */
+    public void testThePaletteRotatesWithThePhase() {
+        final ClassicGamePalette gp = new ClassicGamePalette(
+            ClassicGamePaletteTest.viceroyLike(), null);
+        final ClassicFrameRecorder.Palette p
+            = ClassicFrameRecorder.Palette.of("lf0", gp.rgb(1));
+        assertEquals(1, gp.phaseOf(p.fileEntries()));
+        assertEquals(0, p.rotation());
+        assertFalse(p.rotate(0, 120, 8));
+        for (int phase = 0; phase < 16; phase++) {
+            p.rotate(phase - 1, 120, 8);
+            assertEquals(Math.floorMod(phase - 1, 8), p.rotation());
+            final byte[] plte = p.plte();
+            for (int i = 0; i < 256; i++) {
+                assertEquals("phase " + phase + " #" + i, gp.rgb(phase, i), p.entry(i));
+                assertEquals(gp.rgb(phase, i), ((plte[3 * i] & 0xFF) << 16)
+                    | ((plte[3 * i + 1] & 0xFF) << 8) | (plte[3 * i + 2] & 0xFF));
+            }
+            for (int i = 120; i < 128; i++) {
+                final int c = gp.rgb(phase, i);
+                final int want = (c == gp.rgb(0, 56)) ? 56 : (c == gp.rgb(0, 59)) ? 59 : i;
+                assertEquals("phase " + phase + " #" + i, want, p.index(c));
+            }
+        }
+        assertEquals(0, p.missPixels);
+        assertTrue(java.util.Arrays.equals(gp.rgb(1), p.fileEntries()));
+        final ClassicFrameRecorder.Palette ad = ClassicFrameRecorder.Palette.adaptive();
+        assertNull(ad.fileEntries());
+        assertFalse(ad.rotate(3, 120, 8));
+    }
+
+    /**
+     * W6c (design 10 §9.2.4): the index hint resolves a cycling pixel whose
+     * colour a lower index holds too -- 127 at phase 0 has 59's colour, 120
+     * has 56's -- only in the map area, only where the colour is the hint's
+     * entry.
+     */
+    public void testTheHintResolves127AtPhase0Against59() {
+        final ClassicGamePalette gp = new ClassicGamePalette(
+            ClassicGamePaletteTest.viceroyLike(), null);
+        final ClassicFrameRecorder.Palette p
+            = ClassicFrameRecorder.Palette.of("fs19", gp.rgb(0));
+        final BufferedImage img = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+        final int c59 = gp.rgb(0, 127), c56 = gp.rgb(0, 120);
+        assertEquals(gp.rgb(0, 59), c59);
+        assertEquals(gp.rgb(0, 56), c56);
+        img.setRGB(10, 20, c59);    // hint 127
+        img.setRGB(11, 20, c59);    // no hint: 59
+        img.setRGB(12, 20, c56);    // hint 120
+        img.setRGB(13, 20, gp.rgb(0, 30));   // hint 127, another colour: the colour
+        img.setRGB(250, 20, c59);   // outside the map area: 59
+        img.setRGB(10, 3, c59);     // the menu strip: 59
+        final byte[] hint = new byte[ClassicFrameRecorder.MAP_W * ClassicFrameRecorder.MAP_H];
+        hint[(20 - 8) * 240 + 10] = (byte) 127;
+        hint[(20 - 8) * 240 + 12] = (byte) 120;
+        hint[(20 - 8) * 240 + 13] = (byte) 127;
+        final byte[] out = new byte[320 * 200];
+        assertEquals(2, ClassicFrameRecorder.downsample(img, new Rectangle(0, 0, 320, 200),
+                                                        1, p, hint, out));
+        assertEquals(127, out[20 * 320 + 10] & 0xFF);
+        assertEquals(59, out[20 * 320 + 11] & 0xFF);
+        assertEquals(120, out[20 * 320 + 12] & 0xFF);
+        assertEquals(30, out[20 * 320 + 13] & 0xFF);
+        assertEquals(59, out[20 * 320 + 250] & 0xFF);
+        assertEquals(59, out[3 * 320 + 10] & 0xFF);
+        // Without the hint: the lowest index, as before.
+        ClassicFrameRecorder.downsample(img, new Rectangle(0, 0, 320, 200), 1, p, out);
+        assertEquals(59, out[20 * 320 + 10] & 0xFF);
+        assertEquals(56, out[20 * 320 + 12] & 0xFF);
+    }
+
+    /**
+     * W6c end to end: a recording whose terrain changes phase.  The frame
+     * after a step is a {@code paletteChanged=1} row with 8 entries and a
+     * PNG even with no changed pixel; each PNG's PLTE is the game palette
+     * at the frame's phase (the file being phase 1, as landfall #0); the
+     * hint keeps the cycling pixels' indices across the step; a step with
+     * no cycling pixel on the screen gets its palette frame without a
+     * paint; the summary counts it all.
+     */
+    public void testPaletteStepsInARecording() throws Exception {
+        final File d = tempDir();
+        final ClassicGamePalette gp = new ClassicGamePalette(
+            ClassicGamePaletteTest.viceroyLike(), null);
+        final ClassicFrameRecorder rec = ClassicFrameRecorder.open(d,
+            ClassicFrameRecorder.Palette.of("lf0", gp.rgb(1)));
+        final int[] phase = { 0 };
+        final boolean[] cycling = { true };
+        rec.setTerrainProbe(new ClassicFrameRecorder.TerrainProbe() {
+                @Override
+                public int paintedPhase() {
+                    return phase[0];
+                }
+
+                @Override
+                public ClassicGamePalette gamePalette() {
+                    return gp;
+                }
+
+                @Override
+                public boolean indexHint(byte[] out) {
+                    java.util.Arrays.fill(out, (byte) 0);
+                    if (cycling[0]) {
+                        out[(20 - 8) * 240 + 10] = (byte) 127;
+                        out[(20 - 8) * 240 + 12] = (byte) 120;
+                    }
+                    return true;
+                }
+            });
+        final JPanel pane = new JPanel();
+        pane.setBounds(0, 0, 320, 200);
+        final BufferedImage screen = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+        final Graphics g = screen.getGraphics();
+        final java.util.function.IntConsumer paint = ph -> rec.paintThrough(pane, g,
+            new Rectangle(0, 0, 320, 200), 1, cg -> {
+                cg.setColor(new Color(gp.rgb(0, 200)));   // a plain index
+                cg.fillRect(0, 0, 320, 200);
+                cg.setColor(new Color(gp.rgb(0, 59)));
+                cg.fillRect(11, 20, 1, 1);           // plain ocean 59
+                if (cycling[0]) {
+                    cg.setColor(new Color(gp.rgb(ph, 127)));
+                    cg.fillRect(10, 20, 1, 1);
+                    cg.setColor(new Color(gp.rgb(ph, 120)));
+                    cg.fillRect(12, 20, 1, 1);
+                }
+            });
+        paint.accept(0);                 // phase 0: 127 shows 59's colour
+        awaitFrames(rec, rec.framesSampled() + 6);
+        phase[0] = 1;                    // a step: only the palette changes
+        paint.accept(1);
+        awaitFrames(rec, rec.framesSampled() + 6);
+        cycling[0] = false;              // the lane leaves the view
+        paint.accept(1);
+        awaitFrames(rec, rec.framesSampled() + 6);
+        phase[0] = 2;                    // a step with nothing to paint
+        rec.notePaletteStep("p=2 k=2 test", 1_000_000L, 2_000_000L, false);
+        awaitFrames(rec, rec.framesSampled() + 6);
+        g.dispose();
+        rec.close();
+
+        final List<String> tl = Files.readAllLines(new File(d, "timeline.csv").toPath(),
+                                                   StandardCharsets.UTF_8);
+        final java.util.Map<Integer, String> paletteOnly = new java.util.TreeMap<>();
+        String phase0 = null;
+        for (String row : tl.subList(1, tl.size())) {
+            final String[] f = row.split(",", -1);
+            if (f[6].isEmpty()) {
+                assertEquals(row, "0", f[3]);
+                continue;
+            }
+            final BufferedImage png = ImageIO.read(new File(d, f[6]));
+            final IndexColorModel cm = (IndexColorModel) png.getColorModel();
+            final int ph = gp.phaseOf(plte(cm));
+            assertTrue(row + ": a phase of the game palette", ph >= 0);
+            if (f[3].equals("1") && !f[0].equals("0")) assertEquals(row, "8", f[7]);
+            if (f[3].equals("1") && f[4].equals("0")) paletteOnly.put(ph, row);
+            // The cycling pixels keep their indices (never 56 or 59), the
+            // ocean is 59 (frame 0 may come before the first paint).
+            final int a = png.getRaster().getSample(10, 20, 0);
+            final int c = png.getRaster().getSample(12, 20, 0);
+            assertFalse(row + ": " + a, a == 56 || a == 59);
+            assertFalse(row + ": " + c, c == 56 || c == 59);
+            if (a == 127) {
+                assertEquals(row, 120, c);
+                if (ph == 0) phase0 = f[6];
+            } else if (!f[0].equals("0")) {
+                assertEquals(row, 200, a);
+            }
+            if (!f[0].equals("0")) {
+                assertEquals(row, 59, png.getRaster().getSample(11, 20, 0));
+            }
+            for (int i = 0; i < 256; i++) {
+                assertEquals(row + " #" + i, gp.rgb(ph, i), cm.getRGB(i) & 0xFFFFFF);
+            }
+        }
+        assertNotNull("a frame at phase 0 with the lane", phase0);
+        assertTrue("palette-only frames " + paletteOnly, paletteOnly.containsKey(1));
+        assertTrue("the step without a paint " + paletteOnly, paletteOnly.containsKey(2));
+        final List<String> sum = Files.readAllLines(new File(d, "summary.txt").toPath(),
+                                                    StandardCharsets.UTF_8);
+        String frames = null, hints = null, steps = null;
+        for (String l : sum) {
+            if (l.startsWith("paletteFrames: ")) frames = l;
+            if (l.startsWith("hintPixels: ")) hints = l;
+            if (l.startsWith("paletteSteps: ")) steps = l;
+        }
+        assertNotNull(sum.toString(), frames);
+        assertTrue(frames, frames.endsWith("record palette phase 1"));
+        assertTrue(frames, frames.contains("(palette only "));
+        assertNotNull(hints);
+        assertTrue(hints, Long.parseLong(hints.substring(12)) > 0);
+        assertTrue(steps, steps.startsWith("paletteSteps: 1; late mean 2.000 max 2.000 ms;"
+                                           + " painted 0"));
+        final List<String> ev = Files.readAllLines(new File(d, "events.log").toPath(),
+                                                   StandardCharsets.UTF_8);
+        boolean step = false, file = false;
+        for (String l : ev) {
+            if (l.endsWith(",palette-step,p=2 k=2 test")) step = true;
+            if (l.contains(",palette-file,phase=1 cycle=8@120/35")) file = true;
+        }
+        assertTrue(step);
+        assertTrue(file);
+        for (File f : d.listFiles()) f.deleteOnExit();
+    }
+
+    /** The 256 entries of a colour model, 0xRRGGBB. */
+    private static int[] plte(IndexColorModel cm) {
+        final int[] e = new int[256];
+        for (int i = 0; i < Math.min(256, cm.getMapSize()); i++) e[i] = cm.getRGB(i) & 0xFFFFFF;
+        return e;
     }
 
     /**

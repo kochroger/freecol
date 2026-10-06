@@ -65,8 +65,8 @@ import javax.swing.JComponent;
  * <p><b>Output</b>, in the record directory:
  * <ul>
  *   <li>{@code frame_NNNNNN.png}: frame 0 and every frame whose pixels
- *       changed, 8 bit indexed with a 256-entry PLTE (always the same
- *       palette, see below);</li>
+ *       or palette changed, 8 bit indexed with a 256-entry PLTE (the record
+ *       palette, its colour cycle at the frame's phase, see below);</li>
  *   <li>{@code timeline.csv}: one row per frame, ZmbvExtract's columns
  *       {@value #TIMELINE_HEADER}; frame k is at k * 1000 / 70.0863 ms
  *       after the recorder started;</li>
@@ -98,9 +98,14 @@ import javax.swing.JComponent;
  * (the sprite frame and place of each building on the colony screen),
  * {@code still}, {@code terrain} (W6e: whether the pack holds the index
  * pipeline, {@code index ...} or {@code fallback ...}; a {@link #note},
- * so it is also a line of {@code summary.txt}).  Reserved for
+ * so it is also a line of {@code summary.txt}), {@code palette-step}
+ * (W6c: {@code p= k= late= dur= via=post|wait} and what it painted:
+ * {@code cells=c0,r0-c1,r1}, {@code final-draw}, {@code none},
+ * {@code hidden}), {@code palette-start}, {@code palette-hold},
+ * {@code palette-release}, {@code palette-pref} (the cycle),
+ * {@code palette-file} (the record palette's phase).  Reserved for
  * the M1 work items: {@code endturn-timer-start/fire}
- * (W5), {@code palette-step} (W6c), {@code music-fade} (W15).
+ * (W5), {@code music-fade} (W15).
  *
  * <p><b>Where the pixels come from.</b>  While recording, the HUD pane
  * ({@link ClassicHudPane}) is the painting origin of all its children and
@@ -130,6 +135,18 @@ import javax.swing.JComponent;
  * Without a palette file the indices are handed out in order of first
  * sight (the tools then still see changes, but not the original's index
  * meanings).
+ *
+ * <p><b>The water cycle</b> (M1c design 10 §9.2, W6c).  The map's terrain
+ * layer ({@link TerrainProbe}) is read with every HUD paint and published
+ * with its copy: the phase it shows and its index hint.  The record
+ * palette's own phase of the game palette's cycle is found once (fog-start
+ * #19 is 0, the landfall clip's #0 is 1), and each frame's PLTE is the
+ * record palette with entries 120-127 rotated by {@code phase - p_file}, so
+ * the colours map back to the original's indices at every phase; a frame
+ * whose palette changed is a {@code paletteChanged=1} row with
+ * {@code paletteEntriesChanged=8} and gets a PNG even with no changed pixel,
+ * as in ZmbvExtract's clips.  The index hint names the cycling pixels whose
+ * colour a lower index holds too (120 = 56 and 127 = 59 at phase 0).
  */
 public final class ClassicFrameRecorder {
 
@@ -179,6 +196,36 @@ public final class ClassicFrameRecorder {
     /** Nanoseconds per frame on the clip's grid. */
     private static final double NS_PER_FRAME = 1e9 / HZ;
 
+    /**
+     * The map area of the canvas, the HUD's 15x12 view below the 8-px
+     * menu strip: (0, {@value #MAP_Y}, {@value #MAP_W}, {@value #MAP_H}).
+     */
+    static final int MAP_Y = 8, MAP_W = 240, MAP_H = 192;
+
+
+    /**
+     * What the recorder reads of the map's terrain layer, on the event
+     * thread right after each HUD paint (design 10 §9.2): the phase the
+     * terrain is shown at, the game palette and the index hint.
+     */
+    interface TerrainProbe {
+
+        /** @return The phase the map shows its terrain at, or -1 without a layer. */
+        int paintedPhase();
+
+        /** @return The game palette, or null without a layer. */
+        ClassicGamePalette gamePalette();
+
+        /**
+         * Copy the index hint: {@link #MAP_W} x {@link #MAP_H}, the
+         * composed index where it cycles, else 0.
+         *
+         * @param out The hint.
+         * @return False without a layer.
+         */
+        boolean indexHint(byte[] out);
+    }
+
     /** Guards {@link #initDone} and the creation of {@link #instance}. */
     private static final Object INIT = new Object();
 
@@ -222,6 +269,49 @@ public final class ClassicFrameRecorder {
     /** The 320x200 canvas inside {@link #shadow}, and its scale. */
     private Rectangle canvas = null;
     private int scale = 1;
+
+    /**
+     * The map's terrain layer as the recorder reads it (EDT only), or
+     * null: what a frame's palette and index hint come from.
+     */
+    private TerrainProbe terrain = null;
+
+    /** The index hint as painted (EDT only), {@link #MAP_W} x {@link #MAP_H}. */
+    private final byte[] hintWork = new byte[MAP_W * MAP_H];
+
+    /** The hint published with {@link #shadow} (under {@link #frameLock}). */
+    private final byte[] hintShadow = new byte[MAP_W * MAP_H];
+
+    /** Whether {@link #hintShadow} holds a hint (under {@link #frameLock}). */
+    private boolean hintOn = false;
+
+    /**
+     * The colour cycle's rotation of the record palette for the published
+     * copy, {@code phase - p_file}, and the cycle (under {@link #frameLock}).
+     */
+    private int publishedRotation = 0, cycleFirst = ClassicGamePalette.CYCLE_FIRST,
+        cycleCount = ClassicGamePalette.CYCLE_COUNT;
+
+    /** The game palette {@link #fileCyclePhase} was found for (EDT only). */
+    private ClassicGamePalette cyclePalette = null;
+
+    /**
+     * The record palette's phase of the game palette's cycle (design 10
+     * §9.2.2: fog-start #19 is 0, landfall #0 is 1), -1 for no match or no
+     * fixed palette (EDT only).
+     */
+    private int fileCyclePhase = -1;
+
+    /** Palette steps of the game (EDT): count, paints, and their cost. */
+    private long paletteSteps = 0, paletteStepPaints = 0;
+    private long paletteStepNs = 0, paletteStepMaxNs = 0, paletteLateNs = 0,
+        paletteLateMaxNs = 0;
+
+    /** Sampler: frames whose palette changed (after frame 0), and hint pixels. */
+    private long paletteFrames = 0, paletteOnlyFrames = 0, hintPixels = 0;
+
+    /** Sampler: the PLTE of the last frame, null before frame 0. */
+    private byte[] lastPlte = null;
 
     /** Guards {@link #events} and {@link #eventsOpen}. */
     private final Object eventsLock = new Object();
@@ -489,6 +579,9 @@ public final class ClassicFrameRecorder {
             sg.dispose();
         }
         final long b = System.nanoTime();
+        // The terrain's phase and index hint as just painted (W6c).
+        final int rot = terrainRotation();
+        final boolean hint = this.terrain != null && this.terrain.indexHint(this.hintWork);
         synchronized (this.frameLock) {
             if (this.shadow == null || this.shadow.getWidth() != w
                 || this.shadow.getHeight() != h) {
@@ -504,6 +597,9 @@ public final class ClassicFrameRecorder {
             }
             this.canvas = new Rectangle(canvas);
             this.scale = Math.max(1, s);
+            this.publishedRotation = rot;
+            this.hintOn = hint;
+            if (hint) System.arraycopy(this.hintWork, 0, this.hintShadow, 0, this.hintWork.length);
         }
         final long c = System.nanoTime();
         g.drawImage(img, 0, 0, null);
@@ -515,6 +611,94 @@ public final class ClassicFrameRecorder {
         this.publishMaxNs = Math.max(this.publishMaxNs, c - b);
         this.blitNs += d - c;
         this.blitMaxNs = Math.max(this.blitMaxNs, d - c);
+    }
+
+    /**
+     * Read the map's terrain layer with every HUD paint (design 10 §9.2):
+     * the phase of each published frame, which rotates the record
+     * palette's colour cycle, and the index hint.  EDT only; once, by the
+     * HUD pane.
+     *
+     * @param probe The map's layer, or null.
+     */
+    void setTerrainProbe(TerrainProbe probe) {
+        this.terrain = probe;
+    }
+
+    /**
+     * The record palette's rotation for the terrain as painted now:
+     * {@code phase - p_file}, with p_file the record palette's own phase
+     * of the game palette's cycle (no match: 0, and one warning).  EDT.
+     *
+     * @return The rotation, 0 without a layer or a fixed palette.
+     */
+    private int terrainRotation() {
+        final TerrainProbe t = this.terrain;
+        if (t == null) return 0;
+        final int phase = t.paintedPhase();
+        final ClassicGamePalette gp = t.gamePalette();
+        if (phase < 0 || gp == null) return 0;
+        if (gp != this.cyclePalette) {
+            this.cyclePalette = gp;
+            final int[] f = this.palette.fileEntries();
+            int p = (f == null) ? -1 : gp.phaseOf(f);
+            if (p < 0 && f != null) {
+                logger.warning("Classic recorder: the record palette's 120-127"
+                    + " are no phase of the game palette; taken as phase 0");
+                p = 0;
+            }
+            this.fileCyclePhase = p;
+            synchronized (this.frameLock) {
+                this.cycleFirst = gp.cycle().first;
+                this.cycleCount = gp.cycle().count;
+            }
+            log(System.nanoTime(), "palette-file", (f == null)
+                ? "adaptive: no rotation" : "phase=" + p + " cycle=" + gp.cycle());
+        }
+        return (this.fileCyclePhase < 0) ? 0 : phase - this.fileCyclePhase;
+    }
+
+    /**
+     * A step of the water cycle (W6c; the map viewer, EDT): log it as
+     * {@code palette-step}, count its paint for the summary, and publish
+     * the new phase even when no cycling pixel had to be painted, so the
+     * frame gets its palette change (an original palette frame changes no
+     * pixel).  A no-op while recording is off.
+     *
+     * @param detail The event's detail.
+     * @param durNs The step's paint, ns.
+     * @param lateNs How late the step ran, ns.
+     * @param painted Whether it painted anything.
+     */
+    static void paletteStep(String detail, long durNs, long lateNs, boolean painted) {
+        final ClassicFrameRecorder r = instance;
+        if (r != null) r.notePaletteStep(detail, durNs, lateNs, painted);
+    }
+
+    /**
+     * {@link #paletteStep} on this recorder.
+     *
+     * @param detail The event's detail.
+     * @param durNs The step's paint, ns.
+     * @param lateNs How late the step ran, ns.
+     * @param painted Whether it painted anything.
+     */
+    void notePaletteStep(String detail, long durNs, long lateNs, boolean painted) {
+        this.paletteSteps++;
+        this.paletteLateNs += lateNs;
+        this.paletteLateMaxNs = Math.max(this.paletteLateMaxNs, lateNs);
+        if (painted) {
+            this.paletteStepPaints++;
+            this.paletteStepNs += durNs;
+            this.paletteStepMaxNs = Math.max(this.paletteStepMaxNs, durNs);
+        }
+        log(System.nanoTime(), "palette-step", detail);
+        if (this.terrain != null) {
+            final int rot = terrainRotation();
+            synchronized (this.frameLock) {
+                this.publishedRotation = rot;
+            }
+        }
     }
 
     /**
@@ -609,7 +793,7 @@ public final class ClassicFrameRecorder {
                     (long)Math.floor((now - this.t0) / NS_PER_FRAME));
                 if (kNow > k) {
                     if (this.framesOn) {
-                        for (long j = k; j < kNow; j++) writeRow(j, 0, 0, "");
+                        for (long j = k; j < kNow; j++) writeRow(j, 0, 0, "", 0);
                     }
                     this.lateTicks += kNow - k;
                     log(now, "late", "ticks=" + (kNow - k) + " at=" + kNow);
@@ -688,8 +872,19 @@ public final class ClassicFrameRecorder {
      * @exception IOException if the timeline cannot be written.
      */
     private void sampleFrame(long k, byte[] prev, byte[] cur) throws IOException {
+        boolean rotated;
         synchronized (this.frameLock) {
-            downsample(this.shadow, this.canvas, this.scale, this.palette, cur);
+            // The frame's palette: the record palette at the terrain's phase.
+            rotated = this.palette.rotate(this.publishedRotation, this.cycleFirst,
+                                          this.cycleCount);
+            this.hintPixels += downsample(this.shadow, this.canvas, this.scale,
+                this.palette, (this.hintOn) ? this.hintShadow : null, cur);
+        }
+        int entries = 0;
+        if (rotated || this.lastPlte == null) {
+            final byte[] plte = this.palette.plte();
+            entries = (this.lastPlte == null) ? 0 : entriesChanged(this.lastPlte, plte);
+            this.lastPlte = plte;
         }
         final int changed, blocks;
         if (k == 0) {
@@ -699,13 +894,17 @@ public final class ClassicFrameRecorder {
             final int[] cb = diff(prev, cur);
             changed = cb[0];
             blocks = cb[1];
+            if (entries > 0) {
+                this.paletteFrames++;
+                if (changed == 0) this.paletteOnlyFrames++;
+            }
         }
         String png = "";
-        if (changed > 0) {
+        if (changed > 0 || entries > 0) {
             png = String.format(Locale.ROOT, "frame_%06d.png", k);
             final File f = new File(this.dir, png);
             final byte[] pix = cur.clone();
-            final byte[] plte = this.palette.plte();
+            final byte[] plte = this.lastPlte;
             this.pngWriter.execute(() -> {
                     try {
                         writeIndexedPng(f, W, H, pix, plte);
@@ -717,7 +916,7 @@ public final class ClassicFrameRecorder {
             this.pngs++;
             System.arraycopy(cur, 0, prev, 0, cur.length);
         }
-        writeRow(k, changed, blocks, png);
+        writeRow(k, changed, blocks, png, entries);
     }
 
     /**
@@ -727,17 +926,18 @@ public final class ClassicFrameRecorder {
      * @param changed The changed pixels.
      * @param blocks The changed 16x16 blocks.
      * @param png The PNG written for it, or "".
+     * @param entries The palette entries changed since the frame before.
      * @exception IOException if the timeline cannot be written.
      */
-    private void writeRow(long k, int changed, int blocks, String png)
+    private void writeRow(long k, int changed, int blocks, String png, int entries)
         throws IOException {
-        this.timeline.write(timelineRow(k, changed, blocks, png));
+        this.timeline.write(timelineRow(k, changed, blocks, png, entries));
         this.frames = k + 1;
     }
 
     /**
-     * One timeline row, as ZmbvExtract writes it: frame 0 is the keyframe
-     * with the whole palette, every later frame keeps it.
+     * One timeline row of a frame whose palette did not change
+     * ({@link #timelineRow(long, int, int, String, int)}).
      *
      * @param k The frame.
      * @param changed The changed pixels.
@@ -746,16 +946,51 @@ public final class ClassicFrameRecorder {
      * @return The row, newline included.
      */
     static String timelineRow(long k, int changed, int blocks, String png) {
-        final boolean key = k == 0;
-        return String.format(Locale.ROOT, "%d,%.3f,%d,%d,%d,%d,%s,%d,ok\n",
-            k, k * 1000.0 / HZ, key ? 1 : 0, key ? 1 : 0, changed, blocks,
-            png, key ? 256 : 0);
+        return timelineRow(k, changed, blocks, png, 0);
     }
 
     /**
-     * Downsample the HUD copy to the 320x200 canvas: the pixel at the
-     * centre of each s x s block, mapped to its index.  Outside the copy (or
-     * without one) the canvas is black.
+     * One timeline row, as ZmbvExtract writes it: frame 0 is the keyframe
+     * with the whole palette; a later frame whose palette changed (a step
+     * of the water cycle, W6c) has {@code paletteChanged=1} and the number
+     * of entries changed, the original's 8, with or without changed pixels.
+     *
+     * @param k The frame.
+     * @param changed The changed pixels.
+     * @param blocks The changed blocks.
+     * @param png The PNG file name, or "".
+     * @param entries The palette entries changed since the frame before
+     *     (ignored for frame 0, which has all 256).
+     * @return The row, newline included.
+     */
+    static String timelineRow(long k, int changed, int blocks, String png,
+                              int entries) {
+        final boolean key = k == 0;
+        final int e = (key) ? 256 : Math.max(0, entries);
+        return String.format(Locale.ROOT, "%d,%.3f,%d,%d,%d,%d,%s,%d,ok\n",
+            k, k * 1000.0 / HZ, key ? 1 : 0, (e > 0) ? 1 : 0, changed, blocks,
+            png, e);
+    }
+
+    /**
+     * The palette entries two PLTEs differ in.
+     *
+     * @param a 768 bytes.
+     * @param b 768 bytes.
+     * @return The entries (0-256).
+     */
+    static int entriesChanged(byte[] a, byte[] b) {
+        int n = 0;
+        for (int i = 0; i < 256; i++) {
+            if (a[3 * i] != b[3 * i] || a[3 * i + 1] != b[3 * i + 1]
+                || a[3 * i + 2] != b[3 * i + 2]) n++;
+        }
+        return n;
+    }
+
+    /**
+     * {@link #downsample(BufferedImage, Rectangle, int, Palette, byte[], byte[])}
+     * without an index hint.
      *
      * @param img The copy, or null.
      * @param canvas The canvas in it, or null.
@@ -765,14 +1000,42 @@ public final class ClassicFrameRecorder {
      */
     static void downsample(BufferedImage img, Rectangle canvas, int s,
                            Palette palette, byte[] out) {
+        downsample(img, canvas, s, palette, null, out);
+    }
+
+    /**
+     * Downsample the HUD copy to the 320x200 canvas: the pixel at the
+     * centre of each s x s block, mapped to its index.  Outside the copy (or
+     * without one) the canvas is black.
+     *
+     * <p>The <b>index hint</b> (design 10 §9.2.4): in the map area a pixel
+     * whose hint h is not 0 and whose colour is the palette's entry h is
+     * index h, though a lower index holds the same colour.  At two of the
+     * eight phases a cycling pixel has the colour of 56 or 59; the lowest
+     * index would record it as those, wrong indices that would also change
+     * on every palette step.  A unit pixel of the same colour over it is
+     * attributed to the terrain (negligible).
+     *
+     * @param img The copy, or null.
+     * @param canvas The canvas in it, or null.
+     * @param s The scale.
+     * @param palette The colour map.
+     * @param hint The map area's hint ({@link #MAP_W} x {@link #MAP_H}),
+     *     or null.
+     * @param out The 320x200 indices.
+     * @return The pixels the hint gave another index than the colour.
+     */
+    static int downsample(BufferedImage img, Rectangle canvas, int s,
+                          Palette palette, byte[] hint, byte[] out) {
         if (img == null || canvas == null) {
             Arrays.fill(out, (byte)palette.index(0));
-            return;
+            return 0;
         }
         final int iw = img.getWidth(), ih = img.getHeight();
         final int[] row = new int[iw];
         final boolean direct = img.getType() == BufferedImage.TYPE_INT_RGB;
         final int half = s / 2;
+        int hinted = 0;
         for (int y = 0; y < H; y++) {
             final int py = canvas.y + y * s + half;
             if (py < 0 || py >= ih) {
@@ -782,13 +1045,24 @@ public final class ClassicFrameRecorder {
             } else {
                 img.getRGB(0, py, iw, 1, row, 0, iw);
             }
+            final int hy = y - MAP_Y;
+            final boolean hintRow = hint != null && hy >= 0 && hy < MAP_H;
             for (int x = 0; x < W; x++) {
                 final int px = canvas.x + x * s + half;
                 final int rgb = (px < 0 || px >= iw || py < 0 || py >= ih) ? 0
                     : row[px] & 0xFFFFFF;
-                out[y * W + x] = (byte)palette.index(rgb);
+                int idx = palette.index(rgb);
+                if (hintRow && x < MAP_W) {
+                    final int h = hint[hy * MAP_W + x] & 0xFF;
+                    if (h != 0 && h != idx && palette.entry(h) == rgb) {
+                        idx = h;
+                        hinted++;
+                    }
+                }
+                out[y * W + x] = (byte)idx;
             }
         }
+        return hinted;
     }
 
     /**
@@ -871,6 +1145,19 @@ public final class ClassicFrameRecorder {
         s.add("palette: " + this.palette.source);
         s.add("paletteMissPixels: " + this.palette.missPixels);
         s.add("paletteMissColours: " + this.palette.missedColours());
+        // The water cycle (W6c): the game's steps, their paints and lateness
+        // (Critic 7), the frames whose palette changed, the hint.
+        final long ns = Math.max(1, this.paletteSteps);
+        final long nsp = Math.max(1, this.paletteStepPaints);
+        s.add(String.format(Locale.ROOT, "paletteSteps: %d; late mean %.3f max %.3f ms;"
+            + " painted %d, paint mean %.3f max %.3f ms", this.paletteSteps,
+            this.paletteLateNs / 1e6 / ns, this.paletteLateMaxNs / 1e6,
+            this.paletteStepPaints, this.paletteStepNs / 1e6 / nsp,
+            this.paletteStepMaxNs / 1e6));
+        s.add("paletteFrames: " + this.paletteFrames + " (palette only "
+            + this.paletteOnlyFrames + "); record palette phase "
+            + this.fileCyclePhase);
+        s.add("hintPixels: " + this.hintPixels);
         synchronized (this.notes) {
             for (Map.Entry<String, String> e : this.notes.entrySet()) {
                 s.add(e.getKey() + ": " + e.getValue());
@@ -982,11 +1269,17 @@ public final class ClassicFrameRecorder {
         /** Where the palette came from (for the summary). */
         final String source;
 
-        /** The entries, 0xRRGGBB. */
+        /** The entries, 0xRRGGBB (a fixed palette's at the current rotation). */
         private final int[] rgb = new int[256];
 
         /** Whether the entries are fixed (a file) or handed out as seen. */
         private final boolean fixed;
+
+        /** A fixed palette's entries as the file gives them; null if adaptive. */
+        private final int[] file;
+
+        /** The colour cycle's entries rotated: {@link #rotate}. */
+        private int rotation = 0;
 
         /** Entries handed out so far (adaptive only). */
         private int used = 0;
@@ -1011,12 +1304,60 @@ public final class ClassicFrameRecorder {
             this.source = source;
             this.fixed = fixed;
             if (entries != null) {
-                for (int i = 0; i < 256; i++) {
-                    this.rgb[i] = entries[i] & 0xFFFFFF;
-                    // Ascending, so a colour held twice keeps the lowest index.
-                    this.exact.putIfAbsent(this.rgb[i], i);
-                }
+                for (int i = 0; i < 256; i++) this.rgb[i] = entries[i] & 0xFFFFFF;
+                indexExact();
             }
+            this.file = (fixed) ? this.rgb.clone() : null;
+        }
+
+        /** The exact map, ascending, so a colour held twice keeps the lowest index. */
+        private void indexExact() {
+            this.exact.clear();
+            for (int i = 0; i < 256; i++) this.exact.putIfAbsent(this.rgb[i], i);
+        }
+
+        /** @return A fixed palette's entries as the file gives them, else null. */
+        int[] fileEntries() {
+            return (this.file == null) ? null : this.file.clone();
+        }
+
+        /**
+         * @param i An index.
+         * @return Its entry at the current rotation, 0xRRGGBB.
+         */
+        int entry(int i) {
+            return this.rgb[i & 0xFF];
+        }
+
+        /** @return The current rotation of the colour cycle ({@link #rotate}). */
+        int rotation() {
+            return this.rotation;
+        }
+
+        /**
+         * Rotate a fixed palette's colour cycle (design 10 §9.2.2): entry
+         * {@code first + i} gets the file's {@code first + ((i - r) mod
+         * count)}, the frame's palette at {@code r} steps from the file's
+         * phase; the other entries stay.  The colour to index maps follow.
+         *
+         * @param r The steps (any int).
+         * @param first The cycle's first entry (120).
+         * @param count Its length (8).
+         * @return True if the entries changed.
+         */
+        boolean rotate(int r, int first, int count) {
+            if (!this.fixed || count < 1 || first < 0 || first + count > 256) return false;
+            final int rr = Math.floorMod(r, count);
+            if (rr == this.rotation) return false;
+            for (int i = 0; i < count; i++) {
+                this.rgb[first + i] = this.file[first + Math.floorMod(i - rr, count)];
+            }
+            this.rotation = rr;
+            indexExact();
+            this.nearest.clear();
+            this.lastRgb = -1;
+            this.lastMiss = false;
+            return true;
         }
 
         /**

@@ -130,3 +130,27 @@ compare 876 px=44994 pointer=62 cells=19,16,145 exclude=44,44 w6b=3
 # FS #1042: move 3's reveal, 24 tiles: the 3-wide diagonal band (img/01-02);
 # the ship on (43,45), a native brave on (43,46).
 compare 1042 px=44482 pointer=62 cells=24,18,138 exclude=43,45;43,46 w6b=4
+
+# W6c, the water cycling (design 10 §7.4, §12.2), ClassicTerrainGoldenTest:
+#   palette <frame> <phase>
+#       the frame's PLTE 120-127 is the game palette (VICEROY.PAL) at that
+#       phase: P_p[120+i] = B[120 + ((i - p) mod 8)] (F3);
+#   phases <x>,<y> <cycling> <frame>...
+#       the tile's composed cell has <cycling> pixels in 120-127 and equals
+#       each frame's cell index for index and, through the game palette at
+#       each frame's phase, colour for colour; the phases follow one another;
+#   sprite <frame> <c>,<r> <Pnnn|Tnnn> <opaque> <cycling>
+#       screen cell (c,r) (view independent) holds the sprite at its opaque
+#       pixels, the cycling ones included, in the colours of the frame's
+#       phase; a PHYS0 sprite keeps them as an overlay through the composer.
+# FS #0 is phase 7, it steps to phase 0 at #7; #19 is phase 0, VICEROY's
+# own order (10-support/clip_vs_viceroy.txt).
+palette 0 7
+palette 19 0
+# FS #6543 cell (6,1): the major river PHYS0.SS.024 (N connection), 86/86
+# opaque px with its 5 cycling px (F5: rivers cycle, 10-support/
+# fs6543_river_cycling.txt), at phase 5, then after the steps #6570 and
+# #6610 at phases 6 and 7 (freecol-spike-results/d/w6c/tools/SprCell.java).
+sprite 6543 6,1 P024 86 5
+sprite 6576 6,1 P024 86 5
+sprite 6610 6,1 P024 86 5

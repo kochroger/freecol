@@ -142,7 +142,7 @@ indices through; the clips' fog-start #19 is phase 0, its #0 phase 7, landfall
 #0 phase 1. Why: the PNGs are coloured with each SS file's own palette, and
 `TERRAIN.SS`'s differs from the game's in 121-126 (the sea lane's PNG shows 4
 colours the game never shows). The map is composed from these indices (W6a);
-the water cycling (W6c) will swap the colour model.
+the water cycling (W6c, below) swaps the colour model.
 `ClassicPackFiles` reads them (`indexSheet`, `gamePalette`, `cycleSpec`, and
 `terrainSpriteFor` from the alias lines). A pack converted before W6e has none:
 `indexStatus` says `fallback no ssidx/TERRAIN.SS.idx`, logs one warning, and the
@@ -229,6 +229,51 @@ compose whole clip frames from the pack's index sheets and compare them index
 for index: fog-start #19 (46,080/46,080 px), #718, #876, #1042 and landfall
 #341, #345, #1407 all 0 px off (the mouse arrow and the unit cells excused, and
 until W6b the explored water cells with land around them).
+
+**The water cycling (M1c design 10 §7, W6c).** Palette entries 120-127 rotate
+one step every 35 game ticks, 575.05 ms (`ClassicGamePalette.PERIOD_MS`; the
+clips measure 575.0-575.1 ms): each colour moves one entry up, phase p shows
+`B[120 + ((i - p) mod 8)]` at entry 120 + i. Every pixel that holds such an
+index cycles: sea lanes (62 px), **rivers** (5-21 px each), swamps, beach
+corners, and the fringes and blends next to them. `ClassicWaterCycle` (created
+with the map viewer in `ClassicGUI.reconnectGUI`, started there at phase 0 =
+VICEROY's order, closed in `teardownInGame`) keeps the absolute schedule
+`t0 + k * P` on a daemon thread (`Thread.sleep` plus spin) and posts each step to
+the EDT; `ClassicMapViewer.paletteStep` sets the layer's phase and repaints the
+box of the cells whose last composition holds a cycling index, with the units
+over them, only while the map is on screen. It keeps running under boxes, menus
+and the Europe screen. Details:
+
+- **On time inside blocking waits.** The slide, its hold, the gap before a
+  chained slide, the native cue and the panel tick after a key move block the
+  EDT; they wait on `ClassicWaterCycle.servicing` (the viewer's `slideClock`,
+  `ClassicGUI.waitClock`), which fires every step due before the wait's own
+  deadline at that step's deadline, between two slide steps; the slide's own
+  schedule is unchanged. A post that comes after is dropped as stale.
+- **Silent paints** (Critic 3): a palette step's paint takes no explored state,
+  uses up no final draw and tells the turn flow nothing (`palettePaint`); while
+  a slide's final draw is due the step paints that final draw instead. With no
+  cycling cell in the view nothing is painted (`ClassicTerrainLayer.markShown`).
+- **Frozen:** `hold(reason)` / `release(reason)` for the woodcuts (W9 wires
+  them: no step while one is up, then one step at the next frame, 14.27 ms, and
+  the schedule runs on from it, landfall #2638 -> #2639). The pref
+  `waterCycling` OFF freezes the phase, read at every due step; ON resumes one
+  period later (the original's OFF is not observed, O12). `setEnabled` is the
+  same switch for the options box (W14).
+- **Not emulated:** the original's step delayed by 2-3 frames when a portrait
+  box opens (O10). A step posted while the EDT is busy otherwise (the turn
+  start, a long paint) comes that much late.
+
+Tests: `ClassicWaterCycleTest` (schedule, no drift over 1,000 steps, stale posts,
+hold/release, the pref, the servicing clock, the thread), `ClassicSlideTest`
+(the slide's deadlines with a step inside), `ClassicMapViewerTest` (a step in a
+slide at its deadline, the final-draw case, the silent paint),
+`ClassicTerrainLayerTest`, `ClassicFrameRecorderTest` (below) and the golden
+lines of `ClassicTerrainGoldenTest`: the clips' palettes are phases of VICEROY
+(fog-start #0 = 7, #19 = 0, landfall #0 = 1); landfall #5420-#5702, 8 phases
+in a row, equal our composed sea lane (56,42) and ocean (55,42) index for index
+and colour for colour; the river `PHYS0.SS.024` of fog-start #6543 cell (6,1)
+holds 86/86 px with its 5 cycling ones at three phases in a row.
 
 **Unit & goods sprites.** The original *Colonization* unit map-sprites and goods
 icons come from `ICONS.SS`, aliased onto FreeCol's own resource keys in the same
@@ -3649,9 +3694,22 @@ paints as before). `ClassicTestHarness.install` (from `startGUI`) binds both.
 `ZmbvExtract` decoded the original's DOSBox clips, so the clip-analysis tools
 (BlinkScan, MoveScan2, Activation, MarginCheck, Ring, EndTurn) run on it:
 - `frame_NNNNNN.png` for frame 0 and every changed frame, 320x200, 8-bit
-  indexed with the given palette (the landfall clip's frame #0). RGB maps to
+  indexed with the given palette (the launcher's default is the landfall clip's
+  frame #0; design 10 §9.2 recommends fog-start #19, phase 0). RGB maps to
   indices exactly, a colour held twice (59/120, 56/121) takes the lowest index,
   a colour not in the palette its nearest entry (counted in `summary.txt`).
+- **The water cycle (W6c).** With every HUD paint the recorder reads the map's
+  terrain layer (`TerrainProbe`): the phase it is shown at and its index hint.
+  The record palette's own phase of VICEROY's cycle is found once (`palette-file
+  phase=`: fog-start #19 = 0, landfall #0 = 1); each frame's PLTE is the record
+  palette with 120-127 rotated to the frame's phase, so the PNGs carry the
+  original's palette at every step. A frame whose palette changed is a
+  `paletteChanged=1` row with `paletteEntriesChanged=8` and gets a PNG even
+  with no changed pixel, as ZmbvExtract wrote the clips (fog-start #7). The
+  **index hint** (the layer's indices where they cycle) keeps the cycling
+  pixels on their indices where their colour is that of a lower one (127 at
+  phase 0 = 59's, 120 = 56's), so a palette step changes no pixel. A step with
+  no cycling pixel on the screen still gets its palette frame.
 - `timeline.csv`, one row per frame on an absolute 70.086303 Hz grid
   (the clips' strh rate), ZmbvExtract's columns and number format.
 - `events.log`: `nanoTime,ms,frame,event,detail`. Events: `state` (the probe:
@@ -3665,13 +3723,19 @@ paints as before). `ClassicTestHarness.install` (from `startGUI`) binds both.
   `off`/`on n=..`, `hold`, `stop`), `music-request`, `music-mode`, `pref`,
   `late`, `terrain` (W6e: `index ...` or `fallback ...`, whether the pack holds
   the palette indices), `oracle` (W6d: `server ...` or `unknown ...`, the fog
-  ring at the game view's start). Reserved for the M1 items: `endturn-timer-start/fire` (W5),
-  `palette-step` (W6c), `music-fade`. Add a hook with
+  ring at the game view's start), `palette-step` (W6c: `p= k= late= dur=
+  via=post|wait` and `cells=c0,r0-c1,r1`, `final-draw`, `none` or `hidden`),
+  `palette-start`, `palette-hold`, `palette-release`, `palette-pref`,
+  `palette-file`. Reserved for the M1 items: `endturn-timer-start/fire` (W5),
+  `music-fade`. Add a hook with
   `ClassicFrameRecorder.event(name, detail)`; guard a costly detail with
   `ClassicFrameRecorder.on()`. `ClassicFrameRecorder.note(key, value)` logs
   an event that is also a `key: value` line of `summary.txt`.
 - `summary.txt`: frames, PNGs, late ticks, palette misses, paint cost, the
-  notes (`terrain: ...`, `oracle: ...`).
+  water cycle (`paletteSteps:` count, lateness and the steps' own paint cost,
+  Critic 7; `paletteFrames:` the frames whose palette changed, palette-only
+  ones and the record palette's phase; `hintPixels:` the pixels the hint
+  resolved), the notes (`terrain: ...`, `oracle: ...`).
 
 How the pixels are taken: while recording, `ClassicHudPane` is the painting
 origin of all its children (`isPaintingOrigin`), paints itself as a print into
@@ -3727,7 +3791,8 @@ config directory, build spec section 2): `showNativeMoves` on,
 Tutortips are FreeCol options (`autosavePeriod`, `guiShowPreCombat`,
 `guiShowTutorial`). Read a pref where it is used, not once at start. Read so
 far: `moveAccelerator` (each slide start), `showNativeMoves` and
-`showEuropeanMoves` (each foreign move, W2); W5/W14/W17 add the rest.
+`showEuropeanMoves` (each foreign move, W2), `waterCycling` (each due step of
+the water cycle, W6c); W5/W14/W17 add the rest.
 
 The sandbox launcher, the copied tools and today's baseline are outside the
 repo, in `C:\Users\koch_\freecol-spike-results\m1` (`W1.md`).

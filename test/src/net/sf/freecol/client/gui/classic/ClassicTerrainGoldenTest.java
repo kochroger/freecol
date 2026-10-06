@@ -76,6 +76,12 @@ import net.sf.freecol.util.test.FreeColTestCase;
  *       the unit cells excluded, and until W6b the explored water cells
  *       with land around them (the coast quarters).  Plus the
  *       {@code histogram} and {@code cycling} cell lines.</li>
+ *   <li><b>W6c, the water cycling</b> (§7.4, §12.2): the {@code palette},
+ *       {@code phases} and {@code sprite} lines -- the clips' palettes are
+ *       phases of VICEROY.PAL, 8 consecutive phases of a sea lane and of
+ *       its ocean neighbour equal our composed cells in index and colour,
+ *       and the cycling river of fog-start #6543 keeps its cycling pixels
+ *       ({@link #testCyclingMatchesTheOriginal}).</li>
  *   <li>The pixel checks need the converted pack and
  *       {@code -Dclassic.clips}, else they are skipped with a note (Critic
  *       10(a)(d)); "frame n" is the last PNG at or before n (Critic
@@ -204,6 +210,35 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
         }
     }
 
+    /**
+     * One W6c line (design 10 §7.4, §12.2):
+     * <ul>
+     *   <li>{@code palette <frame> <phase>}: the frame's PLTE is the game
+     *       palette at that phase (its entries 120-127);</li>
+     *   <li>{@code phases <x>,<y> <cycling> <frame>...}: the tile's
+     *       composed cell holds that many cycling pixels at every frame,
+     *       equals each frame's cell index for index, its colours through
+     *       the game palette at each frame's phase are the frame's, and the
+     *       frames' phases follow one another (8 frames: all 8);</li>
+     *   <li>{@code sprite <frame> <c>,<r> <Pnnn|Tnnn> <opaque> <cycling>}:
+     *       screen cell (c,r) holds the sprite at its opaque pixels, its
+     *       cycling ones included, in the colours of the frame's phase;
+     *       through the composer as an overlay it keeps them.</li>
+     * </ul>
+     */
+    static final class CycleCheck {
+        final String kind, line;
+        final int[] frames;
+        int a, b, expected = -1, sprite = -1, opaque = -1, cycling = -1;
+        boolean terrainSheet;
+
+        CycleCheck(String kind, int[] frames, String line) {
+            this.kind = kind;
+            this.frames = frames;
+            this.line = line;
+        }
+    }
+
     /** A fixture file (§12.1, plus the W6d check lines and W6a's frames). */
     static final class Fixture {
         final String name;
@@ -213,6 +248,7 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
         final List<Check> checks = new ArrayList<>();
         final List<Compare> compares = new ArrayList<>();
         final List<CellCheck> cells = new ArrayList<>();
+        final List<CycleCheck> cycles = new ArrayList<>();
 
         Fixture(String name) {
             this.name = name;
@@ -346,6 +382,39 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
                                                       xy[0], xy[1], line);
                     c.cycling = Integer.parseInt(w[3]);
                     fx.cells.add(c);
+                    break;
+                }
+                case "palette": {
+                    final CycleCheck c = new CycleCheck(w[0],
+                        new int[] { Integer.parseInt(w[1]) }, line);
+                    c.expected = Integer.parseInt(w[2]);
+                    fx.cycles.add(c);
+                    break;
+                }
+                case "phases": {
+                    final int[] xy = xy(w[1]);
+                    final int[] frames = new int[w.length - 3];
+                    for (int i = 3; i < w.length; i++) frames[i - 3] = Integer.parseInt(w[i]);
+                    if (frames.length < 2) throw new IOException(at + "phases needs frames");
+                    final CycleCheck c = new CycleCheck(w[0], frames, line);
+                    c.a = xy[0];
+                    c.b = xy[1];
+                    c.cycling = Integer.parseInt(w[2]);
+                    fx.cycles.add(c);
+                    break;
+                }
+                case "sprite": {
+                    final int[] cr = xy(w[2]);
+                    final CycleCheck c = new CycleCheck(w[0],
+                        new int[] { Integer.parseInt(w[1]) }, line);
+                    c.a = cr[0];
+                    c.b = cr[1];
+                    if (!w[3].matches("[PT]\\d+")) throw new IOException(at + "bad sprite " + w[3]);
+                    c.terrainSheet = w[3].charAt(0) == 'T';
+                    c.sprite = Integer.parseInt(w[3].substring(1));
+                    c.opaque = Integer.parseInt(w[4]);
+                    c.cycling = Integer.parseInt(w[5]);
+                    fx.cycles.add(c);
                     break;
                 }
                 default: {
@@ -1123,5 +1192,197 @@ public class ClassicTerrainGoldenTest extends FreeColTestCase {
             }
         }
         assertTrue("cell lines " + n, n >= 5);
+    }
+
+    /**
+     * W6c, the water cycling against the original (design 10 §7.4, §12.2):
+     * the clips' palettes are phases of the game palette (fog-start #0 is
+     * 7, #19 is 0, landfall #0 is 1); 8 consecutive phases of a sea-lane
+     * tile and of the ocean next to it (landfall #5420-#5702,
+     * {@code img/04-04}) equal our composed cells index for index and in
+     * colour at every phase; the major river {@code PHYS0.SS.024} of
+     * fog-start #6543 cell (6,1) holds its 5 cycling pixels at three phases
+     * in a row (F5: rivers cycle), and the composer keeps them.  The counts
+     * need the pack; the frames need {@code -Dclassic.clips}.
+     */
+    public void testCyclingMatchesTheOriginal() throws IOException {
+        final ClassicPackFiles pack = pack();
+        if (pack == null) return;
+        final File clips = clips();
+        final ClassicIndexSheet terrain = pack.indexSheet(ClassicPackFiles.TERRAIN_SS);
+        final ClassicIndexSheet phys = pack.indexSheet(ClassicPackFiles.PHYS0_SS);
+        final ClassicGamePalette gp = ClassicGamePalette.of(pack);
+        assertNotNull(gp);
+        final int lo = ClassicGamePalette.CYCLE_FIRST;
+        final int hi = lo + ClassicGamePalette.CYCLE_COUNT;
+        int n = 0, framesCompared = 0;
+        final StringBuilder report = new StringBuilder();
+        for (Fixture fx : fixtures()) {
+            final ClassicTerrainComposer real = composer(fx, terrain, phys);
+            for (CycleCheck cc : fx.cycles) {
+                n++;
+                final String at = fx.name + " " + cc.line;
+                switch (cc.kind) {
+                case "palette": {
+                    if (clips == null) break;
+                    final java.awt.image.IndexColorModel cm = colourModel(clips, fx, cc.frames[0]);
+                    assertEquals(at, cc.expected, gp.phaseOf(entries(cm)));
+                    for (int i = lo; i < hi; i++) {
+                        assertEquals(at + " #" + i, gp.rgb(cc.expected, i),
+                                     cm.getRGB(i) & 0xFFFFFF);
+                    }
+                    framesCompared++;
+                    report.append("\n  ").append(at).append(": the clip's 120-127 = phase ")
+                        .append(cc.expected);
+                    break;
+                }
+                case "phases": {
+                    final List<Integer> phases = new ArrayList<>();
+                    for (int frame : cc.frames) {
+                        final Frame f = new Frame(fx, frame);
+                        final byte[] cell = new byte[256];
+                        final boolean cyc = real.composeCell(f.source(f.truth), cc.a, cc.b,
+                                                             cell, 0, 16);
+                        int count = 0;
+                        for (byte v : cell) if ((v & 0xFF) >= lo && (v & 0xFF) < hi) count++;
+                        assertEquals(f.at() + " " + cc.line, cc.cycling, count);
+                        assertEquals(f.at() + " " + cc.line, cc.cycling > 0, cyc);
+                        if (clips == null) continue;
+                        final java.awt.image.BufferedImage img
+                            = ImageIO.read(frameFile(new File(clips, fx.clip), frame));
+                        final java.awt.image.IndexColorModel cm
+                            = (java.awt.image.IndexColorModel) img.getColorModel();
+                        final int ph = gp.phaseOf(entries(cm));
+                        assertTrue(f.at() + " " + cc.line + ": a phase", ph >= 0);
+                        phases.add(ph);
+                        final Raster ras = img.getRaster();
+                        final int c = cc.a - fx.vx, r = cc.b - fx.vy;
+                        for (int k = 0; k < 256; k++) {
+                            final int clip = ras.getSample(16 * c + k % 16,
+                                                           MAP_Y + 16 * r + k / 16, 0);
+                            assertEquals(f.at() + " " + cc.line + " px " + k,
+                                         cell[k] & 0xFF, clip);
+                            assertEquals(f.at() + " " + cc.line + " rgb " + k,
+                                         gp.rgb(ph, cell[k] & 0xFF), cm.getRGB(clip) & 0xFFFFFF);
+                        }
+                        framesCompared++;
+                    }
+                    if (clips == null) break;
+                    final java.util.Set<Integer> distinct = new HashSet<>(phases);
+                    assertEquals(at + " " + phases, Math.min(8, phases.size()), distinct.size());
+                    for (int i = 1; i < phases.size(); i++) {
+                        assertEquals(at + " " + phases, (phases.get(i - 1) + 1) % 8,
+                                     (int) phases.get(i));
+                    }
+                    report.append("\n  ").append(at).append(": phases ").append(phases)
+                        .append(", ").append(phases.size()).append(" x 256 px index-exact and"
+                            + " colour-exact, ").append(cc.cycling).append(" cycling px");
+                    break;
+                }
+                case "sprite": {
+                    final ClassicIndexSheet sheet = (cc.terrainSheet) ? terrain : phys;
+                    final int w = sheet.width(cc.sprite), h = sheet.height(cc.sprite);
+                    final byte[] px = sheet.pixels(cc.sprite);
+                    int opaque = 0, cyc = 0;
+                    for (byte v : px) {
+                        if ((v & 0xFF) == ClassicIndexSheet.TRANSPARENT) continue;
+                        opaque++;
+                        if ((v & 0xFF) >= lo && (v & 0xFF) < hi) cyc++;
+                    }
+                    assertEquals(at, cc.opaque, opaque);
+                    assertEquals(at, cc.cycling, cyc);
+                    if (!cc.terrainSheet) {
+                        // As an overlay of an explored land cell the composer
+                        // keeps every opaque pixel, the cycling ones included.
+                        final byte[] cell = new byte[256];
+                        assertEquals(at, cc.cycling > 0,
+                                     real.composeCell(overlaySource(cc.sprite), 1, 1, cell, 0, 16));
+                        for (int j = 0; j < Math.min(16, h); j++) {
+                            for (int i = 0; i < Math.min(16, w); i++) {
+                                final int v = px[j * w + i] & 0xFF;
+                                if (v == ClassicIndexSheet.TRANSPARENT) continue;
+                                assertEquals(at + " composed px " + i + "," + j, v,
+                                             cell[j * 16 + i] & 0xFF);
+                            }
+                        }
+                    }
+                    if (clips == null) break;
+                    final java.awt.image.BufferedImage img
+                        = ImageIO.read(frameFile(new File(clips, fx.clip), cc.frames[0]));
+                    final java.awt.image.IndexColorModel cm
+                        = (java.awt.image.IndexColorModel) img.getColorModel();
+                    final int ph = gp.phaseOf(entries(cm));
+                    assertTrue(at + ": a phase", ph >= 0);
+                    final Raster ras = img.getRaster();
+                    int match = 0;
+                    for (int j = 0; j < h; j++) {
+                        for (int i = 0; i < w; i++) {
+                            final int v = px[j * w + i] & 0xFF;
+                            if (v == ClassicIndexSheet.TRANSPARENT) continue;
+                            final int clip = ras.getSample(16 * cc.a + i, MAP_Y + 16 * cc.b + j, 0);
+                            assertEquals(at + " px " + i + "," + j, v, clip);
+                            assertEquals(at + " rgb " + i + "," + j, gp.rgb(ph, v),
+                                         cm.getRGB(clip) & 0xFFFFFF);
+                            match++;
+                        }
+                    }
+                    assertEquals(at, cc.opaque, match);
+                    framesCompared++;
+                    report.append("\n  ").append(at).append(": ").append(match).append("/")
+                        .append(cc.opaque).append(" px at phase ").append(ph).append(", ")
+                        .append(cc.cycling).append(" cycling; kept by the composer");
+                    break;
+                }
+                default:
+                    fail(at);
+                }
+            }
+        }
+        assertTrue("W6c lines " + n, n >= 8);
+        if (clips != null) assertTrue("frames " + framesCompared, framesCompared >= 22);
+        System.err.println("ClassicTerrainGoldenTest: W6c " + n + " lines, "
+            + framesCompared + " clip frames compared" + report);
+    }
+
+    /** A 3x3 of explored plains whose centre (1,1) has one overlay frame. */
+    private static ClassicTerrainComposer.TerrainSource overlaySource(int frame) {
+        final TileType plains = spec().getTileType("model.tile.plains");
+        return new ClassicTerrainComposer.TerrainSource() {
+                @Override
+                public boolean onMap(int x, int y) {
+                    return x >= 0 && x < 3 && y >= 0 && y < 3;
+                }
+
+                @Override
+                public boolean explored(int x, int y) {
+                    return onMap(x, y);
+                }
+
+                @Override
+                public TileType type(int x, int y) {
+                    return (onMap(x, y)) ? plains : null;
+                }
+
+                @Override
+                public void overlays(int x, int y, IntConsumer frames) {
+                    if (x == 1 && y == 1) frames.accept(frame);
+                }
+            };
+    }
+
+    /** @return A clip frame's colour model (the last PNG at or before it). */
+    private static java.awt.image.IndexColorModel colourModel(File clips, Fixture fx,
+                                                               int frame)
+        throws IOException {
+        final File f = frameFile(new File(clips, fx.clip), frame);
+        assertNotNull(fx.name + " #" + frame, f);
+        return (java.awt.image.IndexColorModel) ImageIO.read(f).getColorModel();
+    }
+
+    /** @return A colour model's 256 entries, 0xRRGGBB. */
+    private static int[] entries(java.awt.image.IndexColorModel cm) {
+        final int[] e = new int[256];
+        for (int i = 0; i < Math.min(256, cm.getMapSize()); i++) e[i] = cm.getRGB(i) & 0xFFFFFF;
+        return e;
     }
 }
