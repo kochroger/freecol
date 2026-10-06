@@ -61,6 +61,15 @@ import net.sf.freecol.common.io.FreeColModFile;
  * and the other text files ({@code ClassicAssetConverter.TEXT_FILES}),
  * and {@code ss-anchors.properties} the sprite-header anchors.
  *
+ * <p>The index pipeline (M1c design 10 §4, W6e): {@code ssidx/<NAME>.idx}
+ * holds each SS file's frames as palette indices ({@link #indexSheet}),
+ * {@code palette/VICEROY.rgb} the game palette ({@link #gamePalette}) and
+ * {@code data/CYCLE.DAT} the original's colour cycle ({@link #cycleSpec});
+ * {@link #terrainSpriteFor} reads which TERRAIN.SS frame a tile type uses
+ * from the alias lines, so {@code aliases.properties} stays the one place
+ * that says it.  Packs converted before W6e lack them: {@link #indexStatus}
+ * then says "fallback" and logs one warning.
+ *
  * <p>Thread-safe (all caches synchronized): the title screen prefetches the
  * new-game assets on a daemon thread while the EDT paints.
  */
@@ -70,6 +79,21 @@ final class ClassicPackFiles {
 
     /** The pack's mod id and directory name. */
     static final String PACK_ID = "classic_original";
+
+    /** The directory of the index sheets (the converter's {@code INDEX_DIR}). */
+    static final String INDEX_DIR = "ssidx";
+
+    /** The suffix of an index sheet, as in {@code ssidx/TERRAIN.SS.idx}. */
+    static final String INDEX_SUFFIX = ".idx";
+
+    /** The game palette, 768 bytes of 8-bit R G B (the converter's {@code PALETTE_FILE}). */
+    static final String PALETTE_FILE = "palette/VICEROY.rgb";
+
+    /** The original's colour-cycling table (the converter's {@code CYCLE_FILE}). */
+    static final String CYCLE_FILE = "data/CYCLE.DAT";
+
+    /** The map's base sprites and its overlays, fringes, masks and coast pieces. */
+    static final String TERRAIN_SS = "TERRAIN.SS", PHYS0_SS = "PHYS0.SS";
 
     /** The runtime pack: empty = probed and absent. */
     private static Optional<ClassicPackFiles> runtime = null;
@@ -88,6 +112,18 @@ final class ClassicPackFiles {
 
     /** Loaded fonts, same convention. */
     private final Map<String, Optional<ClassicFont>> fonts = new HashMap<>();
+
+    /** Loaded index sheets by SS name, same convention. */
+    private final Map<String, Optional<ClassicIndexSheet>> sheets = new HashMap<>();
+
+    /** The game palette (0xRRGGBB); null = not read yet, empty = absent. */
+    private Optional<int[]> palette = null;
+
+    /** The colour cycle; null = not read yet. */
+    private ClassicGamePalette.Cycle cycle = null;
+
+    /** Whether {@link #indexStatus} has warned about a missing pipeline. */
+    private boolean indexWarned = false;
 
 
     private ClassicPackFiles(File dir) {
@@ -317,6 +353,172 @@ final class ClassicPackFiles {
         final String rel = this.props.get(key);
         return rel != null && !rel.startsWith("resource:")
             && new File(this.dir, rel).isFile();
+    }
+
+
+    // The index pipeline (W6e)
+
+    /**
+     * An SS file's frames as palette indices, from
+     * {@code ssidx/<ss>.idx}.  Read once; a missing or broken file is
+     * remembered as missing (a broken one is logged).
+     *
+     * @param ss The SS file name, e.g. {@link #TERRAIN_SS}.
+     * @return The sheet (shared), or null when the pack has none.
+     */
+    ClassicIndexSheet indexSheet(String ss) {
+        synchronized (this.sheets) {
+            Optional<ClassicIndexSheet> o = this.sheets.get(ss);
+            if (o == null) {
+                ClassicIndexSheet sheet = null;
+                final File f = new File(new File(this.dir, INDEX_DIR), ss + INDEX_SUFFIX);
+                if (f.isFile()) {
+                    try {
+                        sheet = ClassicIndexSheet.parse(ss, Files.readAllBytes(f.toPath()));
+                    } catch (IOException | IllegalArgumentException e) {
+                        logger.log(Level.WARNING, "Unreadable index sheet " + f, e);
+                    }
+                }
+                o = Optional.ofNullable(sheet);
+                this.sheets.put(ss, o);
+            }
+            return o.orElse(null);
+        }
+    }
+
+    /**
+     * The game palette {@code VICEROY.PAL} as the converter wrote it
+     * ({@link #PALETTE_FILE}: 768 bytes, already 8-bit).  Read once.
+     *
+     * @return A copy of the 256 entries, 0xRRGGBB, or null when the file
+     *     is missing or not 768 bytes long.
+     */
+    synchronized int[] gamePalette() {
+        if (this.palette == null) {
+            int[] e = null;
+            final File f = new File(this.dir, PALETTE_FILE);
+            if (f.isFile()) {
+                try {
+                    final byte[] b = Files.readAllBytes(f.toPath());
+                    if (b.length == 256 * 3) {
+                        e = new int[256];
+                        for (int i = 0; i < 256; i++) {
+                            e[i] = ((b[i * 3] & 0xFF) << 16)
+                                | ((b[i * 3 + 1] & 0xFF) << 8) | (b[i * 3 + 2] & 0xFF);
+                        }
+                    } else {
+                        logger.warning("Game palette " + f + ": " + b.length
+                            + " bytes, expected 768");
+                    }
+                } catch (IOException ex) {
+                    logger.log(Level.WARNING, "Unreadable " + f, ex);
+                }
+            }
+            this.palette = Optional.ofNullable(e);
+        }
+        return this.palette.map(int[]::clone).orElse(null);
+    }
+
+    /**
+     * The original's colour cycle from {@link #CYCLE_FILE}: a 16-bit
+     * cycle count, then 4 bytes per cycle -- the number of entries, a byte
+     * not interpreted here (0x3D), the first entry and the ticks per step
+     * ({@code 01 00 | 08 3D 78 23}: 8 entries from 120, 35 ticks).  Only
+     * the first cycle is used; the original has one.  Read once.
+     *
+     * @return The cycle; {@link ClassicGamePalette.Cycle#DEFAULT} (the same
+     *     values) when the file is missing or unusable (the latter logged).
+     */
+    synchronized ClassicGamePalette.Cycle cycleSpec() {
+        if (this.cycle == null) {
+            ClassicGamePalette.Cycle c = ClassicGamePalette.Cycle.DEFAULT;
+            final File f = new File(this.dir, CYCLE_FILE);
+            if (f.isFile()) {
+                try {
+                    c = parseCycle(Files.readAllBytes(f.toPath()));
+                } catch (IOException | IllegalArgumentException e) {
+                    logger.log(Level.WARNING, "Unusable " + f + ", default cycle "
+                        + c, e);
+                }
+            }
+            this.cycle = c;
+        }
+        return this.cycle;
+    }
+
+    /**
+     * Read the first cycle of a {@code CYCLE.DAT}.
+     *
+     * @param b The file contents.
+     * @return The cycle.
+     * @exception IllegalArgumentException if it holds no usable cycle.
+     */
+    static ClassicGamePalette.Cycle parseCycle(byte[] b) {
+        if (b.length < 6 || ((b[0] & 0xFF) | ((b[1] & 0xFF) << 8)) < 1) {
+            throw new IllegalArgumentException("no cycle in " + b.length + " bytes");
+        }
+        return new ClassicGamePalette.Cycle(b[2] & 0xFF, b[4] & 0xFF, b[5] & 0xFF);
+    }
+
+    /**
+     * The TERRAIN.SS frame a tile type is drawn with, read from the pack's
+     * alias line {@code image.tile.<id>.center=resource:image.classic_original.ss.TERRAIN.SS.NNN}
+     * (appended from {@code tools/classic_assets/aliases.properties}).
+     *
+     * @param tileTypeId E.g. {@code model.tile.plains}.
+     * @return NNN, or -1 when the type has no such alias.
+     */
+    int terrainSpriteFor(String tileTypeId) {
+        final String v = this.props.get("image.tile." + tileTypeId + ".center");
+        final String prefix = "resource:" + ssKey(TERRAIN_SS + ".");
+        if (v == null || !v.startsWith(prefix)) return -1;
+        try {
+            return Integer.parseInt(v.substring(prefix.length()));
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    /**
+     * Whether the map can be composed from indices, as one line for the
+     * log and the recorder ({@code terrain} event and summary line):
+     * {@code index TERRAIN.SS=12 PHYS0.SS=154 palette=VICEROY cycle=8@120/35},
+     * or {@code fallback <what is missing>}.  Packs converted before the
+     * index pipeline lack it; the first fallback logs one warning.
+     *
+     * @return The status line.
+     */
+    String indexStatus() {
+        final ClassicIndexSheet t = indexSheet(TERRAIN_SS);
+        final ClassicIndexSheet p = indexSheet(PHYS0_SS);
+        final String missing = (t == null) ? INDEX_DIR + "/" + TERRAIN_SS + INDEX_SUFFIX
+            : (p == null) ? INDEX_DIR + "/" + PHYS0_SS + INDEX_SUFFIX
+            : (gamePalette() == null) ? PALETTE_FILE
+            : null;
+        if (missing == null) {
+            return "index " + TERRAIN_SS + "=" + t.size() + " " + PHYS0_SS + "="
+                + p.size() + " palette=VICEROY cycle=" + cycleSpec()
+                + (new File(this.dir, CYCLE_FILE).isFile() ? "" : " (default)");
+        }
+        synchronized (this) {
+            if (!this.indexWarned) {
+                this.indexWarned = true;
+                logger.warning("The classic pack " + this.dir + " has no " + missing
+                    + ": the map falls back to the RGBA tiles without palette"
+                    + " cycling.  Re-run ant classic-assets to convert it again.");
+            }
+        }
+        return "fallback no " + missing;
+    }
+
+    /**
+     * {@link #indexStatus} of a pack that may be missing.
+     *
+     * @param pack The pack, or null.
+     * @return The status line ({@code fallback no pack} for null).
+     */
+    static String indexStatus(ClassicPackFiles pack) {
+        return (pack == null) ? "fallback no pack" : pack.indexStatus();
     }
 
 

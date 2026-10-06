@@ -1604,6 +1604,10 @@ public class ClassicGUI extends GUI {
             closeReportPanel();
         }
         final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        // Whether the pack holds the original indices for the map (W6e): a
+        // pack converted before them logs one warning; the recorder notes
+        // it in events.log and summary.txt.
+        ClassicFrameRecorder.note("terrain", ClassicPackFiles.indexStatus(pack));
         final ClassicText text = ClassicText.load(pack);
         final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
         final BufferedImage wood = (pack == null) ? null

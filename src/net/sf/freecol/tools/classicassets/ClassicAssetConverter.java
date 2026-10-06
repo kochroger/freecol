@@ -50,6 +50,13 @@ import javax.imageio.ImageIO;
  * committed {@code aliases.properties} (plan item A2) mapping real FreeCol
  * keys onto those is appended if supplied, so re-running never clobbers it.
  *
+ * <p>Beside the PNGs, every SS file is also kept as palette indices
+ * ({@code ssidx/<NAME>.idx}, {@link #encodeIndexSheet}), together with the
+ * game palette ({@code palette/VICEROY.rgb}) and the palette-cycling table
+ * ({@code data/CYCLE.DAT}): the classic map is composed from the original
+ * indices and drawn through the palette at the current cycling phase (M1c
+ * design 10 §4, item W6e).
+ *
  * Usage:
  * <pre>
  *   ClassicAssetConverter --install &lt;colonize-dir&gt; --out &lt;pack-dir&gt; [--aliases &lt;file&gt;]
@@ -58,6 +65,27 @@ import javax.imageio.ImageIO;
 public final class ClassicAssetConverter {
 
     private static final String KEY_PREFIX = "image.classic_original";
+
+    /** The pack directory of the index sheets, one per SS file. */
+    public static final String INDEX_DIR = "ssidx";
+
+    /** The file suffix of an index sheet: {@code ssidx/TERRAIN.SS.idx}. */
+    public static final String INDEX_SUFFIX = ".idx";
+
+    /** The index sheet's magic, its first four bytes. */
+    public static final String INDEX_MAGIC = "CSSI";
+
+    /** The index sheet format version. */
+    public static final int INDEX_VERSION = 1;
+
+    /**
+     * The game palette in the pack: 768 bytes, R G B per entry, already
+     * expanded to 8 bits as DOSBox does ({@link Palette}).
+     */
+    public static final String PALETTE_FILE = "palette/VICEROY.rgb";
+
+    /** The palette-cycling table in the pack, copied unchanged. */
+    public static final String CYCLE_FILE = "data/CYCLE.DAT";
 
     private ClassicAssetConverter() {}
 
@@ -89,12 +117,14 @@ public final class ClassicAssetConverter {
         Path pikDir = imgRoot.resolve("pik");
         Path ssDir = imgRoot.resolve("ss");
         Path ffDir = imgRoot.resolve("ff");
+        Path idxDir = out.resolve(INDEX_DIR);
 
         // The pack is a build artifact: regenerate cleanly.
         deleteRecursively(out);
         Files.createDirectories(pikDir);
         Files.createDirectories(ssDir);
         Files.createDirectories(ffDir);
+        Files.createDirectories(idxDir);
 
         // key -> pack-relative path, sorted for stable output.
         TreeMap<String, String> entries = new TreeMap<>();
@@ -110,17 +140,24 @@ public final class ClassicAssetConverter {
         }
 
         int ssFrames = 0;
+        int ssSheets = 0;
         // stem -> "ax,ay": the frames' screen anchors (see SsDecoder.anchors).
         TreeMap<String, String> anchors = new TreeMap<>();
         for (Path ss : listByExtension(install, ".ss")) {
             String name = ss.getFileName().toString();        // e.g. TERRAIN1.SS
             byte[] bytes = Files.readAllBytes(ss);
-            List<BufferedImage> frames = SsDecoder.decode(bytes);
+            // One decode to indices: the index sheet, and through the
+            // file's own palette the PNGs (SsDecoder.decode).
+            List<SsDecoder.IndexedFrame> frames = SsDecoder.decodeIndexed(bytes);
+            Palette ssPalette = SsDecoder.palette(bytes);
             List<int[]> frameAnchors = SsDecoder.anchors(bytes);
+            Files.write(idxDir.resolve(name + INDEX_SUFFIX), encodeIndexSheet(frames));
+            ssSheets++;
             for (int i = 0; i < frames.size(); i++) {
                 String stem = String.format("%s.%03d", name, i);
                 String png = stem + ".png";
-                ImageIO.write(frames.get(i), "png", ssDir.resolve(png).toFile());
+                ImageIO.write(SsDecoder.toImage(frames.get(i), ssPalette), "png",
+                              ssDir.resolve(png).toFile());
                 entries.put(KEY_PREFIX + ".ss." + stem, "resources/images/ss/" + png);
                 if (i < frameAnchors.size()) {
                     anchors.put(stem, frameAnchors.get(i)[0] + ","
@@ -152,6 +189,12 @@ public final class ClassicAssetConverter {
         int textCount = copyTexts(install, out.resolve("text"));
         writeAnchors(out.resolve("ss-anchors.properties"), anchors);
 
+        // The game palette and the cycling table, for the index sheets.
+        Path palFile = out.resolve(PALETTE_FILE);
+        Files.createDirectories(palFile.getParent());
+        Files.write(palFile, rgbBytes(viceroy));
+        boolean cycle = copyCycleTable(install, out.resolve(CYCLE_FILE));
+
         writeResourceProperties(out.resolve("resources.properties"), entries, aliases);
         Files.writeString(out.resolve("mod.xml"),
             "<mod id=\"classic_original\"/>\n", StandardCharsets.UTF_8);
@@ -163,7 +206,93 @@ public final class ClassicAssetConverter {
             StandardCharsets.UTF_8);
 
         System.out.printf("classic_original pack: %d pik + %d ss images + %d fonts"
-            + " + %d texts -> %s%n", pikCount, ssFrames, ffCount, textCount, out);
+            + " + %d texts + %d index sheets + palette%s -> %s%n", pikCount,
+            ssFrames, ffCount, textCount, ssSheets, (cycle) ? " + cycle table" : "",
+            out);
+    }
+
+    /**
+     * An SS file's frames as an index sheet, the file the classic UI reads
+     * back ({@code ClassicIndexSheet}).  Little-endian:
+     * <pre>
+     *   "CSSI"  u8 version (1)  u16 frames
+     *   per frame:  u16 w  u16 h  w*h index bytes, row by row
+     * </pre>
+     * {@link SsDecoder#TRANSPARENT_INDEX} (0xFD) marks a transparent pixel.
+     *
+     * @param frames The frames ({@link SsDecoder#decodeIndexed}).
+     * @return The file contents.
+     * @exception IllegalArgumentException if a count or size exceeds 16 bits.
+     */
+    public static byte[] encodeIndexSheet(List<SsDecoder.IndexedFrame> frames) {
+        int size = INDEX_MAGIC.length() + 1 + 2;
+        for (SsDecoder.IndexedFrame f : frames) size += 4 + f.idx.length;
+        if (frames.size() > 0xFFFF) {
+            throw new IllegalArgumentException("too many frames: " + frames.size());
+        }
+        final byte[] out = new byte[size];
+        int p = 0;
+        for (byte b : INDEX_MAGIC.getBytes(StandardCharsets.US_ASCII)) out[p++] = b;
+        out[p++] = (byte) INDEX_VERSION;
+        p = putU16(out, p, frames.size());
+        for (SsDecoder.IndexedFrame f : frames) {
+            if (f.w > 0xFFFF || f.h > 0xFFFF || f.idx.length != f.w * f.h) {
+                throw new IllegalArgumentException("bad frame " + f.w + "x" + f.h);
+            }
+            p = putU16(out, p, f.w);
+            p = putU16(out, p, f.h);
+            System.arraycopy(f.idx, 0, out, p, f.idx.length);
+            p += f.idx.length;
+        }
+        return out;
+    }
+
+    private static int putU16(byte[] b, int p, int v) {
+        b[p] = (byte) (v & 0xFF);
+        b[p + 1] = (byte) ((v >> 8) & 0xFF);
+        return p + 2;
+    }
+
+    /**
+     * A palette as {@link #PALETTE_FILE} holds it: R, G, B of each of the
+     * 256 entries, 8 bits each.
+     *
+     * @param pal The palette (VICEROY.PAL, read with {@link Palette#readViceroy}).
+     * @return 768 bytes.
+     */
+    static byte[] rgbBytes(Palette pal) {
+        final byte[] out = new byte[256 * 3];
+        for (int i = 0; i < 256; i++) {
+            out[i * 3] = (byte) (pal.argb[i] >> 16);
+            out[i * 3 + 1] = (byte) (pal.argb[i] >> 8);
+            out[i * 3 + 2] = (byte) pal.argb[i];
+        }
+        return out;
+    }
+
+    /**
+     * Copy the original's palette-cycling table {@code CYCLE.DAT} byte for
+     * byte (it starts {@code 01 00 | 08 3D 78 23}: one cycle of 8 colours
+     * from 0x78 = 120, a step every 0x23 = 35 ticks).  Missing is only a
+     * warning: the client then uses the same values as defaults.
+     *
+     * @param install The original's install directory.
+     * @param dst The pack's {@link #CYCLE_FILE}.
+     * @return Whether the file was copied.
+     * @exception IOException if it cannot be copied.
+     */
+    static boolean copyCycleTable(Path install, Path dst) throws IOException {
+        final Path src;
+        try {
+            src = findIgnoreCase(install, "CYCLE.DAT");
+        } catch (IOException e) {
+            System.err.println("WARNING: " + e.getMessage()
+                + " -- the classic UI cycles the water with its defaults.");
+            return false;
+        }
+        Files.createDirectories(dst.getParent());
+        Files.copy(src, dst);
+        return true;
     }
 
     /**
@@ -185,11 +314,13 @@ public final class ClassicAssetConverter {
      * <p>{@code PEDIA.TXT} is the Colonizopedia's text (the founding
      * fathers' pages, {@code @FATHERn}) and {@code COLONY.TXT} the colony
      * names each nation offers in turn when a colony is founded; both are
-     * read by later screens (plan D8b and D4).
+     * read by later screens (plan D8b and D4).  {@code WOODCUT.TXT} holds
+     * the woodcuts' titles (the ribbon texts), for the woodcut screens
+     * (plan W9).
      */
     static final String[] TEXT_FILES = { "GAME.TXT", "NAMES.TXT", "LABELS.TXT",
                                          "MENU.TXT", "OPENING.TXT", "PATH.DAT",
-                                         "PEDIA.TXT", "COLONY.TXT" };
+                                         "PEDIA.TXT", "COLONY.TXT", "WOODCUT.TXT" };
 
     /**
      * Copy {@link #TEXT_FILES} byte for byte into {@code <pack>/text/}, under

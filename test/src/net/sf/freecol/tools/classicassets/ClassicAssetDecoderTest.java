@@ -304,6 +304,302 @@ public class ClassicAssetDecoderTest extends TestCase {
     }
 
 
+    // --- index sheets (M1c design 10 §4, W6e) --------------------------------
+
+    /**
+     * A synthetic {@code .SS} file: mode 0 (raw), a "col" palette, one
+     * sprite per {@code sprites} entry of the size {@code sizes[i]}.
+     * Public because {@code ClassicIndexSheetTest} builds its sheets from
+     * it too.
+     *
+     * @param colPalette 768 bytes of 6-bit R G B.
+     * @param sizes {w, h} per sprite.
+     * @param sprites The linemode commands per sprite.
+     * @return The file.
+     */
+    public static byte[] ssFile(byte[] colPalette, int[][] sizes, byte[]... sprites) {
+        byte[] header = new byte[152];
+        header[0] = 0;                          // mode 0 (raw)
+        header[0x0C] = 1;                       // pflag -> "col" palette
+        putU16(header, 0x26, sprites.length);
+        byte[] spriteHeaders = new byte[16 * sprites.length];
+        java.io.ByteArrayOutputStream pixels = new java.io.ByteArrayOutputStream();
+        for (int i = 0; i < sprites.length; i++) {
+            putU32(spriteHeaders, 16 * i, pixels.size());
+            putU32(spriteHeaders, 16 * i + 4, sprites[i].length);
+            putU16(spriteHeaders, 16 * i + 8, 100 + i);     // anchor x
+            putU16(spriteHeaders, 16 * i + 10, 50);         // anchor y
+            putU16(spriteHeaders, 16 * i + 12, sizes[i][0]);
+            putU16(spriteHeaders, 16 * i + 14, sizes[i][1]);
+            pixels.write(sprites[i], 0, sprites[i].length);
+        }
+        return madspack(header, spriteHeaders, colPalette, pixels.toByteArray());
+    }
+
+    /** A "col" palette whose used entries are all different colours. */
+    public static byte[] colPalette() {
+        byte[] p = new byte[768];
+        for (int i = 0; i < 256; i++) {
+            p[i * 3] = (byte) (i % 64);
+            p[i * 3 + 1] = (byte) ((i * 5) % 64);
+            p[i * 3 + 2] = (byte) ((i * 11 + 7) % 64);
+        }
+        return p;
+    }
+
+    private static byte[] b(int... v) {
+        byte[] out = new byte[v.length];
+        for (int i = 0; i < v.length; i++) out[i] = (byte) v[i];
+        return out;
+    }
+
+    /**
+     * Four sprites that reach every corner of the linemode decoder: runs in
+     * both modes, an explicit transparent run, a line ended early, a whole
+     * background line, a run past the right edge, a sprite that stops
+     * before its last lines, and a 0x0 sprite.
+     */
+    public static final int[][] SAMPLE_SIZES = { { 5, 4 }, { 3, 3 }, { 0, 0 }, { 2, 2 } };
+
+    /** The commands of {@link #SAMPLE_SIZES}. */
+    public static byte[][] sampleSprites() {
+        return new byte[][] {
+            b(0xFE, 0x01, 0xFE, 0x03, 0x02, 0xFF,       // 1, 2, 2, 2, line end
+              0xFD, 0x02, 0x05, 0x03, 0xFD, 0xFF,       // 5, 5, three transparent
+              0xFF,                                     // a background line
+              0xFE, 0xFE, 0x07, 0x09, 0xFF,             // 7 x 9 into 5 columns
+              0xFC),
+            b(0xFE, 0x04, 0xFF, 0xFC),                  // stops after line 0
+            b(0xFC),                                    // 0x0
+            b(0xFE, 0x00, 0x78, 0xFF,                   // index 0 and 120
+              0xFD, 0x02, 0x7F, 0xFF, 0xFC)             // 127, 127
+        };
+    }
+
+    /**
+     * The RGBA decode of an {@code .SS} file as it was before the indices
+     * were kept (commit 5739cfc40, {@code SsDecoder.decode}), verbatim: the
+     * reference the PNGs must keep matching.
+     */
+    private static List<BufferedImage> legacyDecode(byte[] file) {
+        List<byte[]> parts = MadsPack.read(file);
+        byte[] header = parts.get(0);
+        int mode = Bytes.u8(header, 0);
+        int pflag = Bytes.u8(header, 0x0C);
+        int nsprites = Bytes.u16(header, 0x26);
+        byte[] spriteHeaders = parts.get(1);
+        Palette pal = (pflag != 0)
+            ? Palette.readCol(parts.get(2))
+            : Palette.readRex(parts.get(2));
+        byte[] pixels = parts.get(3);
+        List<BufferedImage> frames = new java.util.ArrayList<>(nsprites);
+        for (int i = 0; i < nsprites; i++) {
+            int base = i * 16;
+            int startOffset = (int) Bytes.u32(spriteHeaders, base);
+            int length = (int) Bytes.u32(spriteHeaders, base + 4);
+            int width = Bytes.u16(spriteHeaders, base + 12);
+            int height = Bytes.u16(spriteHeaders, base + 14);
+            byte[] data = (mode == 0)
+                ? Arrays.copyOfRange(pixels, startOffset, startOffset + length)
+                : Fab.decode(pixels, startOffset).data;
+            if (width == 0 || height == 0) {
+                BufferedImage img = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+                img.setRGB(0, 0, pal.argb[0]);
+                frames.add(img);
+                continue;
+            }
+            BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+            int k = 0, x = 0, y = 0;
+            int lm = data[k++] & 0xFF;
+            while (true) {
+                if (lm == 0xFF) {
+                    while (x < width) legacyPut(img, x++, y, 0);
+                    x = 0;
+                    y++;
+                    lm = data[k++] & 0xFF;
+                } else if (lm == 0xFC) {
+                    break;
+                } else {
+                    int c = data[k++] & 0xFF;
+                    if (c == 0xFF) {
+                        while (x < width) legacyPut(img, x++, y, 0);
+                        x = 0;
+                        y++;
+                        lm = data[k++] & 0xFF;
+                    } else if (lm == 0xFE) {
+                        if (c == 0xFE) {
+                            int runLen = data[k++] & 0xFF;
+                            int ci = data[k++] & 0xFF;
+                            for (int n = 0; n < runLen; n++) {
+                                legacyPut(img, x++, y, (ci == 0xFD) ? 0 : pal.argb[ci]);
+                            }
+                        } else {
+                            legacyPut(img, x++, y, (c == 0xFD) ? 0 : pal.argb[c]);
+                        }
+                    } else if (lm == 0xFD) {
+                        int ci = data[k++] & 0xFF;
+                        for (int n = 0; n < c; n++) {
+                            legacyPut(img, x++, y, (ci == 0xFD) ? 0 : pal.argb[ci]);
+                        }
+                    } else {
+                        throw new IllegalStateException("unknown SS linemode: " + lm);
+                    }
+                }
+            }
+            frames.add(img);
+        }
+        return frames;
+    }
+
+    private static void legacyPut(BufferedImage img, int x, int y, int argb) {
+        if (x >= 0 && x < img.getWidth() && y >= 0 && y < img.getHeight()) {
+            img.setRGB(x, y, argb);
+        }
+    }
+
+    /** A PNG write and read back, as the pack holds an image. */
+    private static BufferedImage viaPng(BufferedImage img) throws Exception {
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(img, "png", bos);
+        return javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bos.toByteArray()));
+    }
+
+    private static void assertSamePixels(String what, BufferedImage a, BufferedImage b) {
+        assertEquals(what + " width", a.getWidth(), b.getWidth());
+        assertEquals(what + " height", a.getHeight(), b.getHeight());
+        for (int y = 0; y < a.getHeight(); y++) {
+            for (int x = 0; x < a.getWidth(); x++) {
+                assertEquals(what + " pixel " + x + "," + y, a.getRGB(x, y), b.getRGB(x, y));
+            }
+        }
+    }
+
+    /**
+     * The index decode keeps 0xFD as the transparent marker, pre-fills
+     * every pixel with it (the rest of a line ended early, the lines after
+     * the stop command), keeps the 0x0 sprite as one pixel of index 0, and
+     * mapped through the file's palette gives exactly the PNG pixels of the
+     * decode before W6e (design 10 §4 item 1; Critic 8: pixels, not bytes).
+     */
+    public void testDecodeIndexedKeepsTheIndicesAndThePngs() throws Exception {
+        byte[] file = ssFile(colPalette(), SAMPLE_SIZES, sampleSprites());
+        List<SsDecoder.IndexedFrame> idx = SsDecoder.decodeIndexed(file);
+        assertEquals(4, idx.size());
+        final int T = SsDecoder.TRANSPARENT_INDEX;
+        assertEquals(0xFD, T);
+        int[][] expected = {
+            { 1, 2, 2, 2, T,   5, 5, T, T, T,   T, T, T, T, T,   9, 9, 9, 9, 9 },
+            { 4, T, T,   T, T, T,   T, T, T },
+            { 0 },
+            { 0, 120,   127, 127 }
+        };
+        for (int f = 0; f < 4; f++) {
+            SsDecoder.IndexedFrame fr = idx.get(f);
+            assertEquals("frame " + f, Math.max(1, SAMPLE_SIZES[f][0]), fr.w);
+            assertEquals("frame " + f, Math.max(1, SAMPLE_SIZES[f][1]), fr.h);
+            assertEquals(fr.w * fr.h, fr.idx.length);
+            for (int i = 0; i < expected[f].length; i++) {
+                assertEquals("frame " + f + " px " + i, expected[f][i],
+                             fr.index(i % fr.w, i / fr.w));
+            }
+        }
+
+        // Through the palette: the decode before W6e, pixel for pixel, also
+        // after a PNG round trip; toImage is what decode does.
+        Palette pal = SsDecoder.palette(file);
+        assertEquals(Palette.readCol(colPalette()).argb[5], pal.argb[5]);
+        List<BufferedImage> legacy = legacyDecode(file);
+        List<BufferedImage> now = SsDecoder.decode(file);
+        assertEquals(legacy.size(), now.size());
+        for (int f = 0; f < legacy.size(); f++) {
+            assertSamePixels("decode " + f, legacy.get(f), now.get(f));
+            assertSamePixels("toImage " + f, legacy.get(f),
+                             SsDecoder.toImage(idx.get(f), pal));
+            assertSamePixels("png " + f, viaPng(legacy.get(f)), viaPng(now.get(f)));
+        }
+        // Transparent exactly where the index is 0xFD; frame 2 is opaque.
+        assertEquals(0, now.get(0).getRGB(4, 0));
+        assertEquals(0, now.get(1).getRGB(2, 2));
+        assertEquals(pal.argb[0], now.get(2).getRGB(0, 0));
+    }
+
+    /**
+     * The index sheet's documented layout ({@code ssidx/<NAME>.idx}):
+     * "CSSI", u8 version 1, u16 frames, then per frame u16 w, u16 h and the
+     * w x h index bytes, all little-endian.
+     */
+    public void testIndexSheetLayout() {
+        List<SsDecoder.IndexedFrame> frames = SsDecoder.decodeIndexed(
+            ssFile(colPalette(), SAMPLE_SIZES, sampleSprites()));
+        byte[] sheet = ClassicAssetConverter.encodeIndexSheet(frames);
+        assertEquals("CSSI", new String(sheet, 0, 4, StandardCharsets.US_ASCII));
+        assertEquals(ClassicAssetConverter.INDEX_VERSION, sheet[4]);
+        assertEquals(1, ClassicAssetConverter.INDEX_VERSION);
+        assertEquals(4, Bytes.u16(sheet, 5));
+        int p = 7;
+        for (SsDecoder.IndexedFrame f : frames) {
+            assertEquals(f.w, Bytes.u16(sheet, p));
+            assertEquals(f.h, Bytes.u16(sheet, p + 2));
+            assertTrue(Arrays.equals(f.idx, Arrays.copyOfRange(sheet, p + 4,
+                                                               p + 4 + f.w * f.h)));
+            p += 4 + f.w * f.h;
+        }
+        assertEquals(sheet.length, p);
+        // 7 + (4 + 20) + (4 + 9) + (4 + 1) + (4 + 4)
+        assertEquals(57, sheet.length);
+        assertEquals(7, ClassicAssetConverter.encodeIndexSheet(List.of()).length);
+    }
+
+    /**
+     * A conversion of a small fake install writes, beside the PNGs, the
+     * index sheet of every SS file, the game palette as 768 8-bit bytes,
+     * CYCLE.DAT unchanged and WOODCUT.TXT among the texts.
+     */
+    public void testConverterWritesTheIndexPipeline() throws Exception {
+        final Path install = Files.createTempDirectory("classic-install");
+        final Path out = install.resolve("pack");
+        try {
+            byte[] viceroy = new byte[1024];
+            viceroy[120 * 3] = 17;             // R 17 -> 0x45 (DOSBox)
+            viceroy[120 * 3 + 2] = 63;         // B 63 -> 0xFF
+            Files.write(install.resolve("VICEROY.PAL"), viceroy);
+            byte[] ss = ssFile(colPalette(), SAMPLE_SIZES, sampleSprites());
+            Files.write(install.resolve("TEST.SS"), ss);
+            byte[] cycle = b(0x01, 0x00, 0x08, 0x3D, 0x78, 0x23, 0x74, 0x10);
+            Files.write(install.resolve("CYCLE.DAT"), cycle);
+            Files.write(install.resolve("WOODCUT.TXT"), b(';', '\r', '\n'));
+            ClassicAssetConverter.main(new String[] {
+                    "--install", install.toString(), "--out", out.toString() });
+
+            assertTrue(Arrays.equals(ClassicAssetConverter.encodeIndexSheet(
+                        SsDecoder.decodeIndexed(ss)),
+                    Files.readAllBytes(out.resolve("ssidx").resolve("TEST.SS.idx"))));
+            byte[] rgb = Files.readAllBytes(out.resolve(ClassicAssetConverter.PALETTE_FILE));
+            assertEquals(768, rgb.length);
+            assertEquals(0x45, rgb[120 * 3] & 0xFF);
+            assertEquals(0x00, rgb[120 * 3 + 1] & 0xFF);
+            assertEquals(0xFF, rgb[120 * 3 + 2] & 0xFF);
+            assertTrue(Arrays.equals(cycle, Files.readAllBytes(
+                        out.resolve(ClassicAssetConverter.CYCLE_FILE))));
+            assertTrue(Files.isRegularFile(out.resolve("text").resolve("WOODCUT.TXT")));
+            List<BufferedImage> legacy = legacyDecode(ss);
+            for (int f = 0; f < legacy.size(); f++) {
+                assertSamePixels("pack png " + f, legacy.get(f), javax.imageio.ImageIO.read(
+                        out.resolve("resources").resolve("images").resolve("ss")
+                        .resolve(String.format("TEST.SS.%03d.png", f)).toFile()));
+            }
+            // Without CYCLE.DAT the conversion still succeeds (a warning).
+            Files.delete(install.resolve("CYCLE.DAT"));
+            assertFalse(ClassicAssetConverter.copyCycleTable(install,
+                    out.resolve("other").resolve("CYCLE.DAT")));
+        } finally {
+            try (Stream<Path> s = Files.walk(install)) {
+                s.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            }
+        }
+    }
+
+
     /** The name the fake install below gives a text file (cases vary). */
     private static String onDisk(String name) {
         return name.equals("PEDIA.TXT") ? "pedia.txt"
@@ -336,7 +632,7 @@ public class ClassicAssetDecoderTest extends TestCase {
                     .collect(Collectors.toList());
             }
             assertEquals("[COLONY.TXT, GAME.TXT, LABELS.TXT, MENU.TXT, NAMES.TXT,"
-                + " OPENING.TXT, PEDIA.TXT]", names.toString());
+                + " OPENING.TXT, PEDIA.TXT, WOODCUT.TXT]", names.toString());
             for (String name : names) {
                 assertTrue(name, Arrays.equals(
                     Files.readAllBytes(install.resolve(onDisk(name))),

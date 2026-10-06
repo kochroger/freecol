@@ -27,8 +27,9 @@ ant classic-assets -Dcol.install="C:\Program Files (x86)\GOG Galaxy\Games\Coloni
 under `MPS\COLONIZE\`).
 
 Output: `data/mods/classic_original/` — `mod.xml`, `resources.properties`,
-`resources/images/{pik,ss,ff}/*.png`, `ss-anchors.properties` and
-`text/{GAME,NAMES,LABELS}.TXT` (see below).
+`resources/images/{pik,ss,ff}/*.png`, `ss-anchors.properties`,
+`text/{GAME,NAMES,LABELS,...}.TXT`, and for the map's palette indices
+`ssidx/*.SS.idx`, `palette/VICEROY.rgb` and `data/CYCLE.DAT` (see below).
 
 ## How it works
 
@@ -60,21 +61,38 @@ The `classic-assets` Ant target compiles the source and runs
    the client then skips the new-game screens and starts with defaults.
    `MENU.TXT`, `OPENING.TXT` and `PATH.DAT` (the menu bar, the opening's
    schedule and ship path) are copied the same way, and so are `PEDIA.TXT`
-   (the Colonizopedia, e.g. the founding fathers' pages) and `COLONY.TXT`
-   (the colony names each nation offers in turn) for the screens that come
-   later.
-4. Writes `ss-anchors.properties`: one line `STEM.SS.nnn=ax,ay` per SS frame,
+   (the Colonizopedia, e.g. the founding fathers' pages), `COLONY.TXT`
+   (the colony names each nation offers in turn) and `WOODCUT.TXT` (the
+   woodcuts' ribbon titles) for the screens that come later.
+4. Keeps every `.SS` file as **palette indices** too (M1c design 10 §4, W6e):
+   `ssidx/NAME.SS.idx`, little-endian `"CSSI"`, u8 version 1, u16 frame
+   count, then per frame u16 width, u16 height and width×height index bytes
+   row by row; 0xFD is a transparent pixel, a 0x0 sprite is a 1×1 frame of
+   index 0 (`SsDecoder.decodeIndexed`, `ClassicAssetConverter.encodeIndexSheet`).
+   The PNGs are exactly this decode through the SS file's own palette, so they
+   are unchanged. Beside them: `palette/VICEROY.rgb`, the game palette as 768
+   bytes of 8-bit R G B (expanded as below), and `data/CYCLE.DAT`, the
+   original's colour-cycling table copied unchanged (`01 00 | 08 3D 78 23`:
+   8 colours from 120, a step every 35 ticks). The classic map is composed
+   from the indices and drawn through the game palette at the current cycling
+   phase: `TERRAIN.SS`'s own palette differs from the game's in the sea lane's
+   cycling colours 121-126, so its PNG cannot show the original's water.
+   About 4.7 MB for all 206 SS files (TERRAIN 3 KB, PHYS0 33 KB).
+5. Writes `ss-anchors.properties`: one line `STEM.SS.nnn=ax,ay` per SS frame,
    the raw bottom-centre screen anchor from bytes 8-11 of the frame's 16-byte
    sprite header (`SsDecoder.anchors`). The original places its sprites by
    these (e.g. the king and the nation banner of the audience screen); the
    frame's top-left is `(ax - w/2, ay - h + 1)` with its PNG size. Numbers
    only, no content.
-5. Writes `resources.properties` exposing every frame under a stable
+6. Writes `resources.properties` exposing every frame under a stable
    `image.classic_original.*` key namespace, plus `mod.xml` and messages.
 
 **Packs built before `text/` and `ss-anchors.properties` existed must be
 regenerated** (re-run `ant classic-assets`); until then the classic UI's
 NEUE WELT starts a game with defaults and logs one INFO line saying so.
+Likewise a pack built before `ssidx/` existed: the classic map then falls back
+to the PNG tiles without palette cycling, logs one warning, and a recorded run
+notes `terrain: fallback no ssidx/TERRAIN.SS.idx` in its `summary.txt`.
 
 The decode path (MADSPACK container, FAB decompression, `.SS` linemode RLE,
 `.PIK` indexed images, VGA palettes, `.FF` fonts) is implemented directly in Java —

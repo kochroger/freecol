@@ -283,6 +283,9 @@ public class ClassicFrameRecorderTest extends TestCase {
         assertEquals(40, screen.getRGB(100, 100) & 0xFF);
         awaitFrames(rec, rec.framesSampled() + 12);
         rec.log(System.nanoTime(), "test", "a,b c");
+        // A note is an event and a summary line; the last value wins (W6e).
+        rec.addNote("terrain", "fallback no ssidx/TERRAIN.SS.idx");
+        rec.addNote("terrain", "index TERRAIN.SS=12");
         rec.close();
         rec.close();   // idempotent
 
@@ -319,15 +322,21 @@ public class ClassicFrameRecorderTest extends TestCase {
         assertEquals("nanoTime,ms,frame,event,detail", ev.get(0));
         assertTrue(ev.get(1), ev.get(1).contains(",recorder-start,"));
         boolean test = false;
+        int terrain = 0;
         for (String l : ev) {
             if (l.endsWith(",test,a,b c")) test = true;
+            if (l.endsWith(",terrain,fallback no ssidx/TERRAIN.SS.idx")
+                || l.endsWith(",terrain,index TERRAIN.SS=12")) terrain++;
         }
         assertTrue(test);
+        assertEquals(2, terrain);
         assertTrue(ev.get(ev.size() - 1).contains(",recorder-stop,"));
         final List<String> sum = Files.readAllLines(new File(d, "summary.txt").toPath(),
                                                     StandardCharsets.UTF_8);
         assertTrue(sum.toString(), sum.contains("palette: greys"));
         assertTrue(sum.toString(), sum.contains("paletteMissPixels: 0"));
+        assertTrue(sum.toString(), sum.contains("terrain: index TERRAIN.SS=12"));
+        assertFalse(sum.toString(), sum.toString().contains("terrain: fallback"));
         for (File f : d.listFiles()) f.deleteOnExit();
     }
 }

@@ -36,6 +36,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -95,7 +96,9 @@ import javax.swing.JComponent;
  * {@code music-request}, {@code music-mode} (the jukebox switched to the
  * title or the in-game playlist), {@code pref}, {@code colony-buildings}
  * (the sprite frame and place of each building on the colony screen),
- * {@code still}.  Reserved for
+ * {@code still}, {@code terrain} (W6e: whether the pack holds the index
+ * pipeline, {@code index ...} or {@code fallback ...}; a {@link #note},
+ * so it is also a line of {@code summary.txt}).  Reserved for
  * the M1 work items: {@code endturn-timer-start/fire}
  * (W5), {@code palette-step} (W6c), {@code music-fade} (W15).
  *
@@ -243,6 +246,9 @@ public final class ClassicFrameRecorder {
     /** The harness's state probe, sampled every frame, or null. */
     private volatile Supplier<String> probe = null;
 
+    /** The {@link #note}s for the summary, in first-note order (guarded). */
+    private final Map<String, String> notes = new LinkedHashMap<>();
+
     /** Sampler statistics; {@link #frames} is read by {@link #framesSampled}. */
     private volatile long frames = 0;
     private long pngs = 0, lateTicks = 0, probeErrors = 0;
@@ -355,6 +361,33 @@ public final class ClassicFrameRecorder {
     public static void event(String type, String detail) {
         final ClassicFrameRecorder r = instance;
         if (r != null) r.log(System.nanoTime(), type, detail);
+    }
+
+    /**
+     * Log an event that also goes into {@code summary.txt} as the line
+     * {@code <key>: <value>} (the last value of a key wins), for a state a
+     * run's result depends on, e.g. {@code terrain} (index or fallback).
+     * A no-op while recording is off.
+     *
+     * @param key The event name and summary key.
+     * @param value The detail and summary value.
+     */
+    static void note(String key, String value) {
+        final ClassicFrameRecorder r = instance;
+        if (r != null) r.addNote(key, value);
+    }
+
+    /**
+     * {@link #note} on this recorder.
+     *
+     * @param key The event name and summary key.
+     * @param value The detail and summary value.
+     */
+    void addNote(String key, String value) {
+        synchronized (this.notes) {
+            this.notes.put(key, value);
+        }
+        log(System.nanoTime(), key, value);
     }
 
     /**
@@ -838,6 +871,11 @@ public final class ClassicFrameRecorder {
         s.add("palette: " + this.palette.source);
         s.add("paletteMissPixels: " + this.palette.missPixels);
         s.add("paletteMissColours: " + this.palette.missedColours());
+        synchronized (this.notes) {
+            for (Map.Entry<String, String> e : this.notes.entrySet()) {
+                s.add(e.getKey() + ": " + e.getValue());
+            }
+        }
         try {
             Files.write(new File(this.dir, "summary.txt").toPath(), s,
                         StandardCharsets.UTF_8);

@@ -129,6 +129,23 @@ pixels stay crisp. Unexplored tiles are left black (classic fog). The
 key→frame mapping lives in `tools/classic_assets/aliases.properties`. When the
 asset pack is absent the same keys fall back to FreeCol's own (isometric) art.
 
+**Palette indices (M1c design 10 §4, W6e).** The pack also keeps every SS file
+as the original's palette indices, `ssidx/<NAME>.idx` (`ClassicIndexSheet`,
+0xFD = transparent), with the game palette `palette/VICEROY.rgb` and the
+original's colour cycle `data/CYCLE.DAT` (8 entries from 120, a step every 35
+ticks = 575.05 ms). `ClassicGamePalette` holds VICEROY.PAL and, per cycling
+phase p, `P_p[120+i] = B[120 + ((i-p) mod 8)]` and an `IndexColorModel` to draw
+indices through; the clips' fog-start #19 is phase 0, its #0 phase 7, landfall
+#0 phase 1. Why: the PNGs are coloured with each SS file's own palette, and
+`TERRAIN.SS`'s differs from the game's in 121-126 (the sea lane's PNG shows 4
+colours the game never shows). The composed map (W6a) and the water cycling
+(W6c) are built on these indices; today's map still draws the PNGs.
+`ClassicPackFiles` reads them (`indexSheet`, `gamePalette`, `cycleSpec`, and
+`terrainSpriteFor` from the alias lines). A pack converted before W6e has none:
+`indexStatus` says `fallback no ssidx/TERRAIN.SS.idx`, logs one warning, and the
+recorder notes it (`terrain` event and `summary.txt` line). Re-run
+`ant classic-assets` to convert such a pack again.
+
 **Unit & goods sprites.** The original *Colonization* unit map-sprites and goods
 icons come from `ICONS.SS`, aliased onto FreeCol's own resource keys in the same
 `aliases.properties` (all 194 `image.unit.model.unit.*` base+role keys and 22
@@ -3675,11 +3692,14 @@ paints as before). `ClassicTestHarness.install` (from `startGUI`) binds both.
   `slide-skip` (fog, or a classic pref), `final-draw`, `end-turn`,
   `dialog-open/close`, `menu-open/close`, `blink` (W3: `arm`, `rebase`,
   `off`/`on n=..`, `hold`, `stop`), `music-request`, `music-mode`, `pref`,
-  `late`. Reserved for the M1 items: `endturn-timer-start/fire` (W5),
+  `late`, `terrain` (W6e: `index ...` or `fallback ...`, whether the pack holds
+  the palette indices). Reserved for the M1 items: `endturn-timer-start/fire` (W5),
   `palette-step` (W6c), `music-fade`. Add a hook with
   `ClassicFrameRecorder.event(name, detail)`; guard a costly detail with
-  `ClassicFrameRecorder.on()`.
-- `summary.txt`: frames, PNGs, late ticks, palette misses, paint cost.
+  `ClassicFrameRecorder.on()`. `ClassicFrameRecorder.note(key, value)` logs
+  an event that is also a `key: value` line of `summary.txt`.
+- `summary.txt`: frames, PNGs, late ticks, palette misses, paint cost, the
+  notes (`terrain: ...`).
 
 How the pixels are taken: while recording, `ClassicHudPane` is the painting
 origin of all its children (`isPaintingOrigin`), paints itself as a print into
