@@ -111,8 +111,9 @@ import javax.swing.JComponent;
  * are events instead.  {@code summary.txt} gives the paint cost (the
  * pane's paint, the copy, the blit), and
  * {@code -Dfreecol.classic.recordFrames=false} records the events alone,
- * with the HUD painting as without the recorder, to see the game's own
- * timing.
+ * with the HUD painting as without the recorder and the state probe read
+ * every {@link #EVENTS_PROBE_MS} by sleeps that leave the Windows timer
+ * resolution alone, to see the game's own timing.
  *
  * <p><b>Palette.</b>  {@code -Dfreecol.classic.recordPalette=<file>} names
  * a PNG with a PLTE (the original clip's frame #0) or a raw 768-byte RGB
@@ -140,6 +141,13 @@ public final class ClassicFrameRecorder {
      * timing, untouched by the frame capture).
      */
     public static final String FRAMES_PROPERTY = "freecol.classic.recordFrames";
+
+    /**
+     * Events only: the state probe's interval (ms), a multiple of 10 so the
+     * probe's sleeps never raise the Windows timer resolution
+     * ({@link #sleepMillis}).
+     */
+    static final long EVENTS_PROBE_MS = 50L;
 
     /**
      * The capture rate of the original's DOSBox clips, 70.0863 Hz (their
@@ -231,8 +239,9 @@ public final class ClassicFrameRecorder {
     /** The harness's state probe, sampled every frame, or null. */
     private volatile Supplier<String> probe = null;
 
-    /** Sampler statistics. */
-    private long frames = 0, pngs = 0, lateTicks = 0, probeErrors = 0;
+    /** Sampler statistics; {@link #frames} is read by {@link #framesSampled}. */
+    private volatile long frames = 0;
+    private long pngs = 0, lateTicks = 0, probeErrors = 0;
     private long maxLateNs = 0;
 
     /**
@@ -377,6 +386,11 @@ public final class ClassicFrameRecorder {
         return this.dir;
     }
 
+    /** @return The timeline rows written so far (any thread). */
+    long framesSampled() {
+        return this.frames;
+    }
+
     /**
      * Paint a HUD pane through the copy (see the class comment).  EDT only,
      * from the pane's {@code paint}.
@@ -439,10 +453,10 @@ public final class ClassicFrameRecorder {
     }
 
     /**
-     * Wait until a moment on the clock: sleep to about 1.5 ms before it,
-     * then spin.  Not {@code LockSupport.parkNanos}: on Windows it wakes on
-     * the 15.6 ms system tick (measured here: up to 15 ms late), while
-     * {@code Thread.sleep} keeps to about a millisecond.
+     * Wait until a moment on the clock: sleep to about 1.5 ms before it
+     * ({@link #sleepMillis}), then spin.  Not {@code LockSupport.parkNanos}:
+     * on Windows it wakes on the 15.6 ms system tick (measured here: up to
+     * 15 ms late), while {@code Thread.sleep} keeps to about a millisecond.
      *
      * @param due The {@code System.nanoTime} to wait for.
      * @exception InterruptedException if interrupted.
@@ -451,12 +465,34 @@ public final class ClassicFrameRecorder {
         for (;;) {
             final long rem = due - System.nanoTime();
             if (rem <= 0) return;
-            if (rem > 2_000_000L) {
-                Thread.sleep((rem - 1_500_000L) / 1_000_000L);
+            final long ms = sleepMillis(rem);
+            if (ms > 0) {
+                Thread.sleep(ms);
             } else {
                 Thread.onSpinWait();
             }
         }
+    }
+
+    /**
+     * How long {@link #waitUntil} sleeps with {@code remNanos} left: to
+     * about 1.5 ms before the deadline, 0 for the spin, and never a
+     * multiple of 10 ms.  On Windows, HotSpot raises the timer resolution
+     * to 1 ms only for a sleep whose length is not a multiple of 10 ms
+     * ({@code HighResolutionInterval} in {@code os_windows.cpp}); a sleep
+     * of 10, 20 ... ms wakes on the 15.6-ms system tick, up to a whole tick
+     * late, unless another thread holds the resolution up at that moment
+     * (in the M1 runs the recorder's sampler always did, so nothing showed;
+     * FINAL "Open" item 5).  One millisecond less is then slept and spun.
+     *
+     * @param remNanos The time left, in nanoseconds.
+     * @return The milliseconds to sleep, 0 to spin.
+     */
+    static long sleepMillis(long remNanos) {
+        if (remNanos <= 2_000_000L) return 0L;
+        long ms = (remNanos - 1_500_000L) / 1_000_000L;
+        if (ms % 10 == 0) ms--;
+        return Math.max(0L, ms);
     }
 
     /**
@@ -484,6 +520,10 @@ public final class ClassicFrameRecorder {
 
     /** The sampler: one frame per tick of the absolute 70.0863 Hz grid. */
     private void sampleLoop() {
+        if (!this.framesOn) {
+            probeLoop();
+            return;
+        }
         final byte[] prev = new byte[W * H];
         final byte[] cur = new byte[W * H];
         String lastState = null;
@@ -513,20 +553,7 @@ public final class ClassicFrameRecorder {
                 this.maxLateNs = Math.max(this.maxLateNs,
                     now - (this.t0 + Math.round(k * NS_PER_FRAME)));
                 if (this.framesOn) sampleFrame(k, prev, cur);
-                final Supplier<String> p = this.probe;
-                if (p != null) {
-                    String s;
-                    try {
-                        s = p.get();
-                    } catch (RuntimeException e) {
-                        s = null;
-                        this.probeErrors++;
-                    }
-                    if (s != null && !s.equals(lastState)) {
-                        lastState = s;
-                        log(System.nanoTime(), "state", s);
-                    }
-                }
+                lastState = sampleProbe(lastState);
                 if (k % 70 == 0 && this.timeline != null) this.timeline.flush();
                 k++;
             }
@@ -534,6 +561,55 @@ public final class ClassicFrameRecorder {
             logger.log(Level.WARNING, "Classic recorder: sampler stopped", e);
             log(System.nanoTime(), "recorder-error", e.toString());
         }
+    }
+
+    /**
+     * The sampler with frames off (events only): the state probe every
+     * {@link #EVENTS_PROBE_MS}, no frame grid.  Its sleeps are multiples of
+     * 10 ms, so the recorder never raises the Windows timer resolution
+     * ({@link #sleepMillis}) and the game's own timers are measured as they
+     * run without it (FINAL "Open" item 5); a state change is stamped up to
+     * about 65 ms late then.
+     */
+    private void probeLoop() {
+        String lastState = null;
+        try {
+            while (!this.stopping) {
+                lastState = sampleProbe(lastState);
+                try {
+                    Thread.sleep(EVENTS_PROBE_MS);
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        } catch (RuntimeException e) {
+            logger.log(Level.WARNING, "Classic recorder: probe stopped", e);
+            log(System.nanoTime(), "recorder-error", e.toString());
+        }
+    }
+
+    /**
+     * Read the state probe and log a {@code state} event if its text
+     * changed.  Sampler thread.
+     *
+     * @param lastState The text logged last, or null.
+     * @return The text logged last now.
+     */
+    private String sampleProbe(String lastState) {
+        final Supplier<String> p = this.probe;
+        if (p == null) return lastState;
+        String s;
+        try {
+            s = p.get();
+        } catch (RuntimeException e) {
+            s = null;
+            this.probeErrors++;
+        }
+        if (s != null && !s.equals(lastState)) {
+            log(System.nanoTime(), "state", s);
+            return s;
+        }
+        return lastState;
     }
 
     /**

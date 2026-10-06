@@ -134,6 +134,13 @@ final class ClassicInfoPanel extends JComponent {
     /** The minimap shown in the last paint (for click-to-recentre). */
     private ClassicHud.MinimapModel lastMinimap = null;
 
+    /**
+     * The panel as the last paint rendered it (80x192), which a
+     * minimap-only paint redraws only the minimap of; null before the
+     * first paint.
+     */
+    private BufferedImage rendered = null;
+
     /** Logged once when painting fails. */
     private boolean failLogged = false;
 
@@ -270,6 +277,45 @@ final class ClassicInfoPanel extends JComponent {
     }
 
     /**
+     * The minimap as the panel shows it now: the map at the view, the
+     * active unit's blink dot, the Spielzugende mode's pixel and a native
+     * cue's pixel (W19).
+     *
+     * @return The minimap, or null without a game or a view.
+     */
+    private ClassicHud.MinimapModel minimapModel() {
+        final Game game = this.freeColClient.getGame();
+        if (game == null || game.getMap() == null) return null;
+        final int[] o = this.mapViewer.viewOrigin();
+        if (o == null) return null;
+        ClassicHud.MinimapModel mm = blinkDot(
+            ClassicHud.minimapOf(game.getMap(), o[0], o[1]),
+            this.mapViewer.getActiveUnit(), this.mapViewer.isBlinkOff());
+        mm = promptDot(mm, this.mapViewer.promptTile(),
+                       this.mapViewer.isPromptShown());
+        // The native cue's white pixel on the move's source (W19).
+        final Tile cue = this.mapViewer.cueTile();
+        return promptDot(mm, cue, cue != null);
+    }
+
+    /**
+     * Whether a paint's clip lies within the minimap's frame: only the
+     * minimap can have changed then ({@link #paintMinimapNow}).
+     *
+     * @param clip The clip in component pixels, or null (all).
+     * @param s The canvas scale.
+     * @return True for a minimap-only paint.
+     */
+    static boolean minimapOnly(Rectangle clip, int s) {
+        if (clip == null) return false;
+        final Rectangle f = new Rectangle(
+            (ClassicHud.MINIMAP_FRAME.x - ClassicHud.PANEL_X) * s,
+            (ClassicHud.MINIMAP_FRAME.y - ClassicHud.PANEL_Y) * s,
+            ClassicHud.MINIMAP_FRAME.width * s, ClassicHud.MINIMAP_FRAME.height * s);
+        return f.contains(clip);
+    }
+
+    /**
      * The panel's model from the live game.
      *
      * @return The model; never null (an empty panel without a game).
@@ -277,18 +323,8 @@ final class ClassicInfoPanel extends JComponent {
     ClassicHud.PanelModel model() {
         final Game game = this.freeColClient.getGame();
         final Player player = this.freeColClient.getMyPlayer();
-        ClassicHud.MinimapModel mm = null;
+        final ClassicHud.MinimapModel mm = minimapModel();
         String season = null, gold = null;
-        if (game != null && game.getMap() != null) {
-            final int[] o = this.mapViewer.viewOrigin();
-            if (o != null) {
-                mm = blinkDot(ClassicHud.minimapOf(game.getMap(), o[0], o[1]),
-                              this.mapViewer.getActiveUnit(),
-                              this.mapViewer.isBlinkOff());
-                mm = promptDot(mm, this.mapViewer.promptTile(),
-                               this.mapViewer.isPromptShown());
-            }
-        }
         if (game != null && game.getTurn() != null) {
             season = ClassicHud.seasonLine(this.text, game.getTurn().getSeason(),
                                            game.getTurn().getYear());
@@ -426,14 +462,28 @@ final class ClassicInfoPanel extends JComponent {
 
     @Override
     protected void paintComponent(Graphics g) {
+        final int s = scale();
+        final Rectangle clip = g.getClipBounds();
         final BufferedImage img = new BufferedImage(ClassicHud.PANEL_W,
             ClassicHud.PANEL_H, BufferedImage.TYPE_INT_RGB);
         final Graphics2D ig = img.createGraphics();
         try {
             ig.translate(-ClassicHud.PANEL_X, -ClassicHud.PANEL_Y);
-            final ClassicHud.PanelModel p = model();
-            this.lastMinimap = p.minimap;
-            ClassicHud.paintPanel(ig, this.font, this.wood, this.text, p);
+            if (this.rendered != null && minimapOnly(clip, s)) {
+                // A minimap-only paint (a blink's dot, a jump's ring, a
+                // native cue's pixel): the rest as the last paint left it,
+                // only the minimap drawn again.  The whole panel took 3-15
+                // ms per toggle, the minimap alone a fraction (C3; the
+                // blink's second paint, F6).
+                ig.drawImage(this.rendered, ClassicHud.PANEL_X, ClassicHud.PANEL_Y, null);
+                final ClassicHud.MinimapModel mm = minimapModel();
+                this.lastMinimap = mm;
+                ClassicHud.paintMinimapArea(ig, mm);
+            } else {
+                final ClassicHud.PanelModel p = model();
+                this.lastMinimap = p.minimap;
+                ClassicHud.paintPanel(ig, this.font, this.wood, this.text, p);
+            }
         } catch (RuntimeException e) {
             if (!this.failLogged) {
                 this.failLogged = true;
@@ -442,14 +492,17 @@ final class ClassicInfoPanel extends JComponent {
         } finally {
             ig.dispose();
         }
-        final int s = scale();
+        this.rendered = img;
         ClassicMenuStrip.blit(g, img, 0, 0, s);
         // The panel refresh after a (re)activation starts the blink's
-        // phase: now, as its pixels are on the screen.
-        this.mapViewer.blinkPanelPainted();
-        if (noteShown(img, g.getClipBounds(), s) && this.turnFlow != null) {
-            this.turnFlow.screenChanged();
-        }
+        // phase: now, as its pixels are on the screen.  Only a paint that
+        // changed something is the refresh: the identical repaint the
+        // controller queues behind a move's block (10-15 ms later) put the
+        // first OFF a frame late (24 frames after the block, the original
+        // 22-23).
+        final boolean changed = noteShown(img, g.getClipBounds(), s);
+        if (changed) this.mapViewer.blinkPanelPainted();
+        if (changed && this.turnFlow != null) this.turnFlow.screenChanged();
     }
 
     /**

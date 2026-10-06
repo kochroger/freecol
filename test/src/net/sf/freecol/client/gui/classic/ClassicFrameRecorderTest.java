@@ -195,6 +195,35 @@ public class ClassicFrameRecorderTest extends TestCase {
         assertEquals(3, d[1]);
     }
 
+    /**
+     * The waits' sleeps (FINAL "Open" item 5): to about 1.5 ms before the
+     * deadline, then the spin, and never a multiple of 10 ms, whose sleep
+     * Windows would wake on the 15.6-ms tick.
+     */
+    public void testSleepsAreNeverWholeTensOfMs() {
+        final long ms = 1_000_000L;
+        assertEquals(0L, ClassicFrameRecorder.sleepMillis(-5 * ms));
+        assertEquals(0L, ClassicFrameRecorder.sleepMillis(0L));
+        assertEquals(0L, ClassicFrameRecorder.sleepMillis(2 * ms));
+        assertEquals(0L, ClassicFrameRecorder.sleepMillis(2 * ms + 400_000L));   // 0.9 ms -> spin
+        assertEquals(1L, ClassicFrameRecorder.sleepMillis(3 * ms));
+        assertEquals(9L, ClassicFrameRecorder.sleepMillis(11_500_000L));          // 10 -> 9
+        assertEquals(19L, ClassicFrameRecorder.sleepMillis(21_600_000L));         // 20 -> 19
+        assertEquals(327L, ClassicFrameRecorder.sleepMillis(328_500_000L));       // the blink
+        assertEquals(14L, ClassicFrameRecorder.sleepMillis(16_430_000L));         // a slide step
+        for (long rem = 0; rem <= 700 * ms; rem += 37_000L) {
+            final long s = ClassicFrameRecorder.sleepMillis(rem);
+            assertTrue(rem + ": " + s, s >= 0);
+            assertTrue(rem + ": " + s, s == 0 || s % 10 != 0);
+            assertTrue(rem + ": wakes before the deadline", s * ms <= rem - 1_500_000L || s == 0);
+            if (rem > 13 * ms) {
+                assertTrue(rem + ": sleeps to within 2.5 ms", rem - s * ms <= 2_500_000L + ms);
+            }
+        }
+        assertEquals(50L, ClassicFrameRecorder.EVENTS_PROBE_MS);
+        assertEquals(0L, ClassicFrameRecorder.EVENTS_PROBE_MS % 10);
+    }
+
     public void testTimelineRowsMatchZmbvExtract() {
         assertEquals("frameIndex,timeMs,keyframe,paletteChanged,pixelsChanged,"
             + "changedBlocks,pngFile,paletteEntriesChanged,status",
@@ -208,6 +237,23 @@ public class ClassicFrameRecorderTest extends TestCase {
             ClassicFrameRecorder.timelineRow(28639, 0, 0, ""));
         assertEquals("1148,16379.805,0,0,138,4,frame_001148.png,0,ok\n",
             ClassicFrameRecorder.timelineRow(1148, 138, 4, "frame_001148.png"));
+    }
+
+    /**
+     * Wait until the sampler has written at least {@code n} timeline rows
+     * (at least 120 ms), instead of a fixed sleep a loaded machine can
+     * starve (FINAL "Open" item 10).
+     */
+    private static void awaitFrames(ClassicFrameRecorder rec, long n)
+        throws InterruptedException {
+        final long start = System.nanoTime();
+        final long end = start + 10_000_000_000L;
+        while ((rec.framesSampled() < n || System.nanoTime() - start < 120_000_000L)
+               && System.nanoTime() < end) {
+            Thread.sleep(10);
+        }
+        assertTrue("frames sampled: " + rec.framesSampled() + " < " + n,
+                   rec.framesSampled() >= n);
     }
 
     public void testShortRecording() throws Exception {
@@ -225,7 +271,7 @@ public class ClassicFrameRecorderTest extends TestCase {
                 cg.setColor(new Color(40, 40, 40));
                 cg.fillRect(0, 0, 640, 400);
             });
-        Thread.sleep(120);
+        awaitFrames(rec, 4);
         // A partial repaint: only the clip is painted and published.
         g.setClip(0, 0, 32, 32);
         rec.paintThrough(pane, g, new Rectangle(0, 0, 640, 400), 2, cg -> {
@@ -235,7 +281,7 @@ public class ClassicFrameRecorderTest extends TestCase {
         g.dispose();
         assertEquals(200, screen.getRGB(0, 0) & 0xFF);       // shown on the screen
         assertEquals(40, screen.getRGB(100, 100) & 0xFF);
-        Thread.sleep(120);
+        awaitFrames(rec, rec.framesSampled() + 12);
         rec.log(System.nanoTime(), "test", "a,b c");
         rec.close();
         rec.close();   // idempotent

@@ -1092,18 +1092,19 @@ public final class InGameController extends FreeColClientHolder {
      * End the turn.
      *
      * @param showDialog Show the end turn dialog?
+     * @return True if the end request went to the server.
      */
-    private void doEndTurn(boolean showDialog) {
+    private boolean doEndTurn(boolean showDialog) {
         final Player player = getMyPlayer();
         // Clear any panels first
-        if (getGUI().isPanelShowing()) return;
-        
+        if (getGUI().isPanelShowing()) return false;
+
         if (showDialog) {
             List<Unit> units = transform(player.getUnits(), Unit::isCandidateForNextActiveUnit);
             if (!units.isEmpty()) {
                 // Modal dialog takes over
                 getGUI().showEndTurnDialog(units);
-                return;
+                return false;
             }
         }
 
@@ -1121,7 +1122,7 @@ public final class InGameController extends FreeColClientHolder {
         // Make sure all goto orders are complete before ending turn, and
         // that nothing (like a LCR exploration) has cancelled the end turn.
         if (!doExecuteGotoOrders()
-            || moveMode.ordinal() < MoveMode.END_TURN.ordinal()) return;
+            || moveMode.ordinal() < MoveMode.END_TURN.ordinal()) return false;
 
         // Check for desync as last thing!
         if (FreeColDebugger.isInDebugMode(FreeColDebugger.DebugMode.DESYNC)
@@ -1129,7 +1130,7 @@ public final class InGameController extends FreeColClientHolder {
             logger.warning("Reconnecting on desync");
             getFreeColClient().getConnectController()
                 .requestLogout(LogoutReason.RECONNECT);
-            return;
+            return false;
         }
         
         // Clean up lingering menus.
@@ -1142,7 +1143,7 @@ public final class InGameController extends FreeColClientHolder {
         turnReportMessages.clear();
 
         // Inform the server of end of turn.
-        askServer().endTurn();
+        return askServer().endTurn();
     }
 
 
@@ -2683,6 +2684,9 @@ public final class InGameController extends FreeColClientHolder {
      * @param newTile The {@code Tile} the move ends at.
      */
     public void animateMoveHandler(Unit unit, Tile oldTile, Tile newTile) {
+        // Before the update that moves the unit (the animation comes
+        // first in the server's change set).
+        getGUI().animateUnitMoveQueued(unit, oldTile, newTile);
         invokeLater(() -> {
             getGUI().animateUnitMove(unit, oldTile, newTile);
         });
@@ -3400,13 +3404,17 @@ public final class InGameController extends FreeColClientHolder {
      * Called from EndTurnAction, GUI.showEndTurnDialog
      *
      * @param showDialog If false, suppress showing the end turn dialog.
+     * @return True if the end request went to the server (and the
+     *     interaction succeeded); false if the turn was kept without
+     *     asking (not our turn, a panel or the end turn dialog up, goto or
+     *     trade route units to look at).
      */
-    public void endTurn(boolean showDialog) {
+    public boolean endTurn(boolean showDialog) {
         if (!requireOurTurn()) {
-            return;
+            return false;
         }
 
-        doEndTurn(showDialog && getClientOptions().getBoolean(ClientOptions.SHOW_END_TURN_DIALOG));
+        return doEndTurn(showDialog && getClientOptions().getBoolean(ClientOptions.SHOW_END_TURN_DIALOG));
     }
 
     /**

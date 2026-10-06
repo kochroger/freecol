@@ -93,6 +93,7 @@ import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.option.BooleanOption;
 import net.sf.freecol.common.option.MapGeneratorOptions;
 import net.sf.freecol.common.resources.ImageCache;
+import net.sf.freecol.common.resources.ResourceManager;
 import net.sf.freecol.server.FreeColServer;
 
 
@@ -1111,11 +1112,14 @@ public class ClassicGUI extends GUI {
             closeReportPanel();
         }
         if (this.turnPoll != null) this.turnPoll.stop();
+        ResourceManager.setPreloadHold(null);
         if (this.turnFlow != null) this.turnFlow.dispose();
         this.turnPoll = null;
         this.turnFlow = null;
-        if (this.mapViewer != null) this.mapViewer.dispose();
+        // The menu first: its close resumes the blink of a live viewer
+        // (FINAL "Open" item 11).
         if (this.menuStrip != null) this.menuStrip.closeMenu();
+        if (this.mapViewer != null) this.mapViewer.dispose();
         if (this.frame != null) this.frame.setJMenuBar(null);
         ClassicDialog.setWatcher(null);
         restoreSessionOptions();
@@ -1672,6 +1676,12 @@ public class ClassicGUI extends GUI {
                 if (turnFlow != null) turnFlow.tick();
             });
         this.turnPoll.start();
+        // The background preload waits while a timed paint is due (M1
+        // acceptance F6: it slowed the first 13 s of every game).
+        ResourceManager.setPreloadHold(() -> {
+                final ClassicMapViewer mv = mapViewer;
+                return mv != null && mv.holdsPreload();
+            });
         this.hudPane = new ClassicHudPane(this.menuStrip, this.mapViewer,
             this.infoPanel, arrowSprite(pack), () -> sceneShowing);
         ClassicKeyMap.install(this.hudPane, this.mapViewer,
@@ -1680,7 +1690,8 @@ public class ClassicGUI extends GUI {
             () -> (mapViewer == null) ? ClassicMenuModel.Context.NONE
                 : ClassicMenuModel.Context.of(mapViewer.getActiveUnit(),
                                               mapViewer.getViewMode()),
-            () -> sceneShowing || (menuStrip != null && menuStrip.isMenuOpen()));
+            () -> sceneShowing || (menuStrip != null && menuStrip.isMenuOpen()),
+            this::turnInputBlocked);
         this.frame.setJMenuBar(null);
         this.frame.setContentPane(this.hudPane);
         this.frame.revalidate();
@@ -1732,6 +1743,31 @@ public class ClassicGUI extends GUI {
     void paintBlinkDot() {
         if (this.infoPanel != null) this.infoPanel.paintMinimapNow();
     }
+
+    /**
+     * The panel's refresh after a key move's final draw (M1 acceptance
+     * F2): the minimap at once, with the final draw and its reveal
+     * (landfall #1166 -&gt; #1167), the rest of the panel one tick later
+     * (the block 1-3 frames after the final draw: +1 in 36 of 47 slides,
+     * +2 in 9, never in its frame; ours came in the same frame in 21 of
+     * 53).  The event thread is held for the tick, as by the slide.  EDT
+     * only.
+     *
+     * @param finalNanos When the final draw was painted.
+     */
+    void panelAfterFinalDraw(long finalNanos) {
+        if (this.infoPanel == null) return;
+        this.infoPanel.paintMinimapNow();
+        try {
+            ClassicSlide.waitUntil(finalNanos + Math.round(PANEL_AFTER_FINAL_MS * 1e6));
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
+        this.infoPanel.paintNow();
+    }
+
+    /** {@link #panelAfterFinalDraw}: one game tick (ms). */
+    static final double PANEL_AFTER_FINAL_MS = ClassicSlide.STEP_MS;
 
     /** Repaint the HUD info panel if it exists (view/model state changed). */
     private void repaintInfo() {
@@ -2066,8 +2102,8 @@ public class ClassicGUI extends GUI {
         }
 
         @Override
-        public void endTurn() {
-            getFreeColClient().getInGameController().endTurn(false);
+        public boolean endTurn() {
+            return getFreeColClient().getInGameController().endTurn(false);
         }
 
         @Override
@@ -2145,6 +2181,7 @@ public class ClassicGUI extends GUI {
         if (this.mapViewer == null) return;
         final String pref = movesPref(unit, getMyPlayer());
         if (pref != null && !ClassicPrefs.get().is(pref)) {
+            this.mapViewer.moveDequeued(unit, srcTile, dstTile);
             if (ClassicFrameRecorder.on()) {
                 ClassicFrameRecorder.event("slide-skip", "unit=" + unit.getId()
                     + " " + pref + "=false");
@@ -2152,6 +2189,21 @@ public class ClassicGUI extends GUI {
             return;
         }
         this.mapViewer.animateMove(unit, srcTile, dstTile);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>A foreign unit's move: the map keeps it at its source until its
+     * slide starts (M1 acceptance F5; the model runs ahead of the slides
+     * in the AI phase).  Our own moves slide at once, inside the move.
+     * Any thread (the network thread).
+     */
+    @Override
+    public void animateUnitMoveQueued(Unit unit, Tile srcTile, Tile dstTile) {
+        final ClassicMapViewer mv = this.mapViewer;
+        if (mv == null || movesPref(unit, getMyPlayer()) == null) return;
+        mv.moveQueued(unit, srcTile, dstTile);
     }
 
     /**
@@ -3476,8 +3528,13 @@ public class ClassicGUI extends GUI {
                                 T choice) {
         if (choice == null) {
             final Tile tile = (settlement == null) ? null : settlement.getTile();
+            // The flow of this game only: a late post must not reach the
+            // next game's (FINAL "Open" item 11).
+            final ClassicTurnFlow flow = this.turnFlow;
             invokeNowOrLater(() -> {
-                    if (this.turnFlow != null) this.turnFlow.villageBoxCancelled(tile);
+                    if (flow != null && flow == this.turnFlow) {
+                        flow.villageBoxCancelled(tile);
+                    }
                 });
         }
         return choice;

@@ -1215,6 +1215,21 @@ public class GUI extends FreeColClientHolder {
      */
     public void animateUnitMove(Unit unit, Tile srcTile, Tile dstTile) {}
 
+    /**
+     * A unit move animation was received and is queued for the GUI
+     * thread ({@link #animateUnitMove} follows there).  Called on the
+     * thread that received it, before the update that moves the unit is
+     * applied, so a GUI can keep showing the unit at its source until its
+     * animation runs.
+     *
+     * Used by: client InGameController
+     *
+     * @param unit The {@code Unit} that is moving.
+     * @param srcTile The {@code Tile} the unit starts at.
+     * @param dstTile The {@code Tile} the unit moves to.
+     */
+    public void animateUnitMoveQueued(Unit unit, Tile srcTile, Tile dstTile) {}
+
 
     // Dialog primitives
 

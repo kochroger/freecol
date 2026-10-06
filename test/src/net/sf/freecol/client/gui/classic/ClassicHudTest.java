@@ -368,6 +368,53 @@ public class ClassicHudTest extends TestCase {
     }
 
     /**
+     * The minimap-only repaint (C3, a blink's dot, a jump's ring, a native
+     * cue's pixel): the panel painted with one minimap and then only its
+     * minimap area with another is pixel for pixel the panel painted with
+     * the other; and only a clip within the minimap's frame takes it.
+     */
+    public void testMinimapOnlyRepaint() {
+        final ClassicHud.MinimapModel a = model(42, 20);
+        final ClassicHud.MinimapModel b = a.with(50, 25, ClassicHud.BLINK_DOT_RGB)
+            .with(48, 22, 0xFF7100);
+        final ClassicHud.MinimapModel c = model(30, 30);   // the view jumped: the ring moves
+        for (ClassicHud.MinimapModel next : new ClassicHud.MinimapModel[] { b, c, null }) {
+            final BufferedImage want = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+            final BufferedImage got = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+            Graphics2D g = want.createGraphics();
+            ClassicHud.paintPanel(g, null, null, null, new ClassicHud.PanelModel(
+                next, null, null, false, null, null, 0x6D3C18));
+            g.dispose();
+            g = got.createGraphics();
+            ClassicHud.paintPanel(g, null, null, null, new ClassicHud.PanelModel(
+                a, null, null, false, null, null, 0x6D3C18));
+            ClassicHud.paintMinimapArea(g, next);
+            g.dispose();
+            for (int y = 0; y < 200; y++) {
+                for (int x = 0; x < 320; x++) {
+                    assertEquals(x + "," + y, rgb(want, x, y), rgb(got, x, y));
+                }
+            }
+        }
+        // The panel component's clips at scale 4: the minimap (or a part)
+        // is minimap-only, the indicator or the whole panel is not.
+        final int s = 4;
+        assertTrue(ClassicInfoPanel.minimapOnly(new Rectangle(
+            (ClassicHud.MINIMAP.x - ClassicHud.PANEL_X) * s,
+            (ClassicHud.MINIMAP.y - ClassicHud.PANEL_Y) * s,
+            ClassicHud.MINIMAP.width * s, ClassicHud.MINIMAP.height * s), s));
+        assertTrue(ClassicInfoPanel.minimapOnly(new Rectangle(
+            (ClassicHud.MINIMAP_FRAME.x - ClassicHud.PANEL_X) * s,
+            (ClassicHud.MINIMAP_FRAME.y - ClassicHud.PANEL_Y) * s,
+            ClassicHud.MINIMAP_FRAME.width * s, ClassicHud.MINIMAP_FRAME.height * s), s));
+        assertFalse(ClassicInfoPanel.minimapOnly(new Rectangle(
+            (ClassicHud.INDICATOR.x - ClassicHud.PANEL_X) * s,
+            (ClassicHud.INDICATOR.y - ClassicHud.PANEL_Y) * s, 20, 12), s));
+        assertFalse(ClassicInfoPanel.minimapOnly(new Rectangle(0, 0, 320, 768), s));
+        assertFalse(ClassicInfoPanel.minimapOnly(null, s));
+    }
+
+    /**
      * The turn indicator (build spec W5c): a solid 5x3 box at x 315-319,
      * y 197-199 over the wood, nothing else touched, and no box at all
      * without a colour.
@@ -636,6 +683,56 @@ public class ClassicHudTest extends TestCase {
         assertTrue(ClassicKeyMap.contextAllows(find("L"), null));
         // The in-game way back to the title.
         assertEquals("[newAction]", find("control N").actionIds.toString());
+    }
+
+    /**
+     * The original's keys are inert while the player waits (build spec
+     * W5d; FINAL "Open" item 7): in the pauses and the AI phase F, S, the
+     * reports ... do nothing, as the map's own keys; Ctrl+N (FreeCol's way
+     * back to the title, which asks first) still works.
+     */
+    public void testKeysWhileWaiting() {
+        assertFalse(ClassicKeyMap.waitAllows(find("F"), true));
+        assertTrue(ClassicKeyMap.waitAllows(find("F"), false));
+        assertFalse(ClassicKeyMap.waitAllows(find("F7"), true));
+        assertFalse(ClassicKeyMap.waitAllows(find("P"), true));
+        assertTrue(ClassicKeyMap.waitAllows(find("control N"), true));
+        for (ClassicKeyMap.Binding b : ClassicKeyMap.bindings()) {
+            assertTrue(b.toString(), ClassicKeyMap.waitAllows(b, false));
+            assertEquals(b.toString(), b.actionIds.contains("newAction"),
+                         ClassicKeyMap.waitAllows(b, true));
+        }
+
+        // The installed bindings: the action fires only while not waiting.
+        final javax.swing.JPanel host = new javax.swing.JPanel();
+        final java.util.List<String> fired = new java.util.ArrayList<>();
+        final java.util.Map<String, javax.swing.Action> actions = new java.util.HashMap<>();
+        for (String id : new String[] { "fortifyAction", "newAction" }) {
+            actions.put(id, new javax.swing.AbstractAction() {
+                    @Override
+                    public void actionPerformed(java.awt.event.ActionEvent e) {
+                        fired.add(id);
+                    }
+                });
+        }
+        final boolean[] waiting = { true };
+        ClassicKeyMap.install(host, null, actions::get,
+            () -> net.sf.freecol.client.gui.GUI.ViewMode.MOVE_UNITS,
+            () -> ClassicMenuModel.Context.NONE, () -> false, () -> waiting[0]);
+        final javax.swing.InputMap im = host.getInputMap(
+            javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW);
+        final javax.swing.Action f = host.getActionMap().get(
+            im.get(javax.swing.KeyStroke.getKeyStroke("F")));
+        final javax.swing.Action n = host.getActionMap().get(
+            im.get(javax.swing.KeyStroke.getKeyStroke("control N")));
+        final java.awt.event.ActionEvent e = new java.awt.event.ActionEvent(host,
+            java.awt.event.ActionEvent.ACTION_PERFORMED, "key");
+        f.actionPerformed(e);
+        n.actionPerformed(e);
+        assertEquals("[newAction]", fired.toString());
+        waiting[0] = false;
+        f.actionPerformed(e);
+        assertEquals("[newAction, fortifyAction]", fired.toString());
     }
 
     private static ClassicKeyMap.Binding find(String key) {

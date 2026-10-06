@@ -60,7 +60,8 @@ import net.sf.freecol.common.model.Unit;
  *   ({@link #indicatorRgb}); the panel paints it, a 50-ms poll
  *   ({@link #tick}) repaints it when the current player changes.  It
  *   lights with the next player's colour in the paint just before our
- *   end-of-turn request goes out.</li>
+ *   end-of-turn request goes out, and with ours for one tick just before
+ *   our new turn's wipe ({@link #OWN_FLASH_MS}).</li>
  *   <li><b>Input</b> (W5d): the map's keys and clicks do nothing while it
  *   is not our turn and while a pause is pending
  *   ({@link #isInputBlocked}).</li>
@@ -133,9 +134,11 @@ final class ClassicTurnFlow {
     static final double WIPE_GRACE_MS = 3000.0;
 
     /**
-     * How long our end-of-turn request may wait for the current player
-     * or the turn to change before it counts as refused (the server's
-     * answer and the player change can come in either order).
+     * How long, from the server's answer, our end-of-turn request may wait
+     * for the current player or the turn to change before it counts as
+     * refused (the answer and the player change can come in either
+     * order).  A request the controller did not send at all is refused at
+     * once.
      */
     static final double ENDING_TIMEOUT_MS = 1500.0;
 
@@ -144,6 +147,13 @@ final class ClassicTurnFlow {
 
     /** The indicator poll's interval (ms). */
     static final int POLL_MS = 50;
+
+    /**
+     * Our own colour in the indicator just before the wipe: one tick, so a
+     * capture shows it in 1 or 2 frames (landfall: 1-2 frames in every
+     * end, M1 acceptance F4).
+     */
+    static final double OWN_FLASH_MS = ClassicSlide.STEP_MS;
 
     /** Nanoseconds per millisecond. */
     private static final double NS_PER_MS = 1_000_000.0;
@@ -211,8 +221,14 @@ final class ClassicTurnFlow {
         /** Paint the panel's turn indicator now. */
         void paintIndicator();
 
-        /** Ask the controller to end the turn ({@code endTurn(false)}). */
-        void endTurn();
+        /**
+         * Ask the controller to end the turn ({@code endTurn(false)}).
+         *
+         * @return True if the end request went to the server and was
+         *     answered; false if the controller kept the turn without
+         *     asking (a goto or trade-route unit to look at, a panel up).
+         */
+        boolean endTurn();
 
         /** Run the goto orders ({@code executeGotoOrders}). */
         void runGotoOrders();
@@ -392,11 +408,21 @@ final class ClassicTurnFlow {
     /** Goto orders run, the controller's view changes are dropped ({@link #ignoring}). */
     private int gotoRuns = 0;
 
+    /**
+     * How often the controller chose a unit or reported none
+     * ({@link #unitChosen}, {@link #noUnitLeft}): {@link #gotosDone} sees
+     * whether its call brought anything.
+     */
+    private int choices = 0;
+
     /** After the goto orders the next unit is a hand-over. */
     private boolean afterGoto = false;
 
     /** The indicator colour of the panel's last paint (-1 none). */
     private int shownIndicator = -1;
+
+    /** Our colour's tick just before the wipe ({@link #flashOwnColour}). */
+    private boolean ownFlash = false;
 
     /** The state for the recorder's probe (another thread). */
     private volatile String probeState = "idle";
@@ -489,6 +515,7 @@ final class ClassicTurnFlow {
      * started yet runs from here.
      */
     void screenChanged() {
+        if (this.disposed) return;
         final long now = this.clock.now();
         this.lastChange = now;
         final Pending p = this.pending;
@@ -504,6 +531,7 @@ final class ClassicTurnFlow {
      * kept from firing is armed again from now (W5a).
      */
     void boxClosed() {
+        if (this.disposed) return;
         screenChanged();
         catchUp();
     }
@@ -514,6 +542,7 @@ final class ClassicTurnFlow {
      * @param village The village's tile, or null.
      */
     void villageBoxCancelled(Tile village) {
+        if (this.disposed) return;
         this.villageCancel = this.clock.now();
         this.villageTile = village;
         ClassicFrameRecorder.event("endturn-village", "cancel"
@@ -526,6 +555,8 @@ final class ClassicTurnFlow {
      * our turn with nothing left to move, the idle pause is armed.
      */
     void noUnitLeft() {
+        if (this.disposed) return;
+        this.choices++;
         settleEnding();   // our end may have gone through unseen
         final Pending p = this.pending;
         if (p != null && p.kind == Kind.PROMPT_END) return;   // the end is out
@@ -550,6 +581,8 @@ final class ClassicTurnFlow {
      *     make it active at once.
      */
     boolean unitChosen(Unit unit, Unit previous) {
+        if (this.disposed) return false;
+        this.choices++;
         // Our end may have gone through without the poll seeing another
         // player (the event thread busy with queued native slides): then
         // this is our new turn's first unit, with its wipe.
@@ -616,6 +649,7 @@ final class ClassicTurnFlow {
      * @param why What ends it (for the recorder).
      */
     void endTurnNow(String why) {
+        if (this.disposed) return;
         if (this.prompt) {
             this.prompt = false;
             this.promptEndWhy = why;
@@ -636,7 +670,18 @@ final class ClassicTurnFlow {
         this.endingSince = this.clock.now();
         this.endingTurn = this.host.turnNumber();
         this.host.paintIndicator();
-        this.host.endTurn();
+        final boolean sent = this.host.endTurn();
+        // The wait for the player change runs from the server's answer: a
+        // slow server's answer must not count as a refusal and let a second
+        // end request out (FINAL "Open" item 9).
+        this.endingSince = this.clock.now();
+        if (!sent && this.ending && this.endingTurn == this.host.turnNumber()
+            && this.host.myTurn()) {
+            // The controller did not ask the server at all (a goto or
+            // trade-route unit with something to show, a panel up): no
+            // need to wait for a player change that cannot come.
+            refuseEnd("not sent");
+        }
         settleEnding();
         updateProbe();
     }
@@ -647,6 +692,7 @@ final class ClassicTurnFlow {
      * and catch up with what a box or a screen held up.
      */
     void tick() {
+        if (this.disposed) return;
         settleEnding();
         final boolean mine = this.host.myTurn();
         final long now = this.clock.now();
@@ -699,11 +745,23 @@ final class ClassicTurnFlow {
             if (!late) this.host.paintIndicator();   // the prediction ends
         } else if (this.ending && this.clock.now() - this.endingSince
                    >= nanos(ENDING_TIMEOUT_MS)) {
-            this.ending = false;
-            ClassicFrameRecorder.event("end-turn", "refused");
-            this.host.paintIndicator();
-            this.host.post(this::recoverRefused);
+            refuseEnd("timeout");
         }
+    }
+
+    /**
+     * Our end request counts as refused: the input is free again, the
+     * indicator's prediction goes, and the recovery is queued
+     * ({@link #recoverRefused}).  The request's turn is kept
+     * ({@link #settleEnding}).
+     *
+     * @param why Why (for the recorder).
+     */
+    private void refuseEnd(String why) {
+        this.ending = false;
+        ClassicFrameRecorder.event("end-turn", "refused " + why);
+        this.host.paintIndicator();
+        this.host.post(this::recoverRefused);
     }
 
     /**
@@ -757,8 +815,15 @@ final class ClassicTurnFlow {
     /**
      * The colour of the turn indicator now (W5c): the current player's
      * while it is not our turn, the next player's while our end-of-turn
-     * request goes out, ours while our new turn is not shown yet (its
-     * turn-start boxes are up), else none.
+     * request goes out, and none while our turn is shown.
+     *
+     * <p>Our new turn before its wipe: ours while its turn-start boxes are
+     * up, and for one tick just before the wipe ({@link #OWN_FLASH_MS});
+     * until then the colour shown stays.  FreeCol autosaves and prepares
+     * its turn report between the player change and the controller's
+     * first view change (0.16-0.41 s), where our colour used to light; the
+     * original shows it for 1-2 frames (landfall, every end; M1 acceptance
+     * F4).
      *
      * @return The RGB, or -1 for none.
      */
@@ -771,7 +836,12 @@ final class ClassicTurnFlow {
                 final Player n = this.host.nextPlayer();
                 return (n == null || n == me) ? -1 : ClassicHud.indicatorRgb(n);
             }
-            return (this.turnStarted) ? -1 : ClassicHud.indicatorRgb(me);
+            if (this.turnStarted) return -1;
+            final int own = ClassicHud.indicatorRgb(me);
+            if (this.ownFlash || this.shownIndicator < 0 || this.host.blocked()) {
+                return own;
+            }
+            return this.shownIndicator;
         }
         return ClassicHud.indicatorRgb(cur);
     }
@@ -910,6 +980,7 @@ final class ClassicTurnFlow {
     private boolean wipe() {
         if (this.turnStarted) return true;
         if (!this.host.myTurn() || this.host.blocked()) return false;
+        flashOwnColour();
         this.turnStarted = true;
         this.unwipedSince = 0L;
         this.wipeNanos = this.clock.now();
@@ -917,6 +988,26 @@ final class ClassicTurnFlow {
         this.host.wipe();
         updateProbe();
         return true;
+    }
+
+    /**
+     * Just before the wipe: our colour in the indicator for one tick
+     * ({@link #OWN_FLASH_MS}, a paint of its own, the event thread held
+     * as by a slide), unless it is lit already (a turn-start box was up).
+     * The wipe then takes the indicator away with the year.
+     */
+    private void flashOwnColour() {
+        final Player me = this.host.myPlayer();
+        if (me == null || this.shownIndicator == ClassicHud.indicatorRgb(me)) return;
+        this.ownFlash = true;
+        try {
+            this.host.paintIndicator();
+            this.clock.waitUntil(this.clock.now() + nanos(OWN_FLASH_MS));
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        } finally {
+            this.ownFlash = false;
+        }
     }
 
     /** Our turn is over: freeze the panel until the next wipe. */
@@ -962,9 +1053,15 @@ final class ClassicTurnFlow {
         updateProbe();
     }
 
-    /** A stage of the pending pause is due (event thread). */
+    /**
+     * A stage of the pending pause is due (event thread).  Whatever the
+     * host does in it, a pause with stages left is scheduled on (in a
+     * finally: a host call that threw used to leave the pause pending
+     * with no timer, and the map's input blocked for good; FINAL "Open"
+     * item 6).
+     */
     private void fire(Pending p) {
-        if (p != this.pending) return;
+        if (p != this.pending || this.disposed) return;
         final Action a = p.stages[p.next].action;
         if (a != Action.END && a != Action.PROMPT && a != Action.END_NOW
             && this.host.blocked()) {
@@ -984,37 +1081,40 @@ final class ClassicTurnFlow {
                 + String.format(Locale.ROOT, " late=%.2fms",
                     (this.clock.now() - (p.base + nanos(s.ms))) / NS_PER_MS));
         }
-        switch (s.action) {
-        case END:
-            idleDecision(false);
-            break;
-        case PROMPT:
-            idleDecision(true);
-            break;
-        case END_NOW:
-            endTurnNow((this.promptEndWhy == null) ? "prompt" : this.promptEndWhy);
-            this.promptEndWhy = null;
-            break;
-        case JUMP:
-            if (usable(p.unit)) this.host.jumpTo(p.unit);
-            break;
-        case ACTIVATE:
-            if (usable(p.unit)) {
-                this.host.activate(p.unit);
-            } else {
-                this.pending = null;
-                this.timer.cancel();
-                this.host.nextActiveUnit();
+        try {
+            switch (s.action) {
+            case END:
+                idleDecision(false);
+                break;
+            case PROMPT:
+                idleDecision(true);
+                break;
+            case END_NOW:
+                endTurnNow((this.promptEndWhy == null) ? "prompt" : this.promptEndWhy);
+                this.promptEndWhy = null;
+                break;
+            case JUMP:
+                if (usable(p.unit)) this.host.jumpTo(p.unit);
+                break;
+            case ACTIVATE:
+                if (usable(p.unit)) {
+                    this.host.activate(p.unit);
+                } else {
+                    this.pending = null;
+                    this.timer.cancel();
+                    this.host.nextActiveUnit();
+                }
+                break;
+            case GOTO:
+                runGotos();
+                break;
+            default:
+                break;
             }
-            break;
-        case GOTO:
-            runGotos();
-            break;
-        default:
-            break;
+        } finally {
+            if (!last && this.pending == p && !this.disposed) schedule(p, "next");
+            updateProbe();
         }
-        if (!last && this.pending == p) schedule(p, "next");
-        updateProbe();
     }
 
     /** Whether a unit can still be handed control. */
@@ -1073,14 +1173,34 @@ final class ClassicTurnFlow {
         try {
             this.host.runGotoOrders();
         } finally {
-            this.host.post(() -> {
-                    this.gotoRuns--;
-                    this.afterGoto = true;
-                    ClassicFrameRecorder.event("handover", "goto orders done");
-                    this.host.nextActiveUnit();
-                    updateProbe();
-                });
+            this.host.post(this::gotosDone);
         }
+    }
+
+    /**
+     * The marker behind the goto orders' queued view changes: the next
+     * unit comes as a hand-over from the last goto step.  FreeCol's
+     * controller leaves its goto mode on the first {@code nextActiveUnit}
+     * after the orders and brings no unit then when the orders stopped
+     * early (a goto unit with no path, which it skips): if that call chose
+     * nothing, it is asked once more, so a unit always comes up (FINAL
+     * "Open" item 8).  Nothing once the flow is disposed (item 11).
+     */
+    private void gotosDone() {
+        this.gotoRuns--;
+        if (this.disposed) return;
+        this.afterGoto = true;
+        ClassicFrameRecorder.event("handover", "goto orders done");
+        final int before = this.choices;
+        this.host.nextActiveUnit();
+        if (this.choices == before && !this.disposed && this.pending == null
+            && this.turnStarted && !this.ending && this.host.myTurn()) {
+            // Once: a unit that can move, or the controller's end view
+            // (and so the automatic end).
+            ClassicFrameRecorder.event("handover", "goto orders: no unit came, next unit again");
+            this.host.nextActiveUnit();
+        }
+        updateProbe();
     }
 
     private void updateProbe() {

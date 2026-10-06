@@ -750,6 +750,25 @@ final class ClassicHud {
         }
     }
 
+    /**
+     * The minimap's area alone -- its frame, the black interior, the
+     * minimap and the viewport ring -- as {@link #paintChrome} and
+     * {@link #paintMinimap} draw it within {@link #MINIMAP_FRAME}: the
+     * minimap-only repaint of a panel whose other pixels stay (a blink's
+     * dot, a jump's ring, a native cue's pixel).
+     *
+     * @param g The graphics, in canvas pixels.
+     * @param m The minimap, or null (the frame and the black interior).
+     */
+    static void paintMinimapArea(Graphics2D g, MinimapModel m) {
+        g.setColor(new Color(FRAME_RGB));
+        ring(g, MINIMAP_FRAME.x, MINIMAP_FRAME.y, MINIMAP_FRAME.width,
+             MINIMAP_FRAME.height);
+        g.setColor(Color.BLACK);
+        g.fillRect(MINIMAP.x, MINIMAP.y, MINIMAP.width, MINIMAP.height);
+        paintMinimap(g, m);
+    }
+
     /** The season and gold lines, clipped at the screen's right edge. */
     static void paintStatus(Graphics2D g, ClassicFont font, String season,
                             String gold) {
@@ -892,6 +911,14 @@ final class ClassicHud {
     /** NAMES.TXT {@code @JOB} row of the free colonist. */
     static final int JOB_FREE_COLONIST = 19;
 
+    /**
+     * NAMES.TXT {@code @UNIT} rows of the galleon (ICONS.SS.007) and the
+     * frigate (ICONS.SS.015), whose icons have their own layout
+     * ({@link #flagRing(int, int, int, int)}, {@link #spriteOffset(int,
+     * int)}).
+     */
+    static final int UNIT_GALLEON = 15, UNIT_FRIGATE = 17;
+
     /** NAMES.TXT {@code @ORDERS} rows. */
     static final int ORDERS_NONE = 0, ORDERS_SENTRY = 1, ORDERS_TRADE = 2,
         ORDERS_GOTO = 3, ORDERS_FORTIFY = 5, ORDERS_FORTIFIED = 6,
@@ -966,6 +993,20 @@ final class ClassicHud {
         if ("missionary".equals(role)) return 3;
         if ("scout".equals(role)) return 5;
         return 0;
+    }
+
+    /**
+     * NAMES.TXT {@code @UNIT} row of a live unit, as its panel block has it
+     * ({@link #unitRow(String, String)}).
+     *
+     * @param u The unit.
+     * @return The row, or -1.
+     */
+    static int unitRow(Unit u) {
+        if (u == null || u.getType() == null) return -1;
+        final String role = (u.getRole() == null) ? null
+            : u.getRole().getRoleSuffix();
+        return unitRow(Role.getRoleIdSuffix(u.getType().getId()), role);
     }
 
     /** NAMES.TXT {@code @JOB} row of a colonist type, or -1. */
@@ -1222,6 +1263,19 @@ final class ClassicHud {
     }
 
     /**
+     * Where a unit's sprite sits in its cell: {@link #spriteOffset(int)},
+     * except the frigate (ICONS.SS.015, 13 wide) at +2 (clip006 Europe,
+     * 0 px; build spec W21 item 7).
+     *
+     * @param w The sprite's width.
+     * @param unitRow The unit's NAMES.TXT {@code @UNIT} row, or -1.
+     * @return The x offset in the cell.
+     */
+    static int spriteOffset(int w, int unitRow) {
+        return (unitRow == UNIT_FRIGATE) ? 2 : spriteOffset(w);
+    }
+
+    /**
      * The order flag's ring: at the cell's top-left for ships and mounted
      * units (sprites 13 or more wide: 032's ship, 000's dragoon), else at
      * the sprite's lower right, {@code (x + w - 2, y + 7)} (032's soldier and
@@ -1234,14 +1288,52 @@ final class ClassicHud {
     }
 
     /**
-     * One unit icon (proved order: 032, 000): the black silhouette shifted
-     * {@link #SHADOW_DX}, then the flag -- black ring, nation fill, the
-     * {@code @ORDERS} letter in FONTTINY at ring + (2,2), black for '-' and
-     * the darker nation shade otherwise -- then the sprite.
+     * The order flag's ring of a unit: per sprite, not per width (build
+     * spec W21 item 7, clip006 deep 4.2): the galleon (ICONS.SS.007, 14
+     * wide) and the frigate (015, 13 wide) at cell + (9,0) (map #4471,
+     * panel #9200, Europe; clip005 #20440: fill x 218-222 for cell 208),
+     * the merchantman (006) and the rest by {@link #flagRing(int, int,
+     * int)}.
+     *
+     * @param cellX The cell's left edge.
+     * @param cellY The cell's top edge.
+     * @param spriteW The sprite's width.
+     * @param unitRow The unit's NAMES.TXT {@code @UNIT} row, or -1.
+     * @return The ring.
+     */
+    static Rectangle flagRing(int cellX, int cellY, int spriteW, int unitRow) {
+        if (unitRow == UNIT_GALLEON || unitRow == UNIT_FRIGATE) {
+            return new Rectangle(cellX + 9, cellY, FLAG_W, FLAG_H);
+        }
+        return flagRing(cellX, cellY, spriteW);
+    }
+
+    /**
+     * The flag letter's ink (build spec W21 item 7, clip006 deep 4.2): the
+     * darker nation shade only for the units the cycle skips, Befestigt
+     * (F, fortified) and Wache (S, sentry); black for '-', G, R, P and for
+     * F while still fortifying (#4555 black -&gt; #4556 dark).
+     *
+     * @param ordersRow The unit's {@code @ORDERS} row ({@link #ordersRow}).
+     * @param dark The nation's darker shade.
+     * @return The ink RGB.
+     */
+    static int letterInk(int ordersRow, int dark) {
+        return (ordersRow == ORDERS_FORTIFIED || ordersRow == ORDERS_SENTRY)
+            ? (dark & 0xFFFFFF) : 0x000000;
+    }
+
+    /**
+     * One unit icon (proved order: 032, 000; clip006 deep 4.2): the black
+     * silhouette shifted {@link #SHADOW_DX}, then the flag -- black ring,
+     * nation fill -- then the sprite, then the {@code @ORDERS} letter in
+     * FONTTINY at ring + (2,2), over the sprite where they meet
+     * ({@link #letterInk}).
      */
     static void paintIcon(Graphics2D g, ClassicFont font, String letter,
                           UnitFacts f, int cellX, int cellY) {
-        paintIcon(g, font, letter, f.sprite, f.fill, f.dark, cellX, cellY,
+        paintIcon(g, font, letter, f.sprite, f.fill,
+                  letterInk(f.ordersRow, f.dark), f.unitRow, cellX, cellY,
                   NO_MARKER);
     }
 
@@ -1251,24 +1343,28 @@ final class ClassicHud {
      * ({@link #CARGO_MARKER}, {@link #STACK_MARKER}): it is drawn after the
      * shadow and before the flag, ring and fill without a letter, so only
      * the edge the flag and the sprite leave free shows.  The map draws
-     * icons through here, 1:1 in native pixels (build spec W2).
+     * icons through here, 1:1 in native pixels (build spec W2, W21a), so a
+     * map unit looks exactly as its panel block.
      *
      * @param g The graphics, in native pixels.
      * @param font FONTTINY, or null (no letter).
      * @param letter The flag letter.
      * @param sp The sprite, at most 16x16, or null.
      * @param fill The flag fill.
-     * @param dark The letter shade for letters other than '-'.
+     * @param ink The letter's ink ({@link #letterInk}).
+     * @param unitRow The unit's NAMES.TXT {@code @UNIT} row, or -1: the
+     *     sprite's place and the flag's side ({@link #spriteOffset(int,
+     *     int)}, {@link #flagRing(int, int, int, int)}).
      * @param cellX The cell's left edge.
      * @param cellY The cell's top edge.
      * @param marker The second flag's offset from the flag {dx, dy}, or
      *     {@link #NO_MARKER}.
      */
     static void paintIcon(Graphics2D g, ClassicFont font, String letter,
-                          BufferedImage sp, int fill, int dark,
+                          BufferedImage sp, int fill, int ink, int unitRow,
                           int cellX, int cellY, int[] marker) {
         final int w = (sp == null) ? 16 : sp.getWidth();
-        final int sx = cellX + spriteOffset(w);
+        final int sx = cellX + spriteOffset(w, unitRow);
         if (sp != null) {
             g.setColor(Color.BLACK);
             for (int y = 0; y < sp.getHeight(); y++) {
@@ -1278,7 +1374,7 @@ final class ClassicHud {
                 }
             }
         }
-        final Rectangle r = flagRing(cellX, cellY, w);
+        final Rectangle r = flagRing(cellX, cellY, w, unitRow);
         final Color fillColour = new Color(fill & 0xFFFFFF);
         if (marker != null && (marker[0] != 0 || marker[1] != 0)) {
             g.setColor(Color.BLACK);
@@ -1291,11 +1387,13 @@ final class ClassicHud {
         ring(g, r.x, r.y, r.width, r.height);
         g.setColor(fillColour);
         g.fillRect(r.x + 1, r.y + 1, r.width - 2, r.height - 2);
-        if (font != null && letter != null && !letter.isEmpty()) {
-            final int ink = "-".equals(letter) ? 0x000000 : (dark & 0xFFFFFF);
-            font.draw(g, letter, r.x + 2, r.y + 2, ClassicFont.colours(ink));
-        }
         if (sp != null) g.drawImage(sp, sx, cellY, null);
+        // The letter last, over the sprite (the galleon's pixel (9,4) shows
+        // the black '-': clip006 #4471 map, #8120 Europe).
+        if (font != null && letter != null && !letter.isEmpty()) {
+            font.draw(g, letter, r.x + 2, r.y + 2,
+                      ClassicFont.colours(ink & 0xFFFFFF));
+        }
     }
 
     /**

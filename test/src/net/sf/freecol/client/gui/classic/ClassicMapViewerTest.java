@@ -116,11 +116,15 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         mv.setFocus(sea);
         assertFalse(mv.isBlinkArmed());
 
+        // Nothing timed is due: the background preload may run (F6).
+        assertFalse(mv.holdsPreload());
         // Activation: ON, armed.
         mv.changeToMoveUnits(ship);
         assertTrue(mv.isBlinkArmed());
         assertFalse(mv.isBlinkOff());
         assertTrue(mv.isShownAt(ship, sea));
+        // Just armed: its panel paint runs, the preload waits.
+        assertTrue(mv.holdsPreload());
 
         // Toggle 1 OFF: the tile is bare -- the laden ship, its cargo
         // marker and its passenger are all gone; toggle 2 ON again.
@@ -334,5 +338,92 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         assertFalse(mv.wouldJump(map.getTile(mv.viewOrigin()[0] + 7,
                                              mv.viewOrigin()[1] + 6)));
         mv.dispose();
+    }
+
+    /**
+     * M1 acceptance F5 and build spec W19: a foreign move the server
+     * announced keeps the unit at its source until its slide starts, also
+     * once the model has moved it (no frame of it at its destination
+     * before its slide); several queued moves in order; a move that does
+     * not slide is taken off too.
+     */
+    public void testQueuedForeignMoveStaysAtItsSource() {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player inca = game.getPlayerByNationId("model.nation.inca");
+        final Tile a = map.getTile(5, 7), b = map.getTile(6, 7), c = map.getTile(7, 7);
+        assertTrue(a.isLand() && b.isLand() && c.isLand());
+        final ClassicMapViewer mv = new ClassicMapViewer(null, null, null, false);
+        final Unit brave = new ServerUnit(game, a, inca,
+            spec().getUnitType("model.unit.brave"));
+        assertSame(brave, mv.displayUnit(a));
+        assertNull(mv.queuedSource(brave));
+
+        // The animation arrives first, then the update moves the unit.
+        mv.moveQueued(brave, a, b);
+        assertSame(brave, mv.displayUnit(a));
+        brave.setLocation(b);
+        assertSame(a, mv.queuedSource(brave));
+        assertSame("still at its source", brave, mv.displayUnit(a));
+        assertNull("not at its new tile before its slide", mv.displayUnit(b));
+
+        // A second move is announced before the first slid: in order.
+        mv.moveQueued(brave, b, c);
+        brave.setLocation(c);
+        assertSame(brave, mv.displayUnit(a));
+        assertNull(mv.displayUnit(b));
+        assertNull(mv.displayUnit(c));
+        mv.moveDequeued(brave, c, a);              // no such move: nothing
+        assertSame(a, mv.queuedSource(brave));
+        mv.moveDequeued(brave, a, b);              // the first slide starts
+        assertSame(b, mv.queuedSource(brave));
+        assertNull(mv.displayUnit(a));
+        assertSame(brave, mv.displayUnit(b));
+        assertNull(mv.displayUnit(c));
+        mv.moveDequeued(brave, b, c);
+        assertNull(mv.queuedSource(brave));
+        assertSame(brave, mv.displayUnit(c));
+        assertNull(mv.displayUnit(b));
+
+        // A unit standing where a queued one comes from is drawn there.
+        final Unit other = new ServerUnit(game, a, inca,
+            spec().getUnitType("model.unit.brave"));
+        mv.moveQueued(brave, c, b);
+        assertSame(other, mv.displayUnit(a));
+        assertSame(brave, mv.displayUnit(c));
+        // A move that does not slide (not shown, both tiles unexplored):
+        // animateMove takes it off (headless the map is not showing).
+        mv.animateMove(brave, c, b);
+        assertNull(mv.queuedSource(brave));
+        mv.dispose();
+    }
+
+    /**
+     * Build spec W19: the cue goes only before a native's move whose
+     * source fails the view rule (the view jumps for it); never for the
+     * player's own or a European's unit, never inside the view.  Its
+     * square needs the source cell on the screen.
+     */
+    public void testNativeCueRule() {
+        assertTrue(ClassicMapViewer.needsNativeCue(false, true, true));
+        assertFalse(ClassicMapViewer.needsNativeCue(false, true, false));
+        assertFalse(ClassicMapViewer.needsNativeCue(false, false, true));
+        assertFalse(ClassicMapViewer.needsNativeCue(true, true, true));
+        assertFalse(ClassicMapViewer.needsNativeCue(true, false, true));
+
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final int[] o = { 3, 2 };
+        assertTrue(ClassicMapViewer.cellInView(map.getTile(3, 2), o));
+        assertTrue(ClassicMapViewer.cellInView(map.getTile(17, 13), o));   // cell (14,11)
+        assertFalse(ClassicMapViewer.cellInView(map.getTile(18, 13), o));
+        assertFalse(ClassicMapViewer.cellInView(map.getTile(17, 14), o));
+        assertFalse(ClassicMapViewer.cellInView(map.getTile(2, 5), o));
+        // The timing: 2 capture frames after the final draw (its paints add
+        // about one), 250 ms to the jump.
+        assertEquals(28.54, ClassicMapViewer.CUE_GAP_MS, 0.01);
+        assertEquals(250.0, ClassicMapViewer.CUE_MS);
     }
 }

@@ -175,6 +175,27 @@ final class ClassicKeyMap {
         new Binding("control N", ANY_MODE, "newAction")
     ));
 
+    /**
+     * The actions whose key still fires while the player waits (build spec
+     * W5d): only Ctrl+N, FreeCol's way back to the title, which asks first.
+     * Every original key is inert in the pause before the end of turn, the
+     * next unit or the turn's first unit, and in the AI phase, as the
+     * map's own keys are (FINAL "Open" item 7).
+     */
+    static final Set<String> WHILE_WAITING = Set.of("newAction");
+
+    /**
+     * Whether a binding may fire while the player waits
+     * ({@link #WHILE_WAITING}).
+     *
+     * @param b The binding.
+     * @param waiting Whether the player waits now.
+     * @return True if it may fire.
+     */
+    static boolean waitAllows(Binding b, boolean waiting) {
+        return !waiting || WHILE_WAITING.containsAll(b.actionIds);
+    }
+
     /** Whether BEFEHLE row {@code index} is listed in context {@code c}. */
     static boolean orderListed(int index, ClassicMenuModel.Context c) {
         return ClassicMenuModel.isVisible(
@@ -250,13 +271,17 @@ final class ClassicKeyMap {
      * @param context The active unit's situation (the menus' context).
      * @param blocked True while input must not act (the first scene, an
      *     open menu).
+     * @param waiting True while the player waits (the turn flow's pauses
+     *     and the AI phase, {@link #waitAllows}); such a key is logged as
+     *     {@code key-blocked} for the recorder.
      * @return The keystrokes bound.
      */
     static List<KeyStroke> install(JComponent host, JComponent mapViewer,
                                    Function<String, Action> lookup,
                                    Supplier<GUI.ViewMode> mode,
                                    Supplier<ClassicMenuModel.Context> context,
-                                   BooleanSupplier blocked) {
+                                   BooleanSupplier blocked,
+                                   BooleanSupplier waiting) {
         final Set<KeyStroke> skip = mapViewerKeys();
         if (mapViewer != null) {
             final KeyStroke[] ks = mapViewer.getInputMap(
@@ -274,6 +299,10 @@ final class ClassicKeyMap {
                     @Override
                     public void actionPerformed(ActionEvent e) {
                         if (blocked.getAsBoolean()) return;
+                        if (!waitAllows(b, waiting.getAsBoolean())) {
+                            ClassicFrameRecorder.event("key-blocked", b.key.toString());
+                            return;
+                        }
                         if (!modeAllows(b, mode.get() == GUI.ViewMode.TERRAIN)) return;
                         if (!contextAllows(b, context.get())) return;
                         final String id = pick(b, i -> {

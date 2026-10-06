@@ -21,6 +21,7 @@ package net.sf.freecol.client.gui.classic;
 
 import java.awt.Color;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,6 +30,8 @@ import net.sf.freecol.client.ClientOptions;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Unit;
+import net.sf.freecol.tools.classicassets.ClassicAssetDecoderTest;
+import net.sf.freecol.tools.classicassets.FfDecoder;
 import net.sf.freecol.util.test.FreeColTestCase;
 
 import junit.framework.TestCase;
@@ -112,6 +115,9 @@ public class ClassicUnitIconTest extends TestCase {
 
     private static final int DUTCH = 0xFF7100, DUTCH_DARK = 0xAA4900;
 
+    /** NAMES.TXT @UNIT row of the merchantman (ICONS.SS 006). */
+    private static final int MERCHANTMAN = 14;
+
     private static final int SEA = 0x2C3C96;
 
     private static BufferedImage sprite(String[] mask) {
@@ -134,7 +140,9 @@ public class ClassicUnitIconTest extends TestCase {
         try {
             g.setColor(new Color(SEA));
             g.fillRect(0, 0, 16, 16);
-            ClassicHud.paintIcon(g, null, "-", sp, DUTCH, DUTCH_DARK, 0, 0, marker);
+            ClassicHud.paintIcon(g, null, "-", sp, DUTCH,
+                ClassicHud.letterInk(ClassicHud.ORDERS_NONE, DUTCH_DARK),
+                MERCHANTMAN, 0, 0, marker);
         } finally {
             g.dispose();
         }
@@ -203,6 +211,117 @@ public class ClassicUnitIconTest extends TestCase {
         for (int y = 7; y < 16; y++) {
             assertEquals("row " + y, p[y].substring(8), s[y].substring(8));
         }
+    }
+
+    /**
+     * Build spec W21a / W21 item 7 (clip006 deep 4.2): the flag ring per
+     * sprite -- galleon (ICONS.SS 007, 14 wide) and frigate (015, 13 wide)
+     * at cell + (9,0), the merchantman (006, 13 wide) and the 14-wide
+     * dragoon at the top-left as before -- and the frigate's sprite at +2.
+     */
+    public void testFlagSidePerSprite() {
+        assertEquals(new Rectangle(217, 104, 7, 9),
+                     ClassicHud.flagRing(208, 104, 14, ClassicHud.UNIT_GALLEON));   // c5 #20440
+        assertEquals(new Rectangle(251, 68, 7, 9),
+                     ClassicHud.flagRing(242, 68, 13, ClassicHud.UNIT_FRIGATE));
+        assertEquals(new Rectangle(242, 68, 7, 9),
+                     ClassicHud.flagRing(242, 68, 13, MERCHANTMAN));                  // 032 ship
+        assertEquals(new Rectangle(242, 149, 7, 9),
+                     ClassicHud.flagRing(242, 149, 14, 4));                            // 000 dragoon
+        assertEquals(new Rectangle(250, 117, 7, 9),
+                     ClassicHud.flagRing(242, 110, 8, 1));                             // 032 soldier
+        assertEquals(2, ClassicHud.spriteOffset(13, ClassicHud.UNIT_FRIGATE));
+        assertEquals(3, ClassicHud.spriteOffset(13, MERCHANTMAN));
+        assertEquals(2, ClassicHud.spriteOffset(14, ClassicHud.UNIT_GALLEON));
+        assertEquals(3, ClassicHud.spriteOffset(7, -1));
+        assertEquals(15, ClassicHud.unitRow("galleon", null));
+        assertEquals(17, ClassicHud.unitRow("frigate", null));
+
+        // Painted: the galleon's flag fill at cell x 10-14 (c5 #20440: fill
+        // x 218-222 for cell 208), nothing of it at the top-left.
+        final BufferedImage galleon = sprite(new String[] {
+            "..............", "..............", "....##..##....", "...###.####...",
+            "..####.#####..", ".#####.######.", "##############", "##############",
+            ".############.", "..##########..", "..............", "..............",
+            "..............", "..............", "..............", ".............."
+        });
+        final String[] g = iconOf(galleon, ClassicHud.UNIT_GALLEON, null, 0);
+        assertEquals("BBBBBBB", g[0].substring(9, 16));
+        assertEquals("BFFFFFB", g[1].substring(9, 16));
+        assertEquals(".........", g[0].substring(0, 9));
+        assertEquals(".........", g[1].substring(0, 9));
+        // The merchantman's layout for the same sprite: the top-left.
+        final String[] m = iconOf(galleon, MERCHANTMAN, null, 0);
+        assertEquals("BBBBBBB", m[0].substring(0, 7));
+        assertEquals("BFFFFFB", m[1].substring(0, 7));
+    }
+
+    /**
+     * The letter after the sprite, and its ink (build spec W21a; clip006
+     * deep 4.2): the galleon's pixel (9,4) under the '-' shows the black
+     * letter (map #4471, Europe #8120); the darker nation shade only for
+     * Befestigt and Wache, black for '-', G, R, P and F while fortifying.
+     */
+    public void testLetterAfterTheSpriteAndItsInk() {
+        assertEquals(0x000000, ClassicHud.letterInk(ClassicHud.ORDERS_NONE, DUTCH_DARK));
+        assertEquals(0x000000, ClassicHud.letterInk(ClassicHud.ORDERS_GOTO, DUTCH_DARK));
+        assertEquals(0x000000, ClassicHud.letterInk(ClassicHud.ORDERS_ROAD, DUTCH_DARK));
+        assertEquals(0x000000, ClassicHud.letterInk(ClassicHud.ORDERS_PLOW, DUTCH_DARK));
+        assertEquals(0x000000, ClassicHud.letterInk(ClassicHud.ORDERS_FORTIFY, DUTCH_DARK));
+        assertEquals(0x000000, ClassicHud.letterInk(ClassicHud.ORDERS_TRADE, DUTCH_DARK));
+        assertEquals(DUTCH_DARK, ClassicHud.letterInk(ClassicHud.ORDERS_FORTIFIED, DUTCH_DARK));
+        assertEquals(DUTCH_DARK, ClassicHud.letterInk(ClassicHud.ORDERS_SENTRY, DUTCH_DARK));
+
+        // A 14-wide sprite, opaque everywhere: the '-' of a synthetic
+        // FONTTINY (3 wide, ink in its row 2) at ring + (2,2) = (11..13, 4)
+        // lies over the sprite and must show.
+        final String[] full = new String[16];
+        java.util.Arrays.fill(full, "##############");
+        final ClassicFont font = dashFont();
+        final String[] dash = iconOf(sprite(full), ClassicHud.UNIT_GALLEON, font, 0x000000);
+        assertEquals("BBB", dash[4].substring(11, 14));
+        assertEquals('.', dash[3].charAt(12));
+        // A dark letter (Befestigt) in the dark shade, also over the sprite.
+        final String[] dark = iconOf(sprite(full), ClassicHud.UNIT_GALLEON, font,
+            ClassicHud.letterInk(ClassicHud.ORDERS_FORTIFIED, DUTCH_DARK));
+        assertEquals("DDD", dark[4].substring(11, 14));
+    }
+
+    /** A FONTTINY stand-in: '-' 3 wide, height 5, ink in row 2. */
+    private static ClassicFont dashFont() {
+        final FfDecoder.Font f = FfDecoder.decodePart(ClassicAssetDecoderTest.ffPart(5, 3,
+            new int[][] { { 45, 3,  0, 0, 0,  0, 0, 0,  1, 1, 1,  0, 0, 0,  0, 0, 0 } }));
+        return ClassicFont.fromAtlas(FfDecoder.toAtlas(f), FfDecoder.metrics(f));
+    }
+
+    /**
+     * Paint one icon at native size on sea with the letter '-' in
+     * {@code ink}; B black, F the Dutch fill, D the Dutch dark shade, .
+     * anything else.
+     */
+    private static String[] iconOf(BufferedImage sp, int unitRow, ClassicFont font,
+                                   int ink) {
+        final BufferedImage out = new BufferedImage(16, 16, BufferedImage.TYPE_INT_RGB);
+        final Graphics2D g = out.createGraphics();
+        try {
+            g.setColor(new Color(SEA));
+            g.fillRect(0, 0, 16, 16);
+            ClassicHud.paintIcon(g, font, "-", sp, DUTCH, ink, unitRow, 0, 0,
+                                 ClassicHud.NO_MARKER);
+        } finally {
+            g.dispose();
+        }
+        final String[] rows = new String[16];
+        for (int y = 0; y < 16; y++) {
+            final StringBuilder sb = new StringBuilder(16);
+            for (int x = 0; x < 16; x++) {
+                final int c = out.getRGB(x, y) & 0xFFFFFF;
+                sb.append((c == 0) ? 'B' : (c == DUTCH) ? 'F'
+                          : (c == DUTCH_DARK) ? 'D' : '.');
+            }
+            rows[y] = sb.toString();
+        }
+        return rows;
     }
 
     /** Settlements: centred, the 21-px village 2 px over the left edge (#13302). */

@@ -30,6 +30,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
@@ -62,6 +63,18 @@ public class ResourceManager {
 
     /** Flag to inform the preload thead that all mappings are queued. */
     private static volatile boolean preloadDone = false;
+
+    /**
+     * Holds the background preload between two resources while it says
+     * so, or null.  The Classic UI holds it while a timed paint is due (a
+     * slide, a blink toggle): with the preload decoding images at the same
+     * time those paints took 2-5 times as long, and the game's first blink
+     * came 1-3 frames late (M1 acceptance F6).
+     */
+    private static volatile BooleanSupplier preloadHold = null;
+
+    /** The longest the preload is held before each resource (ms). */
+    private static final long PRELOAD_HOLD_MAX_MS = 1000L;
 
     /**
      * All the mappings are merged in order into this single ResourceMapping.
@@ -158,7 +171,10 @@ public class ResourceManager {
                 @Override
                 public void run() {
                     logger.info("Preload thread started");
-                    final int n = mergedContainer.preload(() -> !preloadDone);
+                    final int n = mergedContainer.preload(() -> {
+                            holdPreload();
+                            return !preloadDone;
+                        });
                     logger.info("Preload done, " + n + " resources.");
                     preloadThread = null;
                     SwingUtilities.invokeLater(() -> {
@@ -171,6 +187,36 @@ public class ResourceManager {
         // cache is loaded on demand by ImageResource.getImage).
         preloadThread.setPriority(Thread.MIN_PRIORITY);
         preloadThread.start();
+    }
+
+    /**
+     * Set what holds the background preload between two resources
+     * ({@link #preloadHold}).  Called from any thread; the preload thread
+     * asks it.
+     *
+     * @param hold True while the preload should wait, or null for never.
+     */
+    public static void setPreloadHold(BooleanSupplier hold) {
+        preloadHold = hold;
+    }
+
+    /**
+     * Wait while the preload is held, at most
+     * {@link #PRELOAD_HOLD_MAX_MS}, so it always gets on.
+     */
+    private static void holdPreload() {
+        final BooleanSupplier hold = preloadHold;
+        if (hold == null || preloadDone) return;
+        final long end = System.nanoTime() + PRELOAD_HOLD_MAX_MS * 1_000_000L;
+        try {
+            while (!preloadDone && System.nanoTime() < end && hold.getAsBoolean()) {
+                Thread.sleep(2);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (RuntimeException e) {
+            logger.warning("Preload hold failed: " + e);
+        }
     }
 
     /**

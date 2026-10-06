@@ -118,6 +118,57 @@ public class ClassicSlideTest extends TestCase {
         assertEquals(1_000 * MS + s + 14 * s + 72 * MS, c.now);
     }
 
+    /**
+     * M1 acceptance F3: offset 0 stays one whole step on the screen even
+     * when its paint is slow (a jump repaints the whole map, 8-27 ms under
+     * the recorder): offset 1 is due one step after that paint returns,
+     * and the steps after it keep the absolute schedule from there.
+     */
+    public void testSlowOffsetZeroKeepsItsStep() throws InterruptedException {
+        for (boolean fast : new boolean[] { false, true }) {
+            final long s = ClassicSlide.stepNanos(fast);
+            final FakeClock c = new FakeClock(2_000 * MS);
+            final List<long[]> paints = new ArrayList<>();
+            final long t1 = ClassicSlide.run(c, s, true, k -> {
+                    paints.add(new long[] { k, c.now });
+                    c.now += (k == 0) ? 21 * MS : 0L;   // the jump's full repaint
+                });
+            assertEquals(16, paints.size());
+            final long zeroDone = 2_000 * MS + 21 * MS;
+            assertEquals(zeroDone + s, t1);
+            assertEquals(zeroDone + s, paints.get(1)[1]);
+            assertEquals("offset 0 shown one step", s, paints.get(1)[1] - zeroDone);
+            for (int k = 1; k <= 15; k++) {
+                assertEquals(k, paints.get(k)[0]);
+                assertEquals(t1 + (k - 1) * s, paints.get(k)[1]);
+            }
+            assertEquals(ClassicSlide.holdEndNanos(t1, s), c.now);
+        }
+
+        // The painter reports when offset 0 was on the screen (its map
+        // paint, before the minimap and the event): offset 1 is due one
+        // step after that, not after the painter returned.
+        final long s = ClassicSlide.stepNanos(false);
+        final FakeClock c = new FakeClock(3_000 * MS);
+        final long[] shown = { 0L };
+        final List<long[]> paints = new ArrayList<>();
+        final long t1 = ClassicSlide.run(c, s, true, k -> {
+                paints.add(new long[] { k, c.now });
+                if (k == 0) {
+                    c.now += 12 * MS;          // the map
+                    shown[0] = c.now;
+                    c.now += 5 * MS;           // the minimap, the event
+                }
+            }, () -> shown[0]);
+        assertEquals(3_000 * MS + 12 * MS + s, t1);
+        assertEquals(t1, paints.get(1)[1]);
+        // Without a time from the painter: when it returned.
+        final FakeClock d = new FakeClock(0L);
+        final long u1 = ClassicSlide.run(d, s, true, k -> d.now += (k == 0) ? 17 * MS : 0L,
+                                         () -> 0L);
+        assertEquals(17 * MS + s, u1);
+    }
+
     /** A slow paint delays its own frame, never the deadlines after it. */
     public void testAbsoluteDeadlines() throws InterruptedException {
         final FakeClock c = new FakeClock(0L);

@@ -455,13 +455,27 @@ On the HUD grid (`setFixedScale` > 0) the map draws what the original draws,
 in native pixels times the HUD scale s; the adaptive layout keeps the old
 cell-fitted sprites (`drawCentered`, `UNIT_CELL_FRACTION`).
 
-- **Icons 1:1.** A unit is `ClassicHud.paintIcon` -- the panel's proved
-  painter -- at the cell origin: the sprite's black silhouette 2 px left, the
-  7x9 flag (nation fill, `@ORDERS` letter in FONTTINY), the sprite at its
-  measured offset (`spriteOffset`). The ship's flag is at the cell's top-left,
-  a land unit's at the sprite's lower right. Checked pixel class by pixel
-  class against the clips (`ClassicUnitIconTest`: landfall #343, clip007
-  #2374/#3697).
+- **Icons 1:1, the panel's own** (build spec W21a). A unit is
+  `ClassicHud.paintIcon` -- the panel's proved painter, so a map unit looks
+  exactly as its block -- at the cell origin: the sprite's black silhouette
+  2 px left, the 7x9 flag (black ring, nation fill), the sprite, then the
+  `@ORDERS` letter in FONTTINY at ring + (2,2), over the sprite where they
+  meet (clip006 #4471: the galleon's pixel (9,4) under the '-' is black).
+  - The flag's side is per sprite (`flagRing(x, y, w, unitRow)`): the galleon
+    (ICONS.SS.007) and the frigate (015) at cell + (9,0), the merchantman
+    (006), the other ships and mounted units at the top-left, a land unit at
+    the sprite's lower right. The frigate's sprite sits at +2
+    (`spriteOffset(w, unitRow)`), the rest at their measured offsets.
+  - The letter's ink (`letterInk`): the darker nation shade only for
+    Befestigt (F, fortified) and Wache (S); black for '-', G, R, P and for F
+    while still fortifying (clip006 #4555 -> #4556).
+  - Checked pixel class by pixel class (`ClassicUnitIconTest`: landfall #343,
+    clip007 #2374/#3697; the flag side, the frigate's offset, the letter over
+    the sprite and its ink), and at 0 px against the clips by the C3 harness
+    (`freecol-spike-results\c\tools\C3Icons.java`: the map galleon c5 #20440
+    and c6 #4471/#4516 on their blink-OFF frames, the panel's galleon, the
+    pioneer's R, the dragoon's F black and dark, Europe #8120's frigate,
+    merchantman and galleon, the laden and the empty ship of clip007).
 - **Second flag.** A ship with a passenger draws the cargo marker, a second
   flag 2 px down-right behind the flag (spec delta W2.3, V: the 7-px edge at
   x 2-6, y 8-10). A land unit standing over others, or a passenger drawn over
@@ -482,12 +496,22 @@ pixel per step on an absolute schedule `t_k = t1 + (k-1)S` with S = 16.43 ms,
 13.25 ms while the classic pref `moveAccelerator` is on (read at each slide
 start); a 72-ms hold at 15; offset 16 is the final draw, the first ordinary
 paint after the slide, so it comes together with the tiles the move revealed
-(`handleMoveKey` paints it as soon as `moveUnit` returns). Steps repaint only
+(`handleMoveKey` paints it as soon as `moveUnit` returns). The panel's
+refresh follows one tick later (`ClassicGUI.panelAfterFinalDraw`, M1
+acceptance F2): its minimap with the final draw (the reveal, landfall #1167),
+the block 16.43 ms after it (#1168: +1 frame in 36 of 47 slides, +2 in 9);
+it used to land in the final draw's own frame in 21 of 53 slides. Steps repaint only
 the cells the sprite crosses (`slideBounds`); every step restores the source
 tile; diagonals step (+-1,+-1); nothing is mirrored. Offset 0 is painted first,
 one step before offset 1, when the view jumps for the move or the player's own
 unit is not on screen at its source (blink OFF, a passenger leaving its ship);
-a foreign unit not on screen appears at offset 1. A slide without a key (goto
+offset 1 is due one step after offset 0's map paint has *returned* (a jump's
+full repaint took 8-27 ms out of offset 0's tick before, M1 acceptance F3;
+the minimap and the recorder's event after it do not count, `ClassicSlide.run`'s
+`zeroShown`).
+The jump frame shows a foreign unit at its source too, a native on an
+unexplored tile included (landing-slow #6482); a foreign unit not on screen
+without a jump appears at offset 1. A slide without a key (goto
 steps, AI moves) first paints the previous slide's final draw if the queue has
 not, then starts 100 ms (own goto) or 60 ms (foreign) after it. Waits are
 `Thread.sleep` plus a spin, never `parkNanos` (W1). `ClassicSlideTest` checks
@@ -505,11 +529,29 @@ to the Classic UI's end of turn and hand-over (W5).
 `showEuropeanMoves` (other foreign units), read in `ClassicGUI.animateUnitMove`
 (`movesPref`); FreeCol's `enemyMoveAnimationSpeed` is not consulted.
 
-**Known limit (AI phases).** FreeCol queues AI animations on the EDT with
-`invokeLater` while the network thread applies the moves at once, so during an
-AI phase the model can be ahead of the slides (a unit can show at its later
-tile between two of its slides). The original plays them strictly in turn;
-W19 (native-phase cues) is where that belongs.
+**AI phases: the model runs ahead** (M1 acceptance F5). FreeCol queues AI
+animations on the EDT with `invokeLater` while the network thread applies the
+moves at once, so a unit could show at its new tile before its slide (one
+frame of a brave at its destination, iso #1938). The server sends the
+animation before the update; `InGameController.animateMoveHandler` now tells
+the GUI first (`GUI.animateUnitMoveQueued`, a no-op in the base GUI), and the
+map keeps such a foreign unit at the source of its oldest queued move until
+its slide starts (`moveQueued`, `displayUnit`); the slide, or a skip, takes the
+move off (`moveDequeued`). Own moves are not queued (they slide inside the
+move).
+
+**Native-phase cues** (build spec W19). Before a native's move whose source
+tile fails the view rule (the view will jump for it), 2 frames after the
+previous native's final draw (`CUE_GAP_MS`; the original 2-4 frames), the
+source's minimap pixel turns white, and if the source cell is on the screen
+(in the margin) the Spielzugende mode's white 16x16 square is drawn on it with
+the sprite hidden (clip004 #9060, landing-slow #6464); the jump follows
+`CUE_MS` = 250 ms later (the original 199-330 ms) and paints both away, and
+offset 1 one step after the jump frame. No cue for a move inside the view,
+none for a European. The whole slide is gated by "Indianer zeigen"
+(`showNativeMoves`). Recorder event `native-cue minimap|square unit=.. at=..
+cell=..`. Measured from a save with Dutch lookouts by villages
+(`freecol-spike-results\c\saves\c3-natives.fsg`, `C3Natives.java`).
 
 ### The blink and the minimap dot (`ClassicBlink`; build spec W3)
 
@@ -526,9 +568,11 @@ recorder's `Thread.sleep` plus spin, never `parkNanos`) and run on the EDT
   `ClassicDialog` and the `chooseFromList` list through `ClassicDialog.Watcher`,
   the first scene, a menu of the strip through `ClassicMenuStrip.Host`). The
   original measures its first OFF from the **panel refresh** that follows
-  (57 episodes); so every panel paint within 100 ms of an arm re-bases the
-  phase (`ClassicInfoPanel.paintComponent` -> `blinkPanelPainted`), and without
-  one it stays at the arm. Each arm is a new generation; a toggle of an older
+  (57 episodes); so every panel paint that changes a pixel within 100 ms of
+  an arm re-bases the phase (`ClassicInfoPanel.paintComponent` ->
+  `blinkPanelPainted`), and without one it stays at the arm. An identical
+  repaint is no refresh: the one the controller queues 10-15 ms behind a
+  move's block put the first OFF a frame late (C3). Each arm is a new generation; a toggle of an older
   one (queued behind a slide or a box) is dropped.
 - **Held ON** while a slide runs, a menu, a modal box, the first scene or a
   classic screen is up (in front: see W5a), or it is not our turn
@@ -550,8 +594,16 @@ recorder's `Thread.sleep` plus spin, never `parkNanos`) and run on the EDT
   (`paintMinimapNow`). The viewport ring is still drawn last and hides the dot
   in view column 14, as in the original.
 - **A key while OFF** starts the slide at offset 0 (W2's `isShownAt`).
+- **The background preload waits** while a timed paint is due
+  (`ResourceManager.setPreloadHold`, `ClassicMapViewer.holdsPreload`; M1
+  acceptance F6): a slide or a cue runs, or a toggle of the blink or of the
+  Spielzugende square is due within 40 ms or has just been posted. The
+  preload overlaps the game's first 13 s; its decoding made those paints 2-5
+  times as slow and the game's first OFF came 24-26 frames after the panel.
+  It is held at most 1 s per resource, so it always finishes.
 - Recorder events: `blink` with `arm <reason>`, `rebase panel`, `off n=..`,
-  `on n=..`, `hold <reason>`, `stop <reason>`; `menu-open`, `menu-close`.
+  `on n=..` (with `late=`, and `cell=` / `dot=`: what the toggle's two paints
+  took), `hold <reason>`, `stop <reason>`; `menu-open`, `menu-close`.
 
 `ClassicBlinkTest` checks the schedule on a fake clock (no drift over 1000
 toggles, ON first, reset on re-arm, the panel re-base and its window, stale
@@ -714,22 +766,33 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
 - **Turn indicator (W5c).** `ClassicHud.INDICATOR` (315..319, 197..199) is
   filled with the current player's colour while it is not our turn
   (`ClassicHud.indicatorRgb`: the eight tribes, England, France, Spain from
-  NAMES.TXT; else the nation colour), with ours (#FF7100) while our new turn is
-  not shown yet (its turn-start boxes are up), and with the **next** player's
-  in the paint just before our end request goes out (the request blocks the
-  EDT; the server's answer and the player change come in either order, so the
-  prediction holds until the player or the turn number changes or 1.5 s
-  pass). A 50-ms Swing poll (`tick`) repaints the box when the colour
+  NAMES.TXT; else the nation colour), and with the **next** player's in the
+  paint just before our end request goes out (the request blocks the EDT; the
+  server's answer and the player change come in either order, so the
+  prediction holds until the player or the turn number changes, or 1.5 s
+  after the server's answer).
+  - **Ours** (#FF7100) lights while our new turn's boxes are up, and
+    otherwise only for one tick, in a paint of its own, just before the wipe
+    (`flashOwnColour`, `OWN_FLASH_MS` = 16.43 ms: 1-2 frames, as every end in
+    the landfall clip; M1 acceptance F4). Between the player change and the
+    controller's first view change FreeCol autosaves and prepares its turn
+    report (0.16-0.41 s); the last colour stays there now, where ours used to
+    light for 13-29 frames. A 50-ms Swing poll (`tick`) repaints the box when the colour
   changes. Our end request is settled (`settleEnding`, first in `tick`,
   `unitChosen` and `noUnitLeft`) when the current player **or the turn
   number** has changed: native slides are queued on the EDT while the model
   runs ahead, so the whole AI phase can pass between two polls and the next
   `changeView(unit)` is already our new turn's first unit, which then gets its
-  wipe and turn start. After 1.5 s with neither it counts as refused; its turn
-  is kept, so a later turn change still ends the old turn, and a task posted
-  behind the queue asks the controller for the next unit unless one or a
-  pause came meanwhile (`recoverRefused`): the unit it re-selected during the
-  end, or its end view arming the idle end again. The order is
+  wipe and turn start. An end the controller did not send at all
+  (`InGameController.endTurn` now returns whether the request went to the
+  server: false for goto or trade-route units to look at, a panel up) is
+  refused at once; a sent one counts as refused 1.5 s after the server's
+  *answer* with neither change (counted from the request, a slow server's
+  answer used to count as a refusal and let Enter send a second end; FINAL
+  "Open" item 9). Its turn is kept, so a later turn change still ends the old
+  turn, and a task posted behind the queue asks the controller for the next
+  unit unless one or a pause came meanwhile (`recoverRefused`): the unit it
+  re-selected during the end, or its end view arming the idle end again. The order is
   FreeCol's (dutch, iroquois, tupi, sioux, french, arawak, english, apache,
   inca, aztec, spanish in the runs), not the original's natives first; the
   European dark sub-phase is left out (spec: optional, its trigger is I).
@@ -758,6 +821,16 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   after its block; the view changes FreeCol queues for the units it moves
   arrive after the moves and are dropped until a marker posted behind them,
   which then asks for the next unit -- a hand-over from the last goto step.
+  When the orders stopped early (a goto unit with no path, which FreeCol
+  skips), the controller's first `nextActiveUnit` only leaves its goto mode
+  and brings nothing; the marker then asks once more (`gotosDone`), so a unit,
+  or the end view and the automatic end, always comes (FINAL "Open" item 8).
+- **Robust stages.** A stage's host call that throws no longer leaves the
+  pause pending with no timer and the input blocked: the next stage is
+  scheduled in a `finally` (`fire`, FINAL item 6). Once the game view goes
+  (`dispose`) every late call -- the goto marker, a queued village cancel, a
+  menu close in the teardown -- does nothing (item 11); the teardown closes
+  the menu before it disposes the map.
 - **Not our turn:** activations the controller sends then (doEndTurn's goto
   pass) are ignored; no unit comes up until our next turn.
 - Recorder events: `endturn-timer-start <why> <kind> <stages> due=.. base=..`,
@@ -773,9 +846,12 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
 stages, the 485-ms end and its re-basing, the conditions, a box holding it,
 the village pause, the Spielzugende hand-off, the hand-over with and without
 its jump, the turn start (with a box, with a jump, without units, after an
-AI phase no poll saw, after a refusal), goto units first, a screen behind
+AI phase no poll saw, after a refusal), our colour's tick before the wipe and
+with a box up, goto units first and a goto unit with no path, a refusal not
+sent and a slow answer, a stage that throws, a disposed flow, a screen behind
 the map, the indicator's colours and its poll, and `ClassicOneShot` (replace,
-cancel, stale posts, the thread on the real clock).
+cancel, stale posts, the thread on the real clock: never early, the best of
+five tries within 8 ms).
 `ClassicMapViewerTest.testAfterTheLastMove` covers the blink stop with no
 moves, the stale-block rule and the jump question; `ClassicHudTest.
 testTurnIndicator` the 15 pixels; `ClassicUnitIconTest.testSessionOptions`
@@ -1079,6 +1155,12 @@ map must keep winning as it did over the old accelerators.
 | Shift+F1 / F2 / F4 | Cargo / Exploration / Production (FreeCol's keys, no original entry) |
 | Shift+F7 | **Military — moved off F7** (now Naval, as in the original): owner decision flagged |
 | Ctrl+N | FreeCol's `newAction`: **back to the classic title** (asks first, `confirmStopGame`; then `showNewPanel` → `showMainPanel`). No original key: the original leaves a game only by retiring or quitting to DOS. Kept because dropping the `JMenuBar` had removed every in-game way back to the title or to a second game. |
+
+**While the player waits** (the pauses before the end of turn, the next unit
+or the turn's first unit, and the AI phase; `ClassicGUI.turnInputBlocked`)
+every key of the table does nothing, as the map's own keys (build spec W5d;
+logged `key-blocked`); only Ctrl+N still works there (`WHILE_WAITING`,
+`waitAllows`; FINAL "Open" item 7).
 
 This ends the old F7 Naval/Military clash and replaces
 `remapClassicReportAccelerators` (deleted, with `styleClassicMenuBar`,
@@ -3564,13 +3646,23 @@ frame. Not captured: the first scene (glass pane) and the JDialog popups (only
 their open/close events). Cost at s = 3: about 5.4 ms per HUD paint + 0.4 ms
 copy + 1.5-2 ms blit, i.e. a step of today's slide takes ~30 ms instead of
 ~25 ms; `-Dfreecol.classic.recordFrames=false` records the events alone with
-the HUD painting untouched, to time the game itself.
+the HUD painting untouched, to time the game itself: then the sampler only
+reads the state probe every 50 ms (`EVENTS_PROBE_MS`), with sleeps that never
+raise the Windows timer resolution, so nothing of the recorder's keeps the
+game's timers on time.
 
 Timing on Windows: `LockSupport.parkNanos` wakes on the 15.6 ms system tick
-(measured up to 15 ms late); `Thread.sleep` keeps to ~1 ms. The sampler sleeps
-to ~1.5 ms before each tick and spins the rest (`waitUntil`, ~11 % of a core);
-2-3 late ticks per 33 s run remain. Schedule slides and blinks the same way,
-not with `parkNanos`.
+(measured up to 15 ms late); `Thread.sleep` keeps to ~1 ms -- but HotSpot
+raises the timer resolution only for a sleep that is not a multiple of 10 ms
+(`HighResolutionInterval`), and a sleep of 10, 20 ... ms wakes on the tick
+unless another thread of the process holds the resolution up (in the M1 runs
+the recorder's sampler always did). So `waitUntil` sleeps to ~1.5 ms before
+the deadline, one millisecond less when that is a multiple of 10
+(`sleepMillis`), and spins the rest (~11 % of a core for the sampler); 2-3
+late ticks per 33 s run remain. Measured in one JVM with nothing else
+(`freecol-spike-results\c\tools\C3Sleep.java`, 400 waits each): the old rule
+woke late in 25 (> 5 ms in 17, at most 12.4 ms), the new one never (at most
+0.44 ms). Schedule slides and blinks the same way, not with `parkNanos`.
 
 **Input script** (`-Dfreecol.classic.script=<file>`, format in
 `ClassicScript`'s class comment): `wait <ms>`, `key <KeyStroke>` (e.g. `LEFT`,

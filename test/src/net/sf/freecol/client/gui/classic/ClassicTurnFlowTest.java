@@ -78,6 +78,8 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         final List<Runnable> posted = new ArrayList<>();
         /** What endTurn does to the game (the server's answer). */
         Runnable onEndTurn = null;
+        /** What endTurn returns: whether the controller asked the server. */
+        boolean endTurnSent = true;
 
         @Override public boolean myTurn() { return this.myTurn; }
         @Override public boolean blocked() { return this.blocked; }
@@ -89,9 +91,13 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         @Override public Unit activeUnit() { return this.active; }
         @Override public boolean wouldJump(Unit unit) { return this.jump; }
 
+        /** jumpTo throws (a host call that fails). */
+        boolean jumpThrows = false;
+
         @Override
         public void jumpTo(Unit unit) {
             this.calls.add("jump " + unit.getId());
+            if (this.jumpThrows) throw new IllegalStateException("jump failed");
         }
 
         @Override
@@ -106,15 +112,27 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
             this.calls.add("wipe");
         }
 
+        /** The flow, whose colour a paint shows (as the panel does), or null. */
+        ClassicTurnFlow flow = null;
+
         @Override
         public void paintIndicator() {
             this.calls.add("indicator");
+            if (this.flow != null) {
+                final int rgb = this.flow.indicatorRgb();
+                this.flow.indicatorShown(rgb);
+                this.painted.add(rgb);
+            }
         }
 
+        /** The colours the indicator paints showed, in order. */
+        final List<Integer> painted = new ArrayList<>();
+
         @Override
-        public void endTurn() {
+        public boolean endTurn() {
             this.calls.add("endTurn");
             if (this.onEndTurn != null) this.onEndTurn.run();
+            return this.endTurnSent;
         }
 
         @Override
@@ -122,9 +140,13 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
             this.calls.add("gotos");
         }
 
+        /** What the controller does on nextActiveUnit (its view change), or null. */
+        Runnable onNext = null;
+
         @Override
         public void nextActiveUnit() {
             this.calls.add("next");
+            if (this.onNext != null) this.onNext.run();
         }
 
         /** The village tile the last Spielzugende mode was entered with. */
@@ -169,6 +191,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
             this.host.next = game.getPlayerByNationId("model.nation.iroquois");
             this.flow = new ClassicTurnFlow(this.host, this.clock, this.edt::add,
                                             false);
+            this.host.flow = this.flow;
             // The server's answer to our end: the next player's turn.
             this.host.onEndTurn = () -> {
                 this.host.myTurn = false;
@@ -605,16 +628,25 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         // The AI phase.
         r.flow.tick();
         assertEquals(0x6D3C18, r.flow.indicatorRgb());
-        // Our turn comes; the controller has not shown it yet: orange.
+        // Our turn comes; the controller has not shown it yet (FreeCol
+        // autosaves there): the last colour stays (M1 acceptance F4) ...
         r.host.turn = 2;
         r.host.myTurn = true;
         r.host.current = r.host.me;
         r.flow.tick();
-        assertEquals(0xFF7100, r.flow.indicatorRgb());
+        assertEquals(0x6D3C18, r.flow.indicatorRgb());
         assertTrue(r.flow.isInputBlocked());
         assertTrue(r.flow.isBusy());
+        // ... and ours lights for one tick, in a paint of its own, just
+        // before the wipe takes it away with the year.
+        r.host.painted.clear();
+        final long before = r.clock.now;
         assertTrue(r.flow.unitChosen(a, null));
         assertEquals(1, r.count("wipe"));
+        assertEquals(List.of(0xFF7100), r.host.painted);
+        assertEquals("indicator", r.host.calls.get(r.host.calls.indexOf("wipe") - 1));
+        assertEquals(ClassicTurnFlow.nanos(ClassicTurnFlow.OWN_FLASH_MS),
+                     r.clock.now - before);
         assertFalse(r.flow.isWaiting());
         assertEquals(-1, r.flow.indicatorRgb());
         assertEquals(ClassicTurnFlow.Kind.TURN_START, r.flow.pending().kind);
@@ -689,13 +721,98 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertTrue(r.flow.ignoring());
         assertTrue(r.flow.isInputBlocked());
         r.host.nextGoingTo = false;
-        r.run();                                // the marker after the queued changes
+        r.flow.screenChanged();                 // the last goto step's final draw
+        // The marker after the queued changes: the controller brings b (g
+        // has moves, still a hand-over).
+        final boolean[] taken = new boolean[1];
+        r.host.onNext = () -> taken[0] = r.flow.unitChosen(b, g);
+        r.run();
         assertFalse(r.flow.ignoring());
         assertEquals(1, r.count("next"));
-        r.flow.screenChanged();                 // the last goto step's final draw
-        assertTrue(r.flow.unitChosen(b, g));    // g has moves, still a hand-over
+        assertTrue(taken[0]);
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
         r.advanceMs(500);
         assertEquals(1, r.count("activate " + b.getId()));
+    }
+
+    /**
+     * FINAL "Open" item 8: after the goto orders, FreeCol's first
+     * nextActiveUnit only leaves its goto mode when the orders stopped
+     * early (a goto unit with no path, skipped) and brings no unit; the
+     * flow asks once more, and that call's unit comes up as a hand-over.
+     * The flow never sits with no unit and nothing scheduled.
+     */
+    public void testGotoWithoutPathStillBringsAUnit() {
+        final Unit g = ship(5, 5), b = ship(7, 5);
+        final Rig r = new Rig(this.game);
+        r.flow.endTurnNow("key");
+        r.host.turn = 2;
+        r.host.myTurn = true;
+        r.host.current = r.host.me;
+        r.host.nextGoingTo = true;
+        r.host.firstGoingTo = g;
+        assertTrue(r.flow.unitChosen(b, null));
+        r.advanceMs(300);
+        r.clock.advanceMs(100);
+        r.flow.runDue();
+        r.edt.remove(0).run();                  // the goto orders: g has no path
+        assertEquals(1, r.count("gotos"));
+        r.host.nextGoingTo = false;
+        r.host.nextActive = true;
+        // The controller: the first call brings nothing, the second b.
+        final int[] calls = new int[1];
+        r.host.onNext = () -> {
+            if (++calls[0] == 2) r.flow.unitChosen(b, g);
+        };
+        r.run();
+        assertEquals(2, r.count("next"));
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
+        r.advanceMs(500);
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertFalse(r.flow.isInputBlocked());
+
+        // No unit left at all: the second call's end view arms the
+        // automatic end.
+        final Rig n = new Rig(this.game);
+        n.flow.endTurnNow("key");
+        n.host.turn = 2;
+        n.host.myTurn = true;
+        n.host.current = n.host.me;
+        n.host.nextGoingTo = true;
+        n.host.firstGoingTo = g;
+        assertTrue(n.flow.unitChosen(g, null));
+        n.advanceMs(300);
+        n.clock.advanceMs(100);
+        n.flow.runDue();
+        n.edt.remove(0).run();
+        n.host.nextGoingTo = false;
+        final int[] ncalls = new int[1];
+        n.host.onNext = () -> {
+            if (++ncalls[0] == 2) {
+                n.host.active = null;
+                n.flow.noUnitLeft();
+            }
+        };
+        n.run();
+        assertEquals(2, n.count("next"));
+        assertEquals(ClassicTurnFlow.Kind.END_TURN, n.flow.pending().kind);
+
+        // Disposed meanwhile (the game view went): the marker does nothing.
+        final Rig d = new Rig(this.game);
+        d.flow.endTurnNow("key");
+        d.host.turn = 2;
+        d.host.myTurn = true;
+        d.host.current = d.host.me;
+        d.host.nextGoingTo = true;
+        d.host.firstGoingTo = g;
+        assertTrue(d.flow.unitChosen(g, null));
+        d.advanceMs(300);
+        d.clock.advanceMs(100);
+        d.flow.runDue();
+        d.edt.remove(0).run();
+        d.flow.dispose();
+        d.run();
+        assertEquals(0, d.count("next"));
     }
 
     /**
@@ -717,7 +834,8 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         r.host.turn = 2;                        // ... and the AI phase is over
         r.flow.tick();
         assertTrue(r.flow.isWaiting());
-        assertEquals(0xFF7100, r.flow.indicatorRgb());   // ours, not shown yet
+        // Not shown yet: the last colour stays until the wipe's tick of ours.
+        assertEquals(0x6D3C18, r.flow.indicatorRgb());
         r.clock.advanceMs(400);
         assertTrue(r.flow.unitChosen(a, null));
         assertEquals(1, r.count("wipe"));
@@ -825,6 +943,124 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(0, s.count("activate " + a.getId()));
         s.advanceMs(0.2);
         assertEquals(1, s.count("activate " + a.getId()));
+    }
+
+    /**
+     * FINAL "Open" item 9: an end the controller did not send at all is
+     * refused at once (no 1.5 s with the input blocked); a sent one waits
+     * for the player change from the server's answer, so a slow answer
+     * never counts as a refusal and lets a second request out.
+     */
+    public void testEndRefusalTimedFromTheAnswer() {
+        // Not sent (a goto or trade-route unit to look at): refused now.
+        final Rig r = new Rig(this.game);
+        r.host.onEndTurn = null;
+        r.host.endTurnSent = false;
+        r.flow.endTurnNow("auto");
+        assertFalse(r.flow.isInputBlocked());
+        assertEquals(-1, r.flow.indicatorRgb());   // the prediction is gone
+        r.run();                                   // the recovery
+        assertEquals(1, r.count("next"));
+
+        // Sent, the answer took 2 s, still our turn: no refusal yet.
+        final Rig s = new Rig(this.game);
+        s.host.onEndTurn = () -> s.clock.advanceMs(2000);
+        s.flow.endTurnNow("auto");
+        s.flow.tick();
+        assertTrue(s.flow.isInputBlocked());
+        s.advanceMs(1499);
+        s.flow.tick();
+        assertTrue(s.flow.isInputBlocked());       // Enter does nothing yet
+        s.clock.advanceMs(1);
+        s.flow.tick();
+        assertFalse(s.flow.isInputBlocked());      // refused, 1.5 s after the answer
+        assertEquals(1, s.count("endTurn"));
+    }
+
+    /**
+     * FINAL "Open" item 6: a host call that throws in a stage with stages
+     * after it leaves the rest of the pause scheduled; the unit still
+     * comes up and the input is free again.
+     */
+    public void testStageThatThrowsKeepsTheSchedule() {
+        final Unit a = ship(5, 5), b = ship(7, 5);
+        final Rig r = new Rig(this.game);
+        r.host.active = a;
+        a.setMovesLeft(0);
+        r.host.jump = true;
+        r.host.jumpThrows = true;
+        r.flow.screenChanged();
+        assertTrue(r.flow.unitChosen(b, a));
+        r.clock.advanceMs(280);
+        assertTrue(r.flow.runDue());
+        try {
+            r.edt.remove(0).run();
+            fail("the jump should have thrown");
+        } catch (IllegalStateException e) {
+            // the event thread's handler logs it in the game
+        }
+        assertNotNull(r.flow.pending());           // the block is still to come
+        r.advanceMs(220);
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertNull(r.flow.pending());
+        assertFalse(r.flow.isInputBlocked());
+    }
+
+    /**
+     * FINAL "Open" item 11: once disposed (the game view went) the flow
+     * ignores every late call -- a queued village cancel, a box close, a
+     * poll, the controller's unit -- and asks the host for nothing.
+     */
+    public void testDisposedFlowIgnoresLateCalls() {
+        final Unit a = ship(5, 5);
+        final Rig r = new Rig(this.game);
+        r.flow.dispose();
+        r.host.calls.clear();
+        r.host.turn = 2;                          // a unit now would start a turn
+        r.host.nextGoingTo = true;
+        r.host.firstGoingTo = a;
+        r.flow.villageBoxCancelled(null);
+        r.flow.boxClosed();
+        r.flow.screenChanged();
+        r.flow.tick();
+        r.flow.noUnitLeft();
+        assertFalse(r.flow.unitChosen(a, null));   // made active at once
+        r.flow.endTurnNow("key");
+        r.run();
+        assertEquals("[]", r.host.calls.toString());
+        assertNull(r.flow.pending());
+    }
+
+    /**
+     * F4: our colour also lights while a turn-start box is up (the
+     * original shows it while its messages are open); the wipe at the
+     * close then needs no tick of its own.
+     */
+    public void testOwnColourWhileATurnStartBoxIsUp() {
+        final Unit a = ship(5, 5);
+        final Rig r = new Rig(this.game);
+        r.flow.endTurnNow("key");
+        r.flow.tick();
+        assertEquals(0x6D3C18, r.flow.indicatorRgb());
+        r.host.turn = 2;
+        r.host.myTurn = true;
+        r.host.current = r.host.me;
+        r.host.blocked = true;
+        r.flow.tick();
+        assertEquals(0xFF7100, r.flow.indicatorRgb());
+        assertEquals(Integer.valueOf(0xFF7100),
+                     r.host.painted.get(r.host.painted.size() - 1));
+        assertTrue(r.flow.unitChosen(a, null));
+        assertEquals(0, r.count("wipe"));
+        r.host.blocked = false;
+        r.host.painted.clear();
+        final long before = r.clock.now;
+        r.flow.boxClosed();
+        assertEquals(1, r.count("wipe"));
+        assertTrue(r.host.painted.toString(), r.host.painted.isEmpty());
+        assertEquals(before, r.clock.now);
+        r.advanceMs(300);
+        assertEquals(1, r.count("activate " + a.getId()));
     }
 
     /**
@@ -938,19 +1174,29 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertFalse(t.isScheduled());
         t.close();
 
-        // The thread on the real clock: on time to well within a frame.
-        final CountDownLatch done = new CountDownLatch(1);
-        final long[] at = new long[1];
+        // The thread on the real clock: never early, and on time to well
+        // within a frame.  The best of five tries counts, so a loaded
+        // machine (a parallel suite) that delays one wake-up does not fail
+        // it, while a timer that is always late does (FINAL "Open" item
+        // 10; a sleep on the 15.6-ms Windows tick would be late every time).
         final ClassicOneShot real = new ClassicOneShot(ClassicSlide.SYSTEM,
             Runnable::run, true, "test-real");
-        final long due = System.nanoTime() + 120 * MS;
-        real.schedule(due, () -> {
-                at[0] = System.nanoTime();
-                done.countDown();
-            });
-        assertTrue(done.await(2, TimeUnit.SECONDS));
-        assertTrue((at[0] - due) / 1e6 + " ms late", at[0] >= due
-                   && at[0] - due < 8 * MS);
+        final List<String> tries = new ArrayList<>();
+        long best = Long.MAX_VALUE;
+        for (int i = 0; i < 5 && best >= 8 * MS; i++) {
+            final CountDownLatch done = new CountDownLatch(1);
+            final long[] at = new long[1];
+            final long due = System.nanoTime() + 120 * MS;
+            real.schedule(due, () -> {
+                    at[0] = System.nanoTime();
+                    done.countDown();
+                });
+            assertTrue(done.await(2, TimeUnit.SECONDS));
+            assertTrue((at[0] - due) / 1e6 + " ms early", at[0] >= due);
+            best = Math.min(best, at[0] - due);
+            tries.add(String.format(java.util.Locale.ROOT, "%.2f", (at[0] - due) / 1e6));
+        }
+        assertTrue("late (ms): " + tries, best < 8 * MS);
         real.close();
     }
 }

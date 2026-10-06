@@ -186,6 +186,14 @@ final class ClassicSlide {
      * then offsets 1..15 on their deadlines, then the hold.  The caller
      * paints the final draw afterwards.
      *
+     * <p>Offset 0 is on the screen for one whole step: offset 1 is due one
+     * step after its paint has returned, not after it began.  Its paint is
+     * the long one (a view jump repaints the whole map, a key while the
+     * blink is OFF redraws the unit), and counting it in shortened offset 0
+     * to 3.6-12.3 ms, so a capture frame could miss it or offset 1
+     * (M1 acceptance F3; landfall #10269 -&gt; #10270 and #1385 -&gt;
+     * #1386: one tick each).
+     *
      * @param clock The clock.
      * @param step S in nanoseconds.
      * @param redraw Paint offset 0 first (the unit was not on screen at
@@ -197,10 +205,34 @@ final class ClassicSlide {
      */
     static long run(Clock clock, long step, boolean redraw, Painter painter)
         throws InterruptedException {
+        return run(clock, step, redraw, painter, null);
+    }
+
+    /**
+     * {@link #run(Clock, long, boolean, Painter)}, with offset 1 due one
+     * step after offset 0 was on the screen: {@code zeroShown} tells when
+     * offset 0's map paint returned, so what the painter does after it
+     * (the minimap, the recorder's event) does not lengthen offset 0
+     * (a jump frame, then offset 1 one frame later: landfall #10269 -&gt;
+     * #10270).
+     *
+     * @param clock The clock.
+     * @param step S in nanoseconds.
+     * @param redraw Paint offset 0 first.
+     * @param painter Paints each offset.
+     * @param zeroShown When offset 0 was shown, read after its paint; null,
+     *     or 0, for when the painter returned.
+     * @return When offset 1 was due.
+     * @exception InterruptedException if interrupted.
+     */
+    static long run(Clock clock, long step, boolean redraw, Painter painter,
+                    java.util.function.LongSupplier zeroShown)
+        throws InterruptedException {
         long t1 = clock.now();
         if (redraw) {
             painter.paint(0);
-            t1 += step;
+            final long shown = (zeroShown == null) ? 0L : zeroShown.getAsLong();
+            t1 = ((shown != 0L) ? shown : clock.now()) + step;
         }
         for (int k = 1; k <= LAST_STEP; k++) {
             clock.waitUntil(dueNanos(t1, step, k));

@@ -248,11 +248,36 @@ final class ClassicMapViewer extends JPanel {
     private int animDx, animDy;
 
     /**
-     * Offset 0 of a foreign unit that was not on screen: the frame shows
-     * the view, not yet the unit (a brave out of the fog appears at
-     * offset 1).
+     * The native-phase cue (build spec W19) up now: the source tile of the
+     * native move that comes next, whose minimap pixel is white, or null.
      */
-    private boolean animHidden = false;
+    private Tile cueTile = null;
+
+    /**
+     * The cue's tile is on the screen (in the view's margin): the white
+     * square is drawn on it and the sprite there hidden.
+     */
+    private boolean cueSquare = false;
+
+    /**
+     * A slide (with its cue) holds the event thread now; read by the
+     * preload's hold on another thread ({@link #holdsPreload}).
+     */
+    private volatile boolean timedPaint = false;
+
+    /**
+     * Foreign moves the server announced whose slide has not started yet
+     * (build spec W19, M1 acceptance F5): each unit with its moves {source,
+     * destination}, oldest first.  The server sends the animation before
+     * the update, and in the AI phase the slides wait on the event thread
+     * while the model runs ahead: a unit could show at its new tile before
+     * its slide.  Until its slide starts such a unit is drawn at its next
+     * move's source instead ({@link #displayUnit}).  Written by the
+     * network thread ({@link #moveQueued}), read and taken on the event
+     * thread; guarded by itself.
+     */
+    private final java.util.Map<Unit, java.util.ArrayDeque<Tile[]>> queuedMoves
+        = new java.util.HashMap<>();
 
     /**
      * The unit a movement key is moving right now ({@link #handleMoveKey}),
@@ -726,9 +751,13 @@ final class ClassicMapViewer extends JPanel {
                 // No view test on arrival: the view rule ran on the source
                 // tile before the slide (animateMove, build spec W4).
                 // The slide's final draw now that the model has the move
-                // and its reveal, not when the event queue gets to it.
+                // and its reveal, not when the event queue gets to it; the
+                // panel's refresh follows a tick later (M1 acceptance F2).
                 if (this.finalDrawPending) {
                     paintNow(null);
+                    if (!this.finalDrawPending && this.gui != null) {
+                        this.gui.panelAfterFinalDraw(this.lastFinalNanos);
+                    }
                 } else if (u.getTile() != null) {
                     repaint();
                 }
@@ -1020,6 +1049,14 @@ final class ClassicMapViewer extends JPanel {
      *   <li>A slide that follows another one without a key (goto steps, AI
      *   moves) first paints the other's final draw if no paint has yet, and
      *   starts {@link ClassicSlide#gapNanos} after it.</li>
+     *   <li>A native's move whose source fails the view rule first shows
+     *   the cue, {@link #CUE_GAP_MS} after that final draw: the source's
+     *   minimap pixel white, and the white square on it with the sprite
+     *   hidden if the source is on the screen; the jump follows
+     *   {@link #CUE_MS} later (build spec W19, {@link #showNativeCue}).</li>
+     *   <li>Until its slide starts, a foreign unit stays at its source
+     *   although the model has moved it ({@link #moveQueued}; M1
+     *   acceptance F5).</li>
      * </ul>
      *
      * <p>The controller delivers the hook on the EDT (an own move from
@@ -1033,103 +1070,339 @@ final class ClassicMapViewer extends JPanel {
      * {@link #paintAnimatedUnit}).
      */
     void animateMove(Unit unit, Tile srcTile, Tile dstTile) {
-        final boolean rec = ClassicFrameRecorder.on();
-        if (unit == null || srcTile == null || dstTile == null
-            || !isShowing()
-            // Fog: only animate moves the player can actually see.
-            || (!srcTile.isExplored() && !dstTile.isExplored())) {
-            if (rec) {
-                ClassicFrameRecorder.event("slide-skip", "unit="
-                    + ((unit == null) ? "-" : unit.getId()) + " from="
-                    + xy(srcTile) + " to=" + xy(dstTile));
+        // The unit's queued move (moveQueued) is taken off when its slide
+        // starts, or here when it does not slide at all.
+        boolean taken = false;
+        try {
+            final boolean rec = ClassicFrameRecorder.on();
+            if (unit == null || srcTile == null || dstTile == null
+                || !isShowing()
+                // Fog: only animate moves the player can actually see.
+                || (!srcTile.isExplored() && !dstTile.isExplored())) {
+                if (rec) {
+                    ClassicFrameRecorder.event("slide-skip", "unit="
+                        + ((unit == null) ? "-" : unit.getId()) + " from="
+                        + xy(srcTile) + " to=" + xy(dstTile));
+                }
+                return;
             }
-            return;
-        }
-        final boolean own = isOwn(unit);
-        // A frozen Spielzugende square stays on the screen until a paint
-        // covers it: this slide's steps where they cross it, else its
-        // final draw (landing-slow #5525, #2902/#6460); its minimap pixel
-        // goes with the final draw.
-        final boolean promptGone = this.promptFrozen && clearPrompt("slide", false);
-        // A chained slide: draw the previous slide's final frame if no
-        // paint has yet, then keep the pause after it.
-        if (this.finalDrawPending) paintNow(null);
-        if (unit != this.keyMoveUnit && this.lastFinalNanos != 0L) {
+            final boolean own = isOwn(unit);
+            this.timedPaint = true;   // the preload waits (holdsPreload)
+            // A frozen Spielzugende square stays on the screen until a paint
+            // covers it: this slide's steps where they cross it, else its
+            // final draw (landing-slow #5525, #2902/#6460); its minimap pixel
+            // goes with the final draw.
+            final boolean promptGone = this.promptFrozen && clearPrompt("slide", false);
+            // A chained slide: draw the previous slide's final frame if no
+            // paint has yet (this unit still at its source, F5), then keep
+            // the pause after it.
+            if (this.finalDrawPending) paintNow(null);
+            // A native move whose source fails the view rule gets its cue
+            // first (build spec W19), 2-4 frames after the final draw.
+            final boolean cue = needsNativeCue(own, isNative(unit),
+                                               wouldJump(srcTile));
+            if (unit != this.keyMoveUnit && this.lastFinalNanos != 0L) {
+                try {
+                    ClassicSlide.waitUntil(this.lastFinalNanos + ((cue)
+                            ? nanos(CUE_GAP_MS) : ClassicSlide.gapNanos(own)));
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (cue) showNativeCue(unit, srcTile);
+            final boolean shown = isShownAt(unit, srcTile);
+            // The view rule on the SOURCE tile, now the move is accepted and
+            // before the first step (build spec W4 (b)/(c), also for native
+            // moves): a jump is the slide's offset 0, the whole map and the
+            // minimap ring, and offset 1 follows one step later (landfall
+            // #10269 -> #10270, #17712 -> #17714).  The jump frame shows the
+            // unit at its source, a native on an unexplored tile included
+            // (landing-slow #6482).
+            final boolean jumped = jumpIfNeeded(srcTile,
+                                                own ? "move" : "foreign-move");
+            final int[] v = viewOrigin();
+            final boolean redraw = startsAtOffsetZero(jumped, own, shown);
+            final boolean fast = ClassicPrefs.get().is(ClassicPrefs.MOVE_ACCELERATOR);
+            final long step = ClassicSlide.stepNanos(fast);
+            if (rec) {
+                ClassicFrameRecorder.event("slide-start", "unit=" + unit.getId()
+                    + " owner=" + unit.getOwner().getNationId()
+                    + " from=" + xy(srcTile) + " to=" + xy(dstTile)
+                    + ((v == null) ? "" : " view=" + v[0] + "," + v[1]
+                        + " cell=" + (srcTile.getX() - v[0]) + ","
+                        + (srcTile.getY() - v[1]))
+                    + " steps=" + ClassicSlide.LAST_STEP + "x"
+                    + (fast ? ClassicSlide.FAST_STEP_MS : ClassicSlide.STEP_MS)
+                    + "ms hold=" + ClassicSlide.HOLD_MS + "ms"
+                    + (redraw ? " redraw" + (jumped ? "=jump" : "=hidden") : ""));
+            }
+            // The slide shows the unit ON: the blink holds until it ends.  A
+            // key that came while OFF gets offset 0 at once (the slide's own
+            // paint), and the minimap dot turns back to the nation colour
+            // right after it; after a jump the minimap (its ring) is painted
+            // with offset 0.
+            final boolean minimap = this.blinkOff || jumped;
+            this.blinkOff = false;
+            final int dotStep = redraw ? 0 : 1;
+            this.animUnit = unit;
+            this.animFrom = srcTile;
+            this.animTo = dstTile;
+            this.animDx = dstTile.getX() - srcTile.getX();
+            this.animDy = dstTile.getY() - srcTile.getY();
+            moveDequeued(unit, srcTile, dstTile);   // the slide draws it now
+            taken = true;
             try {
-                ClassicSlide.waitUntil(this.lastFinalNanos
-                                       + ClassicSlide.gapNanos(own));
+                // Offset 1 is due one step after offset 0's map paint (the
+                // jump frame), not after the minimap and the event behind it.
+                final long[] zeroShown = { 0L };
+                ClassicSlide.run(ClassicSlide.SYSTEM, step, redraw, k -> {
+                        this.animOffset = k;
+                        // Offset 0 may come with a view jump: the whole map.
+                        paintNow((k == 0) ? null : slideBounds());
+                        if (k == 0) zeroShown[0] = System.nanoTime();
+                        if (minimap && k == dotStep && this.gui != null) {
+                            this.gui.paintBlinkDot();
+                        }
+                        if (rec) {
+                            ClassicFrameRecorder.event("slide-step", k + "/"
+                                + ClassicSlide.CELL);
+                        }
+                    }, () -> zeroShown[0]);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
+            } finally {
+                this.animUnit = null;
+                this.animFrom = null;
+                this.animTo = null;
+                this.animOffset = 0;
+                this.finalDrawPending = true;
+                if (rec) {
+                    ClassicFrameRecorder.event("slide-end", "unit=" + unit.getId());
+                }
+                // The blink restarts ON at the end of every slide; the panel
+                // refresh after the final draw re-bases it (build spec W3).
+                rearmBlink("slide");
+                repaint();
+                if (promptGone && this.gui != null) this.gui.paintBlinkDot();
             }
+        } finally {
+            if (!taken) moveDequeued(unit, srcTile, dstTile);
+            this.cueTile = null;
+            this.cueSquare = false;
+            this.timedPaint = false;
         }
-        final boolean shown = isShownAt(unit, srcTile);
-        // The view rule on the SOURCE tile, now the move is accepted and
-        // before the first step (build spec W4 (b)/(c), also for native
-        // moves): a jump is the slide's offset 0, the whole map and the
-        // minimap ring, and offset 1 follows one step later (landfall
-        // #10269 -> #10270, #17712 -> #17714).
-        final boolean jumped = jumpIfNeeded(srcTile,
-                                            own ? "move" : "foreign-move");
-        final int[] v = viewOrigin();
-        final boolean redraw = startsAtOffsetZero(jumped, own, shown);
-        final boolean fast = ClassicPrefs.get().is(ClassicPrefs.MOVE_ACCELERATOR);
-        final long step = ClassicSlide.stepNanos(fast);
-        if (rec) {
-            ClassicFrameRecorder.event("slide-start", "unit=" + unit.getId()
-                + " owner=" + unit.getOwner().getNationId()
-                + " from=" + xy(srcTile) + " to=" + xy(dstTile)
-                + ((v == null) ? "" : " view=" + v[0] + "," + v[1]
-                    + " cell=" + (srcTile.getX() - v[0]) + ","
-                    + (srcTile.getY() - v[1]))
-                + " steps=" + ClassicSlide.LAST_STEP + "x"
-                + (fast ? ClassicSlide.FAST_STEP_MS : ClassicSlide.STEP_MS)
-                + "ms hold=" + ClassicSlide.HOLD_MS + "ms"
-                + (redraw ? " redraw" + (jumped ? "=jump" : "=hidden") : ""));
+    }
+
+    /** {@code ms} in nanoseconds. */
+    private static long nanos(double ms) {
+        return Math.round(ms * 1_000_000.0);
+    }
+
+    /**
+     * From a native's cue to its jump (build spec W19: 250 ms; landing-slow
+     * 0.243-0.300 s, #6464 -&gt; #6481; clip004 14-16 frames off-screen, 23
+     * in the margin; window 199-330 ms).
+     */
+    static final double CUE_MS = 250.0;
+
+    /**
+     * From the previous native's final draw to the cue: 2-4 frames
+     * (landing-slow #6460 -&gt; #6464, #6501 -&gt; #6503, #8391 -&gt;
+     * #8395, #8438 -&gt; #8440; clip004 #9058 -&gt; #9060; mean 2.8).  Two
+     * frames here: the cue's own paints (the square, the minimap) put its
+     * frame about one later (C3's first run, three frames: 4-5).
+     */
+    static final double CUE_GAP_MS = 2 * 1000.0 / ClassicFrameRecorder.HZ;
+
+    /**
+     * Whether a move gets the native-phase cue before its slide (build
+     * spec W19): a native's move whose source tile fails the view rule
+     * (the view will jump for it); no cue inside the view, none for the
+     * player's own or a European's unit.  The pref "Indianer zeigen" gates
+     * the whole slide ({@link ClassicGUI#animateUnitMove}).
+     *
+     * @param own The unit is the player's.
+     * @param indian It is a native unit.
+     * @param jump The view jumps for its source tile ({@link #wouldJump}).
+     * @return True for a cue.
+     */
+    static boolean needsNativeCue(boolean own, boolean indian, boolean jump) {
+        return !own && indian && jump;
+    }
+
+    /** Whether a unit is a native's. */
+    private static boolean isNative(Unit unit) {
+        return unit.getOwner() != null && unit.getOwner().isIndian();
+    }
+
+    /**
+     * The native-phase cue (build spec W19): the source tile's minimap
+     * pixel white, and if the tile is on the screen (in the view's margin)
+     * the white 16x16 square on it with the sprite hidden (clip004 #9060;
+     * the Spielzugende mode's square, landing-slow #6464), in one go; then
+     * {@link #CUE_MS} until the jump, which paints both away.  The event
+     * thread is held meanwhile, as by a slide.
+     *
+     * @param unit The native.
+     * @param src Its move's source tile.
+     */
+    private void showNativeCue(Unit unit, Tile src) {
+        final int[] o = this.origin;
+        this.cueTile = src;
+        this.cueSquare = o != null && cellInView(src, o);
+        if (this.cueSquare) {
+            final Rectangle r = new Rectangle(screenX(src.getX(), o[0]),
+                screenY(src.getY(), o[1]), tileW(), tileH());
+            final int m = ICON_MARGIN * scale();
+            r.grow(m, m);
+            paintNow(r);
         }
-        // The slide shows the unit ON: the blink holds until it ends.  A key
-        // that came while OFF gets offset 0 at once (the slide's own paint),
-        // and the minimap dot turns back to the nation colour right after it;
-        // after a jump the minimap (its ring) is painted with offset 0.
-        final boolean minimap = this.blinkOff || jumped;
-        this.blinkOff = false;
-        final int dotStep = redraw ? 0 : 1;
-        this.animUnit = unit;
-        this.animFrom = srcTile;
-        this.animTo = dstTile;
-        this.animDx = dstTile.getX() - srcTile.getX();
-        this.animDy = dstTile.getY() - srcTile.getY();
+        if (this.gui != null) this.gui.paintBlinkDot();
+        final long shownAt = System.nanoTime();   // the jump counts from here
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("native-cue",
+                ((this.cueSquare) ? "square" : "minimap")
+                + " unit=" + unit.getId() + " owner=" + unit.getOwner().getNationId()
+                + " at=" + xy(src) + ((o == null) ? ""
+                    : " cell=" + (src.getX() - o[0]) + "," + (src.getY() - o[1])));
+        }
         try {
-            ClassicSlide.run(ClassicSlide.SYSTEM, step, redraw, k -> {
-                    this.animOffset = k;
-                    this.animHidden = k == 0 && !own && !shown;
-                    // Offset 0 may come with a view jump: the whole map.
-                    paintNow((k == 0) ? null : slideBounds());
-                    if (minimap && k == dotStep && this.gui != null) {
-                        this.gui.paintBlinkDot();
-                    }
-                    if (rec) {
-                        ClassicFrameRecorder.event("slide-step", k + "/"
-                            + ClassicSlide.CELL);
-                    }
-                });
+            ClassicSlide.waitUntil(shownAt + nanos(CUE_MS));
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
-        } finally {
-            this.animUnit = null;
-            this.animFrom = null;
-            this.animTo = null;
-            this.animOffset = 0;
-            this.animHidden = false;
-            this.finalDrawPending = true;
-            if (rec) {
-                ClassicFrameRecorder.event("slide-end", "unit=" + unit.getId());
-            }
-            // The blink restarts ON at the end of every slide; the panel
-            // refresh after the final draw re-bases it (build spec W3).
-            rearmBlink("slide");
-            repaint();
-            if (promptGone && this.gui != null) this.gui.paintBlinkDot();
         }
+        // The jump's offset 0 paints the map and the minimap without it.
+        this.cueTile = null;
+        this.cueSquare = false;
+    }
+
+    /**
+     * Whether a tile's cell is in the drawn view (15x12 cells from the
+     * origin).
+     *
+     * @param t The tile.
+     * @param o The view origin.
+     * @return True if it is on the screen.
+     */
+    static boolean cellInView(Tile t, int[] o) {
+        final int c = t.getX() - o[0], r = t.getY() - o[1];
+        return c >= 0 && c < ClassicHud.VIEW_COLS && r >= 0 && r < ClassicHud.VIEW_ROWS;
+    }
+
+    /** @return The native cue's tile (its white minimap pixel), or null. */
+    Tile cueTile() {
+        return this.cueTile;
+    }
+
+    /**
+     * How close to a blink toggle the background preload waits
+     * ({@link #holdsPreload}): its paint must not share the machine with
+     * an image decode.
+     */
+    static final double PRELOAD_TOGGLE_WINDOW_MS = 40.0;
+
+    /**
+     * Whether the background resource preload should wait now (M1
+     * acceptance F6; {@code ResourceManager.setPreloadHold}): a slide (or
+     * a native cue) runs, or a toggle of the blink or of the Spielzugende
+     * square is due within {@link #PRELOAD_TOGGLE_WINDOW_MS}.  The game's
+     * first 13 s overlap the preload, and its decoding made those paints
+     * 2-5 times as slow (the first blink OFF 24-26 frames after the panel
+     * instead of 23).  Any thread (the preload thread asks).
+     *
+     * @return True to hold the preload.
+     */
+    boolean holdsPreload() {
+        if (this.timedPaint) return true;
+        final long now = System.nanoTime();
+        final long w = nanos(PRELOAD_TOGGLE_WINDOW_MS);
+        final long h = nanos(ClassicBlink.HALF_PERIOD_MS);
+        for (ClassicBlink b : new ClassicBlink[] { this.blink, this.promptBlink }) {
+            final long[] n = b.next();
+            if (n == null) continue;
+            // The next toggle soon, or the last one (or the arm) just
+            // posted: its paint is running.
+            if (n[2] - now < w || now - (n[2] - h) < w) return true;
+        }
+        return false;
+    }
+
+    /**
+     * A foreign move the server announced (build spec W19, M1 acceptance
+     * F5): until its slide starts the unit is drawn at {@code src}, not at
+     * the tile the model already has it on.  Any thread (the network
+     * thread, before the update that moves the unit).
+     *
+     * @param unit The moving unit.
+     * @param src Its source tile.
+     * @param dst Its destination tile.
+     */
+    void moveQueued(Unit unit, Tile src, Tile dst) {
+        if (unit == null || src == null || dst == null) return;
+        synchronized (this.queuedMoves) {
+            this.queuedMoves.computeIfAbsent(unit, u -> new java.util.ArrayDeque<>())
+                .addLast(new Tile[] { src, dst });
+        }
+    }
+
+    /**
+     * Take a queued move off: its slide starts, or it does not slide.  The
+     * oldest matching one goes.
+     *
+     * @param unit The unit.
+     * @param src Its source tile.
+     * @param dst Its destination tile.
+     */
+    void moveDequeued(Unit unit, Tile src, Tile dst) {
+        if (unit == null) return;
+        synchronized (this.queuedMoves) {
+            final java.util.ArrayDeque<Tile[]> q = this.queuedMoves.get(unit);
+            if (q == null) return;
+            for (java.util.Iterator<Tile[]> it = q.iterator(); it.hasNext();) {
+                final Tile[] m = it.next();
+                if (m[0] == src && m[1] == dst) {
+                    it.remove();
+                    break;
+                }
+            }
+            if (q.isEmpty()) this.queuedMoves.remove(unit);
+        }
+    }
+
+    /**
+     * Where a unit waiting for its slide is drawn: its next move's source.
+     *
+     * @param unit The unit.
+     * @return The tile, or null if no move of it is queued.
+     */
+    Tile queuedSource(Unit unit) {
+        synchronized (this.queuedMoves) {
+            if (this.queuedMoves.isEmpty()) return null;
+            final java.util.ArrayDeque<Tile[]> q = this.queuedMoves.get(unit);
+            return (q == null || q.isEmpty()) ? null : q.peekFirst()[0];
+        }
+    }
+
+    /**
+     * A unit that waits on {@code tile} for its slide while the model has
+     * already moved it away, or null.
+     *
+     * @param tile The tile.
+     * @return The unit, or null.
+     */
+    private Unit queuedAt(Tile tile) {
+        synchronized (this.queuedMoves) {
+            if (this.queuedMoves.isEmpty()) return null;
+            for (java.util.Map.Entry<Unit, java.util.ArrayDeque<Tile[]>> e
+                     : this.queuedMoves.entrySet()) {
+                final Unit u = e.getKey();
+                final Tile[] m = e.getValue().peekFirst();
+                if (m != null && m[0] == tile && u != this.animUnit
+                    && u.getTile() != tile
+                    && u.getType() != null && u.getOwner() != null) return u;
+            }
+        }
+        return null;
     }
 
     /**
@@ -1217,9 +1490,15 @@ final class ClassicMapViewer extends JPanel {
         if (off == this.blinkOff) return;
         this.blinkOff = off;
         this.changeToShow = true;
+        final long a = System.nanoTime();
         paintBlinkCell();
+        final long b = System.nanoTime();
         if (this.gui != null) this.gui.paintBlinkDot();
+        this.togglePaintNs = new long[] { b - a, System.nanoTime() - b };
     }
+
+    /** How long the last blink paint took: {the cell, the minimap dot} (ns), for the recorder. */
+    private long[] togglePaintNs = { 0L, 0L };
 
     /**
      * Whether the active unit's blink is OFF.
@@ -1261,6 +1540,7 @@ final class ClassicMapViewer extends JPanel {
      * @param reason What re-arms it (for the recorder's events).
      */
     void rearmBlink(String reason) {
+        if (this.disposed) return;   // a late close after the teardown
         this.blinkHeld = false;
         setBlinkOff(false);
         final Unit u = this.activeUnit;
@@ -1285,6 +1565,7 @@ final class ClassicMapViewer extends JPanel {
      * @param reason What holds it.
      */
     void holdBlink(String reason) {
+        if (this.disposed) return;
         if (!this.blinkHeld) {
             this.blinkHeld = true;
             ClassicFrameRecorder.event("blink", "hold " + reason);
@@ -1301,6 +1582,7 @@ final class ClassicMapViewer extends JPanel {
      * @param reason What closed.
      */
     void resumeBlink(String reason) {
+        if (this.disposed) return;
         if (blinkHoldReason() == null) {
             rearmBlink(reason);
             resumePrompt(reason);
@@ -1556,7 +1838,8 @@ final class ClassicMapViewer extends JPanel {
         if (ClassicFrameRecorder.on()) {
             ClassicFrameRecorder.event("blink", (off ? "off" : "on")
                 + " n=" + n + " unit=" + u.getId() + " at=" + xy(u.getTile())
-                + String.format(Locale.ROOT, " late=%.2fms", late / 1e6));
+                + String.format(Locale.ROOT, " late=%.2fms cell=%.1fms dot=%.1fms",
+                    late / 1e6, this.togglePaintNs[0] / 1e6, this.togglePaintNs[1] / 1e6));
         }
     }
 
@@ -1798,6 +2081,9 @@ final class ClassicMapViewer extends JPanel {
         stopEdgeScroll();
         this.blink.close();
         this.promptBlink.close();
+        synchronized (this.queuedMoves) {
+            this.queuedMoves.clear();
+        }
     }
 
     /** Resolve the map {@link Tile} under a screen point, or null if off-map. */
@@ -1938,6 +2224,13 @@ final class ClassicMapViewer extends JPanel {
             ClassicHud.paintPromptSquare(g, screenX(pt.getX(), vx),
                                          screenY(pt.getY(), vy), scale());
         }
+        // The native cue's square on a source in the margin (W19), the
+        // same square (clip004 #9060, landing-slow #6464).
+        final Tile ct = this.cueTile;
+        if (ct != null && this.cueSquare) {
+            ClassicHud.paintPromptSquare(g, screenX(ct.getX(), vx),
+                                         screenY(ct.getY(), vy), scale());
+        }
         boolean changed = this.changeToShow || this.animUnit != null;
         this.changeToShow = false;
         if (this.finalDrawPending && this.animUnit == null) {
@@ -1958,7 +2251,7 @@ final class ClassicMapViewer extends JPanel {
         final Unit u = this.animUnit;
         final Tile from = this.animFrom;
         final Tile to = this.animTo;
-        if (u == null || from == null || to == null || this.animHidden) return;
+        if (u == null || from == null || to == null) return;
         final int s = scale();
         final int sx = screenX(from.getX(), vx)
             + ClassicSlide.screenOffset(this.animOffset, s, this.animDx);
@@ -1982,6 +2275,8 @@ final class ClassicMapViewer extends JPanel {
         }
         if (this.blinkOff && this.activeUnit != null
             && this.activeUnit.getTile() == tile) return;
+        // The native cue's square hides the sprite under it (W19).
+        if (this.cueSquare && tile == this.cueTile) return;
         // A unit mid-slide is painted by paintAnimatedUnit instead.
         final Unit unit = displayUnit(tile);
         if (unit != null) paintUnit(g, unit, sx, sy, markerOf(unit, tile));
@@ -1990,7 +2285,8 @@ final class ClassicMapViewer extends JPanel {
     /**
      * The unit drawn on a tile: the active unit when it is there (also a
      * passenger: it is drawn instead of its ship), else the first unit,
-     * never the one mid-slide.
+     * never the one mid-slide.  A foreign unit whose announced move has
+     * not slid yet stays at that move's source ({@link #moveQueued}).
      *
      * @param tile The tile.
      * @return The unit, or null.
@@ -1999,9 +2295,12 @@ final class ClassicMapViewer extends JPanel {
         final Unit a = this.activeUnit;
         if (a != null && a != this.animUnit && a.getTile() == tile) return a;
         for (Unit u : tile.getUnitList()) {
-            if (u != this.animUnit) return u;
+            if (u == this.animUnit) continue;
+            final Tile from = queuedSource(u);
+            if (from != null && from != tile) continue;   // not slid here yet
+            return u;
         }
-        return null;
+        return queuedAt(tile);
     }
 
     /** Whether a unit carries at least one unit (not counting one mid-slide). */
@@ -2045,14 +2344,18 @@ final class ClassicMapViewer extends JPanel {
         }
         final Player owner = unit.getOwner();
         final int s = scale();
+        final int orders = ClassicHud.ordersRow(unit);
         final Graphics2D gg = (Graphics2D) g.create();
         try {
             gg.translate(sx, sy);
             gg.scale(s, s);
+            // The panel's icon (build spec W21a): the flag's side and the
+            // sprite's place per sprite, the letter after the sprite.
             ClassicHud.paintIcon(gg, this.iconFont,
-                ClassicHud.orderLetter(this.iconText, ClassicHud.ordersRow(unit)),
+                ClassicHud.orderLetter(this.iconText, orders),
                 fit16(img), ClassicHud.nationRgb(owner),
-                ClassicHud.nationDark(owner), 0, 0, marker);
+                ClassicHud.letterInk(orders, ClassicHud.nationDark(owner)),
+                ClassicHud.unitRow(unit), 0, 0, marker);
         } finally {
             gg.dispose();
         }

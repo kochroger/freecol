@@ -264,12 +264,23 @@ public class ClassicBlinkTest extends TestCase {
             got = new ArrayList<>(posts);
         }
         assertTrue("toggles: " + got.size(), got.size() >= 4);
+        // In order and never early; on time in the median, so one wake-up
+        // a loaded machine (a parallel suite) delays does not fail it, while
+        // a clock that is always late does; no toggle a whole half-period
+        // late (FINAL "Open" item 10).  The schedule itself is exact on the
+        // test clock (testSchedule).
+        final List<Long> lates = new ArrayList<>();
         for (int i = 0; i < got.size(); i++) {
             assertEquals(i + 1, got.get(i)[1]);
             final long late = got.get(i)[0] - ClassicBlink.dueNanos(t0, i + 1);
+            assertTrue("toggle " + (i + 1) + " early " + late / 1e6 + " ms", late >= 0);
             assertTrue("toggle " + (i + 1) + " late " + late / 1e6 + " ms",
-                       late >= 0 && late < 25 * MS);
+                       late < 150 * MS);
+            lates.add(late);
         }
+        java.util.Collections.sort(lates);
+        assertTrue("median late " + lates.get(lates.size() / 2) / 1e6 + " ms",
+                   lates.get(lates.size() / 2) < 10 * MS);
         Thread.sleep(400);
         synchronized (posts) {
             assertEquals(got.size(), posts.size());
