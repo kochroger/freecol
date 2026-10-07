@@ -23,9 +23,12 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Random;
 
 import javax.swing.ImageIcon;
+import javax.swing.SwingUtilities;
 
 import net.sf.freecol.FreeCol;
 import net.sf.freecol.client.gui.ChoiceItem;
@@ -33,11 +36,18 @@ import net.sf.freecol.client.gui.action.ReturnToEuropeAction;
 import net.sf.freecol.client.gui.panel.FreeColPanel;
 import net.sf.freecol.common.i18n.Messages;
 import net.sf.freecol.common.io.FreeColRules;
+import net.sf.freecol.common.model.AbstractUnit;
 import net.sf.freecol.common.model.Colony;
+import net.sf.freecol.common.model.DiplomaticTrade;
 import net.sf.freecol.common.model.Direction;
+import net.sf.freecol.common.model.Europe;
 import net.sf.freecol.common.model.Game;
+import net.sf.freecol.common.model.GoldTradeItem;
+import net.sf.freecol.common.model.Goods;
 import net.sf.freecol.common.model.GoodsType;
+import net.sf.freecol.common.model.IndianSettlement;
 import net.sf.freecol.common.model.Map;
+import net.sf.freecol.common.model.Market;
 import net.sf.freecol.common.model.Monarch.MonarchAction;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Specification;
@@ -47,7 +57,12 @@ import net.sf.freecol.common.model.TileType;
 import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.option.GameOptions;
+import net.sf.freecol.server.ServerTestHelper;
+import net.sf.freecol.server.model.LootSession;
+import net.sf.freecol.server.model.ServerEurope;
+import net.sf.freecol.server.model.ServerPlayer;
 import net.sf.freecol.server.model.ServerUnit;
+import net.sf.freecol.server.model.Session;
 import net.sf.freecol.util.test.FreeColTestCase;
 
 
@@ -661,10 +676,13 @@ public class ClassicGUISeamTest extends FreeColTestCase {
      * The king's tax rise (C FINAL trap 1, build spec W24): the bar starts
      * on the original's first row, "Den königlichen Ring küssen" =
      * FreeCol's "yes" (clip005 #17489, clip006 #7380), so Enter kisses the
-     * ring; Down and Enter, "no" and Escape hold the party (Roger's rule:
-     * Escape answers no).  The mercenary offers list the "no" first with the
-     * bar on it (the original's @MERCENARIES); a notice has no rows and any
-     * key dismisses it.  The King stands at the left (W7's King exception).
+     * ring; Down and Enter, "no", hold the party.  Escape does nothing in
+     * the King's decision boxes (Roger: "man muss sich entscheiden", G1):
+     * the box and its bar stay, and Enter then takes the barred row; a box
+     * that closed without a row answers its first row, never the party.
+     * The mercenary offers list the "no" first with the bar on it (the
+     * original's @MERCENARIES); a notice has no rows and any key, Escape
+     * too, dismisses it.  The King stands at the left (W7's King exception).
      */
     public void testKingsBoxEnterKissesTheRing() {
         final ClassicGUI gui = new ClassicGUI(null);
@@ -684,13 +702,16 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             assertEquals("Enter's row, " + a, Integer.valueOf(0), last(fake.defaults));
             assertEquals(1, last(fake.boxes).cancelRow);
             assertSame(ClassicAdvisorBox.Portrait.KING, last(fake.boxes).portrait);
+            assertFalse(a.toString(), last(fake.boxes).escapes);
+            assertEquals(ClassicAdvisorBox.Bar.OPEN, last(fake.boxes).escapeAnswer());
+            assertFalse(last(fake.boxes).outsideCancels);
             assertEquals(Boolean.TRUE, last(answers));        // the ring
             fake.answer = 1;
             gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
             assertEquals(Boolean.FALSE, last(answers));       // the party
-            fake.answer = -1;
+            fake.answer = ClassicAdvisorBox.Bar.DISMISSED;
             gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
-            assertEquals("Escape, " + a, Boolean.FALSE, last(answers));
+            assertEquals("closed without a row, " + a, Boolean.TRUE, last(answers));
         }
         for (MonarchAction a : new MonarchAction[] {
                 MonarchAction.MONARCH_MERCENARIES,
@@ -703,22 +724,29 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             assertEquals(Messages.message(a.getYesKey()), last(fake.asked)[1]);
             assertEquals("Enter's row, " + a, Integer.valueOf(0), last(fake.defaults));
             assertEquals(0, last(fake.boxes).cancelRow);
+            assertFalse(a.toString(), last(fake.boxes).escapes);
+            assertEquals(ClassicAdvisorBox.Bar.OPEN, last(fake.boxes).escapeAnswer());
+            assertFalse(last(fake.boxes).outsideCancels);
             assertEquals(Boolean.FALSE, last(answers));
             fake.answer = 1;
             gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
             assertEquals(Boolean.TRUE, last(answers));
+            fake.answer = ClassicAdvisorBox.Bar.DISMISSED;
+            gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
+            assertEquals("closed without a row, " + a, Boolean.FALSE, last(answers));
         }
-        // A notice (no "yes"): no rows, answered "no".
+        // A notice (no "yes"): no rows, answered "no"; Escape closes it.
         fake.answer = 0;
         gui.showMonarchDialog(MonarchAction.LOWER_TAX_WAR, t,
                               "model.nation.dutch", answers::add);
         assertEquals(0, last(fake.asked).length);
         assertTrue(last(fake.boxes).isNotice());
+        assertEquals(0, last(fake.boxes).escapeAnswer());
         assertEquals(Integer.valueOf(-1), last(fake.defaults));
         assertEquals(Boolean.FALSE, last(answers));
         assertFalse(ClassicGUI.monarchEnterAccepts(null));
-        assertEquals(11, fake.asked.size());
-        assertEquals(11, answers.size());
+        assertEquals(13, fake.asked.size());
+        assertEquals(13, answers.size());
 
         // The same with the player's keys on the real bar.
         final KeyPrompter keys = new KeyPrompter();
@@ -730,13 +758,19 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             { tax, new String[] { "DOWN", "ENTER" }, false },
             { tax, new String[] { "DOWN", "UP", "ENTER" }, true },
             { tax, new String[] { "UP", "ENTER" }, true },
-            { tax, new String[] { "ESC" }, false },
-            { tax, new String[] { "DOWN", "ESC" }, false },
+            // G1: Escape does nothing; Enter then takes the barred row.
+            { tax, new String[] { "ESC", "ENTER" }, true },
+            { tax, new String[] { "DOWN", "ESC", "ENTER" }, false },
+            { tax, new String[] { "ESC", "OUT", "ESC", "ENTER" }, true },
+            { tax, new String[] { "ESC", "DOWN", "ENTER" }, false },
             { merc, new String[] { "ENTER" }, false },
             { merc, new String[] { "DOWN", "ENTER" }, true },
-            { merc, new String[] { "DOWN", "ESC" }, false },
+            { merc, new String[] { "ESC", "ENTER" }, false },
+            { merc, new String[] { "ESC", "DOWN", "ENTER" }, true },
+            { merc, new String[] { "DOWN", "ESC", "ENTER" }, true },
             { MonarchAction.LOWER_TAX_WAR, new String[] { "X" }, false },
             { MonarchAction.LOWER_TAX_WAR, new String[] { "ENTER" }, false },
+            { MonarchAction.LOWER_TAX_WAR, new String[] { "ESC" }, false },
             // E acceptance must-fix: a click outside answers nothing.
             { tax, new String[] { "OUT", "ENTER" }, true },
             { tax, new String[] { "OUT", "OUT", "UP", "ENTER" }, true },
@@ -753,7 +787,8 @@ public class ClassicGUISeamTest extends FreeColTestCase {
                          c[2], last(answers));
             assertFalse(c[0].toString(), last(keys.boxes).outsideCancels);
         }
-        // A click outside alone leaves the box up, the bar where it was.
+        // A click outside alone leaves the box up, the bar where it was;
+        // so does Escape.
         for (MonarchAction a : new MonarchAction[] { tax, merc }) {
             keys.press("OUT");
             gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
@@ -761,9 +796,121 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             keys.press("DOWN", "OUT", "OUT");
             gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
             assertEquals(a.toString(), 1, keys.lastRow);
+            keys.press("ESC");
+            gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
+            assertEquals(a.toString(), 0, keys.lastRow);
+            keys.press("DOWN", "ESC", "ESC");
+            gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
+            assertEquals(a.toString(), 1, keys.lastRow);
         }
         final ClassicAdvisorBox.Request m = last(keys.boxes);
-        assertEquals(m.cancelRow, keys.answer(m, "OUT", "ESC"));   // Escape still answers
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, keys.answer(m, "OUT", "ESC"));
+        assertEquals(m.defaultRow, keys.lastRow);      // still up, on "Nein danke"
+    }
+
+    /**
+     * G1: a King's box reported as still open (a stopgap list, a fake) is
+     * asked again until a row is taken; the handler is called once, with
+     * that row's answer.  One that never answers ends after the guard with
+     * its first row's answer, never the party.
+     */
+    public void testKingsBoxAsksAgainWhileOpen() {
+        final ClassicGUI gui = new ClassicGUI(null);
+        final int[] asks = { 0 };
+        final int[] script = { ClassicAdvisorBox.Bar.OPEN,
+                               ClassicAdvisorBox.Bar.OPEN, 1 };
+        gui.prompter = r -> script[Math.min(asks[0]++, script.length - 1)];
+        final List<Boolean> answers = new ArrayList<>();
+        final StringTemplate t = StringTemplate.template("x").addAmount("%amount%", 5);
+        gui.showMonarchDialog(MonarchAction.RAISE_TAX_ACT, t, "model.nation.dutch",
+                              answers::add);
+        assertEquals(3, asks[0]);
+        assertEquals(1, answers.size());
+        assertEquals(Boolean.FALSE, answers.get(0));   // row 1: the party, chosen
+        asks[0] = 0;
+        gui.prompter = r -> {
+            asks[0]++;
+            return ClassicAdvisorBox.Bar.OPEN;
+        };
+        gui.showMonarchDialog(MonarchAction.RAISE_TAX_WAR, t, "model.nation.dutch",
+                              answers::add);
+        assertEquals(ClassicGUI.ASK_ROUNDS, asks[0]);
+        assertEquals(2, answers.size());
+        assertEquals(Boolean.TRUE, answers.get(1));    // the ring
+        gui.showMonarchDialog(MonarchAction.HESSIAN_MERCENARIES, t,
+                              "model.nation.dutch", answers::add);
+        assertEquals(3, answers.size());
+        assertEquals(Boolean.FALSE, answers.get(2));   // "Nein danke"
+    }
+
+    /**
+     * G1: a King's box that ends without a row answers its first row (the
+     * ring at a tax rise, "Nein danke" at an offer), also when the box
+     * throws (the handler runs in a {@code finally}); the boxes with
+     * Escape (a first contact, a demand) answer "no" as before.
+     */
+    public void testKingsBoxWithoutARow() {
+        final ClassicGUI gui = new ClassicGUI(null);
+        final List<Boolean> answers = new ArrayList<>();
+        final StringTemplate t = StringTemplate.template("x").addAmount("%amount%", 5);
+        final MonarchAction[] acts = { MonarchAction.RAISE_TAX_ACT,
+            MonarchAction.RAISE_TAX_WAR, MonarchAction.MONARCH_MERCENARIES,
+            MonarchAction.HESSIAN_MERCENARIES };
+        final boolean[] expect = { true, true, false, false };
+        for (int i = 0; i < acts.length; i++) {
+            gui.prompter = r -> ClassicAdvisorBox.Bar.DISMISSED;
+            gui.showMonarchDialog(acts[i], t, "model.nation.dutch", answers::add);
+            assertEquals(acts[i] + " dismissed", Boolean.valueOf(expect[i]),
+                         last(answers));
+            gui.prompter = r -> {
+                throw new IllegalStateException("the box failed (test)");
+            };
+            final int before = answers.size();
+            gui.showMonarchDialog(acts[i], t, "model.nation.dutch", answers::add);
+            assertEquals(before + 1, answers.size());
+            assertEquals(acts[i] + " failed", Boolean.valueOf(expect[i]),
+                         last(answers));
+        }
+        // The helper itself: a row is the row's answer; no row, the first
+        // row in a box without Escape, else "no".
+        final ClassicAdvisorBox.Request king = ClassicAdvisorBox.Request
+            .builder("king").freeColText("x").rows("ja", "nein").defaultRow(0)
+            .cancelRow(1).noEscape().build();
+        assertTrue(ClassicGUI.eventAnswer(king, 0, 0));
+        assertFalse(ClassicGUI.eventAnswer(king, 0, 1));
+        assertTrue(ClassicGUI.eventAnswer(king, 0, ClassicAdvisorBox.Bar.DISMISSED));
+        assertTrue(ClassicGUI.eventAnswer(king, 0, ClassicAdvisorBox.Bar.OPEN));
+        final ClassicAdvisorBox.Request contact = ClassicAdvisorBox.Request
+            .builder("contact").freeColText("x").rows("ja", "nein").defaultRow(0)
+            .cancelRow(1).build();
+        assertFalse(ClassicGUI.eventAnswer(contact, 0, ClassicAdvisorBox.Bar.DISMISSED));
+        assertFalse(ClassicGUI.eventAnswer(contact, 0, 1));
+        assertTrue(ClassicGUI.eventAnswer(contact, 0, 0));
+        assertFalse(ClassicGUI.eventAnswer(king, -1, 0));
+    }
+
+    /**
+     * G1: the stopgap window of a box without Escape (the King's
+     * decisions, the father and recruit boxes) has no Escape binding; the
+     * others keep it.  The panel is built headless, the window is not
+     * opened.
+     */
+    public void testStopgapWithoutEscape() {
+        final List<ClassicDialog.Page> pages = List.of(new ClassicDialog.Page("x", null));
+        final String[] rows = { "a", "b" };
+        final javax.swing.KeyStroke esc = javax.swing.KeyStroke.getKeyStroke("ESCAPE");
+        final javax.swing.KeyStroke enter = javax.swing.KeyStroke.getKeyStroke("ENTER");
+        final ClassicDialog fixed = new ClassicDialog(pages, rows, 0, false);
+        final javax.swing.InputMap fim = fixed.getInputMap(
+            javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW);
+        assertNull(fim.get(esc));
+        assertNull(fixed.getActionMap().get("classic_dialogCancel"));
+        assertEquals("classic_dialogDefault", fim.get(enter));
+        final ClassicDialog plain = new ClassicDialog(pages, rows, 0, true);
+        final javax.swing.InputMap pim = plain.getInputMap(
+            javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW);
+        assertEquals("classic_dialogCancel", pim.get(esc));
+        assertEquals("classic_dialogDefault", pim.get(enter));
     }
 
     /**
@@ -874,6 +1021,15 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         keys.press("ESC");
         gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
         assertEquals(Boolean.FALSE, last(answers));
+        // G1 leaves them as they are: Escape answers "Nein" (not answered
+        // by Roger yet), unlike the King's decisions.
+        assertTrue(last(keys.boxes).escapes);
+        assertEquals(1, last(keys.boxes).escapeAnswer());
+        keys.press("DOWN", "ESC");
+        gui.showNativeDemandDialog(brave, colony, null, 50, answers::add);
+        assertEquals(Boolean.FALSE, last(answers));
+        assertTrue(last(keys.boxes).escapes);
+        assertEquals(0, last(keys.boxes).escapeAnswer());
 
         // E acceptance must-fix: a click outside answers neither box.
         keys.press("OUT");
@@ -1549,6 +1705,537 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         } finally {
             mv.dispose();
         }
+    }
+
+    /** Run on the event thread and wait: the seams answer there. */
+    private static void onEdt(Runnable r) throws Exception {
+        SwingUtilities.invokeAndWait(r);
+    }
+
+    /** The goods, most valuable first at a player's market (a stable sort). */
+    private static List<Goods> byPrice(Player p, List<Goods> gl) {
+        final Market market = p.getMarket();
+        final List<Goods> out = new ArrayList<>(gl);
+        out.sort(Comparator.comparingInt((Goods g) ->
+                market.getBidPrice(g.getType(), g.getAmount())).reversed());
+        return out;
+    }
+
+    /**
+     * G1 (N15): after a naval win the loot is answered at once, before any
+     * box, so the server's session ends (the base GUI's silence froze the
+     * game at the next end of turn): as many goods as fit, the most
+     * valuable first, the offered objects themselves; an empty list when
+     * nothing is offered.  A failing notice cannot stop the answer.
+     */
+    public void testLootIsAnsweredAtOnce() throws Exception {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        assertNotNull(dutch.getMarket());
+        final Unit privateer = new ServerUnit(game, map.getTile(15, 7), dutch,
+            spec().getUnitType("model.unit.privateer"));
+        assertEquals(2, privateer.getSpaceLeft());
+        final GoodsType furs = spec().getGoodsType("model.goods.furs");
+        final GoodsType sugar = spec().getGoodsType("model.goods.sugar");
+        final GoodsType silver = spec().getGoodsType("model.goods.silver");
+        final GoodsType food = spec().getGoodsType("model.goods.food");
+        final List<Goods> offer = List.of(new Goods(game, null, furs, 100),
+            new Goods(game, null, sugar, 100), new Goods(game, null, silver, 100));
+        final List<Goods> expect = byPrice(dutch, offer);
+        final List<String> log = new ArrayList<>();
+        final List<List<Goods>> answers = new ArrayList<>();
+        final ClassicGUI gui = new ClassicGUI(null);
+        gui.prompter = r -> {
+            log.add("box " + r.id);
+            return 0;
+        };
+        onEdt(() -> gui.showCaptureGoodsDialog(privateer, offer, gl -> {
+                    log.add("answer");
+                    answers.add(gl);
+                }));
+        assertEquals(1, answers.size());
+        assertEquals(List.of("answer", "box loot"), log);   // the answer first
+        assertEquals(2, answers.get(0).size());
+        assertSame(expect.get(0), answers.get(0).get(0));
+        assertSame(expect.get(1), answers.get(0).get(1));
+
+        // One offered: that one.  None (or null): an empty list, no box.
+        log.clear();
+        onEdt(() -> gui.showCaptureGoodsDialog(privateer, List.of(offer.get(1)),
+                                               answers::add));
+        assertEquals(List.of(offer.get(1)), last(answers));
+        assertSame(offer.get(1), last(answers).get(0));
+        log.clear();
+        onEdt(() -> gui.showCaptureGoodsDialog(privateer, new ArrayList<>(),
+                                               answers::add));
+        assertNotNull(last(answers));
+        assertTrue(last(answers).isEmpty());
+        assertTrue(log.isEmpty());
+        onEdt(() -> gui.showCaptureGoodsDialog(privateer, null, answers::add));
+        assertTrue(last(answers).isEmpty());
+        assertEquals(4, answers.size());
+
+        // A notice that fails: the answer is out already.
+        gui.prompter = r -> {
+            throw new IllegalStateException("no box (test)");
+        };
+        onEdt(() -> gui.showCaptureGoodsDialog(privateer, offer, answers::add));
+        assertEquals(5, answers.size());
+        assertEquals(2, last(answers).size());
+
+        // One hold taken: the most valuable one only.
+        privateer.addGoods(food, 100);
+        assertEquals(1, privateer.getSpaceLeft());
+        assertEquals(List.of(expect.get(0)), ClassicSeams.lootTaken(privateer, offer));
+        // A part-filled hold takes goods of its type without a new hold.
+        privateer.removeGoods(food);
+        privateer.addGoods(furs, 50);
+        privateer.addGoods(food, 100);
+        assertEquals(0, privateer.getSpaceLeft());
+        final Goods fifty = new Goods(game, null, furs, 50);
+        assertEquals(List.of(fifty), ClassicSeams.lootTaken(privateer,
+            List.of(new Goods(game, null, sugar, 100), fifty)));
+        assertTrue(ClassicSeams.lootTaken(privateer,
+            List.of(new Goods(game, null, furs, 51))).isEmpty());
+        assertTrue(ClassicSeams.lootTaken(null, offer).isEmpty());
+    }
+
+    /**
+     * G1 (N15), on the server: the loot session the base GUI never
+     * answered (the end of turn waits for it) ends with the seam's
+     * answer, and the server accepts every good it takes.
+     */
+    public void testLootSessionCompletes() throws Exception {
+        final Game game = ServerTestHelper.startServerGame(
+            getTestMap(spec().getTileType("model.tile.ocean")));
+        try {
+            final net.sf.freecol.server.control.InGameController igc
+                = ServerTestHelper.getInGameController();
+            final Map map = game.getMap();
+            final ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+            final ServerPlayer english = getServerPlayer(game, "model.nation.english");
+            final Unit winner = new ServerUnit(game, map.getTile(5, 5), dutch,
+                spec().getUnitType("model.unit.privateer"));
+            final Unit loser = new ServerUnit(game, map.getTile(6, 5), english,
+                spec().getUnitType("model.unit.merchantman"));
+            final GoodsType furs = spec().getGoodsType("model.goods.furs");
+            final GoodsType sugar = spec().getGoodsType("model.goods.sugar");
+            final GoodsType silver = spec().getGoodsType("model.goods.silver");
+            winner.addGoods(furs, 30);              // a part-filled hold
+            loser.addGoods(furs, 100);
+            loser.addGoods(sugar, 100);
+            loser.addGoods(silver, 100);
+            // As ServerPlayer.csLootShip does it.
+            final List<Goods> capture = loser.getGoodsList();
+            for (Goods g : capture) g.setLocation(null);
+            new LootSession(winner, loser, capture).register();
+            loser.getGoodsContainer().removeAll();
+            assertTrue(Session.waitingForSession());   // the freeze, unanswered
+            final List<Goods> offered = new ArrayList<>(capture);
+            final List<Goods> expect = ClassicSeams.lootTaken(winner, offered);
+            assertEquals(1, expect.size());           // one free hold
+            final List<Goods> answered = new ArrayList<>();
+            final ClassicGUI gui = new ClassicGUI(null);
+            gui.prompter = r -> 0;
+            onEdt(() -> {
+                    gui.animateUnitAttack(winner, loser, winner.getTile(),
+                                          loser.getTile(), true);
+                    gui.showCaptureGoodsDialog(winner, offered, gl -> {
+                            answered.addAll(gl);
+                            igc.lootCargo(dutch, winner, loser.getId(), gl);
+                        });
+                });
+            assertEquals(expect, answered);
+            assertFalse("the session ended", Session.waitingForSession());
+            final Goods g = answered.get(0);
+            assertEquals(g.getAmount() + ((g.getType() == furs) ? 30 : 0),
+                         winner.getGoodsCount(g.getType()));
+        } finally {
+            Session.clearAll();
+            ServerTestHelper.stopServerGame();
+        }
+    }
+
+    /**
+     * G1 (N15): the loot's notices.  With the pack's texts and a known
+     * loser, one GAME.TXT @CARGOCAPTURE per goods type ("Engl. Ware (150
+     * Felle) durch Holl. Kaperschiff erobert!"); the loser is the one the
+     * winner fought last ({@code animateUnitAttack}).  Without the texts,
+     * or the loser, FreeCol's words in one notice.
+     */
+    public void testLootNotice() throws Exception {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player english = game.getPlayerByNationId("model.nation.english");
+        final Unit privateer = new ServerUnit(game, map.getTile(15, 7), dutch,
+            spec().getUnitType("model.unit.privateer"));
+        final Unit loser = new ServerUnit(game, map.getTile(16, 7), english,
+            spec().getUnitType("model.unit.merchantman"));
+        final Unit stranger = new ServerUnit(game, map.getTile(17, 7), english,
+            spec().getUnitType("model.unit.frigate"));
+        final GoodsType furs = spec().getGoodsType("model.goods.furs");
+        final GoodsType sugar = spec().getGoodsType("model.goods.sugar");
+        final List<Goods> taken = List.of(new Goods(game, null, furs, 100),
+            new Goods(game, null, sugar, 100), new Goods(game, null, furs, 50));
+        final String title = Messages.message("captureGoodsDialog.title");
+        // FreeCol's words: the title and one line per goods type.
+        List<ClassicAdvisorBox.Request> ns = ClassicSeams.lootNotices(null, privateer,
+            english, taken, "t");
+        assertEquals(1, ns.size());
+        assertTrue(ns.get(0).isNotice());
+        final String fc = ns.get(0).plainText();
+        assertTrue(fc, fc.startsWith(title));
+        assertTrue(fc, fc.contains(ClassicAdvisorBox.literal(Messages.message(
+            new net.sf.freecol.common.model.AbstractGoods(furs, 150).getLabel()))));
+        assertEquals(3, fc.split("\n").length);
+        assertTrue(ClassicSeams.lootNotices(null, privateer, english,
+            new ArrayList<>(), "t").isEmpty());
+
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t == null) {
+            System.err.println("ClassicGUISeamTest: testLootNotice's GAME.TXT part"
+                + " skipped, no pack texts (ant classic-assets)");
+            return;
+        }
+        assertEquals("loot", ClassicSeams.lootNotices(t, privateer, null, taken,
+            "t").get(0).id);                         // the loser not known
+        ns = ClassicSeams.lootNotices(t, privateer, english, taken, "t");
+        assertEquals(2, ns.size());
+        final String first = ns.get(0).plainText();
+        assertEquals(ClassicSeams.CARGO_CAPTURE, ns.get(0).id);
+        assertTrue(ns.get(0).isNotice());
+        assertSame(ClassicAdvisorBox.Portrait.NONE, ns.get(0).portrait);
+        for (String s : new String[] { "Engl.", "Holl.", "150",
+                Messages.getName(furs), Messages.getName(privateer.getType()) }) {
+            assertTrue(s + " in " + first, first.contains(s));
+        }
+        assertTrue(ns.get(1).plainText().contains(Messages.getName(sugar)));
+        assertEquals("Holl.", ClassicSeams.abbrev(t, dutch));
+        assertNull(ClassicSeams.abbrev(t, game.getPlayerByNationId("model.nation.inca")));
+
+        // Through the GUI: the fight shown before names the loser.
+        final FakePrompter fake = new FakePrompter();
+        final ClassicGUI gui = new ClassicGUI(null);
+        gui.prompter = fake;
+        onEdt(() -> {
+                gui.animateUnitAttack(loser, privateer, loser.getTile(),
+                                      privateer.getTile(), false);
+                gui.showCaptureGoodsDialog(privateer, taken.subList(0, 1), gl -> {});
+            });
+        assertEquals(ClassicSeams.CARGO_CAPTURE, last(fake.boxes).id);
+        // A fight of others: FreeCol's words.
+        onEdt(() -> {
+                gui.animateUnitAttack(stranger, loser, stranger.getTile(),
+                                      loser.getTile(), true);
+                gui.showCaptureGoodsDialog(privateer, taken.subList(0, 1), gl -> {});
+            });
+        assertEquals("loot", last(fake.boxes).id);
+    }
+
+    /**
+     * G1 (N15): William Brewster's and the Fountain of Youth's choice of
+     * a recruit: a list box of the three, the bar on row 1, Escape and a
+     * click beside it doing nothing; a row answers its slot (1-based), a
+     * box closed without a row answers nothing.  GAME.TXT @RECRUITCHOOSE
+     * with our country and port over the priest, @LOSTCITY0 over the
+     * frontiersman, else FreeCol's words.
+     */
+    public void testEmigrationBox() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Europe europe = dutch.getEurope();
+        if (europe.getExpandedRecruitables(false).size() < 3) {
+            ((ServerEurope) europe).initializeMigration(new Random(7));
+        }
+        final List<AbstractUnit> rs = europe.getExpandedRecruitables(false);
+        assertEquals(3, rs.size());
+        final ClassicGUI gui = new ClassicGUI(null);
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        final List<Integer> slots = new ArrayList<>();
+        fake.answer = 2;
+        onEdt(() -> gui.showEmigrationDialog(dutch, false, slots::add));
+        assertEquals(List.of(3), slots);
+        final ClassicAdvisorBox.Request r = last(fake.boxes);
+        assertEquals(3, r.rows.size());
+        for (int i = 0; i < 3; i++) {
+            assertEquals(ClassicAdvisorBox.literal(Messages.message(
+                rs.get(i).getSingleLabel())), r.plainRows()[i]);
+        }
+        assertEquals(0, r.defaultRow);
+        assertFalse(r.escapes);
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, r.escapeAnswer());
+        assertFalse(r.outsideCancels);
+        assertEquals(ClassicMenuBox.LIST_INDENT, r.rowIndent);
+        fake.answer = ClassicAdvisorBox.Bar.DISMISSED;
+        onEdt(() -> gui.showEmigrationDialog(dutch, true, slots::add));
+        assertEquals(1, slots.size());                 // nothing taken
+
+        // The player's keys on the real bar.
+        final KeyPrompter keys = new KeyPrompter();
+        gui.prompter = keys;
+        keys.press("ESC");
+        onEdt(() -> gui.showEmigrationDialog(dutch, false, slots::add));
+        assertEquals(1, slots.size());
+        assertEquals(0, keys.lastRow);                 // still up, on row 1
+        keys.press("OUT", "ESC");
+        onEdt(() -> gui.showEmigrationDialog(dutch, false, slots::add));
+        assertEquals(1, slots.size());
+        assertEquals(0, keys.lastRow);
+        keys.press("ESC", "DOWN", "ENTER");
+        onEdt(() -> gui.showEmigrationDialog(dutch, false, slots::add));
+        assertEquals(Integer.valueOf(2), last(slots));
+        keys.press("DOWN", "DOWN", "DOWN", "ENTER");
+        onEdt(() -> gui.showEmigrationDialog(dutch, true, slots::add));
+        assertEquals(Integer.valueOf(3), last(slots));
+        keys.press("ENTER");
+        onEdt(() -> gui.showEmigrationDialog(dutch, false, slots::add));
+        assertEquals(Integer.valueOf(1), last(slots));
+        // Nobody to choose (natives have no Europe): no box, no answer.
+        final int asked = keys.boxes.size();
+        onEdt(() -> gui.showEmigrationDialog(
+                game.getPlayerByNationId("model.nation.inca"), false, slots::add));
+        assertEquals(asked, keys.boxes.size());
+        assertEquals(4, slots.size());
+
+        // FreeCol's words without the texts.
+        final ClassicAdvisorBox.Request f = ClassicSeams.emigrationRequest(null,
+            dutch, false, rs, "t");
+        assertEquals(Messages.message("emigrationDialog.chooseImmigrant"), f.plainText());
+        assertSame(ClassicAdvisorBox.Portrait.NONE, f.portrait);
+        final ClassicAdvisorBox.Request ff = ClassicSeams.emigrationRequest(null,
+            dutch, true, rs, "t");
+        assertTrue(ff.plainText().startsWith(ClassicAdvisorBox.literal(Messages.message(
+            "model.lostCityRumour.fountainOfYouth.description"))));
+        assertFalse(ff.escapes);
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t == null) {
+            System.err.println("ClassicGUISeamTest: testEmigrationBox's GAME.TXT part"
+                + " skipped, no pack texts (ant classic-assets)");
+            return;
+        }
+        final ClassicAdvisorBox.Request b = ClassicSeams.emigrationRequest(t, dutch,
+            false, rs, "t");
+        assertEquals(ClassicSeams.RECRUIT_CHOOSE, b.id);
+        assertTrue(b.plainText(), b.plainText().contains("Holland"));
+        assertTrue(b.plainText(), b.plainText().contains("Amsterdam"));
+        assertFalse(b.plainText(), b.plainText().contains("%"));
+        assertSame(ClassicAdvisorBox.Portrait.PRIEST, b.portrait);
+        assertEquals(3, b.rows.size());
+        assertFalse(b.escapes);
+        assertEquals(ClassicMenuBox.LIST_INDENT, b.rowIndent);
+        final ClassicAdvisorBox.Request s = ClassicSeams.emigrationRequest(t,
+            game.getPlayerByNationId("model.nation.spanish"), false, rs, "t");
+        assertTrue(s.plainText(), s.plainText().contains("Sevilla"));
+        final ClassicAdvisorBox.Request y = ClassicSeams.emigrationRequest(t, dutch,
+            true, rs, "t");
+        assertEquals(ClassicSeams.LOST_CITY_CHOOSE, y.id);
+        assertSame(ClassicAdvisorBox.Portrait.SCOUT, y.portrait);
+        assertEquals(3, y.rows.size());
+        assertEquals(0, y.defaultRow);
+        assertFalse(y.escapes);
+    }
+
+    /**
+     * G1 (N15): a proposal sent to us.  The first contact's peace with
+     * another European nation is accepted at once, no box (the server waits
+     * 1000 hours for it otherwise); any other is a box with "Annehmen" and
+     * "Abbrechen", the bar and Escape on "Abbrechen"; each answers the
+     * handler once.  Our own fresh proposal is not built yet: the "not
+     * yet" notice, and nothing is sent.
+     */
+    public void testNegotiation() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        final ClassicGUI gui = new ClassicGUI(null);
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        final List<DiplomaticTrade> got = new ArrayList<>();
+        final DiplomaticTrade peace = DiplomaticTrade.makePeaceTreaty(
+            DiplomaticTrade.TradeContext.CONTACT, dutch, french);
+        assertTrue(ClassicSeams.isContactPeace(peace));
+        assertFalse(ClassicSeams.isOwnProposal(peace));
+        final List<net.sf.freecol.common.model.TradeItem> items
+            = new ArrayList<>(peace.getItems());
+        onEdt(() -> gui.showNegotiationDialog(null, null, peace,
+            peace.getReceiveMessage(french), got::add));
+        assertEquals(1, got.size());
+        assertSame(peace, got.get(0));
+        assertEquals(DiplomaticTrade.TradeStatus.ACCEPT_TRADE, peace.getStatus());
+        assertEquals(items, peace.getItems());          // unchanged
+        assertTrue(fake.boxes.isEmpty());
+
+        // Gold: a box, "Abbrechen" barred.
+        final DiplomaticTrade gold = new DiplomaticTrade(game,
+            DiplomaticTrade.TradeContext.DIPLOMATIC, french, dutch,
+            List.of(new GoldTradeItem(game, french, dutch, 100)), 1);
+        assertFalse(ClassicSeams.isContactPeace(gold));
+        assertFalse(ClassicSeams.isOwnProposal(gold));
+        fake.answer = 1;
+        onEdt(() -> gui.showNegotiationDialog(null, null, gold,
+            gold.getReceiveMessage(french), got::add));
+        assertEquals(2, got.size());
+        assertSame(gold, last(got));
+        assertEquals(DiplomaticTrade.TradeStatus.REJECT_TRADE, gold.getStatus());
+        final ClassicAdvisorBox.Request box = last(fake.boxes);
+        assertEquals(Messages.message("negotiationDialog.accept"), box.plainRows()[0]);
+        assertEquals(Messages.message("negotiationDialog.cancel"), box.plainRows()[1]);
+        assertEquals(1, box.defaultRow);
+        assertEquals(1, box.cancelRow);
+        assertTrue(box.escapes);
+        assertFalse(box.outsideCancels);
+        assertTrue(box.plainText(), box.plainText().contains(ClassicAdvisorBox.literal(
+            Messages.message(gold.getItems().get(0).getLabel()))));
+        assertTrue(box.plainText(), box.plainText().contains(ClassicAdvisorBox.literal(
+            Messages.message(gold.getReceiveMessage(french)))));
+        final KeyPrompter keys = new KeyPrompter();
+        gui.prompter = keys;
+        final Object[][] cases = {
+            { new String[] { "ENTER" }, DiplomaticTrade.TradeStatus.REJECT_TRADE },
+            { new String[] { "UP", "ENTER" }, DiplomaticTrade.TradeStatus.ACCEPT_TRADE },
+            { new String[] { "ESC" }, DiplomaticTrade.TradeStatus.REJECT_TRADE },
+            { new String[] { "UP", "ESC" }, DiplomaticTrade.TradeStatus.REJECT_TRADE },
+            { new String[] { "OUT" }, DiplomaticTrade.TradeStatus.REJECT_TRADE },
+        };
+        for (Object[] c : cases) {
+            gold.setStatus(DiplomaticTrade.TradeStatus.PROPOSE_TRADE);
+            final int before = got.size();
+            keys.press((String[]) c[0]);
+            onEdt(() -> gui.showNegotiationDialog(null, null, gold, null, got::add));
+            assertEquals(before + 1, got.size());
+            assertEquals(String.join(" ", (String[]) c[0]), c[1], gold.getStatus());
+        }
+        // A contact treaty that asks for more than peace is no plain peace.
+        final DiplomaticTrade more = DiplomaticTrade.makePeaceTreaty(
+            DiplomaticTrade.TradeContext.CONTACT, dutch, french);
+        more.add(new GoldTradeItem(game, dutch, french, 50));
+        assertFalse(ClassicSeams.isContactPeace(more));
+
+        // Our own fresh proposal: the "not yet" notice, null to the handler.
+        gui.prompter = fake;
+        final int boxes = fake.boxes.size();
+        final DiplomaticTrade own = new DiplomaticTrade(game,
+            DiplomaticTrade.TradeContext.DIPLOMATIC, dutch, french, null, 0);
+        assertTrue(ClassicSeams.isOwnProposal(own));
+        onEdt(() -> gui.showNegotiationDialog(null, null, own, null, got::add));
+        assertNull(last(got));
+        assertEquals(boxes + 1, fake.boxes.size());
+        assertTrue(last(fake.boxes).isNotice());
+        assertEquals(Messages.message("classic.mainMenu.notYet"), last(fake.texts));
+    }
+
+    /**
+     * G1 (N15), on the server: the first contact of our land unit with a
+     * European one opens a diplomacy session of 1000 hours (single
+     * player) that the end of turn waits for; the seam's answer, the peace
+     * without a box, ends it, and the two nations are at peace.
+     */
+    public void testEuropeanContactSessionCompletes() throws Exception {
+        final Game game = ServerTestHelper.startServerGame(getTestMap(true));
+        try {
+            final net.sf.freecol.server.control.InGameController igc
+                = ServerTestHelper.getInGameController();
+            final Map map = game.getMap();
+            final ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+            final ServerPlayer french = getServerPlayer(game, "model.nation.french");
+            final Tile here = map.getTile(5, 8);
+            final Tile there = here.getNeighbourOrNull(Direction.N);
+            final Unit scout = new ServerUnit(game, here, dutch,
+                spec().getUnitType("model.unit.freeColonist"));
+            final Unit other = new ServerUnit(game, there, french,
+                spec().getUnitType("model.unit.freeColonist"));
+            assertNotSame(net.sf.freecol.common.model.Stance.PEACE,
+                          dutch.getStance(french));
+            dutch.csEuropeanFirstContact(scout, null, other,
+                new net.sf.freecol.common.networking.ChangeSet());
+            assertTrue(Session.waitingForSession());   // the freeze, unanswered
+            final net.sf.freecol.server.model.DiplomacySession ds
+                = net.sf.freecol.server.model.DiplomacySession
+                .findContactSession(scout, other);
+            assertNotNull(ds);
+            final DiplomaticTrade dt = ds.getAgreement();
+            assertTrue(ClassicSeams.isContactPeace(dt));
+            final ClassicGUI gui = new ClassicGUI(null);
+            final FakePrompter fake = new FakePrompter();
+            gui.prompter = fake;
+            onEdt(() -> gui.showNegotiationDialog(scout, other, dt, null,
+                    a -> igc.europeanFirstContact(dutch, scout, null, other, null, a)));
+            assertTrue(fake.boxes.isEmpty());
+            assertFalse("the session ended", Session.waitingForSession());
+            assertSame(net.sf.freecol.common.model.Stance.PEACE, dutch.getStance(french));
+        } finally {
+            Session.clearAll();
+            ServerTestHelper.stopServerGame();
+        }
+    }
+
+    /**
+     * G1 (N15): a village's and a tile's facts as notices in FreeCol's
+     * words; nothing for null or an unexplored tile.  The village notice
+     * fits the screen (nothing is cut).
+     */
+    public void testVillageAndTileNotices() throws Exception {
+        final Game game = getStandardGame();
+        final Map map = getTestMap(true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final IndianSettlement is = new IndianSettlementBuilder(game)
+            .player(game.getPlayerByNationId("model.nation.arawak")).build();
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                Player myPlayer() {
+                    return dutch;
+                }
+
+                @Override
+                java.awt.Image iconOf(net.sf.freecol.common.model.FreeColObject d) {
+                    return null;   // no image resources in the test
+                }
+            };
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        final Object[] ret = { "x" };
+        onEdt(() -> ret[0] = gui.showIndianSettlementPanel(is));
+        assertNull(ret[0]);
+        assertEquals(1, fake.boxes.size());
+        final ClassicAdvisorBox.Request v = last(fake.boxes);
+        assertTrue(v.isNotice());
+        final String text = v.plainText();
+        for (String s : new String[] {
+                Messages.message(is.getLocationLabelFor(dutch)),
+                Messages.message("indianSettlementPanel.learnableSkill"),
+                Messages.message(is.getLearnableSkillLabel(false)),
+                Messages.message("indianSettlementPanel.mostHated"),
+                Messages.message("indianSettlementPanel.highlyWanted") }) {
+            assertTrue(s + " in " + text, text.contains(ClassicAdvisorBox.literal(s)));
+        }
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
+        if (tiny != null) {
+            final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(v, tiny, null);
+            assertNotNull(l);
+            for (ClassicTextLayout.Line line : l.prompt) {
+                assertFalse(line.marked, line.marked.endsWith(" ..."));
+            }
+        }
+        final Tile tile = map.getTile(3, 4);
+        onEdt(() -> ret[0] = gui.showTilePanel(tile));
+        assertNull(ret[0]);
+        assertEquals(2, fake.boxes.size());
+        assertTrue(last(fake.boxes).isNotice());
+        assertTrue(last(fake.texts), last(fake.texts).contains("(3, 4)"));
+        assertTrue(last(fake.texts), last(fake.texts).contains(
+            Messages.message("tilePanel.movementCost")));
+        onEdt(() -> {
+                gui.showIndianSettlementPanel(null);
+                gui.showTilePanel(null);
+            });
+        assertEquals(2, fake.boxes.size());
     }
 
     private static <T> T last(List<T> l) {

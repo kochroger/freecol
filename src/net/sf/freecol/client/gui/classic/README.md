@@ -1140,8 +1140,15 @@ testArmDelayed`.
   `@TAXOPTIONS`) opens on "Den königlichen Ring küssen" (clip005 #17489,
   clip006 #7380), so Enter there now accepts the tax
   (`ClassicGUI.monarchEnterAccepts`: `RAISE_TAX_ACT`, `RAISE_TAX_WAR`);
-  FreeCol's box, and ours before, took the party. "Nein" and Escape still
-  hold the party: Escape answers no (W0e, Roger's rule). The mercenary offers
+  FreeCol's box, and ours before, took the party. "Nein" holds the party.
+  Escape does nothing in the King's decision boxes (G1, Roger: "man muss
+  sich entscheiden"; before G1 Escape answered no, the party): the box and
+  its bar stay until a row is taken, in the canvas and in the stopgap
+  window (no Escape binding, the close button inert). A box that closed
+  without a row (the game view went, the box failed) answers its first row,
+  the ring or "Nein danke", never the party (`ClassicGUI.eventAnswer`). The
+  King's notices (no "yes": a lower tax, war declared ...) still close on
+  any key. The mercenary offers
   keep Enter on "no" (`@MERCENARIES` lists "Nein danke." first; I), and the
   advisor box (W7) lists their "no" first, with the bar on it. The
   natives' demands (`showNativeDemandDialog`) keep Enter and Escape on the
@@ -1155,9 +1162,9 @@ testArmDelayed`.
   tension and bans missions for that nation (`nativeFirstContact`), the
   land on offer is lost, and the original answers with `@INDIANSHUN` ("Das
   bedeutet KRIEG!") -- and several such boxes can come at one turn start.
-  Escape still refuses (W0e, Roger's rule; an open question for him, next
-  to Escape at the king's tax). `askEvent` takes the row Enter picks from
-  its caller.
+  Escape still refuses (W0e, Roger's rule; an open question for him), as
+  at a native demand. `askEvent` takes the row Enter picks, and whether
+  Escape does nothing (`mustChoose`), from its caller.
 - **Back to Europe from anywhere (C trap 2).** BEFEHLE row 16 "Zurück nach
   Europa" (ships only) and its gold letter R fire FreeCol's new
   `ReturnToEuropeAction` (`returnToEuropeAction`), which calls
@@ -1289,7 +1296,9 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
   without one); in a FreeCol box on the row FreeCol makes the default.
   Up and Down (also the keypad's 8/2, held keys repeating) move it one row,
   never past the ends, in one paint; Enter takes its row, Escape the box's
-  cancel row (Roger's rule: the "no" row). The mouse never moves it by
+  cancel row (Roger's rule: the "no" row), except in the boxes where one
+  must choose (the King's decisions, the father and recruit boxes:
+  `noEscape`), where Escape does nothing. The mouse never moves it by
   hovering: a press on a row puts it there and the release on that row
   takes it; a press outside the box removes it and the release outside
   closes the box as Escape (clip004, the options box). The portrait's own
@@ -1403,7 +1412,10 @@ menus, @RECRUIT) are advisor boxes with a few more parts, each a
 - **F1 hook** (`help`, `Help`): F1 tells the hook the barred row and the
   box closes with `Bar.HELP` (-2); the caller shows the help and may ask
   the box again. Without a hook F1 is any other key.
-- **No Escape** (`noEscape`): Escape does nothing (the father box).
+- **No Escape** (`noEscape`): Escape does nothing (the father box, the
+  King's decisions, the recruit box; G1). The stopgap window of such a box
+  has no Escape binding and an inert close button
+  (`ClassicDialog.ask(..., cancellable)`).
 - **A page** (`picture`): a full-screen 320x200 picture instead of a box,
   a notice of the whole screen (any key or click closes it): the
   Colonopedia page below.
@@ -1453,6 +1465,56 @@ Tests: `ClassicNoticesTest` (the silent ones, the rules, the tribe, the
 words with the pack, the GUI's two seams; and `testGoldenAgainstTheClips`:
 @BURIAL1, @CHIEFGUIDES, @LEARNALREADY and @CHIEFGIFT as the GUI builds
 them from FreeCol's messages, 0 px off on box and portrait).
+
+### The silent seams (`ClassicSeams`; master plan N15, G1)
+
+Seams the base GUI leaves silent, and what the classic UI answers there.
+Two of them froze the game: the server's end of turn waits for every open
+`Session` (`InGameController.endTurn`: `while (Session.waitingForSession())
+sleep`).
+
+- **Loot** (`showCaptureGoodsDialog`; froze). A naval win against a loaded
+  ship opens a `LootSession` without a timer. It is answered at once, no
+  question: what fits, the most valuable first at our market's bid price,
+  each one only if the server's own check (`Unit.canAdd`, one after the
+  other) takes it (`ClassicSeams.lootTaken`); never `null` and never more
+  than fits (either leaves the session open). Then one GAME.TXT
+  `@CARGOCAPTURE` notice per goods type ("Engl. Ware (150 Felle) durch
+  Holl. Kaperschiff erobert!"), the loser being the one our ship fought last
+  (`animateUnitAttack` only remembers the fight; the animation is W12);
+  without the loser or the texts, FreeCol's words in one notice. I: no clip
+  shows a loot; GAME.TXT has no capture question.
+- **First contact with Europeans** (`showNegotiationDialog`; froze). Our
+  land unit meeting a European unit or colony gets the peace treaty in a
+  `DiplomacySession` of 1000 hours (single player). The peace is accepted
+  at once, no box (`ClassicSeams.isContactPeace`; I). Any other proposal
+  sent to us: a box in FreeCol's words, "Annehmen" / "Abbrechen", the bar
+  and Escape on "Abbrechen". Our own proposals (a scout's "Verhandeln", a
+  ship's trade at a foreign colony): the "not yet" notice, nothing sent.
+- **The recruits** (`showEmigrationDialog`: William Brewster, the Fountain
+  of Youth). A list box of the three recruits (D2's rows), bar on row 1,
+  Escape and a click beside it do nothing: GAME.TXT `@RECRUITCHOOSE` (our
+  `@COUNTRY`, `@HOMEPORT`) over the priest, `@LOSTCITY0` over the
+  frontiersman (I, in no clip); FreeCol's words without the texts. Before,
+  after Brewster no recruit ever came.
+- **A village, a tile** (`showIndianSettlementPanel`, `showTilePanel`):
+  notices in FreeCol's words. A click on a native village centres the view
+  and then shows its notice (`ClassicMapViewer.clickOn`; an invention, the
+  original's reaction is in no clip; one call to drop). Nothing calls the
+  tile notice.
+
+Listed, not changed (they do not block): `showVictoryDialog` (the win's
+question is never answered, the game goes on), `showNamingDialog` (the
+first landing's and the regions' names: the server's default names stay),
+`showSelectTributeAmountDialog` (a tribute demand at a European colony is
+dropped, the move kept), and the seams the classic UI never reaches (the
+menu rows of `ClassicMenuModel.NOOP_SEAMS`, the pre-game, editor and
+multiplayer panels).
+
+Tests: `ClassicGUISeamTest` (`testLootIsAnsweredAtOnce`,
+`testLootSessionCompletes` on a server, `testLootNotice`,
+`testEmigrationBox`, `testNegotiation`, `testVillageAndTileNotices`),
+`ClassicMapViewerTest.testClickOnAVillage`.
 
 ### The founding father choice (`ClassicFathers`, `ClassicPedia`; build spec D8a, D8b's page)
 
@@ -2870,8 +2932,9 @@ otherwise a reassuring picture:
   the event dialogs (monarch, emigration, naming, first-contact, native-demand)
   no-op'd today, and some *return a value that gates flow*. **Chasing this down
   found three real bugs, now fixed** — see "Event confirm dialogs" below. Two
-  remain, tied to the Q4 widgets: `showEmigrationDialog` (pick 1 of 3 recruits —
-  a choice) and `showNamingDialog` (name a colony/region — text input).
+  remained, tied to the Q4 widgets: `showEmigrationDialog` (pick 1 of 3 recruits —
+  a choice; since G1 a list box, "The silent seams" above) and
+  `showNamingDialog` (name a colony/region — text input; still silent).
 
 ### Wired seams
 
@@ -2920,11 +2983,12 @@ the choice to the handler. `ClassicDialog.ask` is modal-blocking, which is right
 for a demand that *must* be answered; the controllers already post these via
 `invokeLater`, so blocking the EDT (which pumps events) is fine. The handler runs
 in a `finally`, so a popup failure still resolves the exchange (as a reject)
-rather than leaving it dangling.
+rather than leaving it dangling; since G1 a King's decision box resolves it
+with its first row instead (the ring, "Nein danke"), never the party.
 
-The remaining two event dialogs, `showEmigrationDialog` (choose 1 of 3 recruits)
-and `showNamingDialog` (name a colony/region), need the choice-list and
-text-field widgets — the same Q4-blocked work as `modalChoiceDialog` /
+Of the remaining two event dialogs, `showEmigrationDialog` (choose 1 of 3
+recruits) is a list box since G1 ("The silent seams" above); `showNamingDialog`
+(name a colony/region) still needs the text field — the same Q4-blocked work as
 `modalInputDialog`.
 
 **Verified live** (2026-07-17 / -18): an end-of-turn notice (*Sons of Liberty at

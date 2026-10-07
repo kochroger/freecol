@@ -184,7 +184,18 @@ final class ClassicDialog extends JPanel {
     private final int vh;
 
 
-    private ClassicDialog(List<Page> pages, String[] options, int defaultIndex) {
+    /**
+     * A popup's panel.  Package-private for the tests: the panel can be
+     * built headless, its {@code JDialog} cannot.
+     *
+     * @param pages The pages.
+     * @param options The option plates.
+     * @param defaultIndex The option {@code Enter} picks.
+     * @param cancellable Whether Escape dismisses it; else Escape does
+     *     nothing (the King's decision boxes, the father box).
+     */
+    ClassicDialog(List<Page> pages, String[] options, int defaultIndex,
+                  boolean cancellable) {
         this.pages = pages;
         this.options = options;
         this.page = 0;
@@ -193,7 +204,7 @@ final class ClassicDialog extends JPanel {
         setBackground(Color.BLACK);
         setPreferredSize(new Dimension(VW * SCALE, this.vh * SCALE));
         setFocusable(true);
-        installKeyBindings(defaultIndex);
+        installKeyBindings(defaultIndex, cancellable);
         addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent e) {
@@ -221,7 +232,8 @@ final class ClassicDialog extends JPanel {
      */
     static void showMessages(Window owner, String title, List<Page> pages) {
         if (pages == null || pages.isEmpty()) return;
-        show(owner, title, pages, new String[] { Messages.message("ok") }, 0);
+        show(owner, title, pages, new String[] { Messages.message("ok") }, 0,
+             true);
     }
 
     /**
@@ -237,7 +249,27 @@ final class ClassicDialog extends JPanel {
      */
     static int ask(Window owner, String title, Page page, String[] options,
                    int defaultIndex) {
-        return show(owner, title, List.of(page), options, defaultIndex);
+        return ask(owner, title, page, options, defaultIndex, true);
+    }
+
+    /**
+     * Put a question, blocking until it is answered.  One that is not
+     * {@code cancellable} ignores Escape and the window's close button:
+     * only a plate, or Enter, answers it.
+     *
+     * @param owner The window to centre on.
+     * @param title The dialog window's title.
+     * @param page The question and its illustration.
+     * @param options The option plates, left to right.
+     * @param defaultIndex The option {@code Enter} picks.
+     * @param cancellable Whether Escape and the close button dismiss it.
+     * @return The index into {@code options} chosen, or {@code -1} if the
+     *     popup was dismissed without choosing.
+     */
+    static int ask(Window owner, String title, Page page, String[] options,
+                   int defaultIndex, boolean cancellable) {
+        return show(owner, title, List.of(page), options, defaultIndex,
+                    cancellable);
     }
 
     /**
@@ -247,11 +279,15 @@ final class ClassicDialog extends JPanel {
      * meaningful, and the entry points above never build one.
      */
     private static int show(Window owner, String title, List<Page> pages,
-                            String[] options, int defaultIndex) {
-        final ClassicDialog p = new ClassicDialog(pages, options, defaultIndex);
+                            String[] options, int defaultIndex,
+                            boolean cancellable) {
+        final ClassicDialog p = new ClassicDialog(pages, options, defaultIndex,
+                                                  cancellable);
         final JDialog d = new JDialog(owner, title, JDialog.ModalityType.APPLICATION_MODAL);
         p.dialog = d;
-        d.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        d.setDefaultCloseOperation((cancellable)
+            ? WindowConstants.DISPOSE_ON_CLOSE
+            : WindowConstants.DO_NOTHING_ON_CLOSE);
         d.setContentPane(p);
         d.setResizable(false);
         // Undecorated and centred over the owner in full screen (the popup
@@ -304,16 +340,18 @@ final class ClassicDialog extends JPanel {
 
     // Input
 
-    private void installKeyBindings(int defaultIndex) {
+    private void installKeyBindings(int defaultIndex, boolean cancellable) {
         final InputMap im = getInputMap(WHEN_IN_FOCUSED_WINDOW);
         final ActionMap am = getActionMap();
-        im.put(KeyStroke.getKeyStroke("ESCAPE"), "classic_dialogCancel");
-        am.put("classic_dialogCancel", new AbstractAction() {
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    close(-1);
-                }
-            });
+        if (cancellable) {
+            im.put(KeyStroke.getKeyStroke("ESCAPE"), "classic_dialogCancel");
+            am.put("classic_dialogCancel", new AbstractAction() {
+                    @Override
+                    public void actionPerformed(ActionEvent e) {
+                        close(-1);
+                    }
+                });
+        }
         im.put(KeyStroke.getKeyStroke("ENTER"), "classic_dialogDefault");
         am.put("classic_dialogDefault", new AbstractAction() {
                 @Override

@@ -72,15 +72,21 @@ import net.sf.freecol.common.FreeColException;
 import net.sf.freecol.common.i18n.Messages;
 import net.sf.freecol.common.i18n.NameCache;
 import net.sf.freecol.common.io.FreeColModFile;
+import net.sf.freecol.common.model.AbstractUnit;
 import net.sf.freecol.common.model.Colony;
+import net.sf.freecol.common.model.DiplomaticTrade;
+import net.sf.freecol.common.model.DiplomaticTrade.TradeStatus;
 import net.sf.freecol.common.model.Direction;
+import net.sf.freecol.common.model.Europe;
 import net.sf.freecol.common.model.FoundingFather;
 import net.sf.freecol.common.model.FreeColObject;
 import net.sf.freecol.common.model.FreeColGameObject;
 import net.sf.freecol.common.model.Game;
+import net.sf.freecol.common.model.Goods;
 import net.sf.freecol.common.model.GoodsType;
 import net.sf.freecol.common.model.HighScore;
 import net.sf.freecol.common.model.IndianNationType;
+import net.sf.freecol.common.model.IndianSettlement;
 import net.sf.freecol.common.model.ModelMessage;
 import net.sf.freecol.common.model.Monarch.MonarchAction;
 import net.sf.freecol.common.model.Game.LogoutReason;
@@ -3753,8 +3759,12 @@ public class ClassicGUI extends GUI {
      * (a null {@code yesKey} = an acknowledge-only notice), over the monarch's
      * portrait.  Enter takes the original's first row
      * ({@link #monarchEnterAccepts}): at a tax rise that is "kiss the ring",
-     * not the party.  Escape answers "no" (W0e, Roger's rule), which at a
-     * tax rise is the party, as in FreeCol's own box.  In the advisor box
+     * not the party.  Escape does nothing in a box with a choice (Roger:
+     * "man muss sich entscheiden"): the box and its bar stay until a row is
+     * taken; FreeCol's own box takes Escape as the party.  A box that closed
+     * without a row (the game view went) answers its first row, the ring or
+     * "Nein danke", never the party ({@link #eventAnswer}).  The notices
+     * without a choice still close on any key.  In the advisor box
      * (W7) the King stands at the left and the box is flush right
      * ({@link ClassicAdvisorBox.Portrait#KING}); where Enter takes the "no"
      * (the mercenary offers) the "no" is the first row, as the original's
@@ -3781,7 +3791,7 @@ public class ClassicGUI extends GUI {
         final boolean enterAccepts = monarchEnterAccepts(action);
         askEvent("monarch " + action, ImageLibrary.getMonarchImage(monarchKey),
                  Messages.message(hdrKey), msg, yesKey, noKey, enterAccepts,
-                 !enterAccepts, ClassicAdvisorBox.Portrait.KING, handler);
+                 !enterAccepts, true, ClassicAdvisorBox.Portrait.KING, handler);
     }
 
     /**
@@ -3843,7 +3853,7 @@ public class ClassicGUI extends GUI {
         }
         askEvent("first-contact " + other.getNation().getSuffix(),
                  ImageLibrary.getMeetingImage(other), Messages.message(hdrKey),
-                 msg, "yes", "no", true, false,
+                 msg, "yes", "no", true, false, false,
                  ClassicAdvisorBox.Portrait.chief(tribeIndex(other)), handler);
     }
 
@@ -3906,8 +3916,8 @@ public class ClassicGUI extends GUI {
         final StringTemplate title = StringTemplate
             .template("nativeDemandDialog.name").addName("%colony%", colony.getName());
         askEvent("native-demand", demandIcon(colony), Messages.message(title),
-                 msg, yes, no, false, true, ClassicAdvisorBox.Portrait.NONE,
-                 handler);
+                 msg, yes, no, false, true, false,
+                 ClassicAdvisorBox.Portrait.NONE, handler);
     }
 
     /**
@@ -3935,7 +3945,11 @@ public class ClassicGUI extends GUI {
      * events) is fine; the handler fires with the result the instant the box
      * closes.  The handler runs in a {@code finally} so the server exchange
      * still resolves (as a reject) if the box throws, rather than dangling.
-     * Escape takes the "no" row (W0e), whichever row Enter takes.  A click
+     * Escape takes the "no" row (W0e), whichever row Enter takes, except
+     * where the player must choose ({@code mustChoose}: the King's decision
+     * boxes, G1): there Escape does nothing, the box is asked until a row
+     * is taken ({@link #askUntilAnswered}), and a box that closed without
+     * one answers its first row ({@link #eventAnswer}).  A click
      * outside the box does nothing here ({@link
      * ClassicAdvisorBox.Request#outsideCancels} off): these "no"s cannot be
      * undone (the Tea Party, a refused peace, a refused demand), and the
@@ -3949,11 +3963,13 @@ public class ClassicGUI extends GUI {
      *     row; else on the "no" row.
      * @param noFirst Whether the "no" row comes first (the original's order
      *     where Enter refuses: the natives' demands, the mercenaries).
+     * @param mustChoose Whether Escape does nothing (a box with rows only).
      * @param portrait Who stands at the box.
      */
     private void askEvent(String id, java.awt.Image icon, String title,
                           StringTemplate message, String yesKey, String noKey,
                           boolean enterAccepts, boolean noFirst,
+                          boolean mustChoose,
                           ClassicAdvisorBox.Portrait portrait,
                           DialogHandler<Boolean> handler) {
         final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.Request
@@ -3968,17 +3984,294 @@ public class ClassicGUI extends GUI {
             yesRow = noFirst ? 1 : 0;
             if (noFirst) b.rows(no, yes); else b.rows(yes, no);
             b.defaultRow(enterAccepts ? yesRow : 1 - yesRow).cancelRow(1 - yesRow);
+            if (mustChoose) b.noEscape();
         }
         final ClassicAdvisorBox.Request r = b.build();
         onEventThread(() -> {
                 int chosen = ClassicAdvisorBox.Bar.DISMISSED;
                 try {
-                    chosen = this.prompter.ask(r);
+                    chosen = askUntilAnswered(r);
                 } finally {
-                    if (handler != null) handler.handle(yesRow >= 0 && chosen == yesRow);
+                    if (handler != null) handler.handle(eventAnswer(r, yesRow, chosen));
                 }
                 return null;
             }, null);
+    }
+
+    /** How often a box that must be answered is asked at most. */
+    static final int ASK_ROUNDS = 1000;
+
+    /**
+     * Ask a box until it is answered (EDT only): a prompter may report a
+     * box that ignores Escape as still open ({@link ClassicAdvisorBox.Bar#OPEN}:
+     * the stopgap's selection list, the tests), and it is then asked again,
+     * as the father box is ({@link #askFathers}).
+     *
+     * @param r The box.
+     * @return The answer ({@link Prompter#ask}); {@code OPEN} only after
+     *     {@link #ASK_ROUNDS} rounds.
+     */
+    int askUntilAnswered(ClassicAdvisorBox.Request r) {
+        int chosen = ClassicAdvisorBox.Bar.OPEN;
+        for (int round = 0; round < ASK_ROUNDS
+                 && chosen == ClassicAdvisorBox.Bar.OPEN; round++) {
+            chosen = this.prompter.ask(r);
+        }
+        if (chosen == ClassicAdvisorBox.Bar.OPEN) {
+            logger.warning("Classic box " + r.id + " still open after "
+                + ASK_ROUNDS + " rounds.");
+        }
+        return chosen;
+    }
+
+    /**
+     * The answer of an event box ({@link #askEvent}): its "yes" row, or
+     * not.  A box that closed without a row (the game view went, the box
+     * failed) answers "no", except a box that ignores Escape (the King's
+     * decisions): it answers the row its bar opened on (the ring at a tax
+     * rise, "Nein danke" at an offer), so the party, the one "no" that
+     * cannot be undone, is never held by itself.
+     *
+     * @param r The box.
+     * @param yesRow Its "yes" row, or -1 for a notice.
+     * @param chosen Its answer ({@link Prompter#ask}).
+     * @return True for "yes".
+     */
+    static boolean eventAnswer(ClassicAdvisorBox.Request r, int yesRow,
+                               int chosen) {
+        if (yesRow < 0) return false;
+        if (chosen >= 0 && chosen < r.rows.size()) return chosen == yesRow;
+        return !r.escapes && r.defaultRow == yesRow;
+    }
+
+    // The silent seams (master plan N15, G1; ClassicSeams)
+
+    /** The last fight shown to us: the units and their owners then. */
+    private static final class Fight {
+
+        final Unit attacker, defender;
+        final Player attackerOwner, defenderOwner;
+
+        Fight(Unit attacker, Unit defender) {
+            this.attacker = attacker;
+            this.defender = defender;
+            this.attackerOwner = (attacker == null) ? null : attacker.getOwner();
+            this.defenderOwner = (defender == null) ? null : defender.getOwner();
+        }
+
+        /** @return The owner of the one that fought {@code u}, or null. */
+        Player otherOwner(Unit u) {
+            if (u == null) return null;
+            if (u == this.attacker) return this.defenderOwner;
+            if (u == this.defender) return this.attackerOwner;
+            return null;
+        }
+    }
+
+    /** The last fight ({@link #animateUnitAttack}), or null.  EDT only. */
+    private Fight lastFight = null;
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>No animation yet (W12): only who fought is kept, for the loot's
+     * notice ({@link #showCaptureGoodsDialog}), whose message does not name
+     * the loser.  The server sends the attack's animation before the loot
+     * in the same change set, and the controller posts both in that order.
+     */
+    @Override
+    public void animateUnitAttack(Unit attacker, Unit defender,
+                                  Tile attackerTile, Tile defenderTile,
+                                  boolean success) {
+        this.lastFight = new Fight(attacker, defender);
+    }
+
+    /**
+     * Ask a notice or a box whose answer nobody waits for: at once on the
+     * event thread (the controllers post the seams with
+     * {@code invokeLater}), else posted, as {@link #showInformationPanel}.
+     *
+     * @param r The box.
+     */
+    private void askOrPost(ClassicAdvisorBox.Request r) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            this.prompter.ask(r);
+        } else {
+            SwingUtilities.invokeLater(() -> this.prompter.ask(r));
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The base GUI's silence here froze the game: the server waits for
+     * the loot's answer before any end of turn (a {@code LootSession}
+     * has no timer).  So it is answered at once, without a question
+     * ({@link ClassicSeams#lootTaken}: what fits, the most valuable first),
+     * and only then the original's {@code @CARGOCAPTURE} notice comes, one
+     * per goods type ({@link ClassicSeams#lootNotices}).  The handler gets
+     * a list in every case, empty if nothing fits (null would leave the
+     * session open).
+     */
+    @Override
+    public void showCaptureGoodsDialog(final Unit unit, List<Goods> gl,
+                                       DialogHandler<List<Goods>> handler) {
+        if (handler == null) return;
+        if (unit == null) {
+            logger.warning("Classic loot without a winner: not answered.");
+            return;
+        }
+        invokeNowOrLater(() -> {
+                List<Goods> taken = new ArrayList<>();
+                try {
+                    taken = ClassicSeams.lootTaken(unit, gl);
+                } finally {
+                    ClassicFrameRecorder.event("loot", unit.getId() + " offered="
+                        + ((gl == null) ? 0 : gl.size()) + " taken=" + taken.size());
+                    handler.handle(new ArrayList<>(taken));
+                }
+                final Fight f = this.lastFight;
+                try {
+                    for (ClassicAdvisorBox.Request r : ClassicSeams.lootNotices(
+                             ClassicText.load(ClassicPackFiles.runtime()), unit,
+                             (f == null) ? null : f.otherOwner(unit), taken,
+                             Messages.message("captureGoodsDialog.title"))) {
+                        this.prompter.ask(r);
+                    }
+                } catch (RuntimeException e) {
+                    logger.log(Level.WARNING, "Classic loot notice failed.", e);
+                }
+            });
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>William Brewster (the server no longer picks the recruit) and the
+     * Fountain of Youth: the list box of the three recruits
+     * ({@link ClassicSeams#emigrationRequest}).  The bar starts on row 1;
+     * Enter or a click takes a recruit; Escape and a click beside the box
+     * do nothing.  The base GUI's silence meant that after Brewster no
+     * recruit ever came again.  A box that closed without a row (the game
+     * view went) calls nothing: Brewster's choice comes again at the next
+     * turn start.
+     */
+    @Override
+    public void showEmigrationDialog(final Player player, final boolean foy,
+                                     DialogHandler<Integer> handler) {
+        if (player == null || handler == null) return;
+        final Europe europe = player.getEurope();
+        final List<AbstractUnit> recruits = (europe == null)
+            ? new ArrayList<>() : europe.getExpandedRecruitables(false);
+        if (recruits.isEmpty()) {
+            logger.info("Classic emigration box: no recruits.");
+            return;
+        }
+        final ClassicAdvisorBox.Request r = ClassicSeams.emigrationRequest(
+            ClassicText.load(ClassicPackFiles.runtime()), player, foy, recruits,
+            Messages.message("classic.dialog.messages"));
+        invokeNowOrLater(() -> {
+                final int chosen = askUntilAnswered(r);
+                ClassicFrameRecorder.event("emigration", r.id + " foy=" + foy
+                    + " rows=" + recruits.size() + " chosen=" + chosen);
+                if (chosen >= 0 && chosen < recruits.size()) {
+                    handler.handle(Europe.MigrationType.migrantIndexToSlot(chosen));
+                }
+            });
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The first contact with a European nation: the server sends us
+     * the peace treaty and waits for the answer (1000 hours in single
+     * player) before any end of turn, so the base GUI's silence froze the
+     * game.  The peace is accepted at once, without a box
+     * ({@link ClassicSeams#isContactPeace}; I: no clip shows such a
+     * meeting).  Any other proposal sent to us is a box in FreeCol's words
+     * ({@link ClassicSeams#negotiationText}) with "Annehmen" and
+     * "Abbrechen", the bar on "Abbrechen", which Escape takes too.  Our own
+     * proposals (a scout's negotiation, a ship's trade at a foreign
+     * colony) are not built yet: the "not yet" notice, nothing happens.
+     */
+    @Override
+    public void showNegotiationDialog(FreeColGameObject our,
+                                      FreeColGameObject other,
+                                      final DiplomaticTrade agreement,
+                                      StringTemplate comment,
+                                      DialogHandler<DiplomaticTrade> handler) {
+        if (handler == null) return;
+        if (agreement == null) {
+            logger.warning("Classic negotiation without an agreement.");
+            return;
+        }
+        final String title = Messages.message("negotiationDialog.title."
+            + agreement.getContext().getKey());
+        if (ClassicSeams.isOwnProposal(agreement)) {
+            ClassicFrameRecorder.event("negotiation", "own "
+                + agreement.getContext() + ": not yet");
+            try {
+                handler.handle(null);
+            } finally {
+                askOrPost(notice("negotiation", Messages.message(
+                    "classic.mainMenu.notYet"), title, null));
+            }
+            return;
+        }
+        if (ClassicSeams.isContactPeace(agreement)) {
+            ClassicFrameRecorder.event("negotiation", "contact peace accepted");
+            agreement.setStatus(TradeStatus.ACCEPT_TRADE);
+            handler.handle(agreement);
+            return;
+        }
+        askEvent("negotiation " + agreement.getContext(), null, title,
+            StringTemplate.name(ClassicSeams.negotiationText(comment, agreement)),
+            "negotiationDialog.accept", "negotiationDialog.cancel", false, false,
+            false, ClassicAdvisorBox.Portrait.NONE, (Boolean yes) -> {
+                ClassicFrameRecorder.event("negotiation", agreement.getContext()
+                    + " accepted=" + yes);
+                agreement.setStatus((Boolean.TRUE.equals(yes))
+                    ? TradeStatus.ACCEPT_TRADE
+                    : TradeStatus.REJECT_TRADE);
+                handler.handle(agreement);
+            });
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>A native village's facts in FreeCol's words, as a notice
+     * ({@link ClassicSeams#villageText}): the classic map shows it after a
+     * click on a village (an invention: the original's reaction to that
+     * click is in no clip).
+     */
+    @Override
+    public FreeColPanel showIndianSettlementPanel(IndianSettlement is) {
+        final Player me = myPlayer();
+        if (is == null || me == null) return null;
+        ClassicFrameRecorder.event("village-notice", is.getId());
+        askOrPost(notice("village-notice " + is.getId(),
+            ClassicSeams.villageText(is, me),
+            Messages.message("classic.dialog.messages"), iconOf(is)));
+        return null;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>A tile's facts in FreeCol's words, as a notice
+     * ({@link ClassicSeams#tileText}).  Nothing of the classic UI calls it
+     * (the original's tile facts are the view mode's panel); an unexplored
+     * tile shows nothing.
+     */
+    @Override
+    public FreeColPanel showTilePanel(Tile tile) {
+        if (tile == null || !tile.isExplored()) return null;
+        ClassicFrameRecorder.event("tile-notice", tile.getId());
+        askOrPost(notice("tile-notice " + tile.getId(),
+            ClassicSeams.tileText(tile, myPlayer()),
+            Messages.message("classic.dialog.messages"), null));
+        return null;
     }
 
     /**
@@ -4230,8 +4523,10 @@ public class ClassicGUI extends GUI {
             }
             return r.escapeAnswer();
         }
+        // A box that ignores Escape (the King's decisions, the father and
+        // emigration boxes) ignores it, and the close button, here too.
         final int chosen = ClassicDialog.ask(owner, r.title, page, rows,
-                                             r.defaultRow);
+                                             r.defaultRow, r.escapes);
         return (chosen < 0) ? r.escapeAnswer() : chosen;
     }
 

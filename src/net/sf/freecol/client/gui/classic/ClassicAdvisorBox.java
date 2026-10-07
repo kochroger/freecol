@@ -73,15 +73,18 @@ import java.util.Map;
  *   <li><b>Bar (V).</b>  It starts on GAME.TXT's {@code @default=n}
  *       (1-based), else on row 1; it moves one row per key and is redrawn in
  *       one paint; Enter takes the row it is on, Escape the box's cancel
- *       row (Roger's rule).  The mouse never moves it by hovering: a press
- *       on a row puts it there, the release on that row takes it; a press
- *       outside the box removes it and the release closes the box as
- *       Escape (clip004, the options box).  The portrait counts as the box
- *       (I).  A box whose refusal costs dearly (the King's, a first
- *       contact, a native demand: {@link Request#outsideCancels} off, I)
- *       ignores a click outside: the notices teach "click anywhere to go
- *       on", and such a click must not answer it.  A box without rows is a
- *       notice: any key, or a click, dismisses it.</li>
+ *       row (Roger's rule), except where one must choose: the King's
+ *       decision boxes ignore Escape ({@link Request#escapes}, G1), as
+ *       the father and recruit boxes do.  The mouse never moves it by
+ *       hovering: a press on a row puts it there, the release on that row
+ *       takes it; a press outside the box removes it and the release
+ *       closes the box as Escape (clip004, the options box).  The portrait
+ *       counts as the box (I).  A box whose refusal costs dearly (the
+ *       King's, a first contact, a native demand:
+ *       {@link Request#outsideCancels} off, I) ignores a click outside: the
+ *       notices teach "click anywhere to go on", and such a click must not
+ *       answer it.  A box without rows is a notice: any key, or a click,
+ *       dismisses it.</li>
  *   <li><b>Checkbox boxes (V, landing-slow 01-options).</b>  GAME.TXT's
  *       {@code @checkbox} messages (the two option boxes,
  *       {@link ClassicOptionBoxes}) put FONTTINY {@code ]} (on) or
@@ -362,7 +365,10 @@ final class ClassicAdvisorBox {
         /** What F1 does, or null: F1 is then any other key (D2). */
         final Help help;
 
-        /** Whether Escape answers the box (else it does nothing: the father box, D8a). */
+        /**
+         * Whether Escape answers the box; else it does nothing (the father
+         * box, D8a; the King's decisions and the recruit box, G1).
+         */
         final boolean escapes;
 
         /**
@@ -493,6 +499,7 @@ final class ClassicAdvisorBox {
             return this.id + " rows=" + this.rows.size() + " bar=" + this.defaultRow
                 + " esc=" + this.cancelRow + " portrait=" + this.portrait
                 + (this.outsideCancels ? "" : " outside=stays")
+                + (this.escapes ? "" : " esc=stays")
                 + (isCheckbox() ? " checks=" + checkString(this.checks) : "");
         }
 
@@ -595,7 +602,7 @@ final class ClassicAdvisorBox {
             return this;
         }
 
-        /** Escape does nothing (the father box, D8a). */
+        /** Escape does nothing (the father box, D8a; the King's decisions, G1). */
         Builder noEscape() {
             this.escapes = false;
             return this;

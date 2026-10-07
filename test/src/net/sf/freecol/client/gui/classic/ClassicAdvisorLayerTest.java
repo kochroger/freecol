@@ -386,6 +386,36 @@ public class ClassicAdvisorLayerTest extends TestCase {
     }
 
     /**
+     * G1: in the King's decision boxes Escape does nothing (Roger: "man
+     * muss sich entscheiden"): the box and its bar stay, in the canvas;
+     * Enter then takes the barred row.
+     */
+    public void testEscapeInTheKingsBox() throws Exception {
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request.builder("king")
+            .freeColText("a a a").rows("a", "a a").cancelRow(1).noEscape()
+            .portrait(ClassicAdvisorBox.Portrait.KING).outsideCancels(false).build();
+        final Answer a = ask(r);
+        flush();
+        runTimer();                                    // the palette
+        this.clock.advanceMs(ClassicAdvisorLayer.PALETTE_LEAD_MS);
+        runTimer();
+        assertTrue(up());
+        key(KeyEvent.VK_ESCAPE);
+        flush();
+        assertFalse(a.isDone());
+        assertTrue(up());
+        assertEquals(0, bar());
+        key(KeyEvent.VK_DOWN);
+        key(KeyEvent.VK_ESCAPE);
+        flush();
+        assertFalse(a.isDone());
+        assertTrue(up());
+        assertEquals(1, bar());
+        key(KeyEvent.VK_ENTER);
+        assertEquals(1, a.get());
+    }
+
+    /**
      * Chained boxes: the next one comes no earlier than 200 ms after the
      * close of the one before; the screen is restored in between.  A box
      * asked for while one is up waits its turn, and both callers get their

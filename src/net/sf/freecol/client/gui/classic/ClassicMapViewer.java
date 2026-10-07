@@ -54,6 +54,7 @@ import net.sf.freecol.client.gui.ImageLibrary;
 import net.sf.freecol.common.i18n.Messages;
 import net.sf.freecol.common.model.Colony;
 import net.sf.freecol.common.model.Direction;
+import net.sf.freecol.common.model.IndianSettlement;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Settlement;
@@ -2313,8 +2314,21 @@ final class ClassicMapViewer extends JPanel {
         final Tile tile = tileAt(e.getX(), e.getY());
         if (tile == null) return;
         requestFocusInWindow();
-        final Player player = this.freeColClient.getMyPlayer();
+        clickOn(tile, this.freeColClient.getMyPlayer());
+    }
 
+    /**
+     * What a click on a tile does ({@link #onClick}).  A native village
+     * is centred and then its notice comes
+     * ({@code ClassicGUI.showIndianSettlementPanel}, G1, an invention: the
+     * original's reaction is in no clip; drop the post to go back to
+     * centring only), posted, as the click is a press and the box must
+     * not open inside it.  Package-private for the tests.
+     *
+     * @param tile The tile clicked.
+     * @param player Our player, or null.
+     */
+    void clickOn(Tile tile, Player player) {
         if (this.gui != null && this.gui.turnPrompt()) {
             // The Spielzugende mode: only an own unit that can still move
             // takes a click, and becomes active (build spec W17 item 6, I);
@@ -2337,7 +2351,12 @@ final class ClassicMapViewer extends JPanel {
             if (settlement instanceof Colony && player != null
                 && player.owns(settlement)) {
                 this.gui.showColonyPanel((Colony) settlement, null);
-            } else { // Foreign/indian settlement: just centre for now
+            } else if (settlement instanceof IndianSettlement) {
+                this.gui.setFocus(tile);
+                final ClassicGUI g = this.gui;
+                final IndianSettlement is = (IndianSettlement) settlement;
+                SwingUtilities.invokeLater(() -> g.showIndianSettlementPanel(is));
+            } else { // A foreign colony: just centre for now
                 this.gui.setFocus(tile);
             }
             return;

@@ -847,4 +847,63 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         mv.dispose();
         bare.dispose();
     }
+
+    /**
+     * G1 (N15): a click on a native village centres the view and then,
+     * posted (the click is a press), shows the village's notice; a foreign
+     * colony is only centred; the Spielzugende mode ignores both.
+     */
+    public void testClickOnAVillage() throws Exception {
+        final Game game = getStandardGame();
+        final Map map = getTestMap(true);
+        game.changeMap(map);
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        final net.sf.freecol.common.model.IndianSettlement is
+            = new IndianSettlementBuilder(game)
+            .player(game.getPlayerByNationId("model.nation.arawak"))
+            .settlementTile(map.getTile(5, 8)).build();
+        final net.sf.freecol.common.model.Colony colony
+            = createStandardColony(1, 15, 10);           // the Dutch: foreign
+        assertFalse(french.owns(colony));
+        final java.util.List<String> log = new java.util.ArrayList<>();
+        final boolean[] prompt = { false };
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                public void setFocus(Tile t) {
+                    log.add("focus " + t.getX() + "," + t.getY());
+                }
+
+                @Override
+                public net.sf.freecol.client.gui.panel.FreeColPanel
+                    showIndianSettlementPanel(
+                        net.sf.freecol.common.model.IndianSettlement s) {
+                    log.add("village " + s.getName());
+                    return null;
+                }
+
+                @Override
+                boolean turnPrompt() {
+                    return prompt[0];
+                }
+            };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        try {
+            mv.clickOn(is.getTile(), french);
+            assertEquals(java.util.List.of("focus 5,8"), log);   // posted
+            javax.swing.SwingUtilities.invokeAndWait(() -> { });
+            assertEquals(java.util.List.of("focus 5,8", "village " + is.getName()), log);
+            log.clear();
+            mv.clickOn(colony.getTile(), french);
+            javax.swing.SwingUtilities.invokeAndWait(() -> { });
+            assertEquals(java.util.List.of("focus 15,10"), log);
+            log.clear();
+            prompt[0] = true;
+            mv.clickOn(is.getTile(), french);
+            mv.clickOn(colony.getTile(), french);
+            javax.swing.SwingUtilities.invokeAndWait(() -> { });
+            assertTrue(log.toString(), log.isEmpty());
+        } finally {
+            mv.dispose();
+        }
+    }
 }
