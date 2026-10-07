@@ -763,8 +763,11 @@ final class ClassicAdvisorLayer extends JComponent {
         this.lastPortrait = null;
         p.woodcut.black();
         this.picture = p.woodcut.image;
-        this.host.woodcutPalette(p.woodcut.k, p.palette);
         paintNow(whole());
+        // The palette after the black is painted: a frame sampled between
+        // the two would show the map under the woodcut's colours (live
+        // run fs3: 53,567 px recorded as misses in one frame).
+        this.host.woodcutPalette(p.woodcut.k, p.palette);
         requestFocusInWindow();
         ClassicFrameRecorder.event("woodcut-black", p.woodcut.k + " pixels="
             + p.woodcut.changed());
