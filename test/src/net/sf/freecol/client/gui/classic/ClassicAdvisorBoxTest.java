@@ -685,36 +685,179 @@ public class ClassicAdvisorBoxTest extends TestCase {
 
     /**
      * The portrait's palette: the colours of its pixels in the slot
-     * (152-223, 251-255), nothing else.
+     * (16-119, 144-255 but the transparent index, W22p), nothing else.
      */
     public void testPortraitPalette() {
-        // A 3x1 sheet: indices 152, 5, 253 (transparent).
+        // A 4x1 sheet: indices 152, 5, 253 (transparent), 224.
         final ByteArrayOutputStream b = new ByteArrayOutputStream();
         b.writeBytes("CSSI".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
         b.write(1);
         b.write(1); b.write(0);              // one frame
-        b.write(3); b.write(0); b.write(1); b.write(0);
-        b.write(152); b.write(5); b.write(253);
+        b.write(4); b.write(0); b.write(1); b.write(0);
+        b.write(152); b.write(5); b.write(253); b.write(224);
         final ClassicIndexSheet sheet = ClassicIndexSheet.parse("T.SS", b.toByteArray());
-        final BufferedImage img = new BufferedImage(3, 1, BufferedImage.TYPE_INT_ARGB);
+        final BufferedImage img = new BufferedImage(4, 1, BufferedImage.TYPE_INT_ARGB);
         img.setRGB(0, 0, 0xFF123456);
         img.setRGB(1, 0, 0xFF654321);
         img.setRGB(2, 0, 0x00000000);
+        img.setRGB(3, 0, 0xFF3C2814);
         final int[] p = ClassicAdvisorBox.portraitPalette(sheet, 0, img);
         assertNotNull(p);
         assertEquals(0x123456, p[152]);
         assertEquals(-1, p[5]);
         assertEquals(-1, p[253]);
+        assertEquals(0x3C2814, p[224]);
         int set = 0;
         for (int e : p) if (e >= 0) set++;
-        assertEquals(1, set);
+        assertEquals(2, set);
         assertNull(ClassicAdvisorBox.portraitPalette(sheet, 0, new BufferedImage(2, 1,
             BufferedImage.TYPE_INT_ARGB)));
         assertNull(ClassicAdvisorBox.portraitPalette(null, 0, img));
-        assertTrue(ClassicAdvisorBox.inPortraitSlot(223));
-        assertFalse(ClassicAdvisorBox.inPortraitSlot(224));
-        assertTrue(ClassicAdvisorBox.inPortraitSlot(251));
-        assertFalse(ClassicAdvisorBox.inPortraitSlot(ClassicIndexSheet.TRANSPARENT));
+        // Seen loaded (16, 24, 32, 40, 103, 152-252, 255) and the slot's
+        // inferred edges; seen kept (5, 12, 13, 120-127, 139).
+        for (int i : new int[] { 16, 24, 32, 40, 103, 119, 144, 152, 223, 224,
+                                 250, 251, 252, 255 }) {
+            assertTrue("slot " + i, ClassicAdvisorBox.inPortraitSlot(i));
+        }
+        for (int i : new int[] { -1, 0, 5, 12, 13, 15, 120, 127, 128, 139, 143,
+                                 ClassicIndexSheet.TRANSPARENT, 256 }) {
+            assertFalse("not slot " + i, ClassicAdvisorBox.inPortraitSlot(i));
+        }
+    }
+
+    /** The slot before W22p (landfall 05 section 2.4). */
+    private static boolean oldPortraitSlot(int i) {
+        return (i >= 152 && i <= 223)
+            || (i >= 251 && i <= 255 && i != ClassicIndexSheet.TRANSPARENT);
+    }
+
+    /** The 15 portraits a box can show: MSS0-5, the King, the 8 chiefs. */
+    private static List<ClassicAdvisorBox.Portrait> allPortraits() {
+        final List<ClassicAdvisorBox.Portrait> l = new ArrayList<>(List.of(
+            ClassicAdvisorBox.Portrait.ADMIRAL, ClassicAdvisorBox.Portrait.SOLDIER,
+            ClassicAdvisorBox.Portrait.TRADE, ClassicAdvisorBox.Portrait.SCOUT,
+            ClassicAdvisorBox.Portrait.PRIEST, ClassicAdvisorBox.Portrait.COLONIST,
+            ClassicAdvisorBox.Portrait.KING));
+        for (int tribe = 0; tribe < 8; tribe++) {
+            l.add(ClassicAdvisorBox.Portrait.chief(tribe));
+        }
+        return l;
+    }
+
+    /**
+     * W22p (F3 Open 5) on the real pack: under each of the 15 portraits
+     * the recorder's palette (the game palette with the portrait's slot
+     * entries) holds every opaque pixel's exact colour at its own index.
+     * The pixels the old slot (152-223, 251-255) lost, outside it and not
+     * the game's colour: the trade advisor 113, the Aztec chief 1,242, the
+     * Iroquois 114 (F3's live run), the Sioux 2,252, the Tupi 923, the King
+     * 1,327, no other (G4 spec section 4 counts 2,188 and 919, the px
+     * without an exact colour anywhere: the Sioux's 64 px of 226 and the
+     * Tupi's 4 of 228 share their colour with a lower entry, which the
+     * recorder takes for them before and after).  Skipped without the pack.
+     */
+    public void testEveryPortraitRecordedExactly() {
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final int[] game = (pack == null) ? null : pack.gamePalette();
+        if (game == null) {
+            System.err.println(getClass().getSimpleName()
+                + ": portrait palettes skipped, no pack palette (ant classic-assets)");
+            return;
+        }
+        final Map<String, Integer> lostBefore = Map.of("MSS2.SS.000", 113,
+            "IND1A0.SS.000", 1242, "IND3A0.SS.000", 114, "IND6A0.SS.000", 2252,
+            "IND7A0.SS.000", 923, "KING.SS.000", 1327);
+        final StringBuilder fails = new StringBuilder();
+        int opaque = 0;
+        for (ClassicAdvisorBox.Portrait p : allPortraits()) {
+            final ClassicIndexSheet sheet = pack.indexSheet(p.sheet());
+            final BufferedImage sprite = pack.image(ClassicPackFiles.ssKey(p.sprite));
+            assertNotNull(p.sprite, sheet);
+            assertNotNull(p.sprite, sprite);
+            final int[] entries = ClassicAdvisorBox.portraitPalette(sheet, 0, sprite);
+            assertNotNull(p.sprite, entries);
+            final int[] recorded = game.clone();
+            for (int i = 0; i < 256; i++) if (entries[i] >= 0) recorded[i] = entries[i];
+            int missing = 0, lost = 0;
+            for (int y = 0; y < sprite.getHeight(); y++) {
+                for (int x = 0; x < sprite.getWidth(); x++) {
+                    final int argb = sprite.getRGB(x, y);
+                    if ((argb >>> 24) == 0) continue;
+                    opaque++;
+                    final int i = sheet.index(0, x, y);
+                    final int rgb = argb & 0xFFFFFF;
+                    if (rgb != recorded[i]) missing++;
+                    if (!oldPortraitSlot(i) && rgb != game[i]) lost++;
+                }
+            }
+            if (missing > 0) fails.append(' ').append(p.sprite).append('=').append(missing);
+            assertEquals(p.sprite, lostBefore.getOrDefault(p.sprite, 0).intValue(), lost);
+        }
+        System.out.println(getClass().getSimpleName() + ": portrait palettes, "
+            + allPortraits().size() + " portraits, " + opaque + " px, missing:"
+            + ((fails.length() == 0) ? " none" : fails.toString()));
+        assertEquals("pixels without their colour:" + fails, 0, fails.length());
+    }
+
+    /**
+     * W22p against the clips (needs the pack and {@code -Dclassic.clips}):
+     * in the frame of a portrait's palette load, every entry the portrait
+     * uses (but the cycling 120-127) holds the portrait's own colour inside
+     * the slot and the game palette's outside it: the Sioux chief (clip004
+     * #5089) and the King (clip005 #17484, clip006 #7375).  Entries beyond
+     * the old slot where the portrait differs from the game palette, all
+     * seen loaded: the Sioux 24, 32, 40, 224-229 (9), the King 224-226,
+     * 230, 233-242, 244-248, 250 (20).
+     */
+    public void testPortraitSlotAgainstTheClips() throws Exception {
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        final File dir = (clips == null) ? null : new File(clips);
+        if (dir == null || !new File(dir, "clip004").isDirectory()) {
+            System.err.println(getClass().getSimpleName()
+                + ": portrait slot check skipped, no recordings (-D"
+                + ClassicTerrainGoldenTest.CLIPS_PROPERTY + ")");
+            return;
+        }
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final int[] game = (pack == null) ? null : pack.gamePalette();
+        if (game == null) {
+            System.err.println(getClass().getSimpleName()
+                + ": portrait slot check skipped, no pack palette (ant classic-assets)");
+            return;
+        }
+        final Object[][] loads = {
+            { "clip004/frame_005089.png", ClassicAdvisorBox.Portrait.chief(6), 9 },
+            { "clip005/frame_017484.png", ClassicAdvisorBox.Portrait.KING, 20 },
+            { "clip006/frame_007375.png", ClassicAdvisorBox.Portrait.KING, 20 },
+        };
+        for (Object[] load : loads) {
+            final String name = (String) load[0];
+            final ClassicAdvisorBox.Portrait p = (ClassicAdvisorBox.Portrait) load[1];
+            final BufferedImage frame = ImageIO.read(new File(dir, name));
+            assertNotNull(name, frame);
+            assertTrue(name, frame.getColorModel() instanceof IndexColorModel);
+            final IndexColorModel cm = (IndexColorModel) frame.getColorModel();
+            final ClassicIndexSheet sheet = pack.indexSheet(p.sheet());
+            final BufferedImage sprite = pack.image(ClassicPackFiles.ssKey(p.sprite));
+            final int[] own = new int[256];
+            Arrays.fill(own, -1);
+            for (int y = 0; y < sprite.getHeight(); y++) {
+                for (int x = 0; x < sprite.getWidth(); x++) {
+                    final int argb = sprite.getRGB(x, y);
+                    if ((argb >>> 24) != 0) own[sheet.index(0, x, y)] = argb & 0xFFFFFF;
+                }
+            }
+            int beyond = 0;
+            for (int i = 0; i < 256; i++) {
+                if (own[i] < 0 || (i >= 120 && i <= 127)) continue;
+                final int shown = cm.getRGB(i) & 0xFFFFFF;
+                final boolean slot = ClassicAdvisorBox.inPortraitSlot(i);
+                assertEquals(name + " #" + i + (slot ? " loaded" : " kept"),
+                             slot ? own[i] : game[i], shown);
+                if (slot && !oldPortraitSlot(i) && own[i] != game[i]) beyond++;
+            }
+            assertEquals(name, ((Integer) load[2]).intValue(), beyond);
+        }
     }
 
 

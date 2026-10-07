@@ -1214,10 +1214,10 @@ final class ClassicAdvisorBox {
 
     /**
      * The original palette entries a portrait brings (landfall 05 section
-     * 2.4: 152-223 and 251-255, loaded 2-8 frames before its box, only when
-     * the advisor changes): entry {@code i} is the colour of the portrait's
-     * pixels of index {@code i}, or -1 where it has none (and every entry
-     * outside the slot).
+     * 2.4, loaded 2-8 frames before its box, only when the advisor changes;
+     * the slot, {@link #inPortraitSlot}, as W22p measured it): entry
+     * {@code i} is the colour of the portrait's pixels of index {@code i},
+     * or -1 where it has none (and every entry outside the slot).
      *
      * @param sheet The portrait's index sheet ({@code MSS0.SS}), or null.
      * @param frame The frame in it.
@@ -1245,10 +1245,22 @@ final class ClassicAdvisorBox {
         return any ? out : null;
     }
 
-    /** @return Whether index {@code i} is a portrait's palette slot entry. */
+    /**
+     * Whether index {@code i} is a portrait's palette slot entry: 16-119
+     * and 144-255 but the transparent index.  Seen loaded where a portrait
+     * differs from the game palette: 16, 24, 32, 40, 152-229, 252 and 255
+     * (the Sioux chief, clip004 #5089), 103, 152-242, 244-251 and 255 (the
+     * King, clip005 #17484, clip006 #7375); seen kept: 5, 12, 13, 120-127
+     * (they go on cycling) and 139 (the Sioux's own is black).  0-15 and
+     * 128-143 as a whole are inferred: no portrait differs from the game
+     * palette there.
+     *
+     * @param i The palette index.
+     * @return True for a slot entry.
+     */
     static boolean inPortraitSlot(int i) {
-        return (i >= 152 && i <= 223)
-            || (i >= 251 && i <= 255 && i != ClassicIndexSheet.TRANSPARENT);
+        return i >= 16 && i <= 255 && (i < 120 || i > 143)
+            && i != ClassicIndexSheet.TRANSPARENT;
     }
 
 

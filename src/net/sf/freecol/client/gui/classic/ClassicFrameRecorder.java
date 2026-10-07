@@ -155,11 +155,14 @@ import javax.swing.JComponent;
  *
  * <p><b>The portrait's palette</b> (W7, landfall 05 section 2.4).  An
  * advisor box whose portrait is not the last one loads that portrait's
- * entries (152-223, 251-255) a few frames before the box
- * ({@link #portraitPalette}, event {@code palette-portrait}); the next
- * frame's PLTE has them, as the original's palette frame does, so the
- * portrait's colours map to its own indices.  They stay until the next
- * portrait comes.
+ * entries (16-119 and 144-255, W22p: {@code ClassicAdvisorBox.inPortraitSlot})
+ * a few frames before the box ({@link #portraitPalette}, event
+ * {@code palette-portrait}); the next frame's PLTE has them, as the
+ * original's palette frame does, so the portrait's colours map to its own
+ * indices.  They stay until the next portrait comes.  The original's load
+ * also recolours the screen behind the box at those entries; ours keeps the
+ * game colours there, so such HUD or map pixels count as nearest while a
+ * portrait that changes their entry is loaded.
  */
 public final class ClassicFrameRecorder {
 

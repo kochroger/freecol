@@ -1377,9 +1377,14 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
   the screen for 0.13-0.27 s between chained boxes). A box whose portrait
   is not the last one shown loads its palette first, 3 frames ahead (the
   clip: 2-8, only when the advisor changes): the recorder's frames then
-  carry the portrait's entries 152-223 and 251-255
+  carry the portrait's entries 16-119 and 144-255 (W22p: the Sioux chief
+  loads 16, 24, 32 and 40 too, clip004 #5089, the King 103 and up to
+  251, clip005 #17484; 5, 12, 13, 120-127 and 139 are never loaded)
   (`ClassicFrameRecorder.portraitPalette`, from the pack's index sheet and
-  sprite). The same portrait again loads nothing.
+  sprite). The same portrait again loads nothing. The original's load also
+  recolours the frozen screen behind the box at those entries (6 map px
+  under the Sioux chief in clip004 #5095); ours keeps the game colours
+  there.
 - **Frozen screen, exact close (V).** While a box is up or due the blink
   holds ON and the turn flow waits (`blinkHoldReason`, `turnBlocked`, the
   `ClassicDialog.Watcher` hooks), the map, the key map and the strip take
