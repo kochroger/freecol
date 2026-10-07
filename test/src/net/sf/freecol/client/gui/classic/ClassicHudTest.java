@@ -377,6 +377,25 @@ public class ClassicHudTest extends TestCase {
             "model.nation.arawak")));
         assertEquals(0x6D3C18, ClassicHud.nationRgb(game.getPlayerByNationId(
             "model.nation.iroquois")));
+        // All eight tribes (H4, R1 fix C): the palette entries of NAMES.TXT
+        // @TRIBES, never FreeCol's, which swap Sioux/Apache and
+        // Iroquois/Cherokee; the flags, the minimap and the turn indicator
+        // agree, and the letter's dark shade follows the fill.
+        final String[][] tribes = {
+            { "inca", "F7F3C7" }, { "aztec", "C7A220" }, { "arawak", "698AC3" },
+            { "iroquois", "6D3C18" }, { "cherokee", "75A64D" }, { "apache", "C3AE86" },
+            { "sioux", "920000" }, { "tupi", "045D04" }
+        };
+        for (String[] t : tribes) {
+            final Player p = game.getPlayerByNationId("model.nation." + t[0]);
+            assertNotNull(t[0], p);
+            final int want = Integer.parseInt(t[1], 16);
+            assertEquals(t[0], want, ClassicHud.nationRgb(p));
+            assertEquals(t[0], want, ClassicHud.indicatorRgb(p));
+            assertEquals(t[0], (((want >> 16) & 0xFF) * 2 / 3 << 16)
+                | (((want >> 8) & 0xFF) * 2 / 3 << 8) | ((want & 0xFF) * 2 / 3),
+                ClassicHud.nationDark(p));
+        }
         final Player ref = game.getPlayerByNationId("model.nation.dutchREF");
         if (ref != null) {
             assertEquals(ref.getNationColor().getRGB() & 0xFFFFFF, ClassicHud.nationRgb(ref));

@@ -257,6 +257,34 @@ public class ClassicUnitIconTest extends TestCase {
     }
 
     /**
+     * The natives' and the unequipped experts' places (H4, R1): the brave
+     * (ICONS.SS 109, 8 wide, row 19) at +2 with its flag at the lower right
+     * (landfall #14022: sprite x 146 in cell 144, the flag's fill pixel
+     * (154,65) #698AC3); the armed brave (110, 9 wide) centred, its flag at
+     * the lower right; the mounted ones (111, 112, 14 wide) at +2 with the
+     * flag at the top left like the dragoon 076 (I, never in a clip); the
+     * experts without equipment (058-061, 6 wide, row 0) at +3 (clip005
+     * #709: 059 at x 115 in cell 112) with the settler's flag.
+     */
+    public void testNativesAndUnequippedExperts() {
+        assertEquals(19, ClassicHud.unitRow("brave", null));
+        assertEquals(20, ClassicHud.unitRow("brave", "armedBrave"));
+        assertEquals(21, ClassicHud.unitRow("brave", "mountedBrave"));
+        assertEquals(22, ClassicHud.unitRow("brave", "nativeDragoon"));
+        assertEquals(2, ClassicHud.spriteOffset(8, 19));
+        final Rectangle brave = ClassicHud.flagRing(144, 56, 8, 19);
+        assertEquals(new Rectangle(152, 63, 7, 9), brave);
+        assertTrue(new Rectangle(brave.x + 1, brave.y + 1, 5, 7).contains(154, 65));
+        assertEquals(3, ClassicHud.spriteOffset(9, 20));
+        assertEquals(new Rectangle(154, 63, 7, 9), ClassicHud.flagRing(144, 56, 9, 20));
+        assertEquals(new Rectangle(144, 56, 7, 9), ClassicHud.flagRing(144, 56, 14, 21));
+        assertEquals(new Rectangle(144, 56, 7, 9), ClassicHud.flagRing(144, 56, 14, 22));
+        assertEquals(0, ClassicHud.unitRow("veteranSoldier", null));
+        assertEquals(3, ClassicHud.spriteOffset(6, 0));
+        assertEquals(new Rectangle(119, 143, 7, 9), ClassicHud.flagRing(112, 136, 6, 0));
+    }
+
+    /**
      * The letter after the sprite, and its ink (build spec W21a; clip006
      * deep 4.2): the galleon's pixel (9,4) under the '-' shows the black
      * letter (map #4471, Europe #8120); the darker nation shade only for

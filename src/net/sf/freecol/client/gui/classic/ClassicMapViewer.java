@@ -3238,7 +3238,9 @@ final class ClassicMapViewer extends JPanel {
      * Render the whole map into {@link #minimapCache}: one
      * {@link #minimapPPT}-px square per tile, background colour for unexplored
      * tiles, {@link ImageLibrary#getMinimapPoliticsColor} for explored terrain,
-     * and the owner's nation colour for a tile carrying a settlement or unit.
+     * and the owner's colour as the panel's minimap has it
+     * ({@link ClassicHud#indicatorRgb}: the tribes' NAMES.TXT colours, not
+     * FreeCol's) for a tile carrying a settlement or unit.
      * Iterates every tile, so it runs only on a rebuild (see
      * {@link #invalidateMinimap}).
      */
@@ -3267,11 +3269,11 @@ final class ClassicMapViewer extends JPanel {
                     ImageLibrary.getMinimapPoliticsColor(tile.getType()), bg);
                 final Settlement s = tile.getSettlement();
                 if (s != null && s.getOwner() != null) {
-                    c = orElse(s.getOwner().getNationColor(), c);
+                    c = new Color(ClassicHud.indicatorRgb(s.getOwner()));
                 } else {
                     final Unit u = tile.getFirstUnit();
                     if (u != null && u.getOwner() != null) {
-                        c = orElse(u.getOwner().getNationColor(), c);
+                        c = new Color(ClassicHud.indicatorRgb(u.getOwner()));
                     }
                 }
                 g.setColor(c);

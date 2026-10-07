@@ -526,7 +526,8 @@ the original does. (It began as a bottom-left overlay on the map itself; the
 
 - Colours: unexplored → `ImageLibrary.getMinimapBackgroundColor()`; explored →
   `getMinimapPoliticsColor(tile.getType())`; a tile with a settlement/unit →
-  the owner's `getNationColor()`. All guarded with fallbacks (`orElse`).
+  the owner's `ClassicHud.indicatorRgb` (H4: the same colours as the panel's
+  minimap, the tribes' NAMES.TXT ones). Terrain guarded with fallbacks (`orElse`).
 - Sizing: integer pixels-per-tile `max(1, MINIMAP_MAX/max(w,h))` fits the raster
   into a ~200px box, so a tall/narrow map renders as a vertical strip.
 - **Caching / performance:** the raster is cached in a `BufferedImage` and
@@ -2464,6 +2465,21 @@ that icon minus one: the brave 109 (was 098, the statesman's sprite; clip004
 regulars 125 and cavalry 126 (were 115/116, native leaders' faces), the
 continental army 128 and cavalry 129 (by the rule).  These also change the
 map, colony and Europe screens — check them live.
+
+H4 (R1, the verifier's rule): the four experts of a role are not 081 + row
+without their equipment but 058 hardy pioneer (no tools), 059 veteran soldier
+(no muskets; clip008 #4032/#42042 after he left his muskets in Base, clip005
+#709 and dago-colony2 #3976 on the map, 0 px), 060 seasoned scout (no
+horses), 061 jesuit (no cross) — the last three by their clothes; in their
+role they keep 101-105.  The convert is 066 (the native in blue trousers, I;
+the row's 108 is the totem pole).  A type's own picture (`getUnitTypeImage`,
+the Europe and report lists) takes the type's default role, so it still shows
+the equipped expert.  `ClassicPackAliasesTest.testEveryUnitAliasFollowsTheFrameTable`
+checks every unit alias against the whole table, `testTheFramesAgainstTheClips`
+the frames the clips show (skipped without `-Dclassic.clips` or the pack).
+The tribes' flags, the minimap and the turn indicator all take the NAMES.TXT
+`@TRIBES` colours (`ClassicHud.nationRgb`/`indicatorRgb`; FreeCol's swap
+Sioux/Apache and Iroquois/Cherokee).
 
 ### Harness, tests, open
 
