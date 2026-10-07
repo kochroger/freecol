@@ -85,14 +85,15 @@ public class ClassicGUISeamTest extends FreeColTestCase {
     /**
      * Answers every box by pressing {@link #keys} on its real bar
      * ({@link ClassicAdvisorBox.Bar}): what the player's keys answer.
-     * Keys: UP, DOWN, ENTER, ESC, X (any other key).
+     * Keys: UP, DOWN, ENTER, ESC, X (any other key), OUT (a click outside
+     * the box: a press and a release in the letterbox).
      */
     static final class KeyPrompter implements ClassicGUI.Prompter {
 
         String[] keys = {};
         final List<ClassicAdvisorBox.Request> boxes = new ArrayList<>();
 
-        /** The bar's row after the keys of the last box (if it stayed open). */
+        /** The bar's row after the keys of the last box if it stayed open, else -2. */
         int lastRow = -2;
 
         KeyPrompter press(String... k) {
@@ -108,6 +109,7 @@ public class ClassicGUISeamTest extends FreeColTestCase {
 
         int answer(ClassicAdvisorBox.Request r, String... ks) {
             final ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+            this.lastRow = -2;
             for (String k : ks) {
                 final int a;
                 switch (k) {
@@ -115,6 +117,10 @@ public class ClassicGUISeamTest extends FreeColTestCase {
                 case "DOWN": a = bar.down(); break;
                 case "ENTER": a = bar.enter(); break;
                 case "ESC": a = bar.escape(); break;
+                case "OUT":
+                    bar.press(-1, false);
+                    a = bar.release(-1, false);
+                    break;
                 default: a = bar.otherKey(); break;
                 }
                 if (a != ClassicAdvisorBox.Bar.OPEN) return a;
@@ -226,6 +232,8 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             assertEquals(what, Messages.message(cancel), last(fake.asked)[1]);
             assertEquals("Enter's option, " + what,
                          Integer.valueOf(defaultOk ? 0 : 1), last(fake.defaults));
+            assertTrue("a click outside: no, " + what,
+                       last(fake.boxes).outsideCancels);
             fake.answer = 0;
             assertTrue("yes on " + what, gui.modalConfirmDialog(null, t,
                     (ImageIcon) null, ok, cancel, defaultOk));
@@ -281,6 +289,7 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertEquals(Messages.message("cancel"), last(fake.asked)[2]);
         assertEquals(2, last(fake.boxes).cancelRow);
         assertEquals(0, last(fake.boxes).defaultRow);
+        assertTrue(last(fake.boxes).outsideCancels);   // a click outside: cancel
     }
 
     /**
@@ -631,6 +640,8 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             assertEquals(1, q.cancelRow);
             assertSame(ClassicAdvisorBox.Portrait.ADMIRAL, q.portrait);
             assertEquals(ClassicGUI.SAIL_HOME_SECTION, q.id);
+            assertTrue(q.outsideCancels);              // a click outside: "Nein"
+            assertEquals(1, new KeyPrompter().answer(q, "OUT"));
         } finally {
             for (File f : dir.listFiles()) f.delete();
             dir.delete();
@@ -642,6 +653,7 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertEquals(1, f.cancelRow);
         assertFalse(f.plainText().isEmpty());
         assertSame(ClassicAdvisorBox.Portrait.ADMIRAL, f.portrait);
+        assertTrue(f.outsideCancels);
     }
 
     /**
@@ -724,6 +736,13 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             { merc, new String[] { "DOWN", "ESC" }, false },
             { MonarchAction.LOWER_TAX_WAR, new String[] { "X" }, false },
             { MonarchAction.LOWER_TAX_WAR, new String[] { "ENTER" }, false },
+            // E acceptance must-fix: a click outside answers nothing.
+            { tax, new String[] { "OUT", "ENTER" }, true },
+            { tax, new String[] { "OUT", "OUT", "UP", "ENTER" }, true },
+            { tax, new String[] { "DOWN", "OUT", "ENTER" }, false },
+            { merc, new String[] { "OUT", "ENTER" }, false },
+            { merc, new String[] { "OUT", "DOWN", "ENTER" }, true },
+            { MonarchAction.LOWER_TAX_WAR, new String[] { "OUT" }, false },
         };
         for (Object[] c : cases) {
             keys.press((String[]) c[1]);
@@ -731,7 +750,19 @@ public class ClassicGUISeamTest extends FreeColTestCase {
                                   answers::add);
             assertEquals(c[0] + " " + String.join(" ", (String[]) c[1]),
                          c[2], last(answers));
+            assertFalse(c[0].toString(), last(keys.boxes).outsideCancels);
         }
+        // A click outside alone leaves the box up, the bar where it was.
+        for (MonarchAction a : new MonarchAction[] { tax, merc }) {
+            keys.press("OUT");
+            gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
+            assertEquals(a.toString(), 0, keys.lastRow);
+            keys.press("DOWN", "OUT", "OUT");
+            gui.showMonarchDialog(a, t, "model.nation.dutch", answers::add);
+            assertEquals(a.toString(), 1, keys.lastRow);
+        }
+        final ClassicAdvisorBox.Request m = last(keys.boxes);
+        assertEquals(m.cancelRow, keys.answer(m, "OUT", "ESC"));   // Escape still answers
     }
 
     /**
@@ -842,6 +873,22 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         keys.press("ESC");
         gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
         assertEquals(Boolean.FALSE, last(answers));
+
+        // E acceptance must-fix: a click outside answers neither box.
+        keys.press("OUT");
+        gui.showNativeDemandDialog(brave, colony, null, 50, answers::add);
+        assertFalse(last(keys.boxes).outsideCancels);
+        assertEquals(0, keys.lastRow);                 // still up, on the refusal
+        keys.press("OUT", "DOWN", "ENTER");
+        gui.showNativeDemandDialog(brave, colony, null, 50, answers::add);
+        assertEquals(Boolean.TRUE, last(answers));
+        keys.press("OUT");
+        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
+        assertFalse(last(keys.boxes).outsideCancels);
+        assertEquals(0, keys.lastRow);                 // still up, on "Ja"
+        keys.press("OUT", "OUT", "ENTER");
+        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
+        assertEquals("peace after stray clicks", Boolean.TRUE, last(answers));
     }
 
     /**

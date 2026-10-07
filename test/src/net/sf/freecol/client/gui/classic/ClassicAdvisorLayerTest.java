@@ -351,6 +351,41 @@ public class ClassicAdvisorLayerTest extends TestCase {
     }
 
     /**
+     * E acceptance must-fix: on a box like the King's (a click outside does
+     * not cancel), neither a click on his portrait nor one outside answers
+     * it or moves the bar; Enter then takes the barred row.
+     */
+    public void testMouseOutsideTheKingsBox() throws Exception {
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request.builder("king")
+            .freeColText("a a a").rows("a", "a a").cancelRow(1)
+            .portrait(ClassicAdvisorBox.Portrait.KING).outsideCancels(false).build();
+        final Answer a = ask(r);
+        flush();
+        runTimer();                                    // the palette
+        this.clock.advanceMs(ClassicAdvisorLayer.PALETTE_LEAD_MS);
+        runTimer();
+        assertTrue(up());
+        final ClassicAdvisorBox.Layout l = edt(() -> this.layer.currentLayout());
+        final java.awt.Point king = l.portraitAt;
+        assertEquals(0, king.x);
+        mouse(MouseEvent.MOUSE_PRESSED, king.x + 30, king.y + 40);   // the King
+        assertEquals(0, bar());
+        mouse(MouseEvent.MOUSE_RELEASED, king.x + 30, king.y + 40);
+        assertFalse(a.isDone());
+        key(KeyEvent.VK_DOWN);
+        mouse(MouseEvent.MOUSE_PRESSED, l.box.x - 2, 2);             // outside
+        assertEquals(1, bar());
+        mouse(MouseEvent.MOUSE_RELEASED, l.box.x - 2, 3);
+        flush();
+        assertFalse(a.isDone());
+        assertTrue(up());
+        assertEquals(1, bar());
+        key(KeyEvent.VK_UP);
+        key(KeyEvent.VK_ENTER);
+        assertEquals(0, a.get());
+    }
+
+    /**
      * Chained boxes: the next one comes no earlier than 200 ms after the
      * close of the one before; the screen is restored in between.  A box
      * asked for while one is up waits its turn, and both callers get their

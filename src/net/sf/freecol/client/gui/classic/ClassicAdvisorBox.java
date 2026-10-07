@@ -76,8 +76,12 @@ import java.util.Map;
  *       row (Roger's rule).  The mouse never moves it by hovering: a press
  *       on a row puts it there, the release on that row takes it; a press
  *       outside the box removes it and the release closes the box as
- *       Escape (clip004, the options box).  A box without rows is a notice:
- *       any key, or a click, dismisses it.</li>
+ *       Escape (clip004, the options box).  The portrait counts as the box
+ *       (I).  A box whose refusal costs dearly (the King's, a first
+ *       contact, a native demand: {@link Request#outsideCancels} off, I)
+ *       ignores a click outside: the notices teach "click anywhere to go
+ *       on", and such a click must not answer it.  A box without rows is a
+ *       notice: any key, or a click, dismisses it.</li>
  * </ul>
  */
 final class ClassicAdvisorBox {
@@ -245,6 +249,13 @@ final class ClassicAdvisorBox {
         /** Who stands at the box. */
         final Portrait portrait;
 
+        /**
+         * Whether a click outside the box (and its portrait) answers it as
+         * Escape, as the options box does (clip004); off where Escape's
+         * answer cannot be undone (the King, first contact, a demand).
+         */
+        final boolean outsideCancels;
+
         /** The stopgap's window title, when the box cannot be drawn. */
         final String title;
 
@@ -269,6 +280,7 @@ final class ClassicAdvisorBox {
             this.defaultRow = (n == 0) ? -1 : ClassicHud.clamp(b.defaultRow, 0, n - 1);
             this.cancelRow = (b.cancelRow < 0 || b.cancelRow >= n) ? -1 : b.cancelRow;
             this.portrait = (b.portrait == null) ? Portrait.NONE : b.portrait;
+            this.outsideCancels = b.outsideCancels;
             this.title = (b.title == null) ? "" : b.title;
             this.icon = b.icon;
             this.list = b.list;
@@ -315,7 +327,8 @@ final class ClassicAdvisorBox {
         @Override
         public String toString() {
             return this.id + " rows=" + this.rows.size() + " bar=" + this.defaultRow
-                + " esc=" + this.cancelRow + " portrait=" + this.portrait;
+                + " esc=" + this.cancelRow + " portrait=" + this.portrait
+                + (this.outsideCancels ? "" : " outside=stays");
         }
 
         /**
@@ -341,6 +354,7 @@ final class ClassicAdvisorBox {
         private int defaultRow = 0;
         private int cancelRow = Integer.MIN_VALUE;
         private Portrait portrait = Portrait.NONE;
+        private boolean outsideCancels = true;
         private String title = null;
         private Image icon = null;
         private boolean list = false;
@@ -411,6 +425,15 @@ final class ClassicAdvisorBox {
         /** Who stands at the box. */
         Builder portrait(Portrait p) {
             this.portrait = p;
+            return this;
+        }
+
+        /**
+         * Whether a click outside answers the box as Escape (the default,
+         * the options box's rule), or does nothing.
+         */
+        Builder outsideCancels(boolean c) {
+            this.outsideCancels = c;
             return this;
         }
 
@@ -494,9 +517,22 @@ final class ClassicAdvisorBox {
             return -1;
         }
 
-        /** @return Whether a 320x200 point is on the box. */
+        /**
+         * Whether a 320x200 point is on the box or on its portrait's own
+         * rectangle (a click on the admiral, the chief or the King is not
+         * outside; I).  Not {@link #bounds}: the King's union with his box
+         * is nearly the whole screen.
+         *
+         * @param vx The x.
+         * @param vy The y.
+         * @return True if the point counts as the box.
+         */
         boolean inBox(int vx, int vy) {
-            return this.box.contains(vx, vy);
+            if (this.box.contains(vx, vy)) return true;
+            return this.portrait != null && this.portraitAt != null
+                && new Rectangle(this.portraitAt.x, this.portraitAt.y,
+                                 this.portrait.getWidth(),
+                                 this.portrait.getHeight()).contains(vx, vy);
         }
 
         /** @return The bar's rectangle at row {@code i}. */
@@ -881,17 +917,20 @@ final class ClassicAdvisorBox {
 
         /**
          * A mouse press: on a row it puts the bar there; outside the box it
-         * removes the bar.
+         * removes the bar, unless a click outside does nothing in this box
+         * ({@link Request#outsideCancels} off: the bar stays where it is).
          *
          * @param hitRow The row under the press, or -1.
-         * @param inBox Whether the press is on the box.
+         * @param inBox Whether the press is on the box ({@link Layout#inBox}).
          */
         void press(int hitRow, boolean inBox) {
             if (hitRow >= 0) {
                 this.row = hitRow;
                 this.pressed = hitRow;
             } else if (!inBox) {
-                if (!this.request.isNotice()) this.row = -1;
+                if (!this.request.isNotice() && this.request.outsideCancels) {
+                    this.row = -1;
+                }
                 this.pressed = PRESS_OUTSIDE;
             } else {
                 this.pressed = PRESS_TEXT;
@@ -900,11 +939,12 @@ final class ClassicAdvisorBox {
 
         /**
          * The release of a press: on the row it was pressed on it takes it;
-         * after a press outside the box, outside it, it closes as Escape; a
+         * after a press outside the box, outside it, it closes as Escape
+         * where {@link Request#outsideCancels} (else nothing happens); a
          * notice closes on any release after a press.
          *
          * @param hitRow The row under the release, or -1.
-         * @param inBox Whether the release is on the box.
+         * @param inBox Whether the release is on the box ({@link Layout#inBox}).
          * @return The answer, or {@link #OPEN}.
          */
         int release(int hitRow, boolean inBox) {
@@ -913,7 +953,9 @@ final class ClassicAdvisorBox {
             if (p == NO_PRESS) return OPEN;
             if (this.request.isNotice()) return 0;
             if (p >= 0 && hitRow == p && this.request.enabled(p)) return p;
-            if (p == PRESS_OUTSIDE && !inBox) return escape();
+            if (p == PRESS_OUTSIDE && !inBox && this.request.outsideCancels) {
+                return escape();
+            }
             return OPEN;
         }
     }

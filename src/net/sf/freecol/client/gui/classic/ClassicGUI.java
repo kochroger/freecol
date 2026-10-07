@@ -3549,7 +3549,12 @@ public class ClassicGUI extends GUI {
      * events) is fine; the handler fires with the result the instant the box
      * closes.  The handler runs in a {@code finally} so the server exchange
      * still resolves (as a reject) if the box throws, rather than dangling.
-     * Escape takes the "no" row (W0e), whichever row Enter takes.
+     * Escape takes the "no" row (W0e), whichever row Enter takes.  A click
+     * outside the box does nothing here ({@link
+     * ClassicAdvisorBox.Request#outsideCancels} off): these "no"s cannot be
+     * undone (the Tea Party, a refused peace, a refused demand), and the
+     * notices that often come just before close on a click anywhere
+     * (E acceptance A5).
      *
      * @param id What the box is (for the recorder).
      * @param icon The stopgap's illustration, or null.
@@ -3567,7 +3572,7 @@ public class ClassicGUI extends GUI {
                           DialogHandler<Boolean> handler) {
         final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.Request
             .builder(id).freeColText(Messages.message(message))
-            .portrait(portrait).stopgap(title, icon);
+            .portrait(portrait).outsideCancels(false).stopgap(title, icon);
         final int yesRow;
         if (yesKey == null) {
             yesRow = -1;

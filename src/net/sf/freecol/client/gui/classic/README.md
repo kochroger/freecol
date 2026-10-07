@@ -1262,10 +1262,18 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
   cancel row (Roger's rule: the "no" row). The mouse never moves it by
   hovering: a press on a row puts it there and the release on that row
   takes it; a press outside the box removes it and the release outside
-  closes the box as Escape (clip004, the options box). A notice (no rows)
-  goes on any key or click. Enter, Escape and the other keys count only as
-  fresh presses made while the box is on screen (an auto-repeat of a key
-  held from before, or a press older than the box, does nothing).
+  closes the box as Escape (clip004, the options box). The portrait's own
+  rectangle counts as the box (I): a click on the admiral, a chief or the
+  King answers nothing. In the King's boxes, the first contact and the
+  natives' demands (`askEvent`, `Request.outsideCancels` off; I) a click
+  outside does nothing at all and the bar stays: their "no" cannot be
+  undone (the Tea Party, a refused peace, a refused demand), and the
+  notices that often come just before them close on a click anywhere (E
+  acceptance A5). Confirms, choices and @SAILHOME keep the measured rule.
+  A notice (no rows) goes on any key or click. Enter, Escape and the other
+  keys count only as fresh presses made while the box is on screen (an
+  auto-repeat of a key held from before, or a press older than the box,
+  does nothing).
 - **Timing (V).** A box comes, moves its bar and goes in one paint
   (`paintImmediately`, as the slide and the blink paint, so also in a
   minimized window, whose `repaint()`s Swing holds back). A box after
@@ -1323,11 +1331,15 @@ portraits and their palette; and `testGoldenAgainstTheLandfallClip`: 26
 GAME.TXT boxes drawn from the pack against the clip's pixel-exact crops
 `landfall/analysis/img/*_1x.png`, box and portrait pixels, 0 px off apart
 from the original's mouse arrow and @TUTORIAL13's first four lines; it
-needs the pack and `-Dclassic.clips`), `ClassicAdvisorLayerTest` (modal
-show, keys, held keys, the mouse, chained boxes 200 ms apart, the
-palette's lead, notices, teardown), `ClassicGUISeamTest` (every seam's
-Enter, Escape and arrows on the real bar: `testConfirmBoxKeys`,
-`testChoiceBoxKeys`, `testSailHomeBoxKeys`, `testKingsBoxEnterKissesTheRing`,
+needs the pack and `-Dclassic.clips`; the clicks on a portrait and outside:
+`testAClickOnTheKingsPortraitDoesNotAnswer`,
+`testAClickOutsideAMonarchBoxDoesNotAnswer`,
+`testAClickOutsideSailHomeStillAnswersNein`), `ClassicAdvisorLayerTest`
+(modal show, keys, held keys, the mouse, a click outside the King's box,
+chained boxes 200 ms apart, the palette's lead, notices, teardown),
+`ClassicGUISeamTest` (every seam's Enter, Escape, arrows and a click
+outside on the real bar: `testConfirmBoxKeys`, `testChoiceBoxKeys`,
+`testSailHomeBoxKeys`, `testKingsBoxEnterKissesTheRing`,
 `testNativeDemandEnterRefuses`, `testNoticesOneBoxEach`).
 
 ## In-game HUD (menu strip, dropdowns, right panel)

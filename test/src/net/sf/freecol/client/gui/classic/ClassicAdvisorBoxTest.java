@@ -209,7 +209,9 @@ public class ClassicAdvisorBoxTest extends TestCase {
         assertEquals(-1, l.rowAt(100, 125));       // the prompt
         assertEquals(-1, l.rowAt(46, 140));        // the frame
         assertTrue(l.inBox(44, 113));
-        assertFalse(l.inBox(43, 113));
+        assertTrue(l.inBox(43, 113));              // the admiral (40..114, 42..132)
+        assertFalse(l.inBox(39, 113));
+        assertFalse(l.inBox(115, 60));
         assertFalse(l.inBox(100, 159));
         final BufferedImage img = ClassicAdvisorBox.render(l, 0, null, f);
         final Rectangle box = l.box;
@@ -326,6 +328,157 @@ public class ClassicAdvisorBoxTest extends TestCase {
         assertEquals(open, n.release(-1, true));
         n.press(-1, false);
         assertEquals(0, n.release(-1, false));
+        assertTrue(r.outsideCancels);                  // the default
+    }
+
+    /** A click at a 320x200 point of a box: press and release there. */
+    private static int click(ClassicAdvisorBox.Bar bar, ClassicAdvisorBox.Layout l,
+                             int vx, int vy) {
+        bar.press(l.rowAt(vx, vy), l.inBox(vx, vy));
+        return bar.release(l.rowAt(vx, vy), l.inBox(vx, vy));
+    }
+
+    /** A click in the letterbox (no 320x200 point): outside, no row. */
+    private static int clickLetterbox(ClassicAdvisorBox.Bar bar) {
+        bar.press(-1, false);
+        return bar.release(-1, false);
+    }
+
+    /** A box as {@code ClassicGUI.askEvent} asks the King's tax rise. */
+    private static ClassicAdvisorBox.Request kingsTax() {
+        final List<String> lines = new ArrayList<>();
+        for (int i = 0; i < 5; i++) lines.add("^a a");
+        return ClassicAdvisorBox.Request.builder("monarch RAISE_TAX_ACT")
+            .gameText(lines).rows("a", "b").defaultRow(0).cancelRow(1)
+            .portrait(ClassicAdvisorBox.Portrait.KING).outsideCancels(false)
+            .build();
+    }
+
+    /**
+     * E acceptance A5: a click on the King's portrait is a click on the box,
+     * not outside it, so it answers nothing; the same for the chief and the
+     * admiral.  The King's rectangle only: the gap between him and his box,
+     * and the screen above and below him, stay outside.
+     */
+    public void testAClickOnTheKingsPortraitDoesNotAnswer() {
+        final ClassicFont f = font();
+        final int open = ClassicAdvisorBox.Bar.OPEN;
+        final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(kingsTax(), f,
+            sprite(79, 161));
+        assertEquals(new Rectangle(84, 68, 236, 64), l.box);   // clip005
+        assertEquals(new Point(0, 18), l.portraitAt);
+        assertTrue(l.inBox(0, 18));
+        assertTrue(l.inBox(78, 178));
+        assertTrue(l.inBox(40, 100));
+        assertFalse(l.inBox(79, 100));                 // the gap to the box
+        assertFalse(l.inBox(83, 100));
+        assertFalse(l.inBox(40, 17));
+        assertFalse(l.inBox(40, 179));
+        assertFalse(l.inBox(200, 10));
+        ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(l.request);
+        for (int[] p : new int[][] { { 40, 100 }, { 0, 18 }, { 78, 178 } }) {
+            assertEquals(open, click(bar, l, p[0], p[1]));
+            assertEquals(0, bar.row());                // the bar stays
+        }
+        assertEquals(0, bar.enter());                  // the ring, as before
+        // The same where a click outside would cancel: the King is no "outside".
+        final ClassicAdvisorBox.Request cancels = ClassicAdvisorBox.Request
+            .builder("t").gameText(List.of("^a a")).rows("a", "b").cancelRow(1)
+            .portrait(ClassicAdvisorBox.Portrait.KING).build();
+        final ClassicAdvisorBox.Layout lc = ClassicAdvisorBox.layout(cancels, f,
+            sprite(79, 161));
+        bar = new ClassicAdvisorBox.Bar(cancels);
+        assertEquals(open, click(bar, lc, 40, 100));
+        assertEquals(0, bar.row());
+        // A chief (Sioux, 107x177 at (210,10), under the box) and the admiral.
+        final ClassicAdvisorBox.Layout chief = ClassicAdvisorBox.layout(
+            request(230, 5, 2, ClassicAdvisorBox.Portrait.chief(6), null), f,
+            sprite(107, 177));
+        assertEquals(new Point(210, 10), chief.portraitAt);
+        bar = new ClassicAdvisorBox.Bar(chief.request);
+        assertEquals(open, click(bar, chief, 300, 20));
+        assertEquals(0, bar.row());
+        final ClassicAdvisorBox.Layout sail = ClassicAdvisorBox.layout(
+            request(230, 2, 2, ClassicAdvisorBox.Portrait.ADMIRAL, null), f,
+            sprite(75, 91));
+        bar = new ClassicAdvisorBox.Bar(sail.request);
+        assertEquals(open, click(bar, sail, 70, 70));  // A5's click on the admiral
+        assertEquals(0, bar.row());
+    }
+
+    /**
+     * E acceptance must-fix: a click outside the King's box (and the
+     * letterbox) answers nothing -- no Tea Party -- and leaves the bar
+     * where it is, the moved one too; Enter and the rows still answer.
+     * First contact and the natives' demands are asked the same way
+     * ({@code ClassicGUI.askEvent}).
+     */
+    public void testAClickOutsideAMonarchBoxDoesNotAnswer() {
+        final ClassicFont f = font();
+        final int open = ClassicAdvisorBox.Bar.OPEN;
+        final ClassicAdvisorBox.Request r = kingsTax();
+        assertFalse(r.outsideCancels);
+        final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(r, f,
+            sprite(79, 161));
+        final ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+        for (int[] p : new int[][] { { 81, 100 }, { 200, 10 }, { 200, 190 },
+                                     { 40, 190 } }) {
+            bar.press(l.rowAt(p[0], p[1]), l.inBox(p[0], p[1]));
+            assertEquals(0, bar.row());                // the bar is not removed
+            assertEquals(open, bar.release(l.rowAt(p[0], p[1]),
+                                           l.inBox(p[0], p[1])));
+            assertEquals(0, bar.row());
+        }
+        assertEquals(open, clickLetterbox(bar));
+        assertEquals(0, bar.row());
+        // Pressed outside, released on the box: nothing either.
+        bar.press(-1, false);
+        assertEquals(open, bar.release(l.rowAt(150, 80), l.inBox(150, 80)));
+        assertEquals(0, bar.row());
+        // The bar moved to the party stays there.
+        assertEquals(open, bar.down());
+        assertEquals(open, clickLetterbox(bar));
+        assertEquals(open, click(bar, l, 200, 10));
+        assertEquals(1, bar.row());
+        assertEquals(1, bar.escape());                 // Escape still answers
+        assertEquals(1, bar.enter());
+        // A click on a row still takes it.
+        final Rectangle row0 = l.barRect(0);
+        assertEquals(0, click(new ClassicAdvisorBox.Bar(r), l, row0.x + 10,
+                              row0.y + 2));
+        // A notice of the King still closes on any click.
+        final ClassicAdvisorBox.Request notice = ClassicAdvisorBox.Request
+            .builder("monarch LOWER_TAX_WAR").freeColText("a a")
+            .portrait(ClassicAdvisorBox.Portrait.KING).outsideCancels(false)
+            .build();
+        assertEquals(0, clickLetterbox(new ClassicAdvisorBox.Bar(notice)));
+    }
+
+    /**
+     * The measured rule stays where "no" is harmless: a click outside the
+     * @SAILHOME box and its admiral removes the bar on the press and its
+     * release answers "Nein" (Escape's row), from either row.
+     */
+    public void testAClickOutsideSailHomeStillAnswersNein() {
+        final ClassicFont f = font();
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request
+            .builder("SAILHOME").gameText(List.of("^a a", "^a a"))
+            .rows("Jawohl", "Nein").defaultRow(0).cancelRow(1)
+            .portrait(ClassicAdvisorBox.Portrait.ADMIRAL).build();
+        assertTrue(r.outsideCancels);
+        final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(r, f,
+            sprite(75, 91));
+        assertEquals(new Rectangle(44, 113, 236, 46), l.box);
+        for (int[] p : new int[][] { { 10, 10 }, { 300, 100 }, { 39, 113 },
+                                     { 100, 170 } }) {
+            final ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+            bar.press(l.rowAt(p[0], p[1]), l.inBox(p[0], p[1]));
+            assertEquals(-1, bar.row());
+            assertEquals(1, bar.release(l.rowAt(p[0], p[1]), l.inBox(p[0], p[1])));
+        }
+        final ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, bar.down());
+        assertEquals(1, clickLetterbox(bar));
     }
 
     /** FreeCol's text as box text, GAME.TXT's markup dropped for the stopgap. */
