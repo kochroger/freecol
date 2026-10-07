@@ -328,7 +328,7 @@ class EuropeanStartingPositionsGenerator {
             sampleTiles(westLandTiles, number);
             sampleTiles(westSeaTiles, number);
             if (map.hasOuterRing()) {
-                // The original's order: the candidates north to south,
+                // The fixed order (N6): the candidates north to south,
                 // taken by the nations in START_ORDER.
                 final Comparator<Tile> northToSouth
                     = Comparator.comparingInt(Tile::getY);
