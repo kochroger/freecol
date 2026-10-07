@@ -367,6 +367,19 @@ public class ClassicHudTest extends TestCase {
             assertEquals(id, fill[i], ClassicHud.nationRgb(player));
         }
         assertEquals(0xFFFFFF, ClassicHud.nationRgb(null));
+        // The tribes' flags in their @TRIBES colours (clip004 #5090: the
+        // Sioux brave's flag #920000, not FreeCol's #900000; the Araukaner's
+        // 54), FreeCol's colour for a nation the original has not.
+        assertEquals(0x920000, ClassicHud.nationRgb(game.getPlayerByNationId(
+            "model.nation.sioux")));
+        assertEquals(0x698AC3, ClassicHud.nationRgb(game.getPlayerByNationId(
+            "model.nation.arawak")));
+        assertEquals(0x6D3C18, ClassicHud.nationRgb(game.getPlayerByNationId(
+            "model.nation.iroquois")));
+        final Player ref = game.getPlayerByNationId("model.nation.dutchREF");
+        if (ref != null) {
+            assertEquals(ref.getNationColor().getRGB() & 0xFFFFFF, ClassicHud.nationRgb(ref));
+        }
     }
 
     /**

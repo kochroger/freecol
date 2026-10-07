@@ -2509,14 +2509,22 @@ final class ClassicHud {
     // From the game
 
     /**
-     * A nation's colour on the minimap: the measured fill for the four
-     * European nations of the original, else FreeCol's nation colour.
+     * A nation's flag fill (the units' flags on the map and the panel, the
+     * blink dot): the measured fill for the four European nations of the
+     * original, a tribe's NAMES.TXT {@code @TRIBES} colour (clip004 #5090:
+     * the Sioux brave's flag 118 {@code #920000}; #4987: the Araukaner's
+     * 54; the other six as the turn indicator, I), else FreeCol's nation
+     * colour.
      */
     static int nationRgb(Player p) {
         if (p == null) return 0xFFFFFF;
         final int n = Arrays.asList(ClassicNewWorldScreens.NATION_IDS)
             .indexOf(p.getNationId());
         if (n >= 0 && NATION_FILL[n] >= 0) return NATION_FILL[n];
+        if (tribeRow(p.getNationId()) >= 0) {
+            final Integer t = INDICATOR_RGB.get(p.getNationId());
+            if (t != null) return t;
+        }
         final Color c = p.getNationColor();
         return (c == null) ? 0xFFFFFF : (c.getRGB() & 0xFFFFFF);
     }

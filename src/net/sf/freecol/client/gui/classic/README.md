@@ -2006,8 +2006,10 @@ terrain copied from the capture).  Green `0x559634`, gold `0xC7A220`.
 - Active unit (hidden in scene mode): icon cell (242,68) — black silhouette
   shifted (-2,0), then the flag (7x9 black ring, 5x7 nation fill, the
   `@ORDERS` letter in FONTTINY at ring+(2,2), black for '-', else the dark
-  shade: Holland FF7100/AA4900, England FF0000/AA0000, France/Spain FreeCol's
-  colour and 2/3 of it, unmeasured), then the sprite at cell + 3 (widths
+  shade: Holland FF7100/AA4900, England FF0000/AA0000, France 5555FF and
+  Spain FFFF55 with 2/3 of it, unmeasured; a tribe its NAMES.TXT `@TRIBES`
+  colour, W16: clip004 #5090 the Sioux brave's flag 920000, before
+  FreeCol's 900000), then the sprite at cell + 3 (widths
   6/7/13) or + 2 (8/14), others centred (unmeasured).  Flag at the cell's
   top-left for sprites ≥ 13 wide (ships, mounted), else at
   `(sprite.x + w - 2, y + 7)`; galleon and frigate at cell + (9,0); the
