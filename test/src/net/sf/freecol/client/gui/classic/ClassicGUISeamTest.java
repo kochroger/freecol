@@ -2211,7 +2211,9 @@ public class ClassicGUISeamTest extends FreeColTestCase {
                 Messages.message("indianSettlementPanel.learnableSkill"),
                 Messages.message(is.getLearnableSkillLabel(false)),
                 Messages.message("indianSettlementPanel.mostHated"),
-                Messages.message("indianSettlementPanel.highlyWanted") }) {
+                // Not visited: FreeCol's "Unbekannt", not an empty value.
+                Messages.message("indianSettlementPanel.highlyWanted") + " "
+                    + Messages.message("model.indianSettlement.wantedGoodsUnknown") }) {
             assertTrue(s + " in " + text, text.contains(ClassicAdvisorBox.literal(s)));
         }
         final ClassicPackFiles pack = ClassicPackFiles.runtime();

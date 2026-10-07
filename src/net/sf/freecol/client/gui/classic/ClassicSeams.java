@@ -379,14 +379,19 @@ final class ClassicSeams {
             + Messages.message(is.getLearnableSkillLabel(visited)));
         lines.add(Messages.message("indianSettlementPanel.mostHated") + " "
             + Messages.message(is.getMostHatedLabel(contacted)));
+        // FreeCol's label of a good not known yet is empty (its panel shows
+        // no picture there); the notice says FreeCol's "Unbekannt".
+        final String first = Messages.message(is.getWantedGoodsLabel(0, me).get(0));
         lines.add(Messages.message("indianSettlementPanel.highlyWanted") + " "
-            + Messages.message(is.getWantedGoodsLabel(0, me).get(0)));
-        final int n = is.getWantedGoodsCount();
-        if (n > 1) {
-            final List<String> others = new ArrayList<>();
-            for (int i = 1; i < n; i++) {
-                others.add(Messages.message(is.getWantedGoodsLabel(i, me).get(0)));
-            }
+            + ((first.isEmpty())
+                ? Messages.message("model.indianSettlement.wantedGoodsUnknown")
+                : first));
+        final List<String> others = new ArrayList<>();
+        for (int i = 1; i < is.getWantedGoodsCount(); i++) {
+            final String s = Messages.message(is.getWantedGoodsLabel(i, me).get(0));
+            if (!s.isEmpty()) others.add(s);
+        }
+        if (!others.isEmpty()) {
             lines.add(Messages.message("indianSettlementPanel.otherWanted") + " "
                 + String.join(", ", others));
         }
