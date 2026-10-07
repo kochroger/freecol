@@ -69,7 +69,9 @@ import javax.swing.JComponent;
  *   <li>A box comes in one paint.  A box after another comes no earlier
  *       than {@link #CHAIN_MS} after its close: the original restores the
  *       screen for 0.13-0.27 s between chained boxes (WELCOME, PEACE,
- *       COME; LEARNSTAY, LEARNDONE).  A box with an
+ *       COME; LEARNSTAY, LEARNDONE), or than its own
+ *       {@link ClassicAdvisorBox.Request#chainMs} (the father box's F1
+ *       page, the box again after it).  A box with an
  *       {@link ClassicAdvisorBox.Request#openDelayMs} comes no earlier than
  *       that after it is asked for (the option boxes, 2-4 frames after
  *       their menu goes).</li>
@@ -90,7 +92,9 @@ import javax.swing.JComponent;
  * the map's keys, the key map nor the strip can act behind the box; the
  * HUD's gates ask {@link #isBusy} as a backstop.  Keys: Up/Down (also the
  * keypad's 8/2) move the bar, also when held (auto-repeat); Enter takes the
- * barred row, Escape the cancel row; a notice goes on any key.  In a
+ * barred row, Escape the cancel row (nothing in a box without Escape); a
+ * notice goes on any key; F1 closes a list box with a help hook
+ * ({@link ClassicAdvisorBox.Bar#help}).  In a
  * checkbox box (the option boxes) Enter and Space flip the barred row and a
  * row's gold letter flips that row, and the box stays.  Enter, Escape and
  * the other keys are taken only as fresh presses made while the box is on
@@ -408,7 +412,9 @@ final class ClassicAdvisorLayer extends JComponent {
         final long now = this.clock.now();
         long due = now + Math.round(p.request.openDelayMs * 1e6);
         if (this.lastClose != Long.MIN_VALUE) {
-            due = Math.max(due, this.lastClose + Math.round(CHAIN_MS * 1e6));
+            final double chain = (p.request.chainMs >= 0.0) ? p.request.chainMs
+                : CHAIN_MS;
+            due = Math.max(due, this.lastClose + Math.round(chain * 1e6));
         }
         final String sprite = (p.layout.portrait == null) ? null
             : p.request.portrait.sprite;
@@ -540,6 +546,10 @@ final class ClassicAdvisorLayer extends JComponent {
         case KeyEvent.VK_SPACE:
             if (predates(e.getWhen()) || repeat) return;
             answer = p.bar.space();
+            break;
+        case KeyEvent.VK_F1:
+            if (predates(e.getWhen()) || repeat) return;
+            answer = p.bar.help();
             break;
         default:
             if (predates(e.getWhen()) || repeat) return;

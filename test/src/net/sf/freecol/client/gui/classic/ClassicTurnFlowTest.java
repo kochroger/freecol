@@ -176,6 +176,15 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         public void post(Runnable r) {
             this.posted.add(r);
         }
+
+        /** Whether a turn-start box must come first (the father choice). */
+        boolean hold = false;
+
+        @Override
+        public boolean holdTurnStart() {
+            if (this.hold) this.calls.add("hold");
+            return this.hold;
+        }
     }
 
     /** A flow without a thread, on the fake clock and host. */
@@ -734,6 +743,50 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(1, r.count("activate " + a.getId()));
         r.advanceMs(0.2);
         assertEquals(2, r.count("activate " + a.getId()));
+    }
+
+    /**
+     * A turn-start box that must come first (the father choice, build spec
+     * D8a): the host holds the wipe, the year does not flip and the first
+     * unit does not come; once the box is taken the poll wipes, and the
+     * first unit follows 300 ms later.  Without units the idle end waits
+     * for it too.
+     */
+    public void testHeldTurnStart() {
+        final Unit a = ship(5, 5);
+        final Rig r = new Rig(this.game);
+        r.flow.endTurnNow("key");
+        r.host.turn = 2;
+        r.host.myTurn = true;
+        r.host.current = r.host.me;
+        r.host.hold = true;
+        assertTrue(r.flow.unitChosen(a, null));
+        assertEquals(0, r.count("wipe"));
+        assertEquals(1, r.count("hold"));
+        r.flow.tick();
+        r.advanceMs(1000);
+        assertEquals(0, r.count("wipe"));
+        assertEquals(0, r.count("activate " + a.getId()));
+        r.host.hold = false;                   // the father is taken
+        r.flow.tick();
+        assertEquals(1, r.count("wipe"));
+        r.advanceMs(300);
+        assertEquals(1, r.count("activate " + a.getId()));
+        // No unit: the idle end waits for the box as well.
+        r.flow.endTurnNow("key");
+        r.host.turn = 3;
+        r.host.myTurn = true;
+        r.host.current = r.host.me;
+        r.host.hold = true;
+        r.flow.noUnitLeft();
+        r.advanceMs(1000);
+        assertEquals(1, r.count("wipe"));
+        final int ends = r.count("endTurn");
+        r.host.hold = false;
+        r.flow.tick();
+        assertEquals(2, r.count("wipe"));
+        r.advanceMs(485);
+        assertEquals(ends + 1, r.count("endTurn"));
     }
 
     /** No unit at the start of our turn: the wipe, then the automatic end. */

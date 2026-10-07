@@ -642,4 +642,63 @@ public class ClassicAdvisorLayerTest extends TestCase {
         assertEquals(0, d.get());
         assertEquals(14.27, ClassicAdvisorLayer.FRAME_MS, 0.01);
     }
+
+    /**
+     * A list box with an F1 hook (build spec D2, the father box D8a): F1
+     * tells the hook the barred row and closes the box with HELP; Escape
+     * does nothing there; a box without a hook takes F1 as any other key.
+     * A full-screen page that comes 142 ms after its box (its own chain
+     * time, not the usual 200) closes on any key, and the box asked again
+     * 264 ms after the page comes then, its bar on row 1.
+     */
+    public void testF1AndThePage() throws Exception {
+        final int[] told = { -1 };
+        final ClassicAdvisorBox.Request box = ClassicAdvisorBox.Request.builder("f")
+            .freeColText("a a").rows("a", "a a", "a a a").noEscape()
+            .outsideCancels(false).help(row -> told[0] = row).build();
+        final Answer a = ask(box);
+        flush();
+        assertTrue(up());
+        key(KeyEvent.VK_ESCAPE);                       // nothing
+        mouse(MouseEvent.MOUSE_PRESSED, 1, 1);         // nor a click beside it
+        mouse(MouseEvent.MOUSE_RELEASED, 1, 1);
+        assertTrue(up());
+        key(KeyEvent.VK_DOWN);
+        key(KeyEvent.VK_F1);
+        assertEquals(ClassicAdvisorBox.Bar.HELP, a.get());
+        assertEquals(1, told[0]);
+        assertFalse(up());
+        // The page: 142 ms after the box went.
+        final java.awt.image.BufferedImage pic = new java.awt.image.BufferedImage(320,
+            200, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        final Answer p = ask(ClassicAdvisorBox.Request.builder("page")
+            .freeColText("x").picture(pic).chain(142.0).build());
+        flush();
+        assertFalse(up());
+        this.clock.advanceMs(141);
+        runTimer();
+        assertFalse(up());
+        this.clock.advanceMs(1);
+        runTimer();
+        assertTrue(up());
+        assertEquals(new java.awt.Rectangle(0, 0, 320, 200),
+                     edt(() -> this.layer.currentLayout()).box);
+        key(KeyEvent.VK_F1);                           // any key closes it
+        assertEquals(0, p.get());
+        // The box again, 264 ms later, on row 1.
+        final Answer b = ask(ClassicAdvisorBox.Request.builder("f")
+            .freeColText("a a").rows("a", "a a").noEscape().chain(264.0).build());
+        flush();
+        this.clock.advanceMs(263);
+        runTimer();
+        assertFalse(up());
+        this.clock.advanceMs(1);
+        runTimer();
+        assertTrue(up());
+        assertEquals(0, bar());
+        key(KeyEvent.VK_F1);                           // no hook: nothing
+        assertTrue(up());
+        key(KeyEvent.VK_ENTER);
+        assertEquals(0, b.get());
+    }
 }

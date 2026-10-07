@@ -272,6 +272,14 @@ final class ClassicTestHarness {
         }
 
         @Override
+        public String boxOnScreen() {
+            return onEdt(() -> {
+                    final ClassicAdvisorLayer l = gui.boxLayer();
+                    return (l == null || !l.isShowingBox()) ? null : l.probe();
+                }, null);
+        }
+
+        @Override
         public int turnNumber() {
             final Game g = fcc.getGame();
             return (g == null || g.getTurn() == null) ? -1 : g.getTurn().getNumber();

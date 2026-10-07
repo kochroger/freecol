@@ -179,9 +179,19 @@ final class ClassicMenuBox {
         return b.y + 9 + PROMPT_PITCH * k;
     }
 
+    /** The rows' usual indent from the box's left edge. */
+    static final int ROW_INDENT = 9;
+
+    /**
+     * The list boxes' deeper indent (clip008: the father, recruit and job
+     * lists, x 55 in a box at 42, x 75 in one at 62; I: two leading 2-px
+     * spaces).
+     */
+    static final int LIST_INDENT = 13;
+
     /** Left edge of the row text (indented 4 px against the prompt). */
     static int rowX(Rectangle b) {
-        return b.x + 9;
+        return b.x + ROW_INDENT;
     }
 
     /**
@@ -207,6 +217,27 @@ final class ClassicMenuBox {
     /** The widest row text that stays inside the interior. */
     static int rowTextMaxWidth(Rectangle b) {
         return b.width - 14;
+    }
+
+    /**
+     * The height the list boxes' gold footer line "(F1 für Hilfe)" adds
+     * (clip008: the father box 82 = 6P + 8R + 18 + 6, the build menu 126,
+     * the job menus 174 and 78).
+     */
+    static final int FOOTER_HEIGHT = 6;
+
+    /**
+     * Left edge of a footer of width {@code w}: flush with the interior's
+     * right, {@code x + W - 2 - w} (clip008: x 226 in the father box at 42,
+     * x 206/207 in the build and job menus at 62).
+     */
+    static int footerX(Rectangle b, int w) {
+        return b.x + b.width - 2 - w;
+    }
+
+    /** Glyph top of the footer: {@code y + H - 9} (clip008: 132, 154, 178). */
+    static int footerTop(Rectangle b) {
+        return b.y + b.height - 9;
     }
 
     /** Outer bounds of a dropdown: 3 px top, 8 px per row, 2 px bottom. */

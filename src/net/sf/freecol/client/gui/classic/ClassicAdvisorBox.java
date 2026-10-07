@@ -92,6 +92,19 @@ import java.util.Map;
  *       its bullet changes; Enter and Space flip the barred row and the
  *       row's gold letter flips its row (I, never seen); Escape, or a
  *       press and release outside the box, closes it.</li>
+ *   <li><b>List boxes (V, clip008; build spec D2).</b>  The father,
+ *       recruit and job lists put their rows at x + 13
+ *       ({@link Request#rowIndent}); a list's gold footer "(F1 für Hilfe)"
+ *       ({@link Request#footer}) sits flush right at {@code y + H - 9} and
+ *       adds 6 px; a right column ({@link Request#right}) ends as far from
+ *       the right edge as the rows start from the left; the current entry
+ *       is yellow, an unavailable one grey, each with its cell; F1 tells
+ *       the caller's hook the barred row and closes the box with
+ *       {@link Bar#HELP} ({@link Request#help}).  0 px on the father boxes,
+ *       the build menu and both job menus.  A box may ignore Escape
+ *       ({@link Request#escapes}), come a set time after the box before
+ *       ({@link Request#chainMs}), or be a full-screen page
+ *       ({@link Request#picture}: the Colonopedia page).</li>
  * </ul>
  */
 final class ClassicAdvisorBox {
@@ -226,6 +239,22 @@ final class ClassicAdvisorBox {
     }
 
 
+    /**
+     * What F1 does in a list box ({@link Request#help}, build spec D2): the
+     * box closes with {@link Bar#HELP}, and its caller shows the help of
+     * the barred row and may ask the box again.
+     */
+    interface Help {
+
+        /**
+         * F1 was pressed with the bar on a row.  EDT only; the box is still
+         * up, so this only remembers the row.
+         *
+         * @param row The barred row (0-based).
+         */
+        void help(int row);
+    }
+
     /** What a checkbox box's row does when it flips ({@link Request#toggles}). */
     interface Toggles {
 
@@ -305,6 +334,52 @@ final class ClassicAdvisorBox {
          */
         final long showAtNanos;
 
+        /**
+         * The rows' indent from the box's left edge:
+         * {@link ClassicMenuBox#ROW_INDENT}, or the list boxes'
+         * {@link ClassicMenuBox#LIST_INDENT} (D2).
+         */
+        final int rowIndent;
+
+        /**
+         * The gold footer line, e.g. "(F1 für Hilfe)" (LABELS @MISC 188),
+         * or null; it adds {@link ClassicMenuBox#FOOTER_HEIGHT} (D2).
+         */
+        final String footer;
+
+        /** Per row the right column's text, or null (none in that row); null for none at all. */
+        final List<String> right;
+
+        /**
+         * Where the right column's text ends: this far left of the box's
+         * right edge (by default the rows' indent).
+         */
+        final int rightInset;
+
+        /** Per row, whether it is the "current" entry, drawn yellow (D2). */
+        final boolean[] current;
+
+        /** What F1 does, or null: F1 is then any other key (D2). */
+        final Help help;
+
+        /** Whether Escape answers the box (else it does nothing: the father box, D8a). */
+        final boolean escapes;
+
+        /**
+         * A full-screen page (320x200, opaque) instead of a box: the
+         * Colonopedia page of D8b.  It is a notice: any key or click
+         * closes it.  Null for a box.
+         */
+        final BufferedImage picture;
+
+        /**
+         * The least time after the previous box's close (ms), or a negative
+         * value for {@link ClassicAdvisorLayer#CHAIN_MS}: the father box's
+         * F1 page comes 0.13-0.16 s after the box goes, the box again
+         * 0.26-0.27 s after the page (clip008).
+         */
+        final double chainMs;
+
         /** The stopgap's window title, when the box cannot be drawn. */
         final String title;
 
@@ -335,9 +410,37 @@ final class ClassicAdvisorBox {
             this.toggles = (this.checks == null) ? null : b.toggles;
             this.openDelayMs = Math.max(0.0, b.openDelayMs);
             this.showAtNanos = b.showAtNanos;
+            this.rowIndent = b.rowIndent;
+            this.footer = (b.footer == null || b.footer.isEmpty()) ? null : b.footer;
+            if (b.right == null) {
+                this.right = null;
+            } else {
+                final List<String> rs = new ArrayList<>(n);
+                for (int i = 0; i < n; i++) {
+                    rs.add((i < b.right.size()) ? b.right.get(i) : null);
+                }
+                this.right = Collections.unmodifiableList(rs);
+            }
+            this.rightInset = (b.rightInset < 0) ? b.rowIndent : b.rightInset;
+            this.current = Arrays.copyOf(b.current, n);
+            this.help = b.help;
+            this.escapes = b.escapes;
+            this.picture = b.picture;
+            this.chainMs = b.chainMs;
             this.title = (b.title == null) ? "" : b.title;
             this.icon = b.icon;
             this.list = b.list;
+        }
+
+        /** @return Whether row {@code i} is the yellow "current" entry. */
+        boolean isCurrent(int i) {
+            return i >= 0 && i < this.current.length && this.current[i];
+        }
+
+        /** @return Row {@code i}'s right column text, or null. */
+        String rightOf(int i) {
+            return (this.right == null || i < 0 || i >= this.right.size()) ? null
+                : this.right.get(i);
         }
 
         /** @return Whether it is a notice (no rows). */
@@ -357,10 +460,12 @@ final class ClassicAdvisorBox {
 
         /**
          * @return What Escape answers: the cancel row, or
-         *     {@link Bar#DISMISSED}; a notice's 0.
+         *     {@link Bar#DISMISSED}; a notice's 0; {@link Bar#OPEN} where
+         *     Escape does nothing ({@link #escapes} off).
          */
         int escapeAnswer() {
             if (isNotice()) return 0;
+            if (!this.escapes) return Bar.OPEN;
             return (this.cancelRow >= 0) ? this.cancelRow : Bar.DISMISSED;
         }
 
@@ -419,12 +524,98 @@ final class ClassicAdvisorBox {
         private Toggles toggles = null;
         private double openDelayMs = 0.0;
         private long showAtNanos = 0L;
+        private int rowIndent = ClassicMenuBox.ROW_INDENT;
+        private String footer = null;
+        private List<String> right = null;
+        private int rightInset = -1;
+        private boolean[] current = new boolean[0];
+        private Help help = null;
+        private boolean escapes = true;
+        private BufferedImage picture = null;
+        private double chainMs = -1.0;
         private String title = null;
         private Image icon = null;
         private boolean list = false;
 
         private Builder(String id) {
             this.id = (id == null) ? "box" : id;
+        }
+
+        /**
+         * @param indent The rows' indent from the box's left edge
+         *     ({@link ClassicMenuBox#LIST_INDENT} for the list boxes).
+         */
+        Builder rowIndent(int indent) {
+            this.rowIndent = indent;
+            return this;
+        }
+
+        /** @param text The gold footer line ("(F1 für Hilfe)"), or null. */
+        Builder footer(String text) {
+            this.footer = text;
+            return this;
+        }
+
+        /**
+         * A right column: per row its text (null for none), right-aligned
+         * as far from the box's right edge as the rows are from its left
+         * (V, 0 px: the build menu's costs end 9 px from the edge, its rows
+         * at + 9, clip008 #11142; the job menus' goods 13 px, their rows at
+         * + 13, #42043 and #42539).
+         *
+         * @param cells The cells, in row order.
+         */
+        Builder right(List<String> cells) {
+            return right(cells, -1);
+        }
+
+        /**
+         * A right column ending {@code inset} px left of the box's right
+         * edge (a negative inset: the rows' indent, {@link #right(List)}).
+         *
+         * @param cells The cells, in row order.
+         * @param inset The distance of their advance's end from the box's
+         *     right edge.
+         */
+        Builder right(List<String> cells, int inset) {
+            this.right = (cells == null) ? null : new ArrayList<>(cells);
+            this.rightInset = inset;
+            return this;
+        }
+
+        /** Per row, whether it is the yellow "current" entry. */
+        Builder current(boolean[] c) {
+            this.current = (c == null) ? new boolean[0] : c.clone();
+            return this;
+        }
+
+        /** What F1 does with the barred row (the box closes with {@link Bar#HELP}). */
+        Builder help(Help h) {
+            this.help = h;
+            return this;
+        }
+
+        /** Escape does nothing (the father box, D8a). */
+        Builder noEscape() {
+            this.escapes = false;
+            return this;
+        }
+
+        /**
+         * A full-screen page instead of a box (D8b): a notice that shows
+         * the picture.
+         *
+         * @param page The 320x200 picture.
+         */
+        Builder picture(BufferedImage page) {
+            this.picture = page;
+            return this;
+        }
+
+        /** @param ms The least time after the previous box's close. */
+        Builder chain(double ms) {
+            this.chainMs = ms;
+            return this;
         }
 
         /** A GAME.TXT message's lines: one paragraph, reflowed. */
@@ -548,6 +739,9 @@ final class ClassicAdvisorBox {
             if (this.disabled.length < this.rows.size()) {
                 this.disabled = Arrays.copyOf(this.disabled, this.rows.size());
             }
+            if (this.picture != null) {
+                this.rows.clear();   // a page is a notice
+            }
             return new Request(this);
         }
     }
@@ -577,9 +771,23 @@ final class ClassicAdvisorBox {
         /** Whether the portrait is under the box (a chief, the King). */
         final boolean under;
 
+        /** Per row its right column (screen coordinates), or null entries; never null. */
+        final List<ClassicTextLayout.Line> right;
+
+        /** The footer line (screen coordinates), or null. */
+        final ClassicTextLayout.Line footer;
+
         Layout(Request request, Rectangle box, List<ClassicTextLayout.Line> prompt,
                List<ClassicTextLayout.Line> rows, BufferedImage portrait,
                Point portraitAt, boolean under) {
+            this(request, box, prompt, rows, portrait, portraitAt, under,
+                 Collections.<ClassicTextLayout.Line>emptyList(), null);
+        }
+
+        Layout(Request request, Rectangle box, List<ClassicTextLayout.Line> prompt,
+               List<ClassicTextLayout.Line> rows, BufferedImage portrait,
+               Point portraitAt, boolean under,
+               List<ClassicTextLayout.Line> right, ClassicTextLayout.Line footer) {
             this.request = request;
             this.box = box;
             this.prompt = Collections.unmodifiableList(new ArrayList<>(prompt));
@@ -587,6 +795,13 @@ final class ClassicAdvisorBox {
             this.portrait = portrait;
             this.portraitAt = portraitAt;
             this.under = under;
+            this.right = Collections.unmodifiableList(new ArrayList<>(right));
+            this.footer = footer;
+        }
+
+        /** @return Row {@code i}'s right column, or null. */
+        ClassicTextLayout.Line rightOf(int i) {
+            return (i >= 0 && i < this.right.size()) ? this.right.get(i) : null;
         }
 
         /** @return The prompt's line count P. */
@@ -775,20 +990,29 @@ final class ClassicAdvisorBox {
      */
     static Layout layout(Request r, ClassicFont tiny, BufferedImage portrait) {
         if (r == null || tiny == null) return null;
+        if (r.picture != null) {
+            // A full-screen page (D8b): nothing to lay out.
+            return new Layout(r, new Rectangle(0, 0, VW, VH),
+                Collections.<ClassicTextLayout.Line>emptyList(),
+                Collections.<ClassicTextLayout.Line>emptyList(), null, null, false);
+        }
         final int rows = r.rows.size();
+        final int foot = (r.footer == null) ? 0 : ClassicMenuBox.FOOTER_HEIGHT;
         int width = Math.max(10, r.width);
         List<ClassicTextLayout.Line> probe = lines(r, tiny, width, 0, 0);
         // A FreeCol text too long for the screen gets the widest box.
-        if (ClassicMenuBox.dialogHeight(probe.size(), rows) > VH && width < MAX_WIDTH) {
+        if (ClassicMenuBox.dialogHeight(probe.size(), rows) + foot > VH
+            && width < MAX_WIDTH) {
             width = MAX_WIDTH;
             probe = lines(r, tiny, width, 0, 0);
         }
         int p = probe.size();
-        final int room = (VH - ClassicMenuBox.dialogHeight(0, rows)) / ClassicMenuBox.PROMPT_PITCH;
+        final int room = (VH - ClassicMenuBox.dialogHeight(0, rows) - foot)
+            / ClassicMenuBox.PROMPT_PITCH;
         if (room < 0) return null;
         final boolean cut = p > room;
         if (cut) p = room;
-        final int w = width + 6, h = ClassicMenuBox.dialogHeight(p, rows);
+        final int w = width + 6, h = ClassicMenuBox.dialogHeight(p, rows) + foot;
         final Portrait who = r.portrait;
         final BufferedImage sprite = (who.sprite == null) ? null : portrait;
         final Point boxAt, picAt;
@@ -826,16 +1050,26 @@ final class ClassicAdvisorBox {
             }
         }
         final List<ClassicTextLayout.Line> rowLines = new ArrayList<>(rows);
-        final int max = ClassicMenuBox.rowTextMaxWidth(box);
+        final List<ClassicTextLayout.Line> rightLines = new ArrayList<>(rows);
+        final int x = box.x + r.rowIndent;
+        final int max = box.width - r.rowIndent - 5;   // rowTextMaxWidth at x + 9
         final int bullet = r.isCheckbox()
             ? tiny.markedWidth(checkRow("", true)) : 0;
         for (int i = 0; i < rows; i++) {
             String s = r.rows.get(i);
             if (tiny.markedWidth(s) > max - bullet) s = tiny.fit(plain(s), max - bullet);
-            rowLines.add(new ClassicTextLayout.Line(ClassicMenuBox.rowX(box),
-                ClassicMenuBox.rowTop(box, p, i), s));
+            final int top = ClassicMenuBox.rowTop(box, p, i);
+            rowLines.add(new ClassicTextLayout.Line(x, top, s));
+            final String cell = r.rightOf(i);
+            rightLines.add((cell == null || cell.isEmpty()) ? null
+                : new ClassicTextLayout.Line(box.x + box.width - r.rightInset
+                    - tiny.markedWidth(cell), top, cell));
         }
-        return new Layout(r, box, prompt, rowLines, sprite, picAt, under);
+        final ClassicTextLayout.Line footer = (r.footer == null) ? null
+            : new ClassicTextLayout.Line(ClassicMenuBox.footerX(box,
+                tiny.stringWidth(r.footer)), ClassicMenuBox.footerTop(box), r.footer);
+        return new Layout(r, box, prompt, rowLines, sprite, picAt, under,
+                          rightLines, footer);
     }
 
     /** The prompt laid out at a width, its first line at (left, top). */
@@ -882,6 +1116,10 @@ final class ClassicAdvisorBox {
      */
     static void paint(Graphics2D g, Layout l, int bar, boolean[] checks,
                       BufferedImage wood, ClassicFont tiny) {
+        if (l.request.picture != null) {
+            g.drawImage(l.request.picture, 0, 0, null);
+            return;
+        }
         if (l.under && l.portrait != null) {
             g.drawImage(l.portrait, l.portraitAt.x, l.portraitAt.y, null);
         }
@@ -895,16 +1133,31 @@ final class ClassicAdvisorBox {
         for (ClassicTextLayout.Line line : l.prompt) {
             ClassicMenuBox.text(g, tiny, line.marked, line.x, line.y, t, true);
         }
+        final int[] grey = ClassicFont.colours(DISABLED);
         for (int i = 0; i < l.rows.size(); i++) {
             final ClassicTextLayout.Line line = l.rows.get(i);
+            final ClassicTextLayout.Line cell = l.rightOf(i);
             final String s = (checks != null && i < checks.length)
                 ? checkRow(line.marked, checks[i]) : line.marked;
-            if (l.request.enabled(i)) {
-                ClassicMenuBox.text(g, tiny, s, line.x, line.y, t, true);
-            } else {
-                final int[] grey = ClassicFont.colours(DISABLED);
+            if (!l.request.enabled(i)) {
+                // Grey, the whole row (clip008 #42539: Späher, Dragoner).
                 tiny.draw(g, plain(s), line.x, line.y, grey);
+                if (cell != null) tiny.draw(g, plain(cell.marked), cell.x, cell.y, grey);
+            } else if (l.request.isCurrent(i)) {
+                // Yellow, the whole row (clip008 #42539 Soldat, #11142).
+                tiny.draw(g, plain(s), line.x, line.y, t.highlightColours);
+                if (cell != null) {
+                    tiny.draw(g, plain(cell.marked), cell.x, cell.y, t.highlightColours);
+                }
+            } else {
+                ClassicMenuBox.text(g, tiny, s, line.x, line.y, t, true);
+                if (cell != null) {
+                    ClassicMenuBox.text(g, tiny, cell.marked, cell.x, cell.y, t, true);
+                }
             }
+        }
+        if (l.footer != null) {
+            tiny.draw(g, l.footer.marked, l.footer.x, l.footer.y, t.highlightColours);
         }
         if (!l.under && l.portrait != null) {
             g.drawImage(l.portrait, l.portraitAt.x, l.portraitAt.y, null);
@@ -1012,6 +1265,12 @@ final class ClassicAdvisorBox {
         /** The box closed with no row (Escape without a cancel row). */
         static final int DISMISSED = -1;
 
+        /**
+         * The box closed on F1 ({@link Request#help}): its caller shows the
+         * help of the row the hook was told, and may ask the box again.
+         */
+        static final int HELP = -2;
+
         /** What the last press was on: a row (>= 0), or one of these. */
         private static final int NO_PRESS = -1, PRESS_TEXT = -2,
             PRESS_OUTSIDE = -3;
@@ -1115,9 +1374,25 @@ final class ClassicAdvisorBox {
             return this.request.enabled(this.row) ? this.row : OPEN;
         }
 
-        /** @return Escape: the cancel row ({@link Request#escapeAnswer}). */
+        /**
+         * @return Escape: the cancel row ({@link Request#escapeAnswer});
+         *     {@link #OPEN} in a box where Escape does nothing.
+         */
         int escape() {
             return this.request.escapeAnswer();
+        }
+
+        /**
+         * F1 (build spec D2): in a box with a help hook it tells the hook
+         * the barred row and closes the box with {@link #HELP}; elsewhere
+         * {@link #otherKey} (a notice goes, a question stays).
+         *
+         * @return The answer.
+         */
+        int help() {
+            if (this.request.help == null || this.row < 0) return otherKey();
+            this.request.help.help(this.row);
+            return HELP;
         }
 
         /** @return Any other key: dismisses a notice, nothing in a question. */

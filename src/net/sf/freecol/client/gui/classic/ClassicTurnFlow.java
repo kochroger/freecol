@@ -287,6 +287,17 @@ final class ClassicTurnFlow {
          * @param r The task.
          */
         void post(Runnable r);
+
+        /**
+         * Asked just before our new turn's wipe: whether a turn-start box
+         * must come first (the father choice, build spec D8a).  The host
+         * then brings that box; the wipe waits for it as for any box.
+         *
+         * @return True if the wipe must wait.
+         */
+        default boolean holdTurnStart() {
+            return false;
+        }
     }
 
     /** The pauses. */
@@ -1044,6 +1055,7 @@ final class ClassicTurnFlow {
     private boolean wipe() {
         if (this.turnStarted) return true;
         if (!this.host.myTurn() || this.host.blocked()) return false;
+        if (this.host.holdTurnStart()) return false;   // its box first (D8a)
         flashOwnColour();
         this.turnStarted = true;
         this.unwipedSince = 0L;

@@ -77,6 +77,14 @@ final class ClassicScriptDriver {
         int turnNumber();
 
         /**
+         * @return The advisor box on screen as the recorder's probe writes
+         *     it ({@code id:bar}, blanks as {@code _}), or null.
+         */
+        default String boxOnScreen() {
+            return null;
+        }
+
+        /**
          * Press and release a key, as a real one.
          *
          * @param key The key.
@@ -232,6 +240,9 @@ final class ClassicScriptDriver {
                   IDLE_STABLE_MS, c.number, "a turn after turn " + start);
             break;
         }
+        case WAIT_BOX:
+            waitBox(c);
+            break;
         case PREF:
             this.host.pref(c.name, c.value);
             break;
@@ -247,6 +258,37 @@ final class ClassicScriptDriver {
             break;
         default:
             throw new ScriptException("unknown command " + c.op);
+        }
+    }
+
+    /**
+     * {@code waitBox}: until a box with the prefix is on screen; with a
+     * key, every other box on screen meanwhile gets it (once per box: the
+     * next box comes no sooner than the layer's chain time).
+     *
+     * @param c The command.
+     * @exception ScriptException on a timeout.
+     * @exception InterruptedException if interrupted.
+     */
+    private void waitBox(ClassicScript.Command c)
+        throws ScriptException, InterruptedException {
+        final long end = System.nanoTime() + c.number * 1_000_000L;
+        String answered = null;
+        for (;;) {
+            final String b = this.host.boxOnScreen();
+            if (b != null && b.startsWith(c.name)) return;
+            if (b != null && c.key != null && !b.equals(answered)) {
+                ClassicFrameRecorder.event("log", "waitBox answers " + b);
+                this.host.key(c.key, KEY_HOLD_MS);
+                answered = b;
+            } else if (b == null) {
+                answered = null;
+            }
+            if (System.nanoTime() >= end) {
+                throw new ScriptException("timeout after " + c.number
+                    + " ms waiting for a box " + c.name);
+            }
+            Thread.sleep(POLL_MS);
         }
     }
 

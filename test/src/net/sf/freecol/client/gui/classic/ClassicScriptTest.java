@@ -123,6 +123,9 @@ public class ClassicScriptTest extends TestCase {
         assertBad("goto 5 x", "not a number");
         assertBad("quit now", "no argument");
         assertBad("jump 3", "unknown command");
+        assertBad("waitBox", "prefix");
+        assertBad("waitBox a 5 FOO", "not a key");
+        assertBad("waitBox a x", "not a number");
     }
 
     public void testKeyCharactersAndLocations() {
@@ -147,7 +150,7 @@ public class ClassicScriptTest extends TestCase {
     }
 
     /** A host that records what it is asked to do. */
-    private static final class FakeHost implements ClassicScriptDriver.Host {
+    private static class FakeHost implements ClassicScriptDriver.Host {
 
         final List<String> calls = new ArrayList<>();
         volatile boolean game = true;
@@ -231,6 +234,42 @@ public class ClassicScriptTest extends TestCase {
         assertEquals("ok", result(r));
         // Two stable idle waits and the 100 ms sleep.
         assertTrue(ms + " ms", ms >= 100 + 2 * ClassicScriptDriver.IDLE_STABLE_MS);
+    }
+
+    /**
+     * {@code waitBox}: until a box whose probe id starts with the prefix
+     * is on screen (another box, or none, keeps it waiting).
+     */
+    public void testWaitBox() throws IOException {
+        final ClassicScript s = parse("waitBox WHICHFREEDOM", "waitBox pedia 900");
+        assertEquals(ClassicScript.Op.WAIT_BOX, s.commands.get(0).op);
+        assertEquals("WHICHFREEDOM", s.commands.get(0).name);
+        assertEquals(ClassicScript.WAIT_BOX_TIMEOUT, s.commands.get(0).number);
+        assertEquals(900L, s.commands.get(1).number);
+        final int[] asked = { 0 };
+        final FakeHost h = new FakeHost() {
+                @Override
+                public String boxOnScreen() {
+                    return (++asked[0] < 3) ? null
+                        : (asked[0] < 5) ? "message_x:-1" : "WHICHFREEDOM:0";
+                }
+            };
+        final File r = resultFile();
+        new ClassicScriptDriver(parse("waitBox WHICHFREEDOM 5000 ENTER", "quit"),
+                                h, r).run();
+        assertEquals(5, asked[0]);
+        assertEquals("ok", result(r));
+        // ENTER answered the other box once (it stayed for two looks).
+        assertEquals(Arrays.asList("key pressed ENTER " + ClassicScriptDriver.KEY_HOLD_MS,
+                                   "quit"), h.calls);
+        assertEquals(java.awt.event.KeyEvent.VK_ENTER,
+                     parse("waitBox x 9 ENTER").commands.get(0).key.getKeyCode());
+        assertNull(s.commands.get(0).key);
+        // Never: a timeout.
+        final FakeHost none = new FakeHost();
+        final File r2 = resultFile();
+        new ClassicScriptDriver(parse("waitBox pedia 200"), none, r2).run();
+        assertTrue(result(r2), result(r2).contains("timeout after 200 ms waiting for a box pedia"));
     }
 
     public void testATimeoutEndsTheRunAndQuits() throws IOException {

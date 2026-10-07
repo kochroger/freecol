@@ -74,6 +74,8 @@ import net.sf.freecol.common.i18n.NameCache;
 import net.sf.freecol.common.io.FreeColModFile;
 import net.sf.freecol.common.model.Colony;
 import net.sf.freecol.common.model.Direction;
+import net.sf.freecol.common.model.FoundingFather;
+import net.sf.freecol.common.model.FreeColObject;
 import net.sf.freecol.common.model.FreeColGameObject;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.GoodsType;
@@ -1177,9 +1179,12 @@ public class ClassicGUI extends GUI {
         this.infoPanel = null;
         this.menuStrip = null;
         this.hudPane = null;
-        // No first scene and no held notices survive the game view.
+        // No first scene, no held notices and no father offer survive the
+        // game view (the server offers the fathers again).
         this.firstScenePending = false;
         this.heldMessages.clear();
+        this.pendingFathers = null;
+        this.fathersPosted = false;
         if (this.sceneShowing) {
             this.sceneShowing = false;
             if (this.hudOverlay != null) this.hudOverlay.hideScene();
@@ -2541,6 +2546,11 @@ public class ClassicGUI extends GUI {
         public void post(Runnable r) {
             SwingUtilities.invokeLater(r);
         }
+
+        @Override
+        public boolean holdTurnStart() {
+            return ClassicGUI.this.holdTurnStart();
+        }
     }
 
     /**
@@ -3187,9 +3197,12 @@ public class ClassicGUI extends GUI {
      */
     @Override
     public FreeColPanel showReportTurnPanel(List<ModelMessage> messages) {
-        showMessagePopup(messages, "classic.dialog.turnMessages");
+        showMessagePopup(messages, TURN_REPORT);
         return null;
     }
+
+    /** The title key of the turn start's notices ({@link #showReportTurnPanel}). */
+    static final String TURN_REPORT = "classic.dialog.turnMessages";
 
     /**
      * Show {@code messages} as a paged classic popup titled {@code titleKey}.
@@ -3215,6 +3228,11 @@ public class ClassicGUI extends GUI {
      *       is dropped ({@link ClassicOptionBoxes#reportsShown},
      *       {@link ClassicPrefs#REPORTS}), on top of FreeCol's own message
      *       options.</li>
+     *   <li>Each notice is a box in the original's words where GAME.TXT
+     *       has it ({@link ClassicNotices}, master plan N1).</li>
+     *   <li>The turn report asks a pending father offer after its price
+     *       messages and before its other notices (build spec D8a,
+     *       {@link #askFathers}).</li>
      * </ul>
      */
     private void showMessagePopup(List<ModelMessage> messages, String titleKey) {
@@ -3229,19 +3247,241 @@ public class ClassicGUI extends GUI {
         final Game game = getGame();
         if (game == null) return;
         // One box per notice, each after the one before (build spec W7):
-        // the original has no paged report.
-        final List<ClassicAdvisorBox.Request> boxes = new ArrayList<>();
+        // the original has no paged report.  The original's words where
+        // GAME.TXT has the notice (N1, ClassicNotices).
+        final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
+        final Player me = myPlayer();
         final String title = Messages.message(titleKey);
+        // The turn start's father choice comes after its price messages,
+        // before the other notices (clip008 01-fathers section 6.3); else
+        // the notices keep their order.
+        final PendingFathers fathers = (TURN_REPORT.equals(titleKey))
+            ? takePendingFathers() : null;
+        final List<ClassicAdvisorBox.Request> prices = new ArrayList<>();
+        final List<ClassicAdvisorBox.Request> boxes = new ArrayList<>();
         for (ModelMessage m : messages) {
-            final ImageIcon icon = this.imageLibrary
-                .getObjectImageIcon(game.getMessageDisplay(m));
-            boxes.add(notice("message " + m.getId(), Messages.message(m), title,
-                             (icon == null) ? null : icon.getImage()));
+            final FreeColObject display = game.getMessageDisplay(m);
+            final ClassicAdvisorBox.Request r = ClassicNotices.request(text,
+                "message " + m.getId(), m, Messages.message(m), display, me,
+                title, iconOf(display));
+            if (fathers != null
+                && m.getMessageType() == ModelMessage.MessageType.MARKET_PRICES) {
+                prices.add(r);
+            } else {
+                boxes.add(r);
+            }
         }
         onEventThread(() -> {
+                for (ClassicAdvisorBox.Request r : prices) this.prompter.ask(r);
+                if (fathers != null) askFathers(fathers);
                 for (ClassicAdvisorBox.Request r : boxes) this.prompter.ask(r);
                 return null;
             }, null);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>FreeCol's information messages (master plan N1): the base GUI
+     * drops them, so every result of speaking to a chief, every "not
+     * enough gold", every village's answer came without a word.  Each is
+     * a notice box now ({@link ClassicNotices}: GAME.TXT's words where the
+     * original has the notice), except the ones the original never shows
+     * (an illegal move, a key out of turn).  On the event thread the box
+     * is asked at once (the controller posts these with
+     * {@code invokeLater}); from another thread it is posted, so no
+     * server message waits for the player.
+     */
+    @Override
+    public FreeColPanel showInformationPanel(FreeColObject displayObject,
+                                             StringTemplate template) {
+        if (template == null) return null;
+        final String id = template.getId();
+        if (ClassicNotices.silent(id)) {
+            ClassicFrameRecorder.event("notice-silent", id);
+            return null;
+        }
+        final ClassicAdvisorBox.Request r = ClassicNotices.request(
+            ClassicText.load(ClassicPackFiles.runtime()), "notice " + id, template,
+            Messages.message(template), displayObject, myPlayer(),
+            Messages.message("classic.dialog.messages"), iconOf(displayObject));
+        if (SwingUtilities.isEventDispatchThread()) {
+            this.prompter.ask(r);
+        } else {
+            SwingUtilities.invokeLater(() -> this.prompter.ask(r));
+        }
+        return null;
+    }
+
+    /**
+     * The stopgap's illustration of a notice: FreeCol's image of its
+     * object, or null.  A test without the image resources replaces it
+     * (their fallback image would be fatal there).
+     *
+     * @param display The object, or null.
+     * @return The image, or null.
+     */
+    java.awt.Image iconOf(FreeColObject display) {
+        if (display == null) return null;
+        try {
+            final ImageIcon icon = this.imageLibrary.getObjectImageIcon(display);
+            return (icon == null) ? null : icon.getImage();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** @return Our player, or null without a client (the tests). */
+    Player myPlayer() {
+        return (getFreeColClient() == null) ? null : getMyPlayer();
+    }
+
+    // The founding father choice (build spec D8a, ClassicFathers)
+
+    /** A father offer, until its box is asked. */
+    static final class PendingFathers {
+
+        final List<FoundingFather> fathers;
+        final DialogHandler<FoundingFather> handler;
+
+        PendingFathers(List<FoundingFather> fathers,
+                       DialogHandler<FoundingFather> handler) {
+            this.fathers = new ArrayList<>(fathers);
+            this.handler = handler;
+        }
+    }
+
+    /** The father offer of this turn start, until its box is asked (EDT only). */
+    private PendingFathers pendingFathers = null;
+
+    /** Whether the turn start's hold has posted the pending offer's box. */
+    private boolean fathersPosted = false;
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The original's father box ({@link ClassicFathers}).  It is not
+     * asked at once: the controller posts the offer before the turn
+     * start's notices, and the original shows it after their price
+     * messages.  So the offer waits: the turn report asks it after its
+     * price messages ({@link #showMessagePopup}); a turn start without
+     * notices asks it just before the year flips (the turn flow's hold,
+     * {@link #holdTurnStart}).  When it is due it is dropped after
+     * independence and in the turn a father joined
+     * ({@link ClassicFathers#withheld}); the server offers it again next
+     * turn while none is chosen.
+     */
+    @Override
+    public void showChooseFoundingFatherDialog(final List<FoundingFather> ffs,
+        final DialogHandler<FoundingFather> handler) {
+        if (ffs == null || ffs.isEmpty() || handler == null) return;
+        this.pendingFathers = new PendingFathers(ffs, handler);
+        this.fathersPosted = false;
+        ClassicFrameRecorder.event("fathers-offer", ffs.stream()
+            .map(FoundingFather::getId).collect(Collectors.joining(",")));
+    }
+
+    /**
+     * The pending father offer, taken: it is asked by the caller now.
+     *
+     * @return The offer, or null.
+     */
+    PendingFathers takePendingFathers() {
+        final PendingFathers p = this.pendingFathers;
+        this.pendingFathers = null;
+        return p;
+    }
+
+    /**
+     * The turn flow's hold before the year flips (build spec D8a): a
+     * father offer still pending is asked first.  The box is posted (the
+     * flow's wipe asks this from inside its own work); the flow then waits
+     * for it as for any box, and wipes after it.
+     *
+     * @return True if the turn start must wait.
+     */
+    boolean holdTurnStart() {
+        if (this.pendingFathers == null) return false;
+        if (!this.fathersPosted) {
+            this.fathersPosted = true;
+            ClassicFrameRecorder.event("fathers-due", "before the turn start");
+            SwingUtilities.invokeLater(() -> {
+                    final PendingFathers p = takePendingFathers();
+                    if (p != null) askFathers(p);
+                });
+        }
+        return true;
+    }
+
+    /**
+     * Ask the father box until a father is taken (EDT only): F1 shows the
+     * page of the father under the bar and asks the box again, its bar on
+     * row 1; Escape and a click beside it do nothing.  Not after
+     * independence, not in the turn a father joined
+     * ({@link ClassicFathers#withheld}): then nothing is asked, and the
+     * handler is not called.
+     *
+     * @param p The offer.
+     */
+    void askFathers(PendingFathers p) {
+        final Game game = getGame();
+        final String why = ClassicFathers.withheld(myPlayer(),
+            (game == null) ? null : game.getTurn());
+        if (why != null) {
+            ClassicFrameRecorder.event("fathers-withheld", why);
+            logger.info("Classic father choice not shown: " + why + ".");
+            return;
+        }
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicText text = ClassicText.load(pack);
+        final int[] help = { -1 };
+        boolean again = false;
+        for (int round = 0; round < 1000; round++) {
+            // Asked again after its page, it comes a little later (clip008).
+            final int chosen = this.prompter.ask(ClassicFathers.request(text,
+                p.fathers, row -> help[0] = row,
+                (again) ? ClassicFathers.REOPEN_CHAIN_MS : -1.0));
+            if (chosen >= 0 && chosen < p.fathers.size()) {
+                final FoundingFather ff = p.fathers.get(chosen);
+                ClassicFrameRecorder.event("fathers-chosen", ff.getId());
+                p.handler.handle(ff);
+                return;
+            }
+            if (chosen == ClassicAdvisorBox.Bar.HELP && help[0] >= 0
+                && help[0] < p.fathers.size()) {
+                showFatherPage(pack, text, p.fathers.get(help[0]));
+                help[0] = -1;
+                again = true;
+            } else if (chosen == ClassicAdvisorBox.Bar.DISMISSED) {
+                // The game view went (abort): the server offers it again.
+                return;
+            }
+        }
+    }
+
+    /**
+     * The Colonopedia page of a father ({@link ClassicPedia#fatherPage}),
+     * until a key or a click (EDT only).  Without the pack's page the box
+     * simply comes back.
+     *
+     * @param pack The pack, or null.
+     * @param text The texts, or null.
+     * @param ff The father.
+     */
+    private void showFatherPage(ClassicPackFiles pack, ClassicText text,
+                                FoundingFather ff) {
+        final BufferedImage page = (pack == null) ? null : ClassicPedia.fatherPage(
+            ClassicPedia.load(pack), text, pack.font(ClassicFont.TINY),
+            pack.image(ClassicPedia.WOODPANL_KEY), ClassicFathers.index(ff));
+        if (page == null) {
+            logger.info("Classic father page missing for " + ff.getId()
+                + " (re-run ant classic-assets).");
+            return;
+        }
+        this.prompter.ask(ClassicAdvisorBox.Request.builder("pedia " + ff.getId())
+            .freeColText(Messages.getName(ff)).picture(page)
+            .chain(ClassicFathers.PAGE_CHAIN_MS)
+            .stopgap(Messages.getName(ff), null).build());
     }
 
     // First game scene (ClassicFirstScene)

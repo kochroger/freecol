@@ -51,6 +51,12 @@ import javax.swing.KeyStroke;
  *       (our turn, no dialog or scene, no slide running) for a moment.</li>
  *   <li>{@code waitTurn [timeoutMs]}: until a later turn than the current
  *       one has started and we have the controls.</li>
+ *   <li>{@code waitBox <prefix> [timeoutMs [keystroke]]}: until an advisor
+ *       box whose id starts with the prefix is on screen (its id as the
+ *       recorder's probe writes it, blanks as {@code _}:
+ *       {@code WHICHFREEDOM}, {@code pedia}, {@code message_model.market});
+ *       with a keystroke, that key answers every other box that comes
+ *       first (the turn start's notices before the father box).</li>
  *   <li>{@code pref <name> <on|off>}: set a classic pref
  *       ({@link ClassicPrefs#DEFAULTS}) or one of the original's rows that
  *       are FreeCol options ({@link ClassicPrefs#CLIENT_OPTIONS});
@@ -69,10 +75,11 @@ final class ClassicScript {
 
     /** The commands. */
     enum Op { WAIT, KEY, CLICK, WAIT_GAME, WAIT_IDLE, WAIT_TURN, PREF, LOG, QUIT,
-        GOTO }
+        GOTO, WAIT_BOX }
 
-    /** Default timeouts (ms) of the three waits. */
+    /** Default timeouts (ms) of the waits. */
     static final long WAIT_GAME_TIMEOUT = 180_000L;
+    static final long WAIT_BOX_TIMEOUT = 60_000L;
     static final long WAIT_IDLE_TIMEOUT = 60_000L;
     static final long WAIT_TURN_TIMEOUT = 300_000L;
 
@@ -94,10 +101,10 @@ final class ClassicScript {
         /** CLICK, GOTO: y. */
         final int y;
 
-        /** KEY: the key. */
+        /** KEY: the key; WAIT_BOX: the key for the other boxes, or null. */
         final KeyStroke key;
 
-        /** PREF: the name; LOG: the text. */
+        /** PREF: the name; LOG: the text; WAIT_BOX: the prefix. */
         final String name;
 
         /** PREF: the value. */
@@ -182,6 +189,15 @@ final class ClassicScript {
         case "waitturn":
             return new Command(Op.WAIT_TURN, n, s, millis(rest, WAIT_TURN_TIMEOUT),
                                0, null, null, false);
+        case "waitbox": {
+            final String[] pt = rest.split("\\s+", 3);
+            if (rest.isEmpty()) {
+                throw new IllegalArgumentException("waitBox needs a prefix");
+            }
+            return new Command(Op.WAIT_BOX, n, s,
+                millis((pt.length > 1) ? pt[1] : "", WAIT_BOX_TIMEOUT), 0,
+                (pt.length > 2) ? keyStroke(pt[2]) : null, pt[0], false);
+        }
         case "pref": {
             final String[] nv = rest.split("\\s+");
             if (nv.length != 2) throw new IllegalArgumentException("pref needs a name and on/off");

@@ -1333,15 +1333,18 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
   without the pack's FONTTINY, or when the rows do not fit on the screen,
   the stopgap stays (`ClassicDialog`, the selection list for a choice).
 - **Not yet.** FreeCol's words in the FreeCol boxes (the GAME.TXT texts of
-  the villages, the rumours, the first contact chain, the King's texts are
-  W8c-W8f, W24; the landing's  is below); @SAILPORT's indented port rows; the
-  @LANDHO input field; the King's KING2 gesture (W24); a notice's
-  portrait (N1); the original's list boxes with "(F1 für Hilfe)" (D2).
+  the villages' menus, the rumours' questions, the first contact chain, the
+  King's texts are W8c-W8f, W24; the landing's is below; the notices that
+  have a GAME.TXT text are below); @SAILPORT's indented port rows; the
+  @LANDHO input field; the King's KING2 gesture (W24). The list boxes of
+  the colony and Europe screens (D6, D7, D9c) are built on the list-box
+  extensions below.
 - **Recorder events:** `box-palette` and `palette-portrait` (the portrait's
   palette), `box-open <id> box=x,y,w,h portrait=<sprite>@x,y rows= bar=
-  text=`, `box-bar <id> row=`, `box-close <id> chosen=`; the harness's
-  state line shows ` box=<id>:<bar row>` (or `due`), its `isIdle` is false
-  and its keys and clicks go to the box while one is up or due.
+  text=`, `box-bar <id> row=`, `box-close <id> chosen=` (`-2` for F1, D2);
+  the harness's state line shows ` box=<id>:<bar row>` (or `due`), its
+  `isIdle` is false and its keys and clicks go to the box while one is up
+  or due.
 
 Tests: `ClassicAdvisorBoxTest` (the geometry of all 26 measured boxes, the
 bar's keys and mouse, the text helpers, `@default`, long texts, the
@@ -1359,6 +1362,132 @@ chained boxes 200 ms apart, the palette's lead, notices, teardown),
 outside on the real bar: `testConfirmBoxKeys`, `testChoiceBoxKeys`,
 `testSailHomeBoxKeys`, `testKingsBoxEnterKissesTheRing`,
 `testNativeDemandEnterRefuses`, `testNoticesOneBoxEach`).
+
+### List boxes (`ClassicAdvisorBox`; build spec D2)
+
+The original's list boxes (the father choice, the build menu, the job
+menus, @RECRUIT) are advisor boxes with a few more parts, each a
+`Builder` call; measured on clip008 (`clip008-analysis/01-fathers.md`
+§2.2, `01-colony.md` §3.5-3.6), V unless marked:
+
+- **Row indent** (`rowIndent`): the rows at box + 9 (`ROW_INDENT`, the
+  village menus, the build menu) or + 13 (`LIST_INDENT`: the father,
+  recruit and job lists; I: two leading 2-px blanks).
+- **Footer** (`footer`): LABELS @MISC 188 "(F1 für Hilfe)" in gold,
+  flush right at `x + W - 2 - w`, glyph top `y + H - 9`; it adds 6 px,
+  `h = 6P + 8R + 18 + 6` (82 the fathers, 126 the build menu, 174 and 78
+  the job menus).
+- **Right column** (`right`): per row a cell, right-aligned as far from
+  the box's right edge as the rows are from its left (the build menu's
+  costs end 9 px from it, the job menus' goods 13 px).
+- **Row colours:** the current entry yellow, the whole row with its cell
+  (`current`: the current build, the unit's own role in the job sub-list);
+  an unavailable row grey 8 (`0x555555`), with its cell (`disabled`: Späher
+  and Dragoner without horses).
+- **Start row, mouse:** the caller's start row (`defaultRow`); a press
+  puts the bar on the row under the pointer, the release on that row
+  takes it (as every advisor box).
+- **F1 hook** (`help`, `Help`): F1 tells the hook the barred row and the
+  box closes with `Bar.HELP` (-2); the caller shows the help and may ask
+  the box again. Without a hook F1 is any other key.
+- **No Escape** (`noEscape`): Escape does nothing (the father box).
+- **A page** (`picture`): a full-screen 320x200 picture instead of a box,
+  a notice of the whole screen (any key or click closes it): the
+  Colonopedia page below.
+- **Chain time** (`chain`): the least time after the previous box's close,
+  instead of the usual 200 ms (the F1 page 142 ms, the father box again
+  264 ms).
+
+Tests: `ClassicListBoxTest` (the geometry, the colours, F1, no Escape, the
+page; and `testGoldenAgainstTheClip`: the build menu #11142 and the job
+menus #42043 and #42539 drawn with the extensions over clip008's frames,
+0 px off on the whole box; the rows' words are the clip's, the boxes that
+will make them are D6's and D7's). Two findings for D7: NAMES' upper case
+leaves the "ä" of "STäLLE" small (as `ClassicText.upperAscii`), and a
+two-good cost has no blank between its parts: "(52 Hämmer)(20 Werkzeuge)".
+
+### Notices (`ClassicNotices`; master plan N1)
+
+FreeCol's information messages (`GUI.showInformationPanel`, which the base
+GUI drops: every result of speaking to a chief, every village's answer,
+"not enough gold", a colony that cannot shrink) and its model messages are
+each one notice box (W7), in the original's words where GAME.TXT has the
+same notice (`ClassicNotices.RULES`), else in FreeCol's:
+
+| FreeCol | GAME.TXT | Portrait |
+|---|---|---|
+| `scoutSettlement.speakBeads` | @CHIEFGIFT (the tribe, @NATIONABBREV "Holl.", the worth and the coin; V clip008 #51431) | the tribe's chief |
+| `scoutSettlement.expertScout` | @CHIEFGUIDES (V #46396) | chief |
+| `scoutSettlement.speakTales`, `speakNothing`, `speakDie` | @CHIEFAREA, @CHIEFBORED, @CHIEFKILL (I) | chief |
+| `info.noMoreSkill` | @LEARNALREADY (V #37156) | chief |
+| `learnSkill.leave`, `learnSkill.die` | @LEARNMAD, @CHIEFKILL (I) | chief |
+| `buildColony.badUnit` | @ONLYCOL (I) | none |
+| the rumours: mounds empty / gift / treasure | @BURIAL1 (V landfall #20177), @BURIAL2, @BURIAL3 | frontiersman |
+| the rumours: nothing, vanished, chief's gift, ruins, Cibola, fountain, survivors | @LOSTCITY6, 5, 7, 3, 2, 1, 9 | frontiersman |
+| `model.lostCityRumour.burialGround` | @SCREWED (the tribe) | chief (I) |
+
+The tribe is the owner of the notice's object (the village), else the
+nation of its `%nation%`. A notice whose value the original does not have
+(a tribe or nation outside its eight and four) keeps FreeCol's words.
+Silent, as in the original: an illegal move (`move.noAccess*`,
+`move.noAttackWater`, `move.noTile`) and a key while it is not our turn
+(`info.notYourTurn`); the recorder logs `notice-silent`. On the event
+thread the box is asked at once (the controller posts these with
+`invokeLater`); from another thread it is posted, so no server message
+waits for the player.
+
+Tests: `ClassicNoticesTest` (the silent ones, the rules, the tribe, the
+words with the pack, the GUI's two seams; and `testGoldenAgainstTheClips`:
+@BURIAL1, @CHIEFGUIDES, @LEARNALREADY and @CHIEFGIFT as the GUI builds
+them from FreeCol's messages, 0 px off on box and portrait).
+
+### The founding father choice (`ClassicFathers`, `ClassicPedia`; build spec D8a, D8b's page)
+
+GAME.TXT @WHICHFREEDOM as a list box, no portrait, centred: (42,59)
+236x82 for its three prompt lines and five rows, one per offered father in
+FreeCol's order (one per type, the original's), each "Peter Minuit
+(Handels- Berater)" (NAMES @FATHERS, NAMES @FOUNDING with its hyphen and
+blank, LABELS @MISC 102), rows at + 13, the gold footer, the bar on row 1.
+FreeCol's fathers map to NAMES @FATHERS, PEDIA @FATHERn and the congress
+figures CC-nn through an explicit table (`ClassicFathers.IDS`).
+
+- **Keys.** The arrows move the bar, Enter takes the father under it (no
+  message follows). **F1** opens the Colonopedia page of the father under
+  the bar, 142 ms after the box goes (clip008: 0.13-0.16 s); any key or
+  click closes it, the screen under it comes back in one paint, and the
+  box comes again 264 ms later with the bar on row 1 (0.257-0.271 s; 3 of
+  3 times). **Escape does nothing**, nor does a click beside the box (I:
+  no cancel row, a choice is due).
+- **The page** (`ClassicPedia.fatherPage`): WOODPANL.PIK, the gold header
+  LABELS @MISC 107 "COLONIZATION-ENZYKLOPÄDIE" and "(Name: Gründerväter)"
+  (PEDIA @PEDIA 5) at glyph tops 5 and 13, `x = (322 - w) div 2`; the
+  entry's title at y 36, its text reflowed at `320 - 2 x0`
+  (`x0 = (321 - @width) div 2`), 7 px apart, `^` a paragraph with one
+  blank line, `{..}` gold across line ends, `%%` a percent, `$` the coin.
+  PEDIA.TXT is read by `ClassicPedia` (its `@SMALLFONT` is a directive, `@;`
+  ends a section). Without the pack's page the box simply comes back.
+- **When.** FreeCol posts the offer before the turn start's notices; the
+  original shows it after their price messages. So it waits
+  (`pendingFathers`): the turn report asks the price messages, then the
+  father box, then the other notices (`showMessagePopup`); a turn start
+  without notices asks it just before the year flips: the turn flow's wipe
+  asks `Host.holdTurnStart` first, which posts the box and holds the wipe
+  until it is answered. Withheld (no box, no handler) after independence
+  (Roger) and in the turn a father joined (the player's FOUNDING_FATHER
+  history event of this turn: the original offers the next father a turn
+  later; FreeCol offers it again then, while none is chosen).
+- **Not yet.** The music (M10); the join sequence @FREEDOM, the congress
+  hall and its page (D8c); COLONIPÄDIE → Gründerväter (D8b's menu part).
+  A father chosen before independence still joins (a server rule, N10).
+- **Recorder events:** `fathers-offer <ids>`, `fathers-due` (the hold),
+  `fathers-withheld <why>`, `fathers-chosen <id>`.
+
+Tests: `ClassicFathersTest` (the table, the rows, the box, PEDIA.TXT, when
+it is withheld, the turn start's order with Escape, a click beside, F1 and
+the page, the hold before the year flips; and the golden checks: the five
+father boxes #12765, #13304, #48314, #49787, #50129 and the four pages
+#40109 Minuit, #48645 Stuyvesant, #49256 Hudson, #49900 Drake, 0 px off),
+`ClassicTurnFlowTest.testHeldTurnStart`, `ClassicAdvisorLayerTest.testF1AndThePage`.
 
 ### The landing (`ClassicGUI.askLandfall`; build spec W8b, master plan W18)
 
@@ -4269,7 +4398,11 @@ woke late in 25 (> 5 ms in 17, at most 12.4 ms), the new one never (at most
 `waitIdle`, `waitTurn` (optional timeout ms), `pref <name> on|off` (the classic
 prefs below, or `autoSave`/`combatAnalysis`/`tutorTips`, which set FreeCol's
 own options), `goto <x> <y>` (the active unit gets FreeCol's goto order to that
-tile, `InGameController.goToTile`; W5f's goto units), `log <text>`, `quit`. It
+tile, `InGameController.goToTile`; W5f's goto units), `waitBox <prefix>
+[timeoutMs [key]]` (until an advisor box whose probe id starts with the
+prefix is on screen, e.g. `WHICHFREEDOM`, `pedia`, `CHIEF`; with a key, that
+key answers every other box that comes first, as the turn start's notices
+before the father box), `log <text>`, `quit`. It
 runs on its own thread. A key is a
 press, 80 ms, a release (plus `KEY_TYPED` for a character), dispatched on the
 EDT with `Component.dispatchEvent` to the component a real key would reach:
