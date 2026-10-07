@@ -3392,6 +3392,8 @@ public class ClassicGUI extends GUI {
             if (this.menuStrip == null) return;
             final String text = ClassicBands.departure(
                 ClassicText.load(ClassicPackFiles.runtime()), unit);
+            // The ship gone first, the band with it or a frame later.
+            if (this.mapViewer != null) this.mapViewer.paintDeparture();
             showBand(text, ClassicVoyages.BAND_MS);
             ClassicFrameRecorder.event("band", "depart unit=" + unit.getId()
                 + " at=" + from.getX() + "," + from.getY() + " text=" + text);
@@ -3436,13 +3438,17 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * The band goes, the menu titles come back; the turn flow hears it
+     * The band goes, the menu titles come back in the same paint (as the
+     * band came, {@link #showBand}: a queued repaint came late or, in a
+     * minimized run, not at all); the turn flow hears it
      * ({@link ClassicTurnFlow#bandEnded}).  EDT only.
      */
     void clearBand() {
         if (this.bandTimer != null) this.bandTimer.cancel();
         if (this.menuStrip == null || this.menuStrip.band() == null) return;
         this.menuStrip.setBand(null);
+        this.menuStrip.paintImmediately(0, 0, this.menuStrip.getWidth(),
+                                        this.menuStrip.getHeight());
         ClassicFrameRecorder.event("band", "off");
         if (this.turnFlow != null) this.turnFlow.bandEnded();
     }

@@ -1684,6 +1684,16 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
+     * The whole map now, a ship that left it for Europe gone: its
+     * departure band follows in the same frame or the next (W13, landfall
+     * #25734/#25735, clip008 #44179/#44180); a queued repaint came up to
+     * 12 frames later (H3 live check).  EDT only.
+     */
+    void paintDeparture() {
+        paintNow(null);
+    }
+
+    /**
      * Tests: paint into an image instead of the screen ({@link #offscreen}),
      * the viewer sized to it.
      *
