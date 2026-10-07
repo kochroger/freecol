@@ -2377,6 +2377,350 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertEquals(2, fake.boxes.size());
     }
 
+    /**
+     * A classic GUI without a client whose woodcuts and boxes are fakes:
+     * it keeps the order in which they came ("woodcut k", the box's id).
+     */
+    private static class WoodcutGUI extends ClassicGUI {
+
+        final Game game;
+        final Player me;
+        final List<String> order = new ArrayList<>();
+        final List<Integer> woodcutsCut = new ArrayList<>();
+
+        /** What the fake woodcutter answers: shown (1) or not (NOT_SHOWN). */
+        long shows = 1L;
+
+        WoodcutGUI(Game game, Player me) {
+            super(null);
+            this.game = game;
+            this.me = me;
+            this.woodcutter = (k, notBefore, followMs) -> {
+                this.order.add("woodcut " + k);
+                this.woodcutsCut.add(k);
+                return this.shows;
+            };
+            this.prompter = r -> {
+                this.order.add(r.id);
+                return ClassicAdvisorBox.Bar.DISMISSED;
+            };
+        }
+
+        @Override
+        protected Game getGame() {
+            return this.game;
+        }
+
+        @Override
+        Player myPlayer() {
+            return this.me;
+        }
+
+        @Override
+        protected Player getMyPlayer() {
+            return this.me;
+        }
+
+        @Override
+        java.awt.Image iconOf(net.sf.freecol.common.model.FreeColObject d) {
+            return null;   // no image resources in the test
+        }
+    }
+
+    /**
+     * W9/N17: the first meeting with a native nation shows woodcut 3
+     * before the first-contact box, once per game (V: clip004's Sioux
+     * after the landfall's Arawaks has none); the Aztecs and the Incas have
+     * their own (4, 5), which count as 3 too.  The meeting sound of a
+     * European nation and a European contact's negotiation show 10, once;
+     * a native nation's meeting sound shows nothing.  A woodcut that could
+     * not be shown is not marked: it comes at the next trigger.
+     */
+    public void testWoodcutsOfTheMeetings() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player arawak = game.getPlayerByNationId("model.nation.arawak");
+        final Player sioux = game.getPlayerByNationId("model.nation.sioux");
+        final Player aztec = game.getPlayerByNationId("model.nation.aztec");
+        final Player inca = game.getPlayerByNationId("model.nation.inca");
+        final Player english = game.getPlayerByNationId("model.nation.english");
+        final WoodcutGUI gui = new WoodcutGUI(game, dutch);
+        gui.shows = ClassicAdvisorLayer.NOT_SHOWN;      // no canvas: not marked
+        onEdt(() -> gui.showFirstContactDialog(dutch, arawak, null, 3, b -> { }));
+        assertEquals(List.of("woodcut 3", "first-contact arawak"), gui.order);
+        assertEquals(0, gui.woodcutsShown());
+        gui.shows = 1L;
+        gui.order.clear();
+        onEdt(() -> gui.showFirstContactDialog(dutch, arawak, null, 3, b -> { }));
+        onEdt(() -> gui.showFirstContactDialog(dutch, sioux, null, 3, b -> { }));
+        onEdt(() -> gui.showFirstContactDialog(dutch, aztec, null, 3, b -> { }));
+        onEdt(() -> gui.showFirstContactDialog(dutch, inca, null, 3, b -> { }));
+        onEdt(() -> gui.showFirstContactDialog(dutch, aztec, null, 3, b -> { }));
+        assertEquals(List.of("woodcut 3", "first-contact arawak", "first-contact sioux",
+                             "woodcut 4", "first-contact aztec", "woodcut 5",
+                             "first-contact inca", "first-contact aztec"), gui.order);
+        assertEquals(ClassicWoodcut.bit(3) | ClassicWoodcut.bit(4) | ClassicWoodcut.bit(5),
+                     gui.woodcutsShown());
+        assertEquals(gui.woodcutsShown(), dutch.getClassicWoodcuts());
+        // The Aztecs first: 4, and 3 counts as shown.
+        final Game g2 = getStandardGame();
+        final Player d2 = g2.getPlayerByNationId("model.nation.dutch");
+        final WoodcutGUI gui2 = new WoodcutGUI(g2, d2);
+        onEdt(() -> gui2.showFirstContactDialog(d2, g2.getPlayerByNationId("model.nation.aztec"),
+                                                null, 3, b -> { }));
+        onEdt(() -> gui2.showFirstContactDialog(d2, g2.getPlayerByNationId("model.nation.tupi"),
+                                                null, 3, b -> { }));
+        assertEquals(List.of("woodcut 4", "first-contact aztec", "first-contact tupi"),
+                     gui2.order);
+        assertTrue(gui2.woodcutShown(ClassicWoodcut.NATIVES));
+        // Europeans: the native meeting sound shows nothing, the European's 10.
+        gui.order.clear();
+        onEdt(() -> gui.playSound("sound.event.meet." + arawak.getNationId()));
+        onEdt(() -> gui.playSound("sound.event.buildingComplete"));
+        assertTrue(gui.order.isEmpty());
+        onEdt(() -> gui.playSound("sound.event.meet." + english.getNationId()));
+        onEdt(() -> gui.playSound("sound.event.meet." + english.getNationId()));
+        assertEquals(List.of("woodcut 10"), gui.order);
+        // A European contact's negotiation: 10, once (our own proposal:
+        // the "not yet" notice after it).
+        final WoodcutGUI gui3 = new WoodcutGUI(game, english);
+        final DiplomaticTrade dt = new DiplomaticTrade(game,
+            DiplomaticTrade.TradeContext.CONTACT, english, dutch, new ArrayList<>(), 0);
+        onEdt(() -> gui3.showNegotiationDialog(null, null, dt, null, a -> { }));
+        onEdt(() -> gui3.showNegotiationDialog(null, null, dt, null, a -> { }));
+        assertEquals(List.of("woodcut 10", "negotiation", "negotiation"), gui3.order);
+    }
+
+    /**
+     * W9/N17: the Pacific's woodcut 6 at FreeCol's event, once; the first
+     * landing's event shows nothing and its closing callback still runs.
+     * The notices' woodcuts before their boxes, once each: the Fountain of
+     * Youth (8, also when its recruit box comes first), the first laden
+     * ship in Europe (9; an empty one: none), a burning (11), a destroyed
+     * (12) and a raided colony (13); a dropped notice still brings its
+     * woodcut.
+     */
+    public void testWoodcutsOfTheEventsAndNotices() throws Exception {
+        final Game game = getStandardGame();
+        final Map map = getTestMap(true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final WoodcutGUI gui = new WoodcutGUI(game, dutch);
+        final int[] runs = { 0 };
+        onEdt(() -> gui.showEventPanel("h", "image.flavor.event.firstLanding", null)
+              .addClosingCallback(() -> runs[0]++));
+        assertEquals(1, runs[0]);
+        assertTrue(gui.order.isEmpty());
+        onEdt(() -> gui.showEventPanel("h", ClassicGUI.PACIFIC_IMAGE, null));
+        onEdt(() -> gui.showEventPanel("h", ClassicGUI.PACIFIC_IMAGE, null));
+        assertEquals(List.of("woodcut 6"), gui.order);
+        // The notices.
+        final Unit empty = new ServerUnit(game, map.getTile(10, 4), dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final Unit laden = new ServerUnit(game, map.getTile(10, 5), dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        laden.addGoods(spec().getGoodsType("model.goods.furs"), 15);
+        final net.sf.freecol.common.model.ModelMessage.MessageType t
+            = net.sf.freecol.common.model.ModelMessage.MessageType.DEFAULT;
+        final java.util.function.BiFunction<String, net.sf.freecol.common.model.FreeColGameObject,
+            net.sf.freecol.common.model.ModelMessage> msg = (id, display)
+            -> new net.sf.freecol.common.model.ModelMessage(t, id, dutch, display);
+        gui.order.clear();
+        onEdt(() -> gui.showModelMessages(List.of(
+            msg.apply("model.unit.arriveInEurope", empty),
+            msg.apply("model.unit.arriveInEurope", laden),
+            msg.apply("model.unit.arriveInEurope", laden),
+            msg.apply("combat.raid.building", dutch),
+            msg.apply("combat.colonyBurned.ours", dutch),
+            msg.apply("combat.raid.ours", dutch),
+            msg.apply("combat.raid.ours", dutch))));
+        assertEquals(List.of("message model.unit.arriveInEurope", "woodcut 9",
+                             "message model.unit.arriveInEurope",
+                             "message model.unit.arriveInEurope",
+                             "woodcut 11", "message combat.raid.building",
+                             "woodcut 12", "message combat.colonyBurned.ours",
+                             "woodcut 13", "message combat.raid.ours",
+                             "message combat.raid.ours"), gui.order);
+        // The Fountain of Youth: its recruit box first brings it, its
+        // notice later none.
+        gui.order.clear();
+        onEdt(() -> gui.showEmigrationDialog(dutch, true, i -> { }));
+        onEdt(() -> gui.showModelMessages(List.of(msg.apply(
+            "model.lostCityRumour.fountainOfYouth.description", dutch))));
+        assertEquals("woodcut 8", gui.order.get(0));
+        assertEquals(1, java.util.Collections.frequency(gui.order, "woodcut 8"));
+        // A notice dropped by the colony report options still brings its
+        // woodcut (I), in a game where it is new.
+        final WoodcutGUI gui2 = new WoodcutGUI(game, dutch) {
+                @Override
+                List<net.sf.freecol.common.model.ModelMessage> noticesShown(
+                    List<net.sf.freecol.common.model.ModelMessage> messages) {
+                    return new ArrayList<>();
+                }
+            };
+        onEdt(() -> gui2.showModelMessages(List.of(msg.apply("combat.raid.ours", dutch))));
+        assertEquals(List.of("woodcut 13"), gui2.order);
+    }
+
+    /**
+     * W9: the first colony's woodcut 2 comes between the founding (the
+     * name, {@code getNewColonyName}) and its colony screen; opening a
+     * colony later, and a second founding, show none.  The first village
+     * entry's woodcut 7 before the village box or the learn question when
+     * no key brought it, once.
+     */
+    public void testWoodcutsOfTheColonyAndTheVillage() throws Exception {
+        final Game game = getStandardGame();
+        final Map map = getTestMap(true);
+        game.changeMap(map);
+        final Colony colony = createStandardColony();
+        final Player dutch = colony.getOwner();
+        final WoodcutGUI gui = new WoodcutGUI(game, dutch);
+        // Opening a colony without a founding: nothing.
+        onEdt(() -> gui.showColonyPanel(colony, null));
+        onEdt(() -> { });
+        assertTrue(gui.order.isEmpty());
+        onEdt(() -> gui.getNewColonyName(dutch, colony.getTile()));
+        onEdt(() -> gui.showColonyPanel(colony, null));
+        onEdt(() -> { });
+        assertEquals(List.of("woodcut 2"), gui.order);
+        onEdt(() -> gui.getNewColonyName(dutch, colony.getTile()));
+        onEdt(() -> gui.showColonyPanel(colony, null));
+        onEdt(() -> { });
+        assertEquals(List.of("woodcut 2"), gui.order);
+        // The village: the box of a goto or a click (the four village
+        // seams call villageWoodcut first; their boxes need FreeCol's
+        // images, so the test calls it alone), then the learn question,
+        // the woodcut only before the first; a colony is no village.
+        final IndianSettlement is = new IndianSettlementBuilder(game)
+            .player(game.getPlayerByNationId("model.nation.arawak"))
+            .settlementTile(map.getTile(12, 12)).build();
+        gui.order.clear();
+        onEdt(() -> gui.villageWoodcut(colony));
+        assertTrue(gui.order.isEmpty());
+        onEdt(() -> gui.villageWoodcut(is));
+        onEdt(() -> gui.modalConfirmDialog(map.getTile(12, 11), StringTemplate
+            .template(ClassicGUI.LEARN_QUESTION).addName("%skill%", "x"),
+            (ImageIcon) null, "learnSkill.yes", "learnSkill.no", true));
+        assertEquals(List.of("woodcut 7", "confirm " + ClassicGUI.LEARN_QUESTION), gui.order);
+        // The learn question first in a new game.
+        final WoodcutGUI gui2 = new WoodcutGUI(game, dutch);
+        onEdt(() -> gui2.modalConfirmDialog(map.getTile(12, 11), StringTemplate
+            .template(ClassicGUI.LEARN_QUESTION).addName("%skill%", "x"),
+            (ImageIcon) null, "learnSkill.yes", "learnSkill.no", true));
+        assertEquals("woodcut 7", gui2.order.get(0));
+        // The key's rule: a move into the village's tile, not a refused one.
+        assertTrue(ClassicWoodcut.entersVillage(Unit.MoveType.ENTER_INDIAN_SETTLEMENT_WITH_SCOUT,
+                                                is.getTile()));
+        assertTrue(ClassicWoodcut.entersVillage(Unit.MoveType.ATTACK_SETTLEMENT, is.getTile()));
+        assertTrue(ClassicWoodcut.entersVillage(
+            Unit.MoveType.ENTER_SETTLEMENT_WITH_CARRIER_AND_GOODS, is.getTile()));
+        assertFalse(ClassicWoodcut.entersVillage(Unit.MoveType.MOVE_NO_ACCESS_SETTLEMENT,
+                                                 is.getTile()));
+        assertFalse(ClassicWoodcut.entersVillage(Unit.MoveType.ATTACK_SETTLEMENT,
+                                                 colony.getTile()));
+        assertFalse(ClassicWoodcut.entersVillage(Unit.MoveType.MOVE, map.getTile(3, 3)));
+        assertFalse(ClassicWoodcut.entersVillage(null, is.getTile()));
+        // The key: woodcut 7 before the move when the move enters a village.
+        final Unit scout = new ServerUnit(game, map.getTile(12, 11), dutch,
+            spec().getUnitType("model.unit.seasonedScout"));
+        final Direction toVillage = map.getDirection(scout.getTile(), is.getTile());
+        final WoodcutGUI gui3 = new WoodcutGUI(game, dutch);
+        final boolean[] goOn = { false };
+        onEdt(() -> goOn[0] = gui3.villageEntryKey(scout, toVillage.getReverseDirection()));
+        assertTrue(goOn[0]);
+        assertTrue(gui3.order.isEmpty());
+        if (ClassicWoodcut.entersVillage(scout.getMoveType(toVillage), is.getTile())) {
+            onEdt(() -> goOn[0] = gui3.villageEntryKey(scout, toVillage));
+            assertFalse(goOn[0]);                      // no map viewer: the move is dropped
+            assertEquals(List.of("woodcut 7"), gui3.order);
+        }
+    }
+
+    /**
+     * W9: the land sighted at a final draw posts woodcut 1, due at once
+     * (the turn flow waits: busy), 57 ms after the final draw, then the
+     * New World's naming seam (W10) with the map's return; once per game,
+     * also for a second sighting before the first one ran.  A woodcut
+     * marked shown is in our player's record; one that could not be shown
+     * comes at the next sighting.
+     */
+    public void testWoodcutOfTheDiscovery() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final List<Long> named = new ArrayList<>();
+        final List<Long> notBefore = new ArrayList<>();
+        final WoodcutGUI gui = new WoodcutGUI(game, dutch) {
+                @Override
+                void discoveryShown(long mapBackNanos) {
+                    named.add(mapBackNanos);
+                }
+            };
+        final ClassicGUI.Woodcutter fake = gui.woodcutter;
+        gui.woodcutter = (k, nb, f) -> {
+            notBefore.add(nb);
+            assertEquals(ClassicWoodcut.FOLLOW_DISCOVERY_MS, f);
+            return fake.show(k, nb, f);
+        };
+        gui.shows = ClassicAdvisorLayer.NOT_SHOWN;
+        final boolean[] busy = { false, true };
+        onEdt(() -> {
+                gui.landSighted(1_000_000_000L);
+                gui.landSighted(1_000_000_001L);       // the same move: once
+                busy[0] = gui.boxBusy();
+            });
+        onEdt(() -> busy[1] = gui.boxBusy());
+        assertTrue(busy[0]);
+        assertFalse(busy[1]);
+        assertEquals(List.of("woodcut 1"), gui.order);
+        assertEquals(List.of(1_057_000_000L), notBefore);
+        assertTrue(named.isEmpty());                   // not shown: no naming
+        assertEquals(0, dutch.getClassicWoodcuts());
+        gui.shows = 1L;
+        onEdt(() -> gui.landSighted(2_000_000_000L));
+        onEdt(() -> { });
+        onEdt(() -> gui.landSighted(3_000_000_000L));
+        onEdt(() -> { });
+        assertEquals(List.of("woodcut 1", "woodcut 1"), gui.order);
+        assertEquals(List.of(1L), named);
+        assertEquals(ClassicWoodcut.bit(ClassicWoodcut.DISCOVERY), dutch.getClassicWoodcuts());
+    }
+
+    /**
+     * W9: the woodcuts a save without the record counts as shown, from the
+     * traces of their events (spec G5 section 4.2): explored land, a
+     * colony, a met native nation (the Aztecs, the Incas), a visited
+     * village, goods sold in Europe, a met European.
+     */
+    public void testDerivedWoodcuts() {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        assertEquals(0, ClassicWoodcut.derived(null, null));
+        assertEquals(0, ClassicWoodcut.derived(dutch, null));
+        final Map map = getTestMap(true);
+        game.changeMap(map);
+        int d = ClassicWoodcut.derived(dutch, map);
+        assertTrue((d & ClassicWoodcut.bit(ClassicWoodcut.DISCOVERY)) != 0);
+        for (int k : new int[] { ClassicWoodcut.COLONY, ClassicWoodcut.NATIVES,
+                                 ClassicWoodcut.AZTECS, ClassicWoodcut.VILLAGE,
+                                 ClassicWoodcut.CARGO, ClassicWoodcut.EUROPEANS,
+                                 ClassicWoodcut.FOUNTAIN, ClassicWoodcut.RAID }) {
+            assertEquals("k=" + k, 0, d & ClassicWoodcut.bit(k));
+        }
+        final Player aztec = game.getPlayerByNationId("model.nation.aztec");
+        final Player english = game.getPlayerByNationId("model.nation.english");
+        dutch.setStance(aztec, net.sf.freecol.common.model.Stance.PEACE);
+        dutch.setStance(english, net.sf.freecol.common.model.Stance.PEACE);
+        createStandardColony();
+        d = ClassicWoodcut.derived(dutch, map);
+        for (int k : new int[] { ClassicWoodcut.COLONY, ClassicWoodcut.NATIVES,
+                                 ClassicWoodcut.AZTECS, ClassicWoodcut.EUROPEANS }) {
+            assertTrue("k=" + k, (d & ClassicWoodcut.bit(k)) != 0);
+        }
+        assertEquals(0, d & ClassicWoodcut.bit(ClassicWoodcut.INCAS));
+        assertEquals(0, d & ClassicWoodcut.bit(ClassicWoodcut.FOUNTAIN));
+    }
+
     private static <T> T last(List<T> l) {
         return l.get(l.size() - 1);
     }

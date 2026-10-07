@@ -64,6 +64,9 @@ import java.util.logging.Logger;
  * title line and then the items indented by two spaces, '~' marking the
  * gold hotkey letters.  Packs converted before it was copied lack it; the
  * menu strip then shows its wood only ({@link #hasMenus}).
+ *
+ * <p><b>WOODCUT.TXT</b> (the woodcuts' titles, master plan W9) is read on its
+ * own ({@link #woodcuts}): section {@code @WOODCUT}, one title a line.
  */
 final class ClassicText {
 
@@ -196,6 +199,55 @@ final class ClassicText {
             CACHE.put(pack.directory(), t);
             return t;
         }
+    }
+
+    /** The woodcuts' titles (master plan W9): section {@code @WOODCUT}, line k = entry k. */
+    static final String WOODCUT = "WOODCUT.TXT";
+
+    /** The woodcut titles by pack directory (an empty list: unreadable). */
+    private static final Map<File, List<String>> WOODCUTS = new HashMap<>();
+
+    /**
+     * The woodcuts' titles of a pack ({@code WOODCUT.TXT}, which the
+     * converter copies), read once per pack directory and decoded like the
+     * other files: line k of {@code @WOODCUT} is entry k (0 "EINE NEUE
+     * WELT" has no picture), the umlauts on the game's codes.
+     *
+     * @param pack The pack (may be null).
+     * @return The titles (shared, unmodifiable), or null without the file.
+     */
+    static List<String> woodcuts(ClassicPackFiles pack) {
+        if (pack == null) return null;
+        synchronized (WOODCUTS) {
+            List<String> t = WOODCUTS.get(pack.directory());
+            if (t == null) {
+                final File f = pack.textFile(WOODCUT);
+                t = Collections.emptyList();
+                if (f != null) {
+                    try {
+                        t = woodcutLines(Files.readAllBytes(f.toPath()));
+                    } catch (IOException e) {
+                        logger.log(Level.WARNING, "Unreadable " + f, e);
+                    }
+                }
+                WOODCUTS.put(pack.directory(), t);
+            }
+            return (t.isEmpty()) ? null : t;
+        }
+    }
+
+    /**
+     * The lines of {@code @WOODCUT}, the trailing blank lines dropped.
+     *
+     * @param bytes The file.
+     * @return The titles (unmodifiable), empty without the section.
+     */
+    static List<String> woodcutLines(byte[] bytes) {
+        final List<String> body = sections(decode(bytes)).get("WOODCUT");
+        if (body == null) return Collections.emptyList();
+        int n = body.size();
+        while (n > 0 && body.get(n - 1).isBlank()) n--;
+        return Collections.unmodifiableList(new ArrayList<>(body.subList(0, n)));
     }
 
     private static synchronized ClassicText logMiss(String why) {

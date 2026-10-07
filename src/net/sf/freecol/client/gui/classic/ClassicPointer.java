@@ -101,6 +101,13 @@ final class ClassicPointer extends JComponent {
     /** True while this layer must not draw (another layer draws the arrow). */
     private final BooleanSupplier suppressed;
 
+    /**
+     * The arrow under a woodcut's palette ({@link ClassicWoodcut#dimArrow}),
+     * made on first use, and whether it is drawn now.
+     */
+    private BufferedImage dimSprite = null;
+    private boolean dimmed = false;
+
     /** The arrow's virtual top-left, or -1 while it is not drawn. */
     private int vx = -1, vy = -1;
 
@@ -199,6 +206,24 @@ final class ClassicPointer extends JComponent {
      */
     void place(int x, int y) {
         setPos(x, y);
+    }
+
+    /**
+     * Draw the arrow's grey as the woodcut's palette shows it (W9: #797979
+     * instead of #AAAAAA, from a woodcut's black to its palette's return).
+     *
+     * @param on True while a woodcut's palette is up.
+     */
+    void setDimmed(boolean on) {
+        if (on == this.dimmed) return;
+        if (on && this.dimSprite == null) this.dimSprite = ClassicWoodcut.dimArrow(this.sprite);
+        this.dimmed = on;
+        repaintArrow();
+    }
+
+    /** @return Whether the arrow is drawn in the woodcut's grey. */
+    boolean isDimmed() {
+        return this.dimmed;
     }
 
     /** Re-evaluate drawing and the cursor (e.g. when suppression ended). */
@@ -331,7 +356,8 @@ final class ClassicPointer extends JComponent {
     @Override
     protected void paintComponent(Graphics g) {
         if (!drawsArrow()) return;
-        paintArrow((Graphics2D) g, this.sprite, getWidth(), getHeight(),
+        paintArrow((Graphics2D) g, (this.dimmed && this.dimSprite != null)
+                   ? this.dimSprite : this.sprite, getWidth(), getHeight(),
                    this.vx, this.vy);
     }
 }

@@ -284,4 +284,46 @@ public class PlayerTest extends FreeColTestCase {
 
         }
     }
+
+    /**
+     * The Classic UI's woodcuts (W9): the attribute {@code classicWoodcuts}
+     * goes into a save and to its owner only while it is not 0, a save or
+     * an older one without it reads 0, and an update ({@code copyIn})
+     * never takes a woodcut away.
+     */
+    public void testClassicWoodcuts() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        assertEquals(0, dutch.getClassicWoodcuts());
+        final String none = dutch.serialize(
+            net.sf.freecol.common.io.FreeColXMLWriter.WriteScope.toSave());
+        assertFalse(none.contains("classicWoodcuts"));
+        dutch.setClassicWoodcuts(0b1010);
+        final String save = dutch.serialize(
+            net.sf.freecol.common.io.FreeColXMLWriter.WriteScope.toSave());
+        assertTrue(save.contains("classicWoodcuts=\"10\""));
+        assertTrue(dutch.serialize(dutch).contains("classicWoodcuts=\"10\""));
+        assertFalse(dutch.serialize(french).contains("classicWoodcuts"));
+        final Player read = readPlayer(game, save);
+        assertEquals(dutch.getId(), read.getId());
+        assertEquals(10, read.getClassicWoodcuts());
+        assertEquals(0, readPlayer(game, save.replace("classicWoodcuts=\"10\"", ""))
+                     .getClassicWoodcuts());
+        // An update adds, never removes.
+        read.setClassicWoodcuts(0b100);
+        assertTrue(dutch.copyIn(read));
+        assertEquals(0b1110, dutch.getClassicWoodcuts());
+        read.setClassicWoodcuts(0);
+        assertTrue(dutch.copyIn(read));
+        assertEquals(0b1110, dutch.getClassicWoodcuts());
+    }
+
+    /** A player read from XML, outside the game. */
+    private static Player readPlayer(Game game, String xml) throws Exception {
+        try (net.sf.freecol.common.io.FreeColXMLReader xr
+             = new net.sf.freecol.common.io.FreeColXMLReader(new java.io.StringReader(xml))) {
+            return xr.copy(game, Player.class);
+        }
+    }
 }

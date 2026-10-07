@@ -46,7 +46,9 @@ import javax.swing.JLayeredPane;
  *       ({@link ClassicPointer}): it never takes a mouse event, blanks this
  *       pane's cursor (which every child inherits) over the canvas and gives
  *       the system arrow back in the letterbox.  It stays hidden while the
- *       first scene is up, whose overlay draws its own arrow.</li>
+ *       first scene is up, whose overlay draws its own arrow, and during
+ *       a woodcut's dissolve (W9), and is drawn in the woodcut palette's
+ *       grey while a woodcut is up ({@link ClassicPointer#setDimmed}).</li>
  * </ul>
  * One grid for everything is what lets the strip, the panel and the map
  * line up as in the original, and what the first scene's advisor box (which

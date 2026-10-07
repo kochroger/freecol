@@ -163,6 +163,17 @@ import javax.swing.JComponent;
  * also recolours the screen behind the box at those entries; ours keeps the
  * game colours there, so such HUD or map pixels count as nearest while a
  * portrait that changes their entry is loaded.
+ *
+ * <p><b>The woodcuts' palette</b> (W9, {@link ClassicWoodcut#palette}).  At
+ * a woodcut's black the original loads the woodcut's own palette (the
+ * frame's, the ribbon's and the picture's entries, 238-246 of them); its
+ * colours are not in the game palette, so without it every woodcut pixel
+ * would map to a nearest entry.  {@link #woodcutPalette} puts them into the
+ * next frame's PLTE (event {@code palette-woodcut}; the frozen water keeps
+ * the rotation, and a cycle entry is written where the rotation reads it),
+ * and at the palette's return a frame after the close's black the entries
+ * of before come back, the last portrait's slot included
+ * ({@code palette-restore}).
  */
 public final class ClassicFrameRecorder {
 
@@ -313,6 +324,14 @@ public final class ClassicFrameRecorder {
      * {@link #frameLock}), or null ({@link #portraitPalette}).
      */
     private int[] pendingPortrait = null;
+
+    /**
+     * A woodcut's palette for the next frame, or null; and whether the
+     * frame before it comes back instead (under {@link #frameLock},
+     * {@link #woodcutPalette}).
+     */
+    private int[] pendingWoodcut = null;
+    private boolean pendingRestore = false;
 
     /** The game palette {@link #fileCyclePhase} was found for (EDT only). */
     private ClassicGamePalette cyclePalette = null;
@@ -503,6 +522,46 @@ public final class ClassicFrameRecorder {
         if (entries == null || entries.length != 256 || n == 0) return;
         synchronized (this.frameLock) {
             this.pendingPortrait = entries.clone();
+        }
+    }
+
+    /**
+     * A woodcut's palette goes in at its black (class comment): the next
+     * frame's palette has these entries, the frame before them comes back
+     * with {@code k = 0} ({@code palette-restore}).  A no-op while
+     * recording is off.
+     *
+     * @param k The woodcut, or 0 for the game's palette back.
+     * @param entries 256 entries 0xRRGGBB, -1 where it has none; or null.
+     */
+    static void woodcutPalette(int k, int[] entries) {
+        final ClassicFrameRecorder r = instance;
+        if (r != null) r.noteWoodcutPalette(k, entries);
+    }
+
+    /**
+     * {@link #woodcutPalette} on this recorder.
+     *
+     * @param k The woodcut, or 0.
+     * @param entries The entries, or null.
+     */
+    void noteWoodcutPalette(int k, int[] entries) {
+        if (k <= 0) {
+            log(System.nanoTime(), "palette-restore", "");
+            synchronized (this.frameLock) {
+                this.pendingRestore = true;
+            }
+            return;
+        }
+        int n = 0;
+        if (entries != null) {
+            for (int e : entries) if (e >= 0) n++;
+        }
+        log(System.nanoTime(), "palette-woodcut", "k=" + k + " entries=" + n);
+        if (entries == null || entries.length != 256 || n == 0) return;
+        synchronized (this.frameLock) {
+            this.pendingWoodcut = entries.clone();
+            this.pendingRestore = false;
         }
     }
 
@@ -934,6 +993,16 @@ public final class ClassicFrameRecorder {
             if (this.pendingPortrait != null) {
                 rotated |= this.palette.overlay(this.pendingPortrait);
                 this.pendingPortrait = null;
+            }
+            // A woodcut's palette, and the game's back after it (W9).
+            if (this.pendingWoodcut != null) {
+                rotated |= this.palette.woodcut(this.pendingWoodcut,
+                                                this.cycleFirst, this.cycleCount);
+                this.pendingWoodcut = null;
+            }
+            if (this.pendingRestore) {
+                rotated |= this.palette.restore(this.cycleFirst, this.cycleCount);
+                this.pendingRestore = false;
             }
             this.hintPixels += downsample(this.shadow, this.canvas, this.scale,
                 this.palette, (this.hintOn) ? this.hintShadow : null, cur);
@@ -1446,6 +1515,74 @@ public final class ClassicFrameRecorder {
                 this.lastMiss = false;
             }
             return changed;
+        }
+
+        /** The file's entries before a woodcut's palette, or null. */
+        private int[] beforeWoodcut = null;
+
+        /**
+         * Put a woodcut's palette in (the class comment's "woodcuts"): each
+         * entry it has shows its colour at the current rotation (a cycle
+         * entry is written where the rotation reads it); the file's entries
+         * before it are kept for {@link #restore}.  An adaptive palette is
+         * left alone.
+         *
+         * @param entries 256 entries 0xRRGGBB, -1 where nothing changes.
+         * @param first The colour cycle's first entry (120).
+         * @param count Its length (8).
+         * @return True if the entries changed.
+         */
+        boolean woodcut(int[] entries, int first, int count) {
+            if (!this.fixed || entries == null || entries.length != 256) return false;
+            if (this.beforeWoodcut == null) this.beforeWoodcut = this.file.clone();
+            boolean changed = false;
+            for (int i = 0; i < 256; i++) {
+                if (entries[i] < 0) continue;
+                final int c = entries[i] & 0xFFFFFF;
+                final boolean cycle = count > 0 && i >= first && i < first + count;
+                this.file[(cycle) ? first + Math.floorMod(i - first - this.rotation, count)
+                          : i] = c;
+                if (this.rgb[i] != c) {
+                    this.rgb[i] = c;
+                    changed = true;
+                }
+            }
+            if (changed) reindex();
+            return changed;
+        }
+
+        /**
+         * The file's entries of before the last {@link #woodcut} come back
+         * (the game palette and a portrait's slot), at the current rotation.
+         *
+         * @param first The colour cycle's first entry.
+         * @param count Its length.
+         * @return True if the entries changed.
+         */
+        boolean restore(int first, int count) {
+            if (this.beforeWoodcut == null) return false;
+            System.arraycopy(this.beforeWoodcut, 0, this.file, 0, 256);
+            this.beforeWoodcut = null;
+            boolean changed = false;
+            for (int i = 0; i < 256; i++) {
+                final boolean cycle = count > 0 && i >= first && i < first + count;
+                final int c = this.file[(cycle)
+                    ? first + Math.floorMod(i - first - this.rotation, count) : i];
+                if (this.rgb[i] != c) {
+                    this.rgb[i] = c;
+                    changed = true;
+                }
+            }
+            if (changed) reindex();
+            return changed;
+        }
+
+        /** The colour to index maps after the entries changed. */
+        private void reindex() {
+            indexExact();
+            this.nearest.clear();
+            this.lastRgb = -1;
+            this.lastMiss = false;
         }
 
         /**

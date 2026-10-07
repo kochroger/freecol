@@ -102,6 +102,22 @@ import javax.swing.JComponent;
  * the box was drawn, does nothing.  The mouse:
  * {@link ClassicAdvisorBox.Bar}.  Recorder events: {@code box-palette},
  * {@code box-open}, {@code box-bar}, {@code box-toggle}, {@code box-close}.
+ *
+ * <p><b>Woodcuts</b> ({@link ClassicWoodcut}, master plan W9) come through
+ * the same queue ({@link #showWoodcut}), so a box asked during a woodcut
+ * waits for it and a woodcut asked during a box waits too, and every gate
+ * of the boxes (busy, focus, the blink's hold, the turn flow) holds for
+ * them.  One woodcut: the whole screen black, the frame and its ribbon
+ * 86 ms later, the picture's dissolve 43 ms after that, one step per
+ * original frame on the timer's deadlines; then it waits for a fresh key
+ * or click made after the picture is complete (any key, also Escape: a
+ * woodcut has no "Nein"); then black, the game palette back a frame
+ * later, and 300 ms after the black the layer goes and the screen is
+ * painted from the current state.  The next box comes no earlier than the
+ * woodcut's follow-up time after that ({@link #holdUntil}).  Recorder
+ * events: {@code woodcut-black}, {@code woodcut-frame},
+ * {@code woodcut-done}, {@code woodcut-close}, {@code woodcut-palette},
+ * {@code woodcut-end}.
  */
 final class ClassicAdvisorLayer extends JComponent {
 
@@ -121,6 +137,9 @@ final class ClassicAdvisorLayer extends JComponent {
 
     /** {@link #show}: the box could not be drawn (no font, too many rows). */
     static final int UNAVAILABLE = Integer.MIN_VALUE + 1;
+
+    /** {@link #showWoodcut}: the woodcut never reached the screen. */
+    static final long NOT_SHOWN = Long.MIN_VALUE;
 
     /** Whether a key event's time looks like wall-clock milliseconds. */
     private static final long CLOCK_SANITY_MS = 60_000L;
@@ -162,14 +181,68 @@ final class ClassicAdvisorLayer extends JComponent {
          * @return Whether it is an auto-repeat of a key held down before.
          */
         boolean isAutoRepeat(KeyEvent e);
+
+        /**
+         * A woodcut's palette goes in at its black (k &gt; 0: freeze the
+         * water, the recorder's woodcut palette, the arrow's dim grey), or
+         * the game's comes back (k = 0).  May come twice for one woodcut
+         * (its close and an abort); the second does nothing.
+         *
+         * @param k The woodcut, or 0.
+         * @param entries Its palette ({@link ClassicWoodcut#palette}), or null.
+         */
+        default void woodcutPalette(int k, int[] entries) {}
+
+        /** The arrow is hidden or shown again ({@link #hidesArrow}). */
+        default void arrowChanged() {}
+
+        /**
+         * A woodcut that was on the screen has ended (its map is back, or
+         * the game view went): it counts as shown from now on, also while
+         * its caller still waits behind a box asked meanwhile.
+         *
+         * @param k The woodcut.
+         */
+        default void woodcutEnded(int k) {}
+
+        /**
+         * @return The earliest black of a woodcut now on the layer's
+         *     clock: 57 ms after the map's last final draw (a woodcut whose
+         *     time came while slides still ran waits for them); 0 for no
+         *     limit.
+         */
+        default long woodcutNotBefore() {
+            return 0L;
+        }
     }
 
-    /** One box asked for, until answered. */
+    /** A woodcut's steps ({@link #showWoodcut}). */
+    enum Phase { BLACK, FRAME, DISSOLVE, HELD, CLOSING }
+
+    /** One box or woodcut asked for, until answered. */
     private static final class Pending {
 
         final ClassicAdvisorBox.Request request;
         final ClassicAdvisorBox.Layout layout;
         final ClassicAdvisorBox.Bar bar;
+
+        /** The woodcut instead of a box, or null. */
+        final ClassicWoodcut.Screen woodcut;
+
+        /** A woodcut's palette, its earliest black and its follow-up (ms). */
+        final int[] palette;
+        final long notBefore;
+        final double followMs;
+
+        /** A woodcut's step, its black's time and its dissolve's start. */
+        Phase phase = null;
+        long blackAt = 0L, dissolveAt = 0L, closeAt = 0L;
+
+        /** A press on the finished woodcut, waiting for its release. */
+        boolean pressed = false;
+
+        /** When a woodcut's map came back (or it was aborted after its black). */
+        long endedAt = NOT_SHOWN;
 
         /** The answer, once {@link #done}. */
         int result = ClassicAdvisorBox.Bar.DISMISSED;
@@ -186,6 +259,26 @@ final class ClassicAdvisorLayer extends JComponent {
             this.request = request;
             this.layout = layout;
             this.bar = new ClassicAdvisorBox.Bar(request);
+            this.woodcut = null;
+            this.palette = null;
+            this.notBefore = 0L;
+            this.followMs = 0.0;
+        }
+
+        Pending(ClassicWoodcut.Screen woodcut, int[] palette, long notBefore,
+                double followMs) {
+            this.request = null;
+            this.layout = null;
+            this.bar = null;
+            this.woodcut = woodcut;
+            this.palette = palette;
+            this.notBefore = notBefore;
+            this.followMs = followMs;
+        }
+
+        /** @return What it is, for the recorder. */
+        String id() {
+            return (this.woodcut != null) ? "woodcut " + this.woodcut.k : this.request.id;
         }
     }
 
@@ -215,6 +308,12 @@ final class ClassicAdvisorLayer extends JComponent {
 
     /** When the box on screen appeared (wall clock ms, for key times). */
     private long shownAt = 0L;
+
+    /**
+     * The next box or woodcut comes no earlier (clock ns): a woodcut's
+     * follow-up after its map came back; {@code Long.MIN_VALUE} for none.
+     */
+    private long holdUntil = Long.MIN_VALUE;
 
 
     /**
@@ -294,22 +393,60 @@ final class ClassicAdvisorLayer extends JComponent {
         return !this.queue.isEmpty();
     }
 
-    /** @return Whether a box is on screen. */
+    /** @return Whether a box or a woodcut is on screen. */
     boolean isShowingBox() {
         return this.current != null;
     }
 
-    /** @return The id of the box on screen and its bar, for the probe; or null. */
+    /**
+     * @return The id of the box on screen and its bar, or of the woodcut
+     *     and its step ({@code woodcut_3:held}), for the probe; or null.
+     */
     String probe() {
         final Pending p = this.current;
         if (p == null) return isBusy() ? "due" : null;
+        if (p.woodcut != null) {
+            return "woodcut_" + p.woodcut.k + ":"
+                + p.phase.toString().toLowerCase(Locale.ROOT);
+        }
         return p.request.id.replace(' ', '_') + ":" + p.bar.row();
     }
 
-    /** @return The layout of the box on screen, or null (tests). */
+    /** @return The layout of the box on screen, or null (tests, a woodcut). */
     ClassicAdvisorBox.Layout currentLayout() {
         final Pending p = this.current;
         return (p == null) ? null : p.layout;
+    }
+
+    /** @return The woodcut on screen, or null. */
+    ClassicWoodcut.Screen currentWoodcut() {
+        final Pending p = this.current;
+        return (p == null) ? null : p.woodcut;
+    }
+
+    /** @return The step of the woodcut on screen, or null. */
+    Phase woodcutPhase() {
+        final Pending p = this.current;
+        return (p == null || p.woodcut == null) ? null : p.phase;
+    }
+
+    /**
+     * @return Whether a woodcut covers the screen (from its black to its
+     *     map's return): the map's index hint means nothing then.
+     */
+    boolean coversScreen() {
+        final Pending p = this.current;
+        return p != null && p.woodcut != null;
+    }
+
+    /**
+     * @return Whether the mouse arrow is hidden: during a woodcut's
+     *     dissolve (V: landfall #2121-#2175, two or three frames after the
+     *     frame's paint until the last dissolve frame).
+     */
+    boolean hidesArrow() {
+        final Pending p = this.current;
+        return p != null && p.woodcut != null && p.phase == Phase.DISSOLVE;
     }
 
     /**
@@ -336,7 +473,15 @@ final class ClassicAdvisorLayer extends JComponent {
     /** @return The bar's row of the box on screen, or -1 (tests). */
     int currentBar() {
         final Pending p = this.current;
-        return (p == null) ? -1 : p.bar.row();
+        return (p == null || p.bar == null) ? -1 : p.bar.row();
+    }
+
+    /**
+     * @return The earliest time of the next box or woodcut after a
+     *     woodcut's map came back, or {@code Long.MIN_VALUE}.
+     */
+    long holdUntilNanos() {
+        return this.holdUntil;
     }
 
 
@@ -360,32 +505,72 @@ final class ClassicAdvisorLayer extends JComponent {
         final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(r, tiny, pic);
         if (l == null) return UNAVAILABLE;
         final Pending p = new Pending(r, l);
+        enter(p);
+        return p.result;
+    }
+
+    /**
+     * Show a woodcut and wait until it is gone (class comment).  EDT only.
+     *
+     * @param w The woodcut ({@link ClassicWoodcut.Screen#of}).
+     * @param palette Its palette ({@link ClassicWoodcut#palette}), or null.
+     * @param notBefore Its black comes no earlier (clock ns; 0: at once).
+     * @param followMs The next box or woodcut comes no earlier than this
+     *     after the map's return.
+     * @return When the map came back on the clock, or when the game view
+     *     went if that was after its black; {@link #NOT_SHOWN} if it never
+     *     reached the screen.
+     */
+    long showWoodcut(ClassicWoodcut.Screen w, int[] palette, long notBefore,
+                     double followMs) {
+        if (w == null) return NOT_SHOWN;
+        final Pending p = new Pending(w, palette, notBefore, followMs);
+        enter(p);
+        return p.endedAt;
+    }
+
+    /** Queue a box or woodcut and wait in a secondary loop until it is done. */
+    private void enter(Pending p) {
         this.queue.add(p);
         setVisible(true);
         requestFocusInWindow();
         this.host.opened();
         kick();
-        if (!p.done) {
+        // A secondary loop also returns when one it is nested in exits
+        // (JDK 21: about a second after the box below it was answered),
+        // so a box asked meanwhile would answer "dismissed" while it is
+        // still up: wait on until this one is really done.
+        while (!p.done) {
             p.loop = Toolkit.getDefaultToolkit().getSystemEventQueue()
                 .createSecondaryLoop();
             if (!p.loop.enter()) {
                 logger.warning("Classic box: the event loop did not wait for "
-                    + r.id);
+                    + p.id());
+                break;
             }
         }
-        return p.result;
     }
 
     /**
-     * Close every box, up or due, as dismissed: the game view goes.  EDT
-     * only.
+     * Close every box and woodcut, up or due, as dismissed: the game view
+     * goes.  EDT only.
      */
     void abort() {
         this.timer.cancel();
-        for (Pending p : new ArrayList<>(this.queue)) {
-            finish(p, ClassicAdvisorBox.Bar.DISMISSED);
+        // None of them comes on screen meanwhile (a woodcut drawn counts
+        // as shown).
+        this.aborting = true;
+        try {
+            for (Pending p : new ArrayList<>(this.queue)) {
+                finish(p, ClassicAdvisorBox.Bar.DISMISSED);
+            }
+        } finally {
+            this.aborting = false;
         }
     }
+
+    /** True while {@link #abort} closes everything. */
+    private boolean aborting = false;
 
     /** End the timer's thread for good (the game view went). */
     void dispose() {
@@ -403,30 +588,55 @@ final class ClassicAdvisorLayer extends JComponent {
         return this.timer.runIfDue();
     }
 
+    /** @return {@code ms} in nanoseconds, rounded. */
+    private static long nanos(double ms) {
+        return Math.round(ms * 1e6);
+    }
+
     /** Schedule the first box of the queue if none is up or scheduled. */
     private void kick() {
-        if (this.current != null || this.queue.isEmpty()) return;
+        if (this.current != null || this.queue.isEmpty() || this.aborting) return;
         final Pending p = this.queue.get(0);
         if (p.scheduled) return;
         p.scheduled = true;
         final long now = this.clock.now();
-        long due = now + Math.round(p.request.openDelayMs * 1e6);
+        if (p.woodcut != null) {
+            // A woodcut: at its time, after the box before it as a box
+            // would come, and after the woodcut before it.
+            long due = (p.notBefore == 0L) ? now : Math.max(now, p.notBefore);
+            if (this.lastClose != Long.MIN_VALUE) {
+                due = Math.max(due, this.lastClose + nanos(CHAIN_MS));
+            }
+            if (this.holdUntil != Long.MIN_VALUE) due = Math.max(due, this.holdUntil);
+            if (due <= now) {
+                display(p);
+            } else {
+                this.timer.schedule(due, () -> display(p));
+            }
+            return;
+        }
+        long due = now + nanos(p.request.openDelayMs);
         if (this.lastClose != Long.MIN_VALUE) {
             final double chain = (p.request.chainMs >= 0.0) ? p.request.chainMs
                 : CHAIN_MS;
-            due = Math.max(due, this.lastClose + Math.round(chain * 1e6));
+            due = Math.max(due, this.lastClose + nanos(chain));
         }
         final String sprite = (p.layout.portrait == null) ? null
             : p.request.portrait.sprite;
         final boolean load = sprite != null && !sprite.equals(this.lastPortrait);
-        long at = due + ((load) ? Math.round(PALETTE_LEAD_MS * 1e6) : 0L);
-        if (p.request.showAtNanos != 0L) {
+        long at = due + ((load) ? nanos(PALETTE_LEAD_MS) : 0L);
+        long showAt = p.request.showAtNanos;
+        if (this.holdUntil != Long.MIN_VALUE && this.holdUntil > due) {
+            // After a woodcut: the box at its follow-up time, its palette
+            // in the lead before it (landfall #12162 -> #12166).
+            showAt = (showAt == 0L) ? this.holdUntil : Math.max(showAt, this.holdUntil);
+        }
+        if (showAt != 0L) {
             // A box due at a given time: the palette goes in the lead
             // before it, or as much of the lead as is left, at least a
             // frame (the landing box after its key, build spec W8b).
-            at = Math.max(p.request.showAtNanos,
-                          due + ((load) ? Math.round(FRAME_MS * 1e6) : 0L));
-            if (load) due = Math.max(due, at - Math.round(PALETTE_LEAD_MS * 1e6));
+            at = Math.max(showAt, due + ((load) ? nanos(FRAME_MS) : 0L));
+            if (load) due = Math.max(due, at - nanos(PALETTE_LEAD_MS));
             else due = at;
         }
         if (load) {
@@ -452,9 +662,23 @@ final class ClassicAdvisorLayer extends JComponent {
         ClassicFrameRecorder.event("box-palette", who.sprite + " for " + p.request.id);
     }
 
-    /** Put a box on screen. */
+    /** Put a box on screen, or a woodcut's black. */
     private void display(Pending p) {
         if (p.done || this.current != null) return;
+        if (p.woodcut != null) {
+            // Never sooner than 57 ms after the map's last final draw: a
+            // woodcut whose time came during slides (the natives' moves
+            // the server sent after a first contact) follows the last one
+            // as it follows its trigger's paint.
+            final long nb = this.host.woodcutNotBefore();
+            if (nb != 0L && nb > this.clock.now()) {
+                this.timer.schedule(nb, () -> display(p));
+                return;
+            }
+            this.current = p;
+            woodcutBlack(p);
+            return;
+        }
         this.current = p;
         this.shownAt = System.currentTimeMillis();
         render();
@@ -475,31 +699,141 @@ final class ClassicAdvisorLayer extends JComponent {
         }
     }
 
-    /** Close a box with an answer and let the next one come. */
+    /** Close a box with an answer, or end a woodcut, and let the next one come. */
     private void finish(Pending p, int result) {
         if (p.done) return;
         p.done = true;
         p.result = result;
         this.queue.remove(p);
         final boolean wasUp = this.current == p;
-        final Rectangle dirty = scaled(p.layout.bounds());
+        final Rectangle dirty = (p.woodcut != null) ? whole()
+            : scaled(p.layout.bounds());
         if (wasUp) {
             this.current = null;
             this.picture = null;
-            this.lastClose = this.clock.now();
+            if (p.woodcut == null) {
+                this.lastClose = this.clock.now();
+            } else {
+                // Shown once it was drawn, also if the game view goes.
+                if (p.endedAt == NOT_SHOWN) p.endedAt = this.clock.now();
+                this.host.woodcutPalette(0, null);
+                this.host.arrowChanged();
+                this.host.woodcutEnded(p.woodcut.k);
+            }
         }
         if (this.queue.isEmpty()) {
             this.timer.cancel();
             setVisible(false);
         }
-        // The screen under the box comes back in the same paint.
+        // The screen under the box comes back in the same paint; after a
+        // woodcut all of it, drawn from the current state.
         if (wasUp) paintNow(dirty);
-        ClassicFrameRecorder.event("box-close", p.request.id + " chosen=" + result
-            + (wasUp ? "" : " (never shown)"));
+        if (p.woodcut != null) {
+            ClassicFrameRecorder.event("woodcut-end", p.woodcut.k
+                + ((wasUp) ? " map back" : " never shown")
+                + ((result == ClassicAdvisorBox.Bar.DISMISSED) ? " dismissed" : ""));
+        } else {
+            ClassicFrameRecorder.event("box-close", p.request.id + " chosen=" + result
+                + (wasUp ? "" : " (never shown)"));
+        }
         this.host.closed();
         if (this.queue.isEmpty()) this.host.idle();
         if (p.loop != null) p.loop.exit();
         kick();
+    }
+
+
+    // Woodcuts
+
+    /** The whole layer, in layer coordinates. */
+    private Rectangle whole() {
+        return new Rectangle(0, 0, getWidth(), getHeight());
+    }
+
+    /**
+     * A woodcut's first paint: the whole screen black, under the woodcut's
+     * palette (the water frozen); its frame {@link
+     * ClassicWoodcut#FRAME_AFTER_BLACK_MS} later.
+     */
+    private void woodcutBlack(Pending p) {
+        p.phase = Phase.BLACK;
+        p.blackAt = this.clock.now();
+        // The original loads the woodcut's palette over the portrait's:
+        // the next portrait loads its palette again (landfall #12162).
+        this.lastPortrait = null;
+        p.woodcut.black();
+        this.picture = p.woodcut.image;
+        this.host.woodcutPalette(p.woodcut.k, p.palette);
+        paintNow(whole());
+        requestFocusInWindow();
+        ClassicFrameRecorder.event("woodcut-black", p.woodcut.k + " pixels="
+            + p.woodcut.changed());
+        this.timer.schedule(p.blackAt + nanos(ClassicWoodcut.FRAME_AFTER_BLACK_MS),
+                            () -> woodcutFrame(p));
+    }
+
+    /** The frame, the ribbon, the title and the fill, in one paint. */
+    private void woodcutFrame(Pending p) {
+        if (p.done || this.current != p) return;
+        p.phase = Phase.FRAME;
+        p.woodcut.frame();
+        paintNow(whole());
+        ClassicFrameRecorder.event("woodcut-frame", String.valueOf(p.woodcut.k));
+        p.dissolveAt = p.blackAt + nanos(ClassicWoodcut.FRAME_AFTER_BLACK_MS
+            + ClassicWoodcut.DISSOLVE_AFTER_FRAME_MS);
+        this.timer.schedule(p.dissolveAt, () -> woodcutTick(p));
+    }
+
+    /**
+     * One frame of the dissolve, on the original's frame grid from its
+     * start; a late tick catches up.  The arrow is hidden from the first to
+     * the last; then the woodcut waits for a key.
+     */
+    private void woodcutTick(Pending p) {
+        if (p.done || this.current != p) return;
+        final ClassicWoodcut.Screen w = p.woodcut;
+        if (p.phase != Phase.DISSOLVE) {
+            p.phase = Phase.DISSOLVE;
+            this.host.arrowChanged();
+        }
+        final double since = (this.clock.now() - p.dissolveAt) / 1e6;
+        if (w.dissolveTo(ClassicWoodcut.revealed(w.changed(), since))) {
+            paintNow(scaled(ClassicWoodcut.PICTURE));
+        }
+        if (w.complete()) {
+            p.phase = Phase.HELD;
+            this.shownAt = System.currentTimeMillis();
+            this.host.arrowChanged();
+            ClassicFrameRecorder.event("woodcut-done", w.k + " pixels=" + w.changed());
+            return;
+        }
+        final double step = ClassicWoodcut.DISSOLVE_MS / (ClassicWoodcut.DISSOLVE_FRAMES - 1);
+        final long next = (long) Math.floor(Math.max(0.0, since) / step) + 1L;
+        this.timer.schedule(p.dissolveAt + nanos(next * step), () -> woodcutTick(p));
+    }
+
+    /**
+     * The key: black in one paint, the game's palette back a frame later,
+     * the map {@link ClassicWoodcut#MAP_BACK_MS} after the black.
+     */
+    private void woodcutClose(Pending p) {
+        p.phase = Phase.CLOSING;
+        p.pressed = false;
+        p.closeAt = this.clock.now();
+        p.woodcut.black();
+        paintNow(whole());
+        ClassicFrameRecorder.event("woodcut-close", String.valueOf(p.woodcut.k));
+        this.timer.schedule(p.closeAt + nanos(ClassicWoodcut.FRAME_MS), () -> {
+                if (p.done || this.current != p) return;
+                this.host.woodcutPalette(0, null);
+                ClassicFrameRecorder.event("woodcut-palette", p.woodcut.k + " back");
+                this.timer.schedule(p.closeAt + nanos(ClassicWoodcut.MAP_BACK_MS), () -> {
+                        if (p.done || this.current != p) return;
+                        p.endedAt = this.clock.now();
+                        this.holdUntil = p.endedAt + nanos(p.followMs);
+                        finish(p, 0);
+                    });
+            });
     }
 
 
@@ -525,6 +859,14 @@ final class ClassicAdvisorLayer extends JComponent {
         if (isModifier(code) || e.isAltDown() || e.isControlDown()
             || e.isMetaDown() || e.isAltGraphDown()) return;
         final boolean repeat = this.host.isAutoRepeat(e);
+        if (p.woodcut != null) {
+            // Any fresh key once the picture is complete (I: the keys are
+            // never recorded), also Escape; not one held from before.
+            if (p.phase == Phase.HELD && !predates(e.getWhen()) && !repeat) {
+                woodcutClose(p);
+            }
+            return;
+        }
         int answer;
         switch (code) {
         case KeyEvent.VK_UP: case KeyEvent.VK_KP_UP: case KeyEvent.VK_NUMPAD8:
@@ -581,6 +923,11 @@ final class ClassicAdvisorLayer extends JComponent {
         final Pending p = this.current;
         if (p == null || predates(e.getWhen())) return;
         final Point v = virtual(e.getPoint());
+        if (p.woodcut != null) {
+            // A press and its release on the canvas count as a key (I).
+            p.pressed = p.phase == Phase.HELD && v != null;
+            return;
+        }
         final int row = (v == null) ? -1 : p.layout.rowAt(v.x, v.y);
         final boolean in = v != null && p.layout.inBox(v.x, v.y);
         final int before = p.bar.row();
@@ -598,6 +945,10 @@ final class ClassicAdvisorLayer extends JComponent {
         final Pending p = this.current;
         if (p == null) return;
         final Point v = virtual(e.getPoint());
+        if (p.woodcut != null) {
+            if (p.pressed && p.phase == Phase.HELD) woodcutClose(p);
+            return;
+        }
         final int row = (v == null) ? -1 : p.layout.rowAt(v.x, v.y);
         final boolean in = v != null && p.layout.inBox(v.x, v.y);
         settle(p, p.bar.release(row, in));
@@ -669,8 +1020,10 @@ final class ClassicAdvisorLayer extends JComponent {
     /** Draw the box on screen into its picture. */
     private void render() {
         final Pending p = this.current;
-        this.picture = (p == null) ? null : ClassicAdvisorBox.render(p.layout,
-            p.bar.row(), p.bar.checks(), this.host.wood(), this.host.font());
+        this.picture = (p == null) ? null
+            : (p.woodcut != null) ? p.woodcut.image
+            : ClassicAdvisorBox.render(p.layout, p.bar.row(), p.bar.checks(),
+                                       this.host.wood(), this.host.font());
     }
 
     /** A 320x200 rectangle in layer coordinates (one pixel of slack). */

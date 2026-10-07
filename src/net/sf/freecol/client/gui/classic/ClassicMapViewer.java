@@ -280,6 +280,9 @@ final class ClassicMapViewer extends JPanel {
     /** {@code System.nanoTime} of the last final draw; 0 before the first. */
     private long lastFinalNanos = 0L;
 
+    /** The final draw being painted shows land newly explored ({@link #noteReveal}). */
+    private boolean landRevealed = false;
+
     /**
      * The next paint shows a change the player sees: a view jump, a
      * blink toggle, the cursor (the final draw counts by itself).  Told
@@ -814,6 +817,9 @@ final class ClassicMapViewer extends JPanel {
                     repaint();
                     return;
                 }
+                // The first entry into a native village: its woodcut on
+                // the key, before the move (W9; landfall #15424, no slide).
+                if (this.gui != null && !this.gui.villageEntryKey(u, d)) return;
                 this.keyMoveUnit = u;
                 // A unit that boards a ship hands over to the ship (spec
                 // delta W18): the GUI picks the carrier when the controller
@@ -2542,6 +2548,12 @@ final class ClassicMapViewer extends JPanel {
             this.lastFinalNanos = System.nanoTime();
             ClassicFrameRecorder.event("final-draw", "");
             changed = true;
+            // Land shown explored: the discovery's woodcut, after this
+            // paint (W9; the GUI posts it, never a modal loop in a paint).
+            if (this.landRevealed) {
+                this.landRevealed = false;
+                if (this.gui != null) this.gui.landSighted(this.lastFinalNanos);
+            }
         }
         if (changed && this.gui != null) this.gui.screenChanged();
     }
@@ -2887,6 +2899,8 @@ final class ClassicMapViewer extends JPanel {
     boolean indexHint(byte[] out) {
         final ClassicTerrainLayer l = this.layer;
         if (l == null) return false;
+        // A woodcut covers the map: no pixel of it is the terrain (W9).
+        if (this.gui != null && this.gui.woodcutCovers()) return false;
         l.indexHint(out);
         return true;
     }
@@ -2946,12 +2960,43 @@ final class ClassicMapViewer extends JPanel {
     private void noteReveal() {
         final BitSet now = this.shown;
         if (now == null || this.shownMap == null) return;
+        final BitSet add = (BitSet)now.clone();
+        if (this.shownAtFinal != null) add.andNot(this.shownAtFinal);
         if (ClassicFrameRecorder.on()) {
-            final BitSet add = (BitSet)now.clone();
-            if (this.shownAtFinal != null) add.andNot(this.shownAtFinal);
             ClassicFrameRecorder.event("reveal", tileList(add, this.shownMap.getWidth()));
         }
+        this.landRevealed |= revealsLand(this.shownMap, add);
         this.shownAtFinal = (BitSet)now.clone();
+    }
+
+    /**
+     * Whether a final draw's reveal shows land as explored: the sighting
+     * of the New World (woodcut 1, master plan W9; V: landfall #2107,
+     * fog-start #1042).  Land only in the fog ring is not explored and
+     * does not count (fog-start #876).
+     *
+     * @param map The map.
+     * @param add The tiles newly shown explored ({@code y * width + x}).
+     * @return True if one of them is land.
+     */
+    static boolean revealsLand(Map map, BitSet add) {
+        if (map == null || add == null) return false;
+        final int w = map.getWidth();
+        for (int i = add.nextSetBit(0); i >= 0; i = add.nextSetBit(i + 1)) {
+            final Tile t = map.getTile(i % w, i / w);
+            if (t != null && t.isLand()) return true;
+        }
+        return false;
+    }
+
+    /**
+     * When the last final draw was painted ({@code System.nanoTime}), 0
+     * before the first: a woodcut's black comes 57 ms after it.
+     *
+     * @return The time.
+     */
+    long lastFinalNanos() {
+        return this.lastFinalNanos;
     }
 
     /** "n=count tiles=x,y;x,y..." of a tile set, every tile listed (the analysis needs them). */

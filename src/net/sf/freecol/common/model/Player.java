@@ -199,6 +199,13 @@ public class Player extends FreeColGameObject implements Nameable {
     /** The name this player uses for the New World. */
     protected String newLandName = null;
 
+    /**
+     * The Classic UI's woodcuts this player has seen, bit k for entry k of
+     * the original's list (once per game, kept in the save).  Written by
+     * the client's view on the event thread, read by the server's save.
+     */
+    protected volatile int classicWoodcuts = 0;
+
     /** Is this player an admin? */
     protected boolean admin;
 
@@ -466,6 +473,25 @@ public class Player extends FreeColGameObject implements Nameable {
      */
     public void setNewLandName(String newLandName) {
         this.newLandName = newLandName;
+    }
+
+    /**
+     * Gets the woodcuts the Classic UI has shown this player.
+     *
+     * @return A bit set, bit k for woodcut k; 0 for none (and in a save
+     *     without the attribute).
+     */
+    public int getClassicWoodcuts() {
+        return classicWoodcuts;
+    }
+
+    /**
+     * Sets the woodcuts the Classic UI has shown this player.
+     *
+     * @param classicWoodcuts The bit set.
+     */
+    public void setClassicWoodcuts(int classicWoodcuts) {
+        this.classicWoodcuts = classicWoodcuts;
     }
 
     /**
@@ -4152,6 +4178,8 @@ public class Player extends FreeColGameObject implements Nameable {
         this.changeNationType(o.getNationType());
         this.nationId = o.getNationId();
         this.newLandName = o.getNewLandName();
+        // Never forgets one: a woodcut seen stays seen.
+        this.classicWoodcuts |= o.getClassicWoodcuts();
         this.admin = o.isAdmin();
         this.ai = o.isAI();
         this.ready = o.getReady();
@@ -4205,6 +4233,7 @@ public class Player extends FreeColGameObject implements Nameable {
     private static final String ATTACKED_BY_PRIVATEERS_TAG = "attackedByPrivateers";
     private static final String BANKRUPT_TAG = "bankrupt";
     private static final String BAN_MISSIONS_TAG = "banMissions";
+    private static final String CLASSIC_WOODCUTS_TAG = "classicWoodcuts";
     private static final String CURRENT_FATHER_TAG = "currentFather";
     private static final String DEAD_TAG = "dead";
     private static final String ENTRY_LOCATION_TAG = "entryLocation";
@@ -4283,6 +4312,10 @@ public class Player extends FreeColGameObject implements Nameable {
 
             if (entryTile != null) {
                 xw.writeAttribute(ENTRY_LOCATION_TAG, entryTile);
+            }
+
+            if (classicWoodcuts != 0) {
+                xw.writeAttribute(CLASSIC_WOODCUTS_TAG, classicWoodcuts);
             }
         }
 
@@ -4462,6 +4495,8 @@ public class Player extends FreeColGameObject implements Nameable {
         immigrationRequired = xr.getAttribute(IMMIGRATION_REQUIRED_TAG, 12);
 
         newLandName = xr.getAttribute(NEW_LAND_NAME_TAG, (String)null);
+
+        classicWoodcuts = xr.getAttribute(CLASSIC_WOODCUTS_TAG, 0);
 
         independentNationName = xr.getAttribute(INDEPENDENT_NATION_NAME_TAG,
                                                 (String)null);

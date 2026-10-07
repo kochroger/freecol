@@ -123,6 +123,36 @@ public class ClassicAdvisorLayerTest extends TestCase {
         public boolean isAutoRepeat(KeyEvent e) {
             return this.repeat;
         }
+
+        /** The woodcut palette calls (k, 0 for back), and arrow changes. */
+        final List<Integer> woodcutPalettes = new ArrayList<>();
+        int arrowChanges = 0;
+
+        @Override
+        public void woodcutPalette(int k, int[] entries) {
+            this.woodcutPalettes.add(k);
+        }
+
+        @Override
+        public void arrowChanged() {
+            this.arrowChanges++;
+        }
+
+        /** The map's last final draw + 57 ms, or 0. */
+        long notBefore = 0L;
+
+        @Override
+        public long woodcutNotBefore() {
+            return this.notBefore;
+        }
+
+        /** The woodcuts that ended after they were on the screen. */
+        final List<Integer> ended = new ArrayList<>();
+
+        @Override
+        public void woodcutEnded(int k) {
+            this.ended.add(k);
+        }
     }
 
     private static int[] glyph(int code, int w) {
@@ -249,6 +279,50 @@ public class ClassicAdvisorLayerTest extends TestCase {
 
     private int bar() throws Exception {
         return edt(() -> this.layer.currentBar());
+    }
+
+    /** A woodcut's end, when it comes. */
+    private static final class Ended {
+
+        volatile long value = 0L;
+        final CountDownLatch done = new CountDownLatch(1);
+
+        long get() throws InterruptedException {
+            assertTrue("the woodcut never ended", done.await(5, TimeUnit.SECONDS));
+            return this.value;
+        }
+
+        boolean isDone() {
+            return this.done.getCount() == 0;
+        }
+    }
+
+    /** Ask for woodcut 3 of the synthetic art on the EDT. */
+    private Ended woodcut(long notBefore, double followMs) {
+        final Ended e = new Ended();
+        final ClassicWoodcut.Screen s = ClassicWoodcut.Screen.of(
+            ClassicWoodcutTest.syntheticArt(), 3);
+        SwingUtilities.invokeLater(() -> {
+                e.value = this.layer.showWoodcut(s, null, notBefore, followMs);
+                e.done.countDown();
+            });
+        return e;
+    }
+
+    private String probe() throws Exception {
+        return edt(() -> this.layer.probe());
+    }
+
+    /** Run the woodcut's dissolve frame by frame; @return its frames. */
+    private int dissolve() throws Exception {
+        int frames = 0;
+        for (int i = 0; i < 200 && !"woodcut_3:held".equals(probe()); i++) {
+            final int before = edt(() -> this.layer.currentWoodcut().revealed());
+            runTimer();
+            if (edt(() -> this.layer.currentWoodcut().revealed()) > before) frames++;
+            this.clock.advanceMs(ClassicWoodcut.FRAME_MS);
+        }
+        return frames;
     }
 
     private static ClassicAdvisorBox.Request question(String id) {
@@ -444,6 +518,11 @@ public class ClassicAdvisorLayerTest extends TestCase {
         runTimer();
         assertTrue(up());
         assertEquals("second:0", edt(() -> this.layer.probe()));
+        // G5: the JDK ends the second box's event loop a second after the
+        // first one's exited; its caller still waits for its answer.
+        Thread.sleep(1500);
+        assertFalse(b.isDone());
+        assertFalse(a.isDone());
         key(KeyEvent.VK_ESCAPE);
         assertEquals(2, b.get());
         assertEquals(1, a.get());
@@ -730,5 +809,214 @@ public class ClassicAdvisorLayerTest extends TestCase {
         assertTrue(up());
         key(KeyEvent.VK_ENTER);
         assertEquals(0, b.get());
+    }
+
+    /**
+     * W9: a woodcut's timeline on the clock: black at its time (the
+     * palette in, busy from the ask), the frame 86 ms later, the dissolve
+     * 43 ms after that over 55 frames (the arrow hidden meanwhile), then
+     * held; keys before the end of the dissolve and held keys do nothing;
+     * a fresh key: black, the palette back one frame later, the map 300 ms
+     * after the black; the next box no earlier than the follow-up.
+     */
+    public void testWoodcutTimeline() throws Exception {
+        final long t0 = this.clock.now();
+        final Ended e = woodcut(t0 + 57_000_000L, 171.0);
+        flush();
+        assertTrue(edt(() -> this.layer.isBusy()));    // due at once
+        assertEquals("due", probe());
+        assertEquals(1, this.host.opened);
+        this.clock.advanceMs(56);
+        runTimer();
+        assertEquals("due", probe());
+        this.clock.advanceMs(1);
+        runTimer();
+        assertEquals("woodcut_3:black", probe());
+        assertTrue(edt(() -> this.layer.coversScreen()));
+        assertEquals(List.of(3), this.host.woodcutPalettes);
+        for (int p : edt(() -> this.layer.currentWoodcut().pixels())) assertEquals(0, p);
+        key(KeyEvent.VK_SPACE);                        // not yet: nothing
+        this.clock.advanceMs(85);
+        runTimer();
+        assertEquals("woodcut_3:black", probe());
+        this.clock.advanceMs(1);
+        runTimer();
+        assertEquals("woodcut_3:frame", probe());
+        assertFalse(edt(() -> this.layer.hidesArrow()));
+        key(KeyEvent.VK_ENTER);
+        this.clock.advanceMs(43);
+        final int arrows = this.host.arrowChanges;
+        final int frames = dissolve();
+        assertTrue("dissolve frames " + frames, Math.abs(frames - 55) <= 2);
+        assertEquals(arrows + 2, this.host.arrowChanges);   // hidden, then back
+        assertFalse(edt(() -> this.layer.hidesArrow()));
+        assertEquals("woodcut_3:held", probe());
+        assertTrue(edt(() -> this.layer.currentWoodcut().complete()));
+        // Held keys and keys of before the picture was complete: nothing.
+        this.host.repeat = true;
+        key(KeyEvent.VK_ESCAPE);
+        this.host.repeat = false;
+        edt(() -> {
+                this.layer.onKey(new KeyEvent(this.layer, KeyEvent.KEY_PRESSED,
+                    System.currentTimeMillis() - 5000, 0, KeyEvent.VK_A,
+                    KeyEvent.CHAR_UNDEFINED));
+                return null;
+            });
+        key(KeyEvent.VK_SHIFT);
+        this.clock.advanceMs(60_000);                  // no timeout
+        runTimer();
+        assertEquals("woodcut_3:held", probe());
+        assertFalse(e.isDone());
+        // Escape ends it (a woodcut has no "Nein").
+        key(KeyEvent.VK_ESCAPE);
+        final long closed = this.clock.now();
+        assertEquals("woodcut_3:closing", probe());
+        for (int p : edt(() -> this.layer.currentWoodcut().pixels())) assertEquals(0, p);
+        assertEquals(List.of(3), this.host.woodcutPalettes);
+        this.clock.advanceMs(ClassicWoodcut.FRAME_MS);
+        runTimer();
+        assertEquals(List.of(3, 0), this.host.woodcutPalettes);
+        assertTrue(up());
+        this.clock.advanceMs(300 - ClassicWoodcut.FRAME_MS - 0.5);
+        runTimer();
+        assertTrue(up());
+        this.clock.advanceMs(0.5);
+        runTimer();
+        assertEquals(closed + 300_000_000L, e.get());
+        assertEquals(List.of(3), this.host.ended);
+        assertFalse(up());
+        assertFalse(edt(() -> this.layer.isBusy()));
+        assertFalse(edt(() -> this.layer.coversScreen()));
+        assertEquals(1, this.host.closed);
+        assertEquals(1, this.host.idle);
+        assertEquals(e.get() + 171_000_000L, (long) edt(() -> this.layer.holdUntilNanos()));
+        // The next box (a new portrait): its palette in the lead, the box
+        // at the follow-up time.
+        final ClassicAdvisorBox.Request chief = ClassicAdvisorBox.Request.builder("chief")
+            .freeColText("a a").rows("a", "a a").cancelRow(1)
+            .portrait(ClassicAdvisorBox.Portrait.chief(6)).build();
+        final Answer a = ask(chief);
+        flush();
+        this.clock.advanceMs(171 - ClassicAdvisorLayer.PALETTE_LEAD_MS - 1);
+        runTimer();
+        assertTrue(this.host.palettes.isEmpty());
+        this.clock.advanceMs(1);
+        runTimer();
+        assertEquals(1, this.host.palettes.size());
+        assertFalse(up());
+        this.clock.advanceMs(ClassicAdvisorLayer.PALETTE_LEAD_MS);
+        runTimer();
+        assertTrue(up());
+        key(KeyEvent.VK_ENTER);
+        assertEquals(0, a.get());
+    }
+
+    /**
+     * W9: a woodcut asked while a box is up waits for it (200 ms after its
+     * close), a box asked during a woodcut waits for the woodcut; a click
+     * (press and release on the canvas) ends a complete woodcut.  Each
+     * caller resumes only when its own box or woodcut is done, as with
+     * stacked dialogs, also after the JDK ended its nested event loop (a
+     * second after the one below it exited).
+     */
+    public void testWoodcutsAndBoxesWait() throws Exception {
+        final Answer a = ask(question("q"));
+        flush();
+        assertTrue(up());
+        final Ended e = woodcut(0L, 0.0);
+        flush();
+        assertEquals("q:0", probe());                  // the box stays first
+        key(KeyEvent.VK_ENTER);
+        Thread.sleep(1500);                            // the JDK ends a nested
+        assertFalse(e.isDone());                       // loop a second after
+        assertEquals("due", probe());                  // the one below it
+        assertFalse(a.isDone());                       // stacked: the woodcut first
+        this.clock.advanceMs(ClassicAdvisorLayer.CHAIN_MS - 1);
+        runTimer();
+        assertEquals("due", probe());
+        this.clock.advanceMs(1);
+        runTimer();
+        assertEquals("woodcut_3:black", probe());
+        final Answer b = ask(question("q2"));
+        flush();
+        this.clock.advanceMs(ClassicWoodcut.FRAME_AFTER_BLACK_MS);
+        runTimer();
+        this.clock.advanceMs(ClassicWoodcut.DISSOLVE_AFTER_FRAME_MS);
+        dissolve();
+        assertFalse(b.isDone());
+        mouse(MouseEvent.MOUSE_PRESSED, 5, 5);
+        assertEquals("woodcut_3:held", probe());
+        mouse(MouseEvent.MOUSE_RELEASED, 100, 100);
+        assertEquals("woodcut_3:closing", probe());
+        this.clock.advanceMs(ClassicWoodcut.FRAME_MS);
+        runTimer();
+        this.clock.advanceMs(ClassicWoodcut.MAP_BACK_MS);
+        runTimer();
+        assertTrue(up());                              // the box at once (follow 0)
+        assertEquals("q2:0", probe());
+        Thread.sleep(1500);                            // stacked: no early return
+        assertFalse(e.isDone());
+        assertFalse(b.isDone());
+        key(KeyEvent.VK_ESCAPE);
+        assertEquals(2, b.get());
+        assertTrue(e.get() != ClassicAdvisorLayer.NOT_SHOWN);
+        assertEquals(0, a.get());
+    }
+
+    /**
+     * W9: a woodcut due while the map still paints (slides queued before
+     * it, the AI phase) comes 57 ms after the map's last final draw, as
+     * after its trigger.
+     */
+    public void testWoodcutAfterTheLastFinalDraw() throws Exception {
+        final long t0 = this.clock.now();
+        this.host.notBefore = t0 + 57_000_000L;
+        final Ended e = woodcut(0L, 0.0);
+        flush();
+        assertEquals("due", probe());
+        this.clock.advanceMs(56);
+        runTimer();
+        assertEquals("due", probe());
+        this.host.notBefore = t0 + 100_000_000L;      // another slide ended meanwhile
+        this.clock.advanceMs(1);
+        runTimer();
+        assertEquals("due", probe());
+        this.clock.advanceMs(43);
+        runTimer();
+        assertEquals("woodcut_3:black", probe());
+        edt(() -> {
+                this.layer.abort();
+                return null;
+            });
+        assertTrue(e.get() != ClassicAdvisorLayer.NOT_SHOWN);
+    }
+
+    /**
+     * W9: the game view goes during a woodcut: it ends at once, counts as
+     * shown and its palette goes back; a woodcut that never reached the
+     * screen is not shown.
+     */
+    public void testWoodcutAbort() throws Exception {
+        final Ended e = woodcut(0L, 0.0);
+        flush();
+        assertEquals("woodcut_3:black", probe());
+        final Ended later = woodcut(0L, 0.0);
+        flush();
+        this.clock.advanceMs(ClassicWoodcut.FRAME_AFTER_BLACK_MS
+                             + ClassicWoodcut.DISSOLVE_AFTER_FRAME_MS);
+        runTimer();
+        runTimer();
+        edt(() -> {
+                this.layer.abort();
+                return null;
+            });
+        assertTrue(e.get() != ClassicAdvisorLayer.NOT_SHOWN);
+        assertEquals(ClassicAdvisorLayer.NOT_SHOWN, later.get());
+        assertEquals(List.of(3), this.host.ended);              // the drawn one only
+        assertEquals(List.of(3, 0), this.host.woodcutPalettes);
+        assertFalse(edt(() -> this.layer.isBusy()));
+        assertFalse(edt(() -> this.layer.hidesArrow()));
+        assertEquals(ClassicAdvisorLayer.NOT_SHOWN, (long) edt(
+            () -> this.layer.showWoodcut(null, null, 0L, 0.0)));
     }
 }

@@ -289,6 +289,54 @@ public class ClassicFrameRecorderTest extends TestCase {
     }
 
     /**
+     * W9: a woodcut's palette goes into the record palette entry for entry
+     * at the current rotation (a cycle entry shows its woodcut colour, not
+     * a rotated one), its colours map to their own indices, and the
+     * entries of before (the game's, a portrait's) come back with
+     * {@code restore}; an adaptive palette is left alone.
+     */
+    public void testTheWoodcutPaletteAndItsReturn() {
+        final ClassicGamePalette gp = new ClassicGamePalette(
+            ClassicGamePaletteTest.viceroyLike(), null);
+        final ClassicFrameRecorder.Palette p
+            = ClassicFrameRecorder.Palette.of("lf0", gp.rgb(1));
+        p.rotate(3, 120, 8);
+        final int[] portrait = new int[256];
+        java.util.Arrays.fill(portrait, -1);
+        portrait[200] = 0x010203;
+        assertTrue(p.overlay(portrait));
+        final int[] before = new int[256];
+        for (int i = 0; i < 256; i++) before[i] = p.entry(i);
+        final int[] w = new int[256];
+        java.util.Arrays.fill(w, -1);
+        w[7] = ClassicWoodcut.ARROW_DIM;
+        w[10] = ClassicWoodcut.FILL;
+        w[121] = 0xABCDEF;
+        w[127] = 0x123456;
+        w[200] = 0x445566;
+        assertTrue(p.woodcut(w, 120, 8));
+        for (int i = 0; i < 256; i++) {
+            assertEquals("#" + i, (w[i] >= 0) ? w[i] : before[i], p.entry(i));
+        }
+        assertEquals(121, p.index(0xABCDEF));
+        assertEquals(7, p.index(ClassicWoodcut.ARROW_DIM));
+        assertFalse(p.rotate(3, 120, 8));               // the water stands still
+        assertEquals(0x123456, p.entry(127));
+        assertFalse(p.woodcut(w, 120, 8));              // the same again: nothing
+        assertTrue(p.restore(120, 8));
+        for (int i = 0; i < 256; i++) assertEquals("#" + i, before[i], p.entry(i));
+        assertFalse(p.restore(120, 8));
+        assertEquals(0x010203, p.entry(200));           // the portrait's slot is back
+        // The cycle runs on from the game's entries.
+        p.rotate(4, 120, 8);
+        for (int i = 0; i < 256; i++) {
+            if (i == 200) continue;
+            assertEquals("#" + i, gp.rgb(5, i), p.entry(i));
+        }
+        assertFalse(ClassicFrameRecorder.Palette.adaptive().woodcut(w, 120, 8));
+    }
+
+    /**
      * W6c (design 10 §9.2.4): the index hint resolves a cycling pixel whose
      * colour a lower index holds too -- 127 at phase 0 has 59's colour, 120
      * has 56's -- only in the map area, only where the colour is the hint's

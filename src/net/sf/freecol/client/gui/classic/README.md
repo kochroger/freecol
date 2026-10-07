@@ -371,7 +371,7 @@ and the Europe screen. Details:
   uses up no final draw and tells the turn flow nothing (`palettePaint`); while
   a slide's final draw is due the step paints that final draw instead. With no
   cycling cell in the view nothing is painted (`ClassicTerrainLayer.markShown`).
-- **Frozen:** `hold(reason)` / `release(reason)` for the woodcuts (W9 wires
+- **Frozen:** `hold(reason)` / `release(reason)` for the woodcuts (W9, wired:
   them: no step while one is up, then one step at the next frame, 14.27 ms, and
   the schedule runs on from it, landfall #2638 -> #2639). The pref
   `waterCycling` OFF freezes the phase, read at every due step; ON resumes one
@@ -1780,6 +1780,91 @@ clip007, 0 px off on the whole box apart from the original's arrow),
 `ClassicAdvisorLayerTest.testACheckboxBoxStaysUp`,
 `ClassicGUISeamTest.testTheOptionRowsOpenTheBoxes`,
 `testColonyReportsHeldBack`, `ClassicPrefsTest`, `ClassicMenuBarTest`.
+
+### Woodcuts (`ClassicWoodcut`; master plan W9, N17)
+
+The original's full-screen pictures at the great events, once per game:
+the discovery of the New World (k = 1), the first colony (2), the first
+meeting with the natives (3; the Aztecs 4, the Incas 5), the Pacific (6), the
+first village entered (7), the Fountain of Youth (8), the first laden ship in
+Europe (9), the first other Europeans (10), a burning colony (11), a
+destroyed colony (12), a raid on a colony (13). k is the WOODCUT.TXT entry
+and the WDCUT number (the landfall analysis numbers its woodcuts by
+appearance: its "woodcut 2" is k = 3, its "woodcut 3" k = 7). Spec:
+`g\prep\G5-spec.md`; report `g\G5.md`.
+
+- **The picture (V, 0 px):** black over the whole screen; `WOODFRAM.SS.000`
+  at (23,15); its opening filled with index 10 (#5D3824) over (63,40) 192x112
+  (row 152 stays black); the ribbon at y 162, `NAMEPLAT.SS.000`, n x `.001`,
+  `.002`, n = ceil(advance / 16), centred; the title (WOODCUT.TXT line k,
+  `ClassicText.woodcuts`) in FONT-NP at y 165, x = (320 - advance + 1) / 2,
+  values 1/2/3 = #755924/#61411C/#2C200C; `WDCUT<k>.SS.000` at (63,40) last
+  (a 192x115 picture covers rows 153-154, a transparent pixel shows the fill).
+  `ClassicWoodcutTest.testGoldenAgainstTheClips`: landfall #2118/#2175,
+  #11611/#11670, #15431/#15489, clip008 #3381/#3442, #52688/#52745, fog-start
+  #1053/#1110, the whole screen but the arrow's box, 0 px; the three analysis
+  crops `02_`, `07_`, `13_*_1x` 0 px. The titles come from the pack only.
+- **The timeline (V, six recordings):** black 57 ms after the trigger's paint
+  (and never sooner than 57 ms after the map's last final draw); the frame,
+  ribbon, title and fill 86 ms after the black, in one paint; the dissolve 43
+  ms later, 55 frames from the first changed one to the last, evenly (about
+  400 px a frame), on the timer's deadlines; held until a key; black at once,
+  the game palette back a frame later (the water's step a frame after that),
+  the map 300 ms after the black, painted from the current state. The water
+  is frozen from the black to the palette's return (`ClassicWaterCycle.hold`).
+  The arrow is hidden during the dissolve and drawn in the woodcut palette's
+  grey (#797979 for #AAAAAA) from the black to the palette's return.
+- **The dissolve:** the departure's fixed seeded order
+  (`ClassicDeparture.dissolveOrder`): the original's is fixed too (the same in
+  all six recordings, within a frame) but unknown, so the frames during the
+  dissolve differ from it, the settled ones do not.
+- **Keys:** any fresh key or click made after the picture is complete ends
+  it, Escape too (a woodcut has no "Nein"); keys during the black or the
+  dissolve and the auto-repeat of a held key do nothing; no timeout (I).
+- **One queue with the boxes:** `ClassicAdvisorLayer.showWoodcut`, so every
+  gate of the boxes holds (busy, focus, the blink's hold, the turn flow, the
+  actions); probe `woodcut_<k>:<black|frame|dissolve|held|closing>` (scripts:
+  `waitBox woodcut_1:held 15000`). The next box comes no earlier than the
+  woodcut's follow-up after the map is back (W10's @LANDHO 71 ms, the chief
+  171 ms, the village box 128 ms, the colony screen 328 ms, k = 9 57 ms;
+  `ClassicAdvisorLayer.holdUntil`). A box asked while another box or woodcut
+  is up waits for it, and its caller resumes only when its own box is done
+  (`enter` re-enters its loop: the JDK ends a nested event loop about a second
+  after the one below it exits).
+- **The triggers** (`ClassicGUI`, "The woodcuts"): 1 the first final draw that
+  shows land as explored (`ClassicMapViewer.noteReveal`, posted, due at once;
+  then the W10 seam `discoveryShown`); 2 between `getNewColonyName` (the
+  founding, `noteFounding`) and that colony's screen; 3/4/5 in
+  `showFirstContactDialog` before the box; 6 `showEventPanel` with FreeCol's
+  Pacific picture (FreeCol sends it only to the first discoverer in the whole
+  game); 7 the key into a village (`villageEntryKey`, before the move), else
+  before the village seams' boxes and the learn question; 8/9/11/12/13 the
+  notice funnel (`showMessagePopup`, by message id, also for a dropped
+  notice; 8 also before the Fountain of Youth's recruit box); 10 a CONTACT
+  negotiation or FreeCol's meeting sound of a European nation. A woodcut is
+  shown only when the map is what the player sees (not over a colony, Europe
+  or report screen, the first scene, without the pack); then it is not marked
+  and comes at the next trigger of its kind.
+- **Once per game, across save/load:** `Player.classicWoodcuts` (bit k; in
+  the save and for its owner only, only when not 0; an update never removes a
+  bit). Marked on our player and, in single player, on the server's copy, so
+  every later save has it (autosaves included). A save without it (an older
+  build, the standard GUI) counts the woodcuts whose event left a trace as
+  shown (`ClassicWoodcut.derived`: explored land, a colony or FOUND_COLONY,
+  a met native nation, the Aztecs/Incas met, a discovered Pacific, a visited
+  village, goods sold in Europe, a met European, COLONY_DESTROYED; none for 8,
+  11, 13). Multiplayer: this session and the derived bits only.
+- **The recorder** puts the woodcut's palette (the index sheets of WOODFRAM,
+  NAMEPLAT and WDCUT<k>, plus 94) into the frames' PLTE from the black and the
+  entries of before back at the palette's return (`palette-woodcut`,
+  `palette-restore`), and the map's index hint is off while a woodcut covers
+  it. Live (fog-start replay, F3's scout, C4's founding, C3's natives):
+  frame-only and finished screens 0 px, 0 palette misses during the woodcuts.
+- Tests: `ClassicWoodcutTest`, `ClassicAdvisorLayerTest.testWoodcut*`,
+  `ClassicGUISeamTest.testWoodcut*`, `testDerivedWoodcuts`,
+  `ClassicMapViewerTest.testTheLandSightingAtTheFinalDraw`,
+  `ClassicFrameRecorderTest.testTheWoodcutPaletteAndItsReturn`,
+  `PlayerTest.testClassicWoodcuts`.
 
 ## In-game HUD (menu strip, dropdowns, right panel)
 

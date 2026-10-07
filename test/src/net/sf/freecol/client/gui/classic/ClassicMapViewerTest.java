@@ -19,12 +19,14 @@
 
 package net.sf.freecol.client.gui.classic;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Tile;
+import net.sf.freecol.common.model.TileType;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.server.model.ServerUnit;
@@ -628,6 +630,82 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         mv.finalDraw();   // nothing pending: nothing painted
         assertEquals(before + 1, dots[0]);
         mv.dispose();
+    }
+
+    /**
+     * W9: a final draw that shows land as explored tells the GUI (woodcut
+     * 1, the sighting: V landfall #2107, fog-start #1042); a reveal of sea
+     * does not, nor land in the fog ring around the explored tiles (it is
+     * not explored), nor a first paint of a map that already shows land
+     * (a loaded game).  The once per game is the GUI's.
+     */
+    public void testTheLandSightingAtTheFinalDraw() throws Exception {
+        final Game server = seaGame();
+        final Player sDutch = server.getPlayerByNationId("model.nation.dutch");
+        final Game client = ClassicTerrainOracleTest.clientView(server, sDutch);
+        final Map map = client.getMap();
+        final TileType plains = spec().getTileType("model.tile.plains");
+        final Tile src = map.getTile(15, 15), dst = map.getTile(14, 15);
+        final Unit ship = src.getFirstUnit();
+        // Land in the fog ring: two columns west, not explored.
+        server.getMap().getTile(12, 15).setType(plains);
+        assertFalse(map.getTile(12, 15).isExplored());
+        final List<Long> sighted = new ArrayList<>();
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                void landSighted(long finalNanos) {
+                    sighted.add(finalNanos);
+                }
+            };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        mv.setFixedScale(1);
+        mv.setTerrain(ClassicTerrainLayerTest.layer(),
+                      ClassicTerrainOracleTest.oracle(client, true, server));
+        final java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+            240, 192, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        mv.paintOffscreen(img);
+        mv.setFocus(src);
+        final java.awt.Graphics2D g = img.createGraphics();
+        mv.paintComponent(g);
+        g.dispose();
+        // A sea reveal: nothing.
+        for (int y = 14; y <= 16; y++) map.getTile(13, y).setType(spec().getTileType("model.tile.ocean"));
+        mv.animateMove(ship, src, dst);
+        mv.finalDraw();
+        assertTrue(sighted.isEmpty());
+        assertTrue(mv.lastFinalNanos() != 0L);
+        // Land explored by the next move: the GUI hears of it, with the
+        // final draw's time.
+        map.getTile(12, 15).setType(plains);
+        for (int y = 14; y <= 16; y += 2) map.getTile(12, y).setType(spec().getTileType("model.tile.ocean"));
+        ship.setLocation(dst);
+        mv.animateMove(ship, dst, map.getTile(13, 15));
+        mv.finalDraw();
+        assertEquals(1, sighted.size());
+        assertEquals(mv.lastFinalNanos(), (long) sighted.get(0));
+        assertTrue(ClassicMapViewer.revealsLand(map, bits(map, 12, 15)));
+        assertFalse(ClassicMapViewer.revealsLand(map, bits(map, 13, 15)));
+        assertFalse(ClassicMapViewer.revealsLand(null, bits(map, 12, 15)));
+        mv.dispose();
+        // A map that shows land from its first paint (a loaded game): no sighting.
+        final ClassicMapViewer mv2 = new ClassicMapViewer(null, gui, null, false);
+        mv2.setFixedScale(1);
+        mv2.setTerrain(ClassicTerrainLayerTest.layer(),
+                       ClassicTerrainOracleTest.oracle(client, true, server));
+        mv2.paintOffscreen(img);
+        mv2.setFocus(map.getTile(13, 15));
+        final java.awt.Graphics2D g2 = img.createGraphics();
+        mv2.paintComponent(g2);
+        g2.dispose();
+        assertEquals(1, sighted.size());
+        mv2.dispose();
+    }
+
+    /** The bit of one tile in a map's tile set. */
+    private static java.util.BitSet bits(Map map, int x, int y) {
+        final java.util.BitSet b = new java.util.BitSet();
+        b.set(y * map.getWidth() + x);
+        return b;
     }
 
     /**

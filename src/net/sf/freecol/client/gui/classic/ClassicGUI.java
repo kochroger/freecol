@@ -1191,6 +1191,10 @@ public class ClassicGUI extends GUI {
         restoreSessionOptions();
         this.landing = null;
         this.boardedUnit = null;
+        this.woodcuts = 0;
+        this.woodcutsAsked = 0;
+        this.woodcutsPosted = 0;
+        this.foundingTile = null;
         this.mapViewer = null;
         this.terrainOracle = null;
         this.waterCycle = null;
@@ -1630,6 +1634,8 @@ public class ClassicGUI extends GUI {
                     (layer == null) ? null : layer.palette().cycle(), true);
                 this.mapViewer.setSlideClock(this.waterCycle.servicing(ClassicSlide.SYSTEM));
                 installInGameHud();
+                // The woodcuts this game has seen (W9), before any can come.
+                loadWoodcuts();
                 // Phase 0 at the first in-game view (fog-start #19).
                 this.waterCycle.start();
             }
@@ -1792,8 +1798,11 @@ public class ClassicGUI extends GUI {
                 final ClassicMapViewer mv = mapViewer;
                 return mv != null && mv.holdsPreload();
             });
+        // The arrow: hidden under the first scene (its overlay draws one)
+        // and during a woodcut's dissolve (W9).
         this.hudPane = new ClassicHudPane(this.menuStrip, this.mapViewer,
-            this.infoPanel, arrowSprite(pack), () -> sceneShowing);
+            this.infoPanel, arrowSprite(pack), () -> sceneShowing
+                || (boxLayer != null && boxLayer.hidesArrow()));
         ClassicKeyMap.install(this.hudPane, this.mapViewer,
             id -> (am == null) ? null : am.getFreeColAction(id),
             () -> (mapViewer == null) ? null : mapViewer.getViewMode(),
@@ -1871,6 +1880,44 @@ public class ClassicGUI extends GUI {
         public boolean isAutoRepeat(KeyEvent e) {
             return ClassicGUI.this.isAutoRepeat(e);
         }
+
+        @Override
+        public void woodcutPalette(int k, int[] entries) {
+            // The water stands still under the woodcut's palette (W6c's
+            // hold); the recorder's frames take it, the arrow's grey too.
+            final ClassicWaterCycle wc = waterCycle;
+            if (k > 0) {
+                if (wc != null) wc.hold("woodcut");
+                ClassicFrameRecorder.woodcutPalette(k, entries);
+            } else {
+                if (this.dimmed) ClassicFrameRecorder.woodcutPalette(0, null);
+                if (wc != null) wc.release("woodcut");
+            }
+            this.dimmed = k > 0;
+            if (hudPane != null) hudPane.pointer().setDimmed(this.dimmed);
+        }
+
+        /** Whether a woodcut's palette is up. */
+        private boolean dimmed = false;
+
+        @Override
+        public long woodcutNotBefore() {
+            return afterFinalDraw();
+        }
+
+        @Override
+        public void woodcutEnded(int k) {
+            markWoodcut(k);
+            // The Aztecs' and the Incas' woodcut is the natives' too.
+            if (k == ClassicWoodcut.AZTECS || k == ClassicWoodcut.INCAS) {
+                markWoodcut(ClassicWoodcut.NATIVES);
+            }
+        }
+
+        @Override
+        public void arrowChanged() {
+            if (hudPane != null) hudPane.pointer().refresh();
+        }
     }
 
     /**
@@ -1879,7 +1926,8 @@ public class ClassicGUI extends GUI {
      * @return True if so.
      */
     boolean boxBusy() {
-        return this.boxLayer != null && this.boxLayer.isBusy();
+        return (this.boxLayer != null && this.boxLayer.isBusy())
+            || this.woodcutsPosted > 0;
     }
 
     /** @return The advisor boxes' layer, or null (the harness, tests). */
@@ -2067,7 +2115,10 @@ public class ClassicGUI extends GUI {
      * @param finalNanos When the final draw was painted.
      */
     void panelAfterFinalDraw(long finalNanos) {
-        if (this.infoPanel == null) return;
+        // A woodcut comes after this final draw: the original refreshes
+        // no panel before it (landfall #2107 -> #2111); the map's return
+        // repaints everything.
+        if (this.infoPanel == null || this.woodcutsPosted > 0) return;
         this.infoPanel.paintMinimapNow();
         try {
             waitClock().waitUntil(finalNanos + Math.round(PANEL_AFTER_FINAL_MS * 1e6));
@@ -2953,6 +3004,8 @@ public class ClassicGUI extends GUI {
         }
         SwingUtilities.invokeLater(() -> {
             try {
+                // The first colony's woodcut, before its screen (W9).
+                if (!foundingWoodcut(colony)) return;
                 closeColonyPanel();
                 final ClassicColonyPanel panel = new ClassicColonyPanel(
                     getFreeColClient(), this.imageLibrary, colony,
@@ -3405,18 +3458,30 @@ public class ClassicGUI extends GUI {
      *   <li>The turn report asks a pending father offer after its price
      *       messages and before its other notices (build spec D8a,
      *       {@link #askFathers}).</li>
+     *   <li>A notice of an event with a woodcut (the Fountain of Youth, the
+     *       first laden ship in Europe, a burning, destroyed or raided
+     *       colony; N17, {@link #messageWoodcut}) brings it before its box,
+     *       once per game, also when the notice itself is dropped.</li>
      * </ul>
      */
-    private void showMessagePopup(List<ModelMessage> messages, String titleKey) {
-        messages = noticesShown(messages);
-        if (messages.isEmpty()) return;
+    private void showMessagePopup(List<ModelMessage> all, String titleKey) {
+        final List<ModelMessage> messages = noticesShown(all);
+        // The woodcut a notice brings (N17) comes also when the notice
+        // itself is not shown (I), before the shown ones.
+        final Game game = getGame();
+        final List<Integer> unshown = new ArrayList<>();
+        for (ModelMessage m : all) {
+            if (messages.contains(m)) continue;
+            final int k = messageWoodcut(game, m);
+            if (k >= 0) unshown.add(k);
+        }
+        if (messages.isEmpty() && unshown.isEmpty()) return;
         if (this.firstScenePending || this.sceneShowing) {
-            this.heldMessages.add(new HeldMessages(messages, titleKey));
+            this.heldMessages.add(new HeldMessages(all, titleKey));
             logger.info("ClassicGUI: " + messages.size()
                 + " notice(s) held until the first scene is dismissed.");
             return;
         }
-        final Game game = getGame();
         if (game == null) return;
         // One box per notice, each after the one before (build spec W7):
         // the original has no paged report.  The original's words where
@@ -3431,6 +3496,7 @@ public class ClassicGUI extends GUI {
             ? takePendingFathers() : null;
         final List<ClassicAdvisorBox.Request> prices = new ArrayList<>();
         final List<ClassicAdvisorBox.Request> boxes = new ArrayList<>();
+        final List<Integer> woodcutsOf = new ArrayList<>();
         for (ModelMessage m : messages) {
             final FreeColObject display = game.getMessageDisplay(m);
             final ClassicAdvisorBox.Request r = ClassicNotices.request(text,
@@ -3441,12 +3507,17 @@ public class ClassicGUI extends GUI {
                 prices.add(r);
             } else {
                 boxes.add(r);
+                woodcutsOf.add(messageWoodcut(game, m));
             }
         }
         onEventThread(() -> {
+                for (int k : unshown) noticeWoodcut(k);
                 for (ClassicAdvisorBox.Request r : prices) this.prompter.ask(r);
                 if (fathers != null) askFathers(fathers);
-                for (ClassicAdvisorBox.Request r : boxes) this.prompter.ask(r);
+                for (int i = 0; i < boxes.size(); i++) {
+                    noticeWoodcut(woodcutsOf.get(i));
+                    this.prompter.ask(boxes.get(i));
+                }
                 return null;
             }, null);
     }
@@ -4017,6 +4088,11 @@ public class ClassicGUI extends GUI {
         if (!Messages.containsKey(hdrKey)) {
             hdrKey = "firstContactDialog.meeting.natives";
         }
+        // The first meeting's woodcut, before the box (W9, N17).
+        onEventThread(() -> {
+                contactWoodcut(other);
+                return null;
+            }, null);
         askEvent("first-contact " + other.getNation().getSuffix(),
                  ImageLibrary.getMeetingImage(other), Messages.message(hdrKey),
                  msg, "yes", "no", true, false, false,
@@ -4337,6 +4413,9 @@ public class ClassicGUI extends GUI {
             ClassicText.load(ClassicPackFiles.runtime()), player, foy, recruits,
             Messages.message("classic.dialog.messages"));
         invokeNowOrLater(() -> {
+                // The Fountain of Youth's woodcut, if its notice did not
+                // bring it first (N17).
+                if (foy) noticeWoodcut(ClassicWoodcut.FOUNTAIN);
                 final int chosen = askUntilAnswered(r);
                 ClassicFrameRecorder.event("emigration", r.id + " foy=" + foy
                     + " rows=" + recruits.size() + " chosen=" + chosen);
@@ -4373,6 +4452,14 @@ public class ClassicGUI extends GUI {
         }
         final String title = Messages.message("negotiationDialog.title."
             + agreement.getContext().getKey());
+        // The first meeting with another European nation: its woodcut
+        // first, once per game (N17).
+        if (agreement.getContext() == DiplomaticTrade.TradeContext.CONTACT
+            && !woodcutShown(ClassicWoodcut.EUROPEANS)) {
+            onEventThread(() -> woodcut(ClassicWoodcut.EUROPEANS, 0L,
+                                        ClassicAdvisorLayer.CHAIN_MS),
+                          ClassicAdvisorLayer.NOT_SHOWN);
+        }
         if (ClassicSeams.isOwnProposal(agreement)) {
             ClassicFrameRecorder.event("negotiation", "own "
                 + agreement.getContext() + ": not yet");
@@ -4463,6 +4550,8 @@ public class ClassicGUI extends GUI {
      */
     @Override
     public String getNewColonyName(Player player, Tile tile) {
+        // The founding's woodcut comes before the colony screen (W9).
+        noteFounding(tile);
         final String suggested = player.getSettlementName(null);
         if (player.getSettlementByName(suggested) == null) return suggested;
         for (int i = 2; i < 100; i++) {
@@ -4493,8 +4582,10 @@ public class ClassicGUI extends GUI {
     /**
      * {@inheritDoc}
      *
-     * The original has no event pictures (first landing, the Pacific), so
-     * nothing is shown.  The callers still need a panel:
+     * The original has no such event pictures: nothing is shown at the
+     * first landing, and the Pacific's discovery shows the original's
+     * woodcut 6 instead (N17; FreeCol calls this only for the first
+     * discoverer in the whole game).  The callers still need a panel:
      * {@code InGameController.newLandName} adds a closing callback to the
      * result (the build-colony tip and the next message), and the base
      * {@code GUI}'s null would throw there.  The returned stand-in is
@@ -4505,8 +4596,18 @@ public class ClassicGUI extends GUI {
     @Override
     public FreeColPanel showEventPanel(String header, String image,
                                        String footer) {
+        // The Pacific has the original's woodcut 6 (N17), once per game.
+        if (PACIFIC_IMAGE.equals(image)
+            && !woodcutShown(ClassicWoodcut.PACIFIC)) {
+            onEventThread(() -> woodcut(ClassicWoodcut.PACIFIC, 0L,
+                                        ClassicAdvisorLayer.CHAIN_MS),
+                          ClassicAdvisorLayer.NOT_SHOWN);
+        }
         return new ClosedPanel(getFreeColClient());
     }
+
+    /** FreeCol's picture of the Pacific's discovery ({@link #showEventPanel}). */
+    static final String PACIFIC_IMAGE = "image.flavor.event.discoverPacific";
 
     /**
      * The panel {@link #showEventPanel} hands out in place of one it does
@@ -4574,6 +4675,9 @@ public class ClassicGUI extends GUI {
                 : this.mapViewer.getActiveUnit(), tile);
             return askLandfall(carrier, firstLander(carrier, tile));
         }
+        // The learn question is a village box: the first entry's woodcut
+        // before it when no key brought one (W9).
+        if (template != null && LEARN_QUESTION.equals(template.getId())) villageWoodcut();
         final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request
             .builder("confirm " + template.getId())
             .freeColText(Messages.message(template))
@@ -4589,6 +4693,9 @@ public class ClassicGUI extends GUI {
 
     /** FreeCol's question on crossing onto the high seas, never shown (W0f). */
     static final String HIGH_SEAS_QUESTION = "highseas.text";
+
+    /** FreeCol's question at a village's teacher ({@code moveLearnSkill}). */
+    static final String LEARN_QUESTION = "learnSkill.text";
 
     /**
      * Whether a confirm is answered "no" without a box: FreeCol's high-seas
@@ -4776,12 +4883,15 @@ public class ClassicGUI extends GUI {
     // ends the turn 756 ms after a cancelled village box instead of 485
     // (build spec W5a, delta W5a).  The boxes themselves are W8's; a
     // cancel keeps the unit's move (Roger's house rule), as FreeCol does.
+    // The first village entry's woodcut comes before them when no key
+    // brought it (W9: a goto, a click; the key's is villageEntryKey).
 
     /** {@inheritDoc} */
     @Override
     public net.sf.freecol.common.model.Constants.ArmedUnitSettlementAction
         getArmedUnitSettlementChoice(
             net.sf.freecol.common.model.Settlement settlement) {
+        villageWoodcut(settlement);
         return villageChoice(settlement,
                              super.getArmedUnitSettlementChoice(settlement));
     }
@@ -4793,6 +4903,7 @@ public class ClassicGUI extends GUI {
             net.sf.freecol.common.model.Settlement settlement,
             StringTemplate template, boolean canBuy, boolean canSell,
             boolean canGift) {
+        villageWoodcut(settlement);
         return villageChoice(settlement, super.getIndianSettlementTradeChoice(
                 settlement, template, canBuy, canSell, canGift));
     }
@@ -4803,6 +4914,7 @@ public class ClassicGUI extends GUI {
         getMissionaryChoice(Unit unit,
             net.sf.freecol.common.model.IndianSettlement is,
             boolean canEstablish, boolean canDenounce) {
+        villageWoodcut(is);
         return villageChoice(is, super.getMissionaryChoice(unit, is, canEstablish,
                                                            canDenounce));
     }
@@ -4813,6 +4925,7 @@ public class ClassicGUI extends GUI {
         getScoutIndianSettlementChoice(
             net.sf.freecol.common.model.IndianSettlement is,
             String numberString) {
+        villageWoodcut(is);
         return villageChoice(is, super.getScoutIndianSettlementChoice(is,
                                                                       numberString));
     }
@@ -5349,6 +5462,414 @@ public class ClassicGUI extends GUI {
     private static String colony(Tile tile) {
         final Colony c = (tile == null) ? null : tile.getColony();
         return (c == null) ? "FreeCol" : c.getName();
+    }
+
+    // The woodcuts (master plan W9, N17; ClassicWoodcut)
+
+    /**
+     * What shows the woodcuts: {@link #putWoodcut} in the game, a fake in
+     * the tests.  EDT only.
+     */
+    interface Woodcutter {
+
+        /**
+         * Show woodcut {@code k} and wait until the map is back.
+         *
+         * @param k The entry ({@link ClassicWoodcut}).
+         * @param notBefore Its black comes no earlier (clock ns; 0: at once).
+         * @param followMs The next box comes no earlier than this after the
+         *     map's return.
+         * @return When the map came back ({@link #waitClock}), or
+         *     {@link ClassicAdvisorLayer#NOT_SHOWN} when it could not be
+         *     shown (then it is not marked, and comes at the next trigger).
+         */
+        long show(int k, long notBefore, double followMs);
+    }
+
+    /** Shows the woodcuts; replaced by the tests. */
+    Woodcutter woodcutter = this::putWoodcut;
+
+    /**
+     * The woodcuts of this game shown or counted as shown (bit k): the
+     * save's record, the ones derived at the view's build
+     * ({@link ClassicWoodcut#derived}) and this session's.  EDT only.
+     */
+    private int woodcuts = 0;
+
+    /** The woodcuts asked for and not over yet (a second trigger waits out). */
+    private int woodcutsAsked = 0;
+
+    /** Woodcuts posted and not yet queued: the turn flow waits for them. */
+    private int woodcutsPosted = 0;
+
+    /** The woodcuts' art of the pack, loaded on first use. */
+    private ClassicWoodcut.Art woodcutArt = null;
+    private ClassicPackFiles woodcutPack = null;
+
+    /** The tile of the colony being founded ({@link #noteFounding}), or null. */
+    private Tile foundingTile = null;
+
+    /**
+     * Read the woodcuts already seen in this game: the save's
+     * {@code classicWoodcuts} and, for a save without it (an older build,
+     * the standard GUI), the ones whose event left a trace.  EDT only;
+     * once per game view, before anything can trigger one.
+     */
+    private void loadWoodcuts() {
+        final Player me = myPlayer();
+        final Game game = getGame();
+        final int saved = (me == null) ? 0 : me.getClassicWoodcuts();
+        final int derived = ClassicWoodcut.derived(me,
+            (game == null) ? null : game.getMap());
+        this.woodcuts = saved | derived;
+        this.woodcutsAsked = 0;
+        this.woodcutsPosted = 0;
+        this.foundingTile = null;
+        ClassicFrameRecorder.note("woodcuts", "saved=" + Integer.toBinaryString(saved)
+            + " derived=" + Integer.toBinaryString(derived));
+    }
+
+    /**
+     * @param k A woodcut.
+     * @return Whether it was shown in this game, counts as shown, or is
+     *     asked for right now.
+     */
+    boolean woodcutShown(int k) {
+        return ((this.woodcuts | this.woodcutsAsked) & ClassicWoodcut.bit(k)) != 0;
+    }
+
+    /** @return The woodcuts shown or counted as shown in this game (tests). */
+    int woodcutsShown() {
+        return this.woodcuts;
+    }
+
+    /**
+     * Whether a woodcut covers the screen now: the map's index hint is
+     * not the screen then.  EDT only.
+     *
+     * @return True from a woodcut's black to its map's return.
+     */
+    boolean woodcutCovers() {
+        return this.boxLayer != null && this.boxLayer.coversScreen();
+    }
+
+    /**
+     * Show woodcut {@code k} once per game: nothing if it was shown, else
+     * the woodcutter's, and it is marked once it was on the screen.  EDT
+     * only.
+     *
+     * @param k The woodcut.
+     * @param notBefore Its black no earlier (clock ns; 0: at once).
+     * @param followMs The next box's least distance from the map's return.
+     * @return When the map came back, or {@link ClassicAdvisorLayer#NOT_SHOWN}.
+     */
+    long woodcut(int k, long notBefore, double followMs) {
+        if (woodcutShown(k)) return ClassicAdvisorLayer.NOT_SHOWN;
+        final int bit = ClassicWoodcut.bit(k);
+        this.woodcutsAsked |= bit;
+        long back = ClassicAdvisorLayer.NOT_SHOWN;
+        try {
+            back = this.woodcutter.show(k, notBefore, followMs);
+        } finally {
+            this.woodcutsAsked &= ~bit;
+        }
+        if (back != ClassicAdvisorLayer.NOT_SHOWN) {
+            if ((this.woodcuts & bit) == 0) markWoodcut(k);
+            repaintInfo();
+        }
+        return back;
+    }
+
+    /**
+     * Mark a woodcut as shown: in this session, on our player and, in a
+     * single player game, on the server's copy of our player, whose state
+     * every save writes (autosaves included), so it is not shown again
+     * after a reload.  Multiplayer: this session only.
+     *
+     * @param k The woodcut.
+     */
+    void markWoodcut(int k) {
+        final int bit = ClassicWoodcut.bit(k);
+        this.woodcuts |= bit;
+        final Player me = myPlayer();
+        if (me == null) return;
+        me.setClassicWoodcuts(me.getClassicWoodcuts() | bit);
+        final FreeColClient fcc = getFreeColClient();
+        final FreeColServer server = (fcc == null) ? null : fcc.getFreeColServer();
+        final Game sg = (server == null) ? null : server.getGame();
+        final Player sp = (sg == null) ? null
+            : sg.getFreeColGameObject(me.getId(), Player.class);
+        if (sp != null) sp.setClassicWoodcuts(sp.getClassicWoodcuts() | bit);
+        ClassicFrameRecorder.event("woodcut-marked", k + " client="
+            + Integer.toBinaryString(me.getClassicWoodcuts()) + " server="
+            + ((sp == null) ? "-" : Integer.toBinaryString(sp.getClassicWoodcuts())));
+    }
+
+    /**
+     * Put a woodcut on the game's canvas ({@link ClassicAdvisorLayer}) when
+     * the map is what the player is looking at, as {@link #putBox} does;
+     * over a colony, Europe or report screen, the first scene, or without
+     * the pack: not shown.  EDT only.
+     *
+     * @param k The woodcut.
+     * @param notBefore Its black no earlier (clock ns).
+     * @param followMs The next box's least distance from the map's return.
+     * @return When the map came back, or {@link ClassicAdvisorLayer#NOT_SHOWN}.
+     */
+    long putWoodcut(int k, long notBefore, double followMs) {
+        final ClassicAdvisorLayer layer = this.boxLayer;
+        if (layer == null || this.sceneShowing || this.hudPane == null
+            || !this.hudPane.isShowing() || dialogOwner() != this.frame) {
+            ClassicFrameRecorder.event("woodcut-skipped", k + " no game canvas");
+            return ClassicAdvisorLayer.NOT_SHOWN;
+        }
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        if (pack != this.woodcutPack || this.woodcutArt == null) {
+            this.woodcutPack = pack;
+            this.woodcutArt = ClassicWoodcut.load(pack);
+        }
+        final ClassicWoodcut.Screen s = ClassicWoodcut.Screen.of(this.woodcutArt, k);
+        if (s == null) {
+            ClassicFrameRecorder.event("woodcut-skipped", k + " no art");
+            return ClassicAdvisorLayer.NOT_SHOWN;
+        }
+        // A slide's final draw still due comes first, the black 57 ms
+        // after it (a trigger the server sends during the move: the
+        // Pacific's region, a first contact).
+        long due = notBefore;
+        final ClassicMapViewer mv = this.mapViewer;
+        if (mv != null) {
+            final long last = mv.lastFinalNanos();
+            mv.finalDraw();
+            if (mv.lastFinalNanos() != last) due = Math.max(due, afterFinalDraw());
+        }
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("woodcut-ask", k + " black in " + String.format(
+                java.util.Locale.ROOT, "%.1fms", (due - waitClock().now()) / 1e6));
+        }
+        return layer.showWoodcut(s, ClassicWoodcut.palette(pack, this.woodcutArt, k),
+                                 due, followMs);
+    }
+
+    /**
+     * A woodcut's black after the last final draw: 57 ms later (V:
+     * landfall #2107 -&gt; #2111, #11600 -&gt; #11604), at once if that is
+     * past.
+     *
+     * @return The time on the clock, 0 for at once.
+     */
+    private long afterFinalDraw() {
+        final ClassicMapViewer mv = this.mapViewer;
+        final long f = (mv == null) ? 0L : mv.lastFinalNanos();
+        return (f == 0L) ? 0L
+            : f + Math.round(ClassicWoodcut.BLACK_AFTER_TRIGGER_MS * 1e6);
+    }
+
+    /**
+     * Woodcut 1, the discovery of the New World: the first final draw that
+     * shows land as explored (V: landfall #2107, fog-start #1042; the land
+     * in the fog ring before it shows nothing).  Called from the map's
+     * paint, so the woodcut is posted, never shown inside the paint; it
+     * counts as due at once, so the turn flow cannot hand over meanwhile.
+     * EDT only.
+     *
+     * @param finalNanos When the final draw was painted.
+     */
+    void landSighted(long finalNanos) {
+        if (woodcutShown(ClassicWoodcut.DISCOVERY)) return;
+        final int bit = ClassicWoodcut.bit(ClassicWoodcut.DISCOVERY);
+        this.woodcutsAsked |= bit;
+        this.woodcutsPosted++;
+        SwingUtilities.invokeLater(() -> {
+                this.woodcutsPosted = Math.max(0, this.woodcutsPosted - 1);
+                this.woodcutsAsked &= ~bit;
+                final long back = woodcut(ClassicWoodcut.DISCOVERY, finalNanos
+                    + Math.round(ClassicWoodcut.BLACK_AFTER_TRIGGER_MS * 1e6),
+                    ClassicWoodcut.FOLLOW_DISCOVERY_MS);
+                if (back != ClassicAdvisorLayer.NOT_SHOWN) discoveryShown(back);
+            });
+    }
+
+    /** @return Whether a woodcut is posted and not yet queued. */
+    boolean woodcutPosted() {
+        return this.woodcutsPosted > 0;
+    }
+
+    /**
+     * The seam of the New World's name (master plan W10): called after
+     * woodcut 1's map is back; the original asks @LANDHO 71 ms later
+     * ({@link ClassicWoodcut#FOLLOW_DISCOVERY_MS}).  Nothing yet.
+     *
+     * @param mapBackNanos When the map came back ({@link #waitClock}).
+     */
+    void discoveryShown(long mapBackNanos) {
+        // W10 (Part H): @LANDHO here.
+    }
+
+    /**
+     * Woodcut 7 on the key that enters a native village for the first time,
+     * before the move (V: landfall #15424, no slide).  EDT only.
+     *
+     * @param unit The unit ordered.
+     * @param direction The direction.
+     * @return False if the game view went meanwhile (the move is dropped).
+     */
+    boolean villageEntryKey(Unit unit, Direction direction) {
+        if (unit == null || direction == null || !unit.hasTile()
+            || woodcutShown(ClassicWoodcut.VILLAGE)) return true;
+        final Tile target = unit.getTile().getNeighbourOrNull(direction);
+        if (!ClassicWoodcut.entersVillage(unit.getMoveType(direction), target)) {
+            return true;
+        }
+        woodcut(ClassicWoodcut.VILLAGE, 0L, ClassicWoodcut.FOLLOW_VILLAGE_MS);
+        return this.mapViewer != null;
+    }
+
+    /**
+     * Woodcut 7 before a village box that no key brought (a goto, a click):
+     * at once, if not shown yet.
+     *
+     * @param settlement The settlement, or null.
+     */
+    void villageWoodcut(net.sf.freecol.common.model.Settlement settlement) {
+        if (settlement instanceof IndianSettlement) villageWoodcut();
+    }
+
+    /** {@link #villageWoodcut(net.sf.freecol.common.model.Settlement)} for a known village. */
+    private void villageWoodcut() {
+        if (woodcutShown(ClassicWoodcut.VILLAGE)) return;
+        onEventThread(() -> woodcut(ClassicWoodcut.VILLAGE, 0L,
+                                    ClassicWoodcut.FOLLOW_VILLAGE_MS),
+                      ClassicAdvisorLayer.NOT_SHOWN);
+    }
+
+    /**
+     * Remember the colony being founded: its colony screen comes after
+     * woodcut 2 if it is the first (D4's name prompt calls this too).
+     *
+     * @param tile The colony's tile.
+     */
+    void noteFounding(Tile tile) {
+        this.foundingTile = tile;
+    }
+
+    /**
+     * Woodcut 2 before the first colony's screen, once the map shows the
+     * colony (V: clip008 #3369 the colony on the map, #3374 black, #4009
+     * the map, #4032 the colony screen).  EDT only.
+     *
+     * @param colony The colony whose screen comes.
+     * @return False if the game view went meanwhile.
+     */
+    private boolean foundingWoodcut(Colony colony) {
+        final Tile t = this.foundingTile;
+        if (t == null || colony.getTile() != t) return true;
+        this.foundingTile = null;
+        if (woodcutShown(ClassicWoodcut.COLONY)) return true;
+        // The map with the new colony first, the black 72 ms after it.
+        if (this.hudPane != null) {
+            this.hudPane.paintImmediately(0, 0, this.hudPane.getWidth(),
+                                          this.hudPane.getHeight());
+        }
+        final long back = woodcut(ClassicWoodcut.COLONY, waitClock().now()
+            + Math.round(ClassicWoodcut.BLACK_AFTER_COLONY_MS * 1e6),
+            ClassicWoodcut.FOLLOW_COLONY_MS);
+        if (back == ClassicAdvisorLayer.NOT_SHOWN) return this.mapViewer != null;
+        try {
+            waitClock().waitUntil(back + Math.round(ClassicWoodcut.FOLLOW_COLONY_MS * 1e6));
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
+        return this.mapViewer != null;
+    }
+
+    /**
+     * The woodcut of a first meeting with a native nation (3, or 4 and 5
+     * for the Aztecs and the Incas, which count as 3 too), before its box.
+     * EDT only.
+     *
+     * @param other The native nation.
+     */
+    private void contactWoodcut(Player other) {
+        final int k = ClassicWoodcut.contactWoodcut((other == null
+            || other.getNation() == null) ? null : other.getNation().getSuffix());
+        // While the Aztecs' or the Incas' woodcut is up, another tribe met
+        // meanwhile brings no woodcut 3 after it.
+        final int natives = ClassicWoodcut.bit(ClassicWoodcut.NATIVES);
+        final boolean own = k != ClassicWoodcut.NATIVES && !woodcutShown(ClassicWoodcut.NATIVES);
+        if (own) this.woodcutsAsked |= natives;
+        long back = ClassicAdvisorLayer.NOT_SHOWN;
+        try {
+            back = woodcut(k, afterFinalDraw(), ClassicWoodcut.FOLLOW_NATIVES_MS);
+        } finally {
+            if (own) this.woodcutsAsked &= ~natives;
+        }
+        if (back != ClassicAdvisorLayer.NOT_SHOWN && k != ClassicWoodcut.NATIVES
+            && (this.woodcuts & natives) == 0) {
+            markWoodcut(ClassicWoodcut.NATIVES);
+        }
+    }
+
+    /**
+     * The woodcut a notice brings ({@link ClassicWoodcut#messageWoodcut}).
+     *
+     * @param game The game.
+     * @param m The message.
+     * @return The woodcut, or -1.
+     */
+    static int messageWoodcut(Game game, ModelMessage m) {
+        if (m == null) return -1;
+        final FreeColObject display = (game == null) ? null : game.getMessageDisplay(m);
+        final boolean laden = display instanceof Unit && ((Unit) display).isNaval()
+            && ((Unit) display).hasGoodsCargo();
+        return ClassicWoodcut.messageWoodcut(m.getId(), laden);
+    }
+
+    /**
+     * A notice's woodcut, before its box (N17), if not shown yet.  EDT only.
+     *
+     * @param k The woodcut, or -1.
+     */
+    private void noticeWoodcut(int k) {
+        if (k < 0 || woodcutShown(k)) return;
+        woodcut(k, 0L, (k == ClassicWoodcut.CARGO) ? ClassicWoodcut.FOLLOW_CARGO_MS
+                : ClassicAdvisorLayer.CHAIN_MS);
+    }
+
+    /**
+     * Whether a nation id names a European nation (woodcut 10 at its
+     * meeting sound).
+     *
+     * @param nationId The id.
+     * @return True for a European nation of this game's rules.
+     */
+    private boolean isEuropeanNation(String nationId) {
+        final Game game = getGame();
+        final Specification spec = (game == null) ? null : game.getSpecification();
+        final Nation n = (spec == null || nationId == null) ? null
+            : spec.getNation(nationId);
+        return n != null && n.getType() != null && n.getType().isEuropean();
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>FreeCol's sound at a first meeting with a European nation
+     * ({@code sound.event.meet.<nation>}, played when the other nation's
+     * unit made the contact): woodcut 10 first, once per game (N17, I).
+     */
+    @Override
+    public void playSound(String sound) {
+        final String nation = ClassicWoodcut.meetNation(sound);
+        if (nation != null && !woodcutShown(ClassicWoodcut.EUROPEANS)
+            && isEuropeanNation(nation)) {
+            invokeNowOrLater(() -> {
+                    woodcut(ClassicWoodcut.EUROPEANS, 0L, ClassicAdvisorLayer.CHAIN_MS);
+                    if (getFreeColClient() != null) super.playSound(sound);
+                });
+            return;
+        }
+        if (getFreeColClient() != null) super.playSound(sound);
     }
 
     // UI-task dispatch
