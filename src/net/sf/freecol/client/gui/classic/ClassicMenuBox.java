@@ -189,6 +189,13 @@ final class ClassicMenuBox {
      */
     static final int LIST_INDENT = 13;
 
+    /**
+     * The destination list's indent ({@code @SAILPORT}, R2: landfall
+     * #23300, the row ink at x 57 in a box at 42; Steam capture
+     * opening_051 the same).
+     */
+    static final int PORT_INDENT = 15;
+
     /** Left edge of the row text (indented 4 px against the prompt). */
     static int rowX(Rectangle b) {
         return b.x + ROW_INDENT;

@@ -206,7 +206,8 @@ public class ClassicHudTest extends TestCase {
                  + "@OTHER_NAMES\r\nWoods\r\nRiv\r\nBigRiv\r\nSmallRiv\r\nUnexp\r\n\r\n");
         n.append("@RESOURCE\r\n");
         for (int i = 0; i < 14; i++) n.append("R").append(i).append(", 6\r\n");
-        n.append("\r\n@COLONYNAME\r\nNewE\r\nNewF\r\nNewS\r\nNewH\r\n\r\n@TRIBES\r\n");
+        n.append("\r\n@COLONYNAME\r\nNewE\r\nNewF\r\nNewS\r\nNewH\r\n\r\n"
+                 + "@HOMEPORT\r\nP0\r\nP1\r\nP2\r\nHome3\r\n\r\n@TRIBES\r\n");
         final int[] levels = { 3, 2, 1, 1, 1, 0, 0, 0 };   // as in NAMES.TXT
         for (int i = 0; i < 8; i++) {
             n.append("Tribe").append(i).append(", Tribe").append(i).append(", Gifts, ")
@@ -783,7 +784,7 @@ public class ClassicHudTest extends TestCase {
         private int w = 8, orders = ClassicHud.ORDERS_NONE, tools = -1, moves = 3,
             x = 1, y = 1, treasure = -1, river = 0, resource = -1;
         private String terrain = null, dest = null;
-        private boolean road = false, plowed = false;
+        private boolean road = false, plowed = false, home = false;
         private List<ClassicHud.GoodsIcon> cargo = null;
         private BufferedImage sprite = null;
 
@@ -802,6 +803,7 @@ public class ClassicHudTest extends TestCase {
         F treasure(int v) { this.treasure = v; return this; }
         F terrain(String v) { this.terrain = v; return this; }
         F dest(String v) { this.orders = ClassicHud.ORDERS_GOTO; this.dest = v; return this; }
+        F home() { this.orders = ClassicHud.ORDERS_GOTO; this.home = true; return this; }
         F extras(int r, boolean rd, boolean pl, int res) {
             this.river = r; this.road = rd; this.plowed = pl; this.resource = res;
             return this;
@@ -825,7 +827,7 @@ public class ClassicHudTest extends TestCase {
                 ClassicHud.unitRow(this.type, this.role), this.type, this.moves, this.x,
                 this.y, this.orders, this.terrain, this.road, job,
                 job >= 0 && this.role == null, ClassicHud.qualifier(this.type, this.role),
-                this.tools, this.treasure, this.dest, this.river, this.plowed,
+                this.tools, this.treasure, this.dest, this.home, this.river, this.plowed,
                 this.resource, this.cargo);
         }
     }
@@ -897,7 +899,9 @@ public class ClassicHudTest extends TestCase {
      * orders, the flag letter stays G (clip005 #14481: the artillery's
      * "Fur Town" at 93, no skill line; #14827: the soldier's "Base" at
      * 100 after its skill; the blacksmith's list entry "Schmied / Base");
-     * another goto keeps the orders' word ("Ziel", I).
+     * a goto to Europe shows the orders' word and the home port ("Ziel
+     * Amsterdam", R2, landfall #23375); another goto keeps the orders'
+     * word ("Ziel", I).
      */
     public void testGotoDestination() throws IOException {
         final File dir = Files.createTempDirectory("classic-hud-w").toFile();
@@ -915,6 +919,16 @@ public class ClassicHudTest extends TestCase {
             assertEquals("[(242,93,gold) O3]",
                 details(t, new F("artillery", null).w(14).orders(ClassicHud.ORDERS_GOTO)
                     .build()));
+            // Europe: "Ziel Amsterdam" (the stand-in's O3 and Home3), letter G.
+            final ClassicHud.UnitFacts ship = new F("merchantman", null).w(13).home().build();
+            assertEquals("O3 Home3", ClassicHud.ordersText(t, ship));
+            assertEquals("G", ClassicHud.orderLetter(t, ship.ordersRow));
+            assertTrue(details(t, ship), details(t, ship).contains("gold) O3 Home3]"));
+            // A colony's name wins; without a goto the home port is not shown.
+            assertEquals("Base", ClassicHud.ordersText(t,
+                new F("merchantman", null).home().dest("Base").build()));
+            assertEquals("O0", ClassicHud.ordersText(t,
+                new F("merchantman", null).home().orders(ClassicHud.ORDERS_NONE).build()));
         } finally {
             dir.delete();
         }
@@ -1206,6 +1220,14 @@ public class ClassicHudTest extends TestCase {
         assertEquals("[025, 041, 042, 028]",
                      ClassicHud.UnitFacts.of(galleon, null, icons).cargo.toString());
         assertNull(ClassicHud.UnitFacts.of(galleon, null, icons).destination);
+        assertFalse(ClassicHud.UnitFacts.of(galleon, null, icons).homePort);
+        // A goto to Europe (R2): no colony name, the home-port line.
+        galleon.setDestination(dutch.getEurope());
+        f = ClassicHud.UnitFacts.of(galleon, null, icons);
+        assertEquals(ClassicHud.ORDERS_GOTO, f.ordersRow);
+        assertNull(f.destination);
+        assertTrue(f.homePort);
+        assertFalse(ClassicHud.UnitFacts.of(wagon, null, icons).homePort);
         // The colony's row: 7 goods in store, the first five by row.
         for (String[] g : new String[][] { { "food", "120" }, { "sugar", "5" },
                 { "furs", "100" }, { "lumber", "40" }, { "ore", "99" }, { "horses", "60" },
@@ -1519,8 +1541,11 @@ public class ClassicHudTest extends TestCase {
         assertEquals("plowAction", ClassicKeyMap.pick(p, id -> id.equals("plowAction")));
         assertEquals("clearForestAction", ClassicKeyMap.pick(p, id -> true));
         assertNull(ClassicKeyMap.pick(p, id -> false));
-        // No-op seams never fire.
-        assertNull(ClassicKeyMap.pick(find("G"), id -> true));
+        // No-op seams never fire (T: the trade route panel); G is the
+        // destination list now (R2).
+        assertNull(ClassicKeyMap.pick(find("T"), id -> true));
+        assertEquals("gotoAction", ClassicKeyMap.pick(find("G"), id -> true));
+        assertNull(ClassicKeyMap.pick(find("G"), id -> false));
         // M only in TERRAIN mode, V only outside it.
         assertTrue(ClassicKeyMap.modeAllows(find("M"), true));
         assertFalse(ClassicKeyMap.modeAllows(find("M"), false));

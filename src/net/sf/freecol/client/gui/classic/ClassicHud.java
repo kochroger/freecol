@@ -501,6 +501,9 @@ final class ClassicHud {
         /** The colony a goto order leads to, or null (then the orders' name). */
         final String destination;
 
+        /** A goto order leads to the owner's Europe ("Ziel Amsterdam", R2). */
+        final boolean homePort;
+
         /** Its tile's river (0 none, 1 minor, 2 major), plowing and {@code @RESOURCE} row (or -1). */
         final int river;
         final boolean plowed;
@@ -524,6 +527,17 @@ final class ClassicHud {
                   boolean roleless, int qualifier, int tools, int treasure,
                   String destination, int river, boolean plowed,
                   int resourceRow, List<GoodsIcon> cargo) {
+            this(sprite, fill, dark, nation, unitRow, plainName, moves, x, y,
+                 ordersRow, terrainId, road, jobRow, roleless, qualifier, tools,
+                 treasure, destination, false, river, plowed, resourceRow, cargo);
+        }
+
+        UnitFacts(BufferedImage sprite, int fill, int dark, int nation,
+                  int unitRow, String plainName, int moves, int x, int y,
+                  int ordersRow, String terrainId, boolean road, int jobRow,
+                  boolean roleless, int qualifier, int tools, int treasure,
+                  String destination, boolean homePort, int river,
+                  boolean plowed, int resourceRow, List<GoodsIcon> cargo) {
             this.sprite = sprite;
             this.fill = fill;
             this.dark = dark;
@@ -542,6 +556,7 @@ final class ClassicHud {
             this.tools = tools;
             this.treasure = treasure;
             this.destination = destination;
+            this.homePort = homePort;
             this.river = river;
             this.plowed = plowed;
             this.resourceRow = resourceRow;
@@ -626,7 +641,7 @@ final class ClassicHud {
                 person ? jobRow(type) : -1, roleless,
                 qualifier(type, role), tools,
                 u.canCarryTreasure() ? u.getTreasureAmount() : -1,
-                destinationName(u, orders),
+                destinationName(u, orders), toHomePort(u, orders),
                 (t == null) ? 0 : riverOf(t), t != null && plowed(t),
                 (t == null) ? -1 : resourceRowOf(t), cargo);
         }
@@ -642,6 +657,16 @@ final class ClassicHud {
             final Location d = u.getDestination();
             final Colony c = (d == null) ? null : d.getColony();
             return (c == null) ? null : c.getName();
+        }
+
+        /**
+         * Whether a goto order leads to the owner's Europe: the orders line
+         * "Ziel Amsterdam" (R2, landfall #23375; {@link #ordersText}).
+         */
+        static boolean toHomePort(Unit u, int ordersRow) {
+            if (ordersRow != ORDERS_GOTO || u.getOwner() == null) return false;
+            final Location d = u.getDestination();
+            return d != null && d == u.getOwner().getEurope();
         }
     }
 
@@ -1661,10 +1686,16 @@ final class ClassicHud {
     /**
      * The orders line: the destination colony's name for a goto to a
      * colony (clip005 #14481 active, #14827 "Schmied / Base" in the list),
-     * else the {@code @ORDERS} name.
+     * {@code @ORDERS} "Ziel" and the home port for a goto to Europe ("Ziel
+     * Amsterdam", R2, landfall #23375), else the {@code @ORDERS} name.
      */
     static String ordersText(ClassicText t, UnitFacts f) {
         if (f.destination != null && f.ordersRow == ORDERS_GOTO) return f.destination;
+        if (f.homePort && f.ordersRow == ORDERS_GOTO) {
+            final String ziel = cell(t, "ORDERS", ORDERS_GOTO);
+            final String port = ClassicDestinations.homePort(t, f.nation);
+            if (ziel != null && port != null) return ziel.trim() + " " + port;
+        }
         return cell(t, "ORDERS", f.ordersRow);
     }
 

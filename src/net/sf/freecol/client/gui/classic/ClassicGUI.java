@@ -87,6 +87,7 @@ import net.sf.freecol.common.model.GoodsType;
 import net.sf.freecol.common.model.HighScore;
 import net.sf.freecol.common.model.IndianNationType;
 import net.sf.freecol.common.model.IndianSettlement;
+import net.sf.freecol.common.model.Location;
 import net.sf.freecol.common.model.ModelMessage;
 import net.sf.freecol.common.model.Monarch.MonarchAction;
 import net.sf.freecol.common.model.Game.LogoutReason;
@@ -217,6 +218,13 @@ public class ClassicGUI extends GUI {
      * it, the visits.  Cleared with each game view.
      */
     final ClassicUnitCycle unitCycle = new ClassicUnitCycle();
+
+    /**
+     * The unit the destination list sent off (G, R2) while the controller
+     * moves it, until the action is done; else null
+     * ({@link #landGotoRunning}).
+     */
+    private Unit keyGotoUnit = null;
 
     /** The turn flow's 50-ms poll (the turn indicator, W5c), with it. */
     private javax.swing.Timer turnPoll;
@@ -2604,13 +2612,15 @@ public class ClassicGUI extends GUI {
      * on its arrival at its destination colony is dropped (c6 U25 arrives
      * at Base with moves left: "Keine Befehle", no screen).  A ship's stays
      * (the original opens the colony screen on any docking, clip008
-     * 01-shipcolony; I for a goto).
+     * 01-shipcolony; I for a goto).  The cycle's run, and the run G starts
+     * at once (R2; I: c6 U25 is the cycle's).
      *
      * @return True while a land unit's goto runs.
      */
     boolean landGotoRunning() {
         final ClassicTurnFlow f = this.turnFlow;
-        return dropsColonyScreen((f == null) ? null : f.gotoUnit());
+        return dropsColonyScreen((f == null) ? null : f.gotoUnit())
+            || dropsColonyScreen(this.keyGotoUnit);
     }
 
     /**
@@ -5182,6 +5192,92 @@ public class ClassicGUI extends GUI {
         return true;
     }
 
+    // "Gehe zu" (G; R2, master plan W8e, N11; ClassicDestinations).
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>G and BEFEHLE "Zum Hafen gehen" / "Zum Ort gehen"
+     * ({@code GotoAction} -&gt; {@code InGameController.selectDestination}):
+     * the original's destination list ({@link ClassicDestinations}),
+     * @SAILPORT for a ship, @TRAVELPLACE for a land unit, with no
+     * portrait; the bar on row 1, the arrows move it, Enter takes the row.
+     * Escape and a click outside choose nothing: the unit keeps its orders
+     * and moves and stays the active unit.  With nowhere to go no box comes
+     * and nothing happens (I).  A chosen row is returned to the controller,
+     * whose {@code goToDestination} sets it and moves the unit at once
+     * (the path "Zurück nach Europa" takes): its orders line "Ziel
+     * Amsterdam" (or the colony's name) is painted
+     * {@link ClassicMapViewer#GOTO_PANEL_MS} after the close and its first
+     * slide starts {@link ClassicMapViewer#GOTO_SLIDE_MS} after it
+     * (landfall #23372 -&gt; #23375 -&gt; #23381).  The unit counts as run
+     * for this turn in the unit cycle; in later turns the cycle runs it
+     * when it reaches it (master plan W5f).  EDT (the action's).
+     */
+    @Override
+    public Location showSelectDestinationDialog(Unit unit) {
+        if (unit == null) return null;
+        final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
+        final long t0 = System.nanoTime();
+        final List<ClassicDestinations.Row> rows = ClassicDestinations.rows(text, unit);
+        final long searchMs = (System.nanoTime() - t0) / 1_000_000L;
+        if (rows.isEmpty()) {
+            if (ClassicFrameRecorder.on()) {
+                ClassicFrameRecorder.event("goto-list", "unit=" + unit.getId()
+                    + " none ms=" + searchMs);
+            }
+            return null;
+        }
+        final ClassicAdvisorBox.Request r
+            = ClassicDestinations.request(text, unit.isNaval(), rows);
+        final int chosen = onEventThread(() -> this.prompter.ask(r),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        final Location dest = (chosen < 0 || chosen >= rows.size()) ? null
+            : rows.get(chosen).location;
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("goto-list", "unit=" + unit.getId()
+                + " rows=" + rows.stream().map(ClassicDestinations.Row::toString)
+                    .collect(Collectors.joining("|"))
+                + " chosen=" + chosen + " dest="
+                + ((dest == null) ? "-" : dest.getId())
+                + " ms=" + searchMs);
+        }
+        if (dest == null) return null;
+        this.unitCycle.ran(unit);
+        // The controller moves it now, inside the action: its arrival at a
+        // colony is a goto arrival (W5f), until the action is done.
+        this.keyGotoUnit = unit;
+        SwingUtilities.invokeLater(() -> {
+                if (this.keyGotoUnit == unit) this.keyGotoUnit = null;
+            });
+        if (gotoSlides(unit, dest) && this.mapViewer != null) {
+            final long close = boxClosed();
+            this.mapViewer.holdFirstSlide(unit,
+                close + Math.round(ClassicMapViewer.GOTO_PANEL_MS * 1e6),
+                () -> {
+                    if (this.infoPanel != null) this.infoPanel.paintNow();
+                },
+                close + Math.round(ClassicMapViewer.GOTO_SLIDE_MS * 1e6));
+        }
+        return dest;
+    }
+
+    /**
+     * Whether a unit sent to a destination slides now: it has moves, and
+     * it is not a ship bound for Europe from water that leads there
+     * directly (it sails at once, as after "Jawohl").
+     *
+     * @param unit The unit.
+     * @param dest The destination.
+     * @return True if its first slide follows.
+     */
+    static boolean gotoSlides(Unit unit, Location dest) {
+        if (unit == null || dest == null || !unit.hasTile()
+            || unit.getMovesLeft() <= 0) return false;
+        return !(dest instanceof Europe
+                 && unit.getTile().isDirectlyHighSeasConnected());
+    }
+
     // The original's refusals (R3, ClassicIllegalMoves).
 
     /**
@@ -5476,7 +5572,7 @@ public class ClassicGUI extends GUI {
         }
         if (carrier != null) {
             wakePassengers(carrier, lander);
-            final long close = landfallClosed();
+            final long close = boxClosed();
             onEventThread(() -> {
                     this.landing = new Landing(carrier, lander);
                     if (this.mapViewer != null) {
@@ -5490,12 +5586,13 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * When the landing box closed, on the slide clock: the box layer's
-     * close, else now (the stopgap window).
+     * When the last box closed (the landing box, the destination list), on
+     * the slide clock: the box layer's close, else now (the stopgap
+     * window).
      *
      * @return The close.
      */
-    private long landfallClosed() {
+    private long boxClosed() {
         final long now = waitClock().now();
         final ClassicAdvisorLayer layer = this.boxLayer;
         final long close = (layer == null) ? Long.MIN_VALUE : layer.lastCloseNanos();

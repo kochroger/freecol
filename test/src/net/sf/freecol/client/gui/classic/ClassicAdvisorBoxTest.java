@@ -146,9 +146,9 @@ public class ClassicAdvisorBoxTest extends TestCase {
             final ClassicAdvisorBox.Portrait who = (ClassicAdvisorBox.Portrait) b[1];
             final BufferedImage pic = (who.sprite == null) ? null
                 : sprite((Integer) b[2], (Integer) b[3]);
-            final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(
-                request((Integer) b[4], (Integer) b[5], (Integer) b[6], who,
-                        (Integer) b[7]), f, pic);
+            final ClassicAdvisorBox.Request req = request((Integer) b[4],
+                (Integer) b[5], (Integer) b[6], who, (Integer) b[7]);
+            final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(req, f, pic);
             assertNotNull(what, l);
             assertEquals(what + " P", ((Integer) b[5]).intValue(), l.promptLines());
             assertEquals(what + " box", new Rectangle((Integer) b[8], (Integer) b[9],
@@ -161,19 +161,31 @@ public class ClassicAdvisorBoxTest extends TestCase {
                 assertEquals(what + " under", who.kind != ClassicAdvisorBox.Portrait.Kind.OVER,
                              l.under);
             }
-            // Prompt at box + (5, 9), 6 apart; rows at x + 9, 8 apart.
+            // Prompt at box + (5, 9), 6 apart; rows at the indent (x + 9), 8 apart.
             for (int i = 0; i < l.prompt.size(); i++) {
                 assertEquals(what, l.box.x + 5, l.prompt.get(i).x);
                 assertEquals(what, l.box.y + 9 + 6 * i, l.prompt.get(i).y);
             }
             for (int i = 0; i < l.rows.size(); i++) {
-                assertEquals(what, l.box.x + 9, l.rows.get(i).x);
+                assertEquals(what, l.box.x + req.rowIndent, l.rows.get(i).x);
                 assertEquals(what, l.box.y + 13 + 6 * l.promptLines() + 8 * i,
                              l.rows.get(i).y);
                 assertEquals(what + " bar", new Rectangle(l.box.x + 4,
                     l.rows.get(i).y - 1, l.box.width - 8, 7), l.barRect(i));
             }
         }
+        // @SAILPORT as the game asks for it (R2, ClassicDestinations): the
+        // box (42,84,236,32), its row at x + 15 = 57 with glyph top 103, the
+        // bar x 46..273, y 102..108 (landfall #23300, opening_051).
+        final ClassicAdvisorBox.Layout port = ClassicAdvisorBox.layout(
+            ClassicDestinations.request(sailPortText(), true, List.of(
+                new ClassicDestinations.Row("a", null))), f, null);
+        assertNotNull(port);
+        assertEquals(new Rectangle(42, 84, 236, 32), port.box);
+        assertEquals(57, port.rows.get(0).x);
+        assertEquals(103, port.rows.get(0).y);
+        assertEquals(new Rectangle(46, 102, 228, 7), port.barRect(0));
+        assertNull(port.portraitAt);
         // The SAILHOME bar of the clip: rows at y 138 and 146 (05a, 05b).
         final ClassicAdvisorBox.Layout sail = ClassicAdvisorBox.layout(
             request(230, 2, 2, a, null), f, sprite(75, 91));
@@ -188,6 +200,31 @@ public class ClassicAdvisorBoxTest extends TestCase {
             request(230, 2, 2, a, null), f, null);
         assertEquals(new Rectangle(42, 77, 236, 46), bare.box);
         assertNull(bare.portrait);
+    }
+
+    /** A stand-in @SAILPORT in the test font's letters (one prompt line). */
+    private static ClassicText sailPortText() {
+        try {
+            final File dir = java.nio.file.Files.createTempDirectory("sailport").toFile();
+            try {
+                final File game = new File(dir, "GAME.TXT");
+                final File names = new File(dir, "NAMES.TXT");
+                final File labels = new File(dir, "LABELS.TXT");
+                java.nio.file.Files.write(game.toPath(), ("@SAILPORT\r\n@width=230\r\n"
+                    + "@default=1\r\n^a a\r\n\r\n@END\r\n")
+                    .getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                java.nio.file.Files.write(names.toPath(), "@END\r\n".getBytes(
+                    java.nio.charset.StandardCharsets.US_ASCII));
+                java.nio.file.Files.write(labels.toPath(), "@END\r\n".getBytes(
+                    java.nio.charset.StandardCharsets.US_ASCII));
+                return ClassicText.fromFiles(game, names, labels);
+            } finally {
+                for (File x : dir.listFiles()) x.delete();
+                dir.delete();
+            }
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -902,6 +939,8 @@ public class ClassicAdvisorBoxTest extends TestCase {
           "NONE", 2, 42, 67, new int[] { 8, 7, 9 } },
         { "23c_VILLAGESAVAGE_soldier_bar3", "VILLAGESAVAGE", "STRING0=ein Dorf;STRING1=Araukaner",
           "NONE", 2, 42, 67, new int[] { 8, 7, 9 } },
+        // The destination list as the game asks for it (R2, the rows at + 15).
+        { "24_SAILPORT", ClassicDestinations.SAIL_PORT_SECTION, "", "NONE", 0, 42, 84, null },
         { "25_WHACKINDIANS_soldier", "WHACKINDIANS", "STRING0=Araukaner", "SOLDIER", 0, 34, 42, null },
         { "28_VILLAGESAVAGE_soldier_2nd", "VILLAGESAVAGE", "STRING0=ein Dorf;STRING1=Araukaner",
           "NONE", 0, 42, 67, new int[] { 8, 7, 9 } },
@@ -985,7 +1024,11 @@ public class ClassicAdvisorBoxTest extends TestCase {
                 : pack.image(ClassicPackFiles.ssKey(who.sprite));
             // The landing box as the game asks for it (build spec W8b).
             final ClassicAdvisorBox.Request req = ClassicGUI.LANDFALL_SECTION.equals(c[1])
-                ? ClassicGUI.landfallRequest(t, 0L) : b.build();
+                ? ClassicGUI.landfallRequest(t, 0L)
+                : ClassicDestinations.SAIL_PORT_SECTION.equals(c[1])
+                ? ClassicDestinations.request(t, true, List.of(new ClassicDestinations.Row(
+                    ClassicDestinations.homePortLabel(t, 3), null)))
+                : b.build();
             final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(req, tiny, pic);
             assertNotNull(name, l);
             final File f = new File(dir, name + "_1x.png");

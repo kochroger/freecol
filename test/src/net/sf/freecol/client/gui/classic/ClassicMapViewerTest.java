@@ -663,6 +663,86 @@ public class ClassicMapViewerTest extends FreeColTestCase {
     }
 
     /**
+     * The held first slide (R2, W8b), on a fake clock: a unit sent off by
+     * the destination list gets its panel painted at the panel's moment
+     * (close + 42 ms), then its slide starts at close + 128 ms, once; a
+     * dropped hold and a hold more than a second old hold nothing and
+     * paint nothing; the landing's hold waits without a panel.
+     */
+    public void testHeldFirstSlide() throws Exception {
+        final Game server = seaGame();
+        final Player sDutch = server.getPlayerByNationId("model.nation.dutch");
+        final Game client = ClassicTerrainOracleTest.clientView(server, sDutch);
+        final Map map = client.getMap();
+        final Tile src = map.getTile(15, 15), dst = map.getTile(14, 15);
+        final Unit ship = src.getFirstUnit();
+        assertNotNull(ship);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, new ClassicGUI(null),
+                                                         null, false);
+        mv.setFixedScale(1);
+        mv.setTerrain(ClassicTerrainLayerTest.layer(),
+                      ClassicTerrainOracleTest.oracle(client, true, server));
+        mv.paintOffscreen(new java.awt.image.BufferedImage(240, 192,
+            java.awt.image.BufferedImage.TYPE_INT_RGB));
+        mv.setFocus(src);
+        final ClassicWaterCycleTest.FakeClock clock
+            = new ClassicWaterCycleTest.FakeClock(System.nanoTime());
+        mv.setSlideClock(clock);
+        final long ms = 1_000_000L;
+        final long close = clock.now;
+        final long panelDue = close + Math.round(ClassicMapViewer.GOTO_PANEL_MS * ms);
+        final long due = close + Math.round(ClassicMapViewer.GOTO_SLIDE_MS * ms);
+        assertEquals(close + 42 * ms, panelDue);
+        assertEquals(close + 128 * ms, due);
+        final List<Long> painted = new ArrayList<>();
+        mv.holdFirstSlide(ship, panelDue, () -> painted.add(clock.now), due);
+        mv.animateMove(ship, src, dst);
+        assertEquals(List.of(panelDue), painted);
+        final int ip = clock.waits.indexOf(panelDue);
+        assertTrue(ip >= 0);
+        assertEquals(due, (long) clock.waits.get(ip + 1));
+        // The slide's steps come after the start at the hold's end.
+        final List<Long> after = clock.waits.subList(ip + 1, clock.waits.size());
+        for (long w : after) assertTrue(w >= due);
+        assertTrue(after.contains(due + ClassicSlide.stepNanos(false)));
+        mv.finalDraw();
+
+        // Used once: the next slide is not held again.
+        int n = clock.waits.size();
+        long t = clock.now;
+        mv.animateMove(ship, dst, src);
+        assertEquals(1, painted.size());
+        assertFalse(clock.waits.subList(n, clock.waits.size()).contains(due));
+        mv.finalDraw();
+        // A dropped hold holds nothing.
+        t = clock.now + 500 * ms;
+        mv.holdFirstSlide(ship, t, () -> painted.add(clock.now), t + 100 * ms);
+        mv.holdFirstSlide(null, 0L, null, 0L);
+        n = clock.waits.size();
+        mv.animateMove(ship, src, dst);
+        assertEquals(1, painted.size());
+        assertFalse(clock.waits.subList(n, clock.waits.size()).contains(t + 100 * ms));
+        mv.finalDraw();
+        // A stale hold (over a second past its start): no wait, no paint.
+        t = clock.now - 2000 * ms;
+        mv.holdFirstSlide(ship, t, () -> painted.add(clock.now), t + 86 * ms);
+        n = clock.waits.size();
+        mv.animateMove(ship, dst, src);
+        assertEquals(1, painted.size());
+        assertFalse(clock.waits.subList(n, clock.waits.size()).contains(t));
+        mv.finalDraw();
+        // The landing's hold: the wait, no panel.
+        t = clock.now + 300 * ms;
+        mv.landingSlide(ship, t);
+        n = clock.waits.size();
+        mv.animateMove(ship, src, dst);
+        assertEquals(1, painted.size());
+        assertEquals(t, (long) clock.waits.get(clock.waits.indexOf(t)));
+        assertTrue(clock.waits.indexOf(t) >= n);
+        mv.dispose();
+    }
+
+    /**
      * W9: a final draw that shows land as explored tells the GUI (woodcut
      * 1, the sighting: V landfall #2107, fog-start #1042); a reveal of sea
      * does not, nor land in the fog ring around the explored tiles (it is

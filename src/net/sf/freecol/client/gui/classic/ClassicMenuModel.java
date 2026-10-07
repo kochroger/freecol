@@ -107,7 +107,6 @@ final class ClassicMenuModel {
      *   <li>openAction: {@code showLoadSaveFileDialog} (not overridden)</li>
      *   <li>declareIndependenceAction: {@code showDeclarationPanel} (GUI.java:2039)</li>
      *   <li>findSettlementAction: {@code showFindSettlementPanel} (GUI.java:2129)</li>
-     *   <li>gotoAction: {@code showSelectDestinationDialog} (GUI.java:2504)</li>
      *   <li>assignTradeRouteAction, tradeRouteAction: {@code showTradeRoutePanel} (GUI.java:2577)</li>
      *   <li>colopediaAction.*: {@code showColopediaPanel} (GUI.java:2001)</li>
      * </ul>
@@ -117,7 +116,7 @@ final class ClassicMenuModel {
     static final Set<String> NOOP_SEAMS = Collections.unmodifiableSet(new HashSet<>(
         Arrays.asList("saveAction", "openAction",
                       "declareIndependenceAction", "findSettlementAction",
-                      "gotoAction", "assignTradeRouteAction", "tradeRouteAction",
+                      "assignTradeRouteAction", "tradeRouteAction",
                       pedia(ColopediaAction.PanelType.GOODS),
                       pedia(ColopediaAction.PanelType.UNITS),
                       pedia(ColopediaAction.PanelType.TERRAIN),

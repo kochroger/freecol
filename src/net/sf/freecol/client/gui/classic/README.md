@@ -1248,6 +1248,46 @@ testArmDelayed`.
   recorded). Once the ship has left the map with other units of ours still
   on it (sentried, fortified), the turn ends by itself as after any last
   move; before, it hung (D acceptance D1, see "A unit gone, and no choice").
+- **Go to (G; R2, master plan W8e, N11; `ClassicDestinations`).** G and
+  BEFEHLE 13 "Zum Hafen gehen" (ships) / 14 "Zum Ort gehen" (land units)
+  fire FreeCol's `gotoAction` (no longer a no-op seam), whose
+  `InGameController.selectDestination` asks
+  `ClassicGUI.showSelectDestinationDialog`: the original's box with no
+  portrait, GAME.TXT @SAILPORT "Wählen Sie einen Zielhafen:" for a ship,
+  @TRAVELPLACE "Wählen Sie eine Kolonie als Reiseziel:" for a land unit
+  (@width 230, the bar on @default=1; the rows at box + 15,
+  `ClassicMenuBox.PORT_INDENT`; V landfall #23247/#23300, box
+  (42,84,236,32), Steam capture opening_051; the golden crop
+  24_SAILPORT is 0 px). The rows (the manual: the destinations the unit
+  "could reach"): a ship gets our colonies with a port on water that
+  leads to the high seas (`isConnectedPort`), not the one it lies in,
+  that it can reach, then the home port "Amsterdam (Holland)"
+  (@HOMEPORT + " (" + @COUNTRY + ")") while its player has Europe and the
+  ship can get there (one path search, as FreeCol's own dialog); a land
+  unit on the map gets our colonies on its landmass it can reach, no home
+  port; a passenger gets nothing. Order (I, not recorded): the colonies in
+  founding order, the home port last (`HOME_PORT_LAST`). With nowhere to
+  go no box comes and the key does nothing (I). The arrows move the bar,
+  Enter takes the row; Escape and a click outside choose nothing
+  (`noCancelRow`: the builder's default would send the unit to the last
+  row): the unit keeps its orders and moves and stays active. A chosen
+  row goes back to the controller, whose `goToDestination` (the path
+  "Zurück nach Europa" takes) sets it and moves the unit at once: its
+  orders line "Ziel Amsterdam" (@ORDERS 3 + @HOMEPORT; a colony's name
+  alone, W21b) is painted **42 ms** after the close and its first slide
+  starts **128 ms** after it (landfall #23372 -> #23375 -> #23381;
+  `ClassicMapViewer.holdFirstSlide`, the landing's hold with a panel
+  moment; a hold over a second stale is dropped). A ship on water leading
+  to Europe sails at once with no slide (as "Jawohl"). The unit counts as
+  run in the unit cycle this turn; in later turns the cycle runs it at its
+  place (W5f) until it arrives or leaves the map. A land unit arriving at
+  its colony during that run gets no colony screen (as the cycle's run,
+  `landGotoRunning`). FreeCol's Swing Europe panel is the seam's other
+  caller (`EuropePanel.java:192`); the Classic UI never reaches it (its
+  Europe screen sails with `moveTo`). Recorder events: `goto-list unit=
+  rows=a|b chosen= dest= ms=` (`none` with no rows; `ms` the path
+  searches), `hold-panel unit=` (the 42-ms panel), and the box's own
+  `box-open SAILPORT` / `box-close`.
 - **FreeCol's high-seas question is never shown (W0f).**
   `InGameController.moveHighSeas` asks `highseas.text` when a ship sails from
   coastal water onto the high seas; `modalConfirmDialog` answers it "no" at
@@ -1427,7 +1467,7 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
 - **Not yet.** FreeCol's words in the FreeCol boxes (the GAME.TXT texts of
   the villages' menus, the rumours' questions, the first contact chain, the
   King's texts are W8c-W8f, W24; the landing's is below; the notices that
-  have a GAME.TXT text are below); @SAILPORT's indented port rows; the
+  have a GAME.TXT text are below); the
   @LANDHO input field; the King's KING2 gesture (W24). The list boxes of
   the colony and Europe screens (D6, D7, D9c) are built on the list-box
   extensions below.
@@ -2053,14 +2093,14 @@ M4) and gets 0 px.
 | --- | --- |
 | SPIEL | 0 `classic.gameOptions`ᶜ, 1 `classic.colonyOptions`ᶜ, 2 —, 3 —, 4 `saveAction`ⁿ, 5 `openAction`ⁿ, 6 `declareIndependenceAction`ⁿ, 7 `retireAction`, 8 `quitAction` |
 | ANSICHT | 0 `toggleViewModeAction` (fires only in TERRAIN mode, key M), 1 `toggleViewModeAction` (fires only outside it, key V), 2 `europeAction`, 3 `findSettlementAction`ⁿ, 4 `zoomInAction`, 5 `zoomOutAction` (both disable themselves: `GUI.canZoomInMap` is false), 6-9 —, 10 —, 11 `centerAction` |
-| BEFEHLE | 0 `clearOrdersAction`, 1 `waitAction`, 2 `fortifyAction`, 3 (second fortify line: hidden, context unknown), 4 `sentryAction`, 5/6 `buildColonyAction` (no colony / colony on the tile), 7 `clearForestAction` (forest), 8 `plowAction` (no forest), 9 `roadAction`, 10 `loadAction` (carriers), 11 `unloadAction` (carrier in a colony), 12 — (armed land units), 13/14 `gotoAction`ⁿ (ship / land), 15 `assignTradeRouteAction`ⁿ (carriers), 16 `returnToEuropeAction` (ships, key R), 17 `skipUnitAction`, 18 `unloadAction` (ship at sea: dumps cargo), 19 `disbandUnitAction` |
+| BEFEHLE | 0 `clearOrdersAction`, 1 `waitAction`, 2 `fortifyAction`, 3 (second fortify line: hidden, context unknown), 4 `sentryAction`, 5/6 `buildColonyAction` (no colony / colony on the tile), 7 `clearForestAction` (forest), 8 `plowAction` (no forest), 9 `roadAction`, 10 `loadAction` (carriers), 11 `unloadAction` (carrier in a colony), 12 — (armed land units), 13/14 `gotoAction` (ship / land, the destination list), 15 `assignTradeRouteAction`ⁿ (carriers), 16 `returnToEuropeAction` (ships, key R), 17 `skipUnitAction`, 18 `unloadAction` (ship at sea: dumps cargo), 19 `disbandUnitAction` |
 | BERICHTE | 0 —, 1 `reportReligionAction`, 2 `reportCongressAction`, 3 `reportLabourAction`, 4 `reportTradeAction`, 5 `reportColonyAction`, 6 `reportNavalAction`, 7 `reportForeignAction`, 8 `reportIndianAction`, 9 `reportHighScoresAction` (the hall of fame, not the live score: earlier README decision) |
 | HANDEL | 0-2 `tradeRouteAction`ⁿ (FreeCol's one panel does all three) |
 | COLONIPÄDIE | 0 `colopediaAction.goods`ⁿ, 1 `.units`ⁿ, 2 `.terrain`ⁿ, 3 —, 4 `.buildings`ⁿ, 5 `.fathers`ⁿ, 6 `.concepts`ⁿ, 7 — |
 
 ⁿ = in `NOOP_SEAMS`: drawn in normal ink but **inert** until a classic screen
 exists (`showSaveDialog`, `showLoadSaveFileDialog`,
-`showDeclarationPanel`, `showFindSettlementPanel`, `showSelectDestinationDialog`,
+`showDeclarationPanel`, `showFindSettlementPanel`,
 `showTradeRoutePanel`, `showColopediaPanel` are still the base `GUI` no-ops).
 — = **no engine equivalent**, drawn like the original (normal ink) and always
 inert: sound options, choose music, the four

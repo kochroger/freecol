@@ -23,6 +23,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
@@ -2886,6 +2887,114 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             for (ClassicAdvisorBox.Request b : fake.boxes) assertTrue(b.isNotice());
         } finally {
             mv.dispose();
+        }
+    }
+
+    /**
+     * G (R2): the destination seam asks exactly one box, @SAILPORT for a
+     * ship (its one row the home port: Roger's game had no colony),
+     * @TRAVELPLACE for a land unit; the row taken is returned to the
+     * controller, Escape returns nothing; a land unit with nowhere to go
+     * gets no box.  A unit sent off counts as run in the unit cycle this
+     * turn, and is a goto unit again at the next turn start (the cycle
+     * runs it then, W5f).  The key G and BEFEHLE 13/14 fire the action.
+     */
+    public void testGotoSeam() throws Exception {
+        final Game game = getStandardGame();
+        final MapBuilder builder = new MapBuilder(game);
+        builder.setDimensions(20, 15).setBaseTileType(ocean).setExploredByAll(true);
+        for (int y = 0; y < 15; y++) {
+            for (int x = 0; x < 5; x++) {
+                builder.setTileType(x, y, spec().getTileType("model.tile.plains"));
+            }
+            builder.setTileType(18, y, highSeas);
+            builder.setTileType(19, y, highSeas);
+        }
+        final Map map = builder.build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Unit ship = new ServerUnit(game, map.getTile(6, 7), dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final Unit colonist = new ServerUnit(game, map.getTile(2, 7), dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        final ClassicGUI gui = new ClassicGUI(null);
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        // Enter on the home port: Europe, one box with no portrait.
+        fake.answer = 0;
+        assertSame(dutch.getEurope(), gui.showSelectDestinationDialog(ship));
+        assertFalse(gui.landGotoRunning());          // a ship: its docking screen stays
+        assertEquals(1, fake.boxes.size());
+        final ClassicAdvisorBox.Request r = fake.boxes.get(0);
+        assertEquals(ClassicDestinations.SAIL_PORT_SECTION, r.id);
+        assertEquals(1, r.rows.size());
+        assertEquals(-1, r.cancelRow);
+        assertEquals(ClassicMenuBox.PORT_INDENT, r.rowIndent);
+        assertSame(ClassicAdvisorBox.Portrait.NONE, r.portrait);
+        // The controller sets the destination; the ship ran this turn: it
+        // stays the player's (ORDERS) while it has moves, and is a goto
+        // unit for the cycle at the next turn start.
+        ship.setDestination(dutch.getEurope());
+        assertTrue(ship.goingToDestination());
+        assertSame(ClassicUnitCycle.Kind.ORDERS, gui.unitCycle.kind(ship));
+        gui.unitCycle.turnStarted(dutch);
+        assertSame(ClassicUnitCycle.Kind.GOTO, gui.unitCycle.kind(ship));
+        ship.setDestination(null);
+        // Escape (and a click outside): nothing.
+        fake.answer = ClassicAdvisorBox.Bar.DISMISSED;
+        assertNull(gui.showSelectDestinationDialog(ship));
+        assertEquals(2, fake.boxes.size());
+        assertNull(ship.getDestination());
+        // A land unit with no colony: no box, nothing.
+        fake.answer = 0;
+        assertNull(gui.showSelectDestinationDialog(colonist));
+        assertEquals(2, fake.boxes.size());
+        // With a colony on its land: @TRAVELPLACE, the colony.
+        final Colony home = net.sf.freecol.util.test.FreeColTestUtils.getColonyBuilder()
+            .player(dutch).colonyName("Base").colonyTile(map.getTile(2, 3)).build();
+        // While the controller moves it (inside the action, on the event
+        // thread) its arrival is a goto arrival: no colony screen (W5f);
+        // after the action, not.  A ship's docking keeps its screen.
+        final Object[] got = new Object[3];
+        SwingUtilities.invokeAndWait(() -> {
+                got[0] = gui.showSelectDestinationDialog(colonist);
+                got[1] = gui.landGotoRunning();
+            });
+        SwingUtilities.invokeAndWait(() -> got[2] = gui.landGotoRunning());
+        assertSame(home, got[0]);
+        assertEquals(Boolean.TRUE, got[1]);
+        assertEquals(Boolean.FALSE, got[2]);
+        assertEquals(3, fake.boxes.size());
+        assertEquals(ClassicDestinations.TRAVEL_PLACE_SECTION, last(fake.boxes).id);
+        assertEquals(List.of("Base"), Arrays.asList(last(fake.asked)));
+        assertNull(gui.showSelectDestinationDialog(null));
+
+        // Which choices slide: not a ship that sails for Europe at once.
+        assertTrue(ClassicGUI.gotoSlides(ship, dutch.getEurope()));
+        assertTrue(ClassicGUI.gotoSlides(ship, home));
+        final Unit lane = new ServerUnit(game, map.getTile(18, 7), dutch,
+            spec().getUnitType("model.unit.caravel"));
+        assertTrue(lane.getTile().isDirectlyHighSeasConnected());
+        assertFalse(ClassicGUI.gotoSlides(lane, dutch.getEurope()));
+        assertTrue(ClassicGUI.gotoSlides(lane, home));
+        lane.setMovesLeft(0);
+        assertFalse(ClassicGUI.gotoSlides(lane, home));
+
+        // The key G and the BEFEHLE rows fire the action (no seam left).
+        assertFalse(ClassicMenuModel.NOOP_SEAMS.contains("gotoAction"));
+        ClassicKeyMap.Binding g = null;
+        for (ClassicKeyMap.Binding b : ClassicKeyMap.bindings()) {
+            if (javax.swing.KeyStroke.getKeyStroke("G").equals(b.key)) g = b;
+        }
+        assertNotNull(g);
+        assertEquals("gotoAction", ClassicKeyMap.pick(g, id -> true));
+        for (int row : new int[] { 13, 14 }) {
+            final ClassicMenuModel.Item it = ClassicMenuModel
+                .items(ClassicMenuModel.BEFEHLE).get(row);
+            assertEquals("gotoAction", it.actionId);
+            assertTrue(ClassicMenuModel.isLive(it, id -> true));
+            assertFalse(ClassicMenuModel.isLive(it, id -> false));
+            assertTrue(ClassicMenuModel.isGreyed(it, id -> false));
         }
     }
 

@@ -101,9 +101,10 @@ public class ClassicMenuBarTest extends TestCase {
         assertTrue(s.get(6).greyed);        // item 7
         assertFalse(s.get(6).enabled);
         assertTrue(s.get(5).enabled);
-        // Goto (item 14) is behind a no-op seam: normal ink (as in 001), inert.
+        // Goto (item 14, "Zum Ort gehen") opens the destination list (R2):
+        // normal ink (as in 001), live.
         assertFalse(s.get(9).greyed);
-        assertFalse(s.get(9).enabled);
+        assertTrue(s.get(9).enabled);
         assertTrue(s.get(9).selectable());
     }
 

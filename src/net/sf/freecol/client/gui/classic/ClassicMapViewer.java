@@ -252,12 +252,17 @@ final class ClassicMapViewer extends JPanel {
     private Unit keyMoveUnit = null;
 
     /**
-     * The passenger a landing sends ashore ("An Land gehen", build spec
-     * W8b), and when its slide may start: {@link #LANDING_SLIDE_MS} after
-     * the box closed; null when none is due.
+     * The unit whose first slide is held ({@link #holdFirstSlide}): the
+     * passenger a landing sends ashore ("An Land gehen", build spec W8b),
+     * or a unit sent off by the destination list (R2); when its slide may
+     * start ({@link #LANDING_SLIDE_MS}, {@link #GOTO_SLIDE_MS} after the
+     * box closed), and when the panel is painted before it (0 for no
+     * paint) with what; null when none is due.
      */
     private Unit landingUnit = null;
     private long landingDue = 0L;
+    private long landingPanelDue = 0L;
+    private Runnable landingPanel = null;
 
     /** When the last movement key was taken, on the slide clock; 0 before the first. */
     private long moveKeyNanos = 0L;
@@ -269,6 +274,22 @@ final class ClassicMapViewer extends JPanel {
      * 86-128 ms).
      */
     static final double LANDING_SLIDE_MS = 110.0;
+
+    /**
+     * From the close of the destination list (@SAILPORT, R2) to the
+     * panel's orders line "Ziel Amsterdam": 3 frames (landfall #23372
+     * -&gt; #23375).
+     */
+    static final double GOTO_PANEL_MS = 42.0;
+
+    /**
+     * From the close of the destination list to the unit's first slide,
+     * offset 0: 9 frames (landfall #23372 -&gt; #23381).
+     */
+    static final double GOTO_SLIDE_MS = 128.0;
+
+    /** A held first slide older than this is stale: no wait, no paint. */
+    static final long HOLD_STALE_NANOS = 1_000_000_000L;
 
     /**
      * A slide ended, so the next paint is its final draw: offset 16,
@@ -1159,8 +1180,29 @@ final class ClassicMapViewer extends JPanel {
      * @param due The earliest start on the slide clock.
      */
     void landingSlide(Unit unit, long due) {
+        holdFirstSlide(unit, 0L, null, due);
+    }
+
+    /**
+     * Hold a unit's next slide (the landing's, W8b; the destination list's,
+     * R2): it starts at {@code due} at the earliest, and at
+     * {@code panelDue} before it {@code panel} runs (the destination
+     * list's orders line, landfall #23375).  One hold at a time: a new one
+     * replaces a hold whose slide never came; a hold more than
+     * {@link #HOLD_STALE_NANOS} past its {@code due} when the slide comes
+     * neither waits nor paints.
+     *
+     * @param unit The unit, or null to drop the hold.
+     * @param panelDue When the panel runs, on the slide clock; 0 for no
+     *     panel.
+     * @param panel What paints the panel, or null.
+     * @param due The earliest start on the slide clock.
+     */
+    void holdFirstSlide(Unit unit, long panelDue, Runnable panel, long due) {
         this.landingUnit = unit;
         this.landingDue = due;
+        this.landingPanelDue = (panel == null) ? 0L : panelDue;
+        this.landingPanel = (unit == null) ? null : panel;
     }
 
     /**
@@ -1277,12 +1319,26 @@ final class ClassicMapViewer extends JPanel {
             if (cue) showNativeCue(unit, srcTile);
             if (unit == this.landingUnit) {
                 // The landed unit leaves its ship the original's pause after
-                // the landing box closed (build spec W8b).
+                // the landing box closed (build spec W8b); a unit sent off
+                // by the destination list shows its orders line first,
+                // then slides (R2).
                 this.landingUnit = null;
-                try {
-                    this.slideClock.waitUntil(this.landingDue);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
+                final Runnable panel = this.landingPanel;
+                this.landingPanel = null;
+                if (this.slideClock.now() - this.landingDue < HOLD_STALE_NANOS) {
+                    try {
+                        if (panel != null) {
+                            this.slideClock.waitUntil(this.landingPanelDue);
+                            panel.run();
+                            if (rec) {
+                                ClassicFrameRecorder.event("hold-panel", "unit="
+                                    + unit.getId());
+                            }
+                        }
+                        this.slideClock.waitUntil(this.landingDue);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
                 }
             }
             final boolean shown = isShownAt(unit, srcTile);
