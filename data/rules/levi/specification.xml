@@ -86,6 +86,13 @@
              move. -->
         <booleanOption id="model.option.cancelKeepsMove"
                        defaultValue="true"/>
+        <!-- The original's sailing time between Europe and the New
+             World: two turns each way (landfall: off the map in 1503,
+             in Amsterdam at the start of 1505; clip008: off the map in
+             1513, in Amsterdam in 1515, and from Amsterdam in 1508,
+             back on the map in 1510).  Classic and freecol: 3. -->
+        <integerOption id="model.option.turnsToSail"
+                       defaultValue="2" minimumValue="1" maximumValue="10"/>
       </optionGroup>
       <optionGroup id="gameOptions.colony">
         <!-- Row 8: capture units under repair when a colony is

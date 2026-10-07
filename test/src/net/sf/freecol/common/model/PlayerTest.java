@@ -319,6 +319,31 @@ public class PlayerTest extends FreeColTestCase {
         assertEquals(0b1110, dutch.getClassicWoodcuts());
     }
 
+    /**
+     * The Classic UI's tutorial tips (W13, {@code @TUTORIAL17} once per
+     * game): the attribute {@code classicTips} as {@code classicWoodcuts}.
+     */
+    public void testClassicTips() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        assertEquals(0, dutch.getClassicTips());
+        assertFalse(dutch.serialize(net.sf.freecol.common.io.FreeColXMLWriter
+            .WriteScope.toSave()).contains("classicTips"));
+        dutch.setClassicTips(1 << 17);
+        final String save = dutch.serialize(
+            net.sf.freecol.common.io.FreeColXMLWriter.WriteScope.toSave());
+        assertTrue(save.contains("classicTips=\"131072\""));
+        assertFalse(dutch.serialize(french).contains("classicTips"));
+        final Player read = readPlayer(game, save);
+        assertEquals(1 << 17, read.getClassicTips());
+        assertEquals(0, readPlayer(game, save.replace("classicTips=\"131072\"", ""))
+                     .getClassicTips());
+        read.setClassicTips(0);
+        assertTrue(dutch.copyIn(read));
+        assertEquals(1 << 17, dutch.getClassicTips());
+    }
+
     /** A player read from XML, outside the game. */
     private static Player readPlayer(Game game, String xml) throws Exception {
         try (net.sf.freecol.common.io.FreeColXMLReader xr

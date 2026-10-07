@@ -62,6 +62,7 @@ public class LeviRulesTest extends FreeColTestCase {
         CHANGED.put(GameOptions.FOUND_COLONY_DURING_REBELLION, Boolean.TRUE); // row 11
         CHANGED.put(GameOptions.SAVE_PRODUCTION_OVERFLOW, Boolean.FALSE);  // row 12
         CHANGED.put(GameOptions.ALLOW_STUDENT_SELECTION, Boolean.TRUE);    // row 13
+        CHANGED.put(GameOptions.TURNS_TO_SAIL, "2");                       // the original's (W13)
         CHANGED.put(GameOptions.CANCEL_KEEPS_MOVE, Boolean.TRUE);          // house rules
         CHANGED.put(GameOptions.REVENGE_MODE, Boolean.FALSE);
         CHANGED.put(GameOptions.LAST_COLONY_DEFEAT, Boolean.TRUE);
@@ -298,6 +299,26 @@ public class LeviRulesTest extends FreeColTestCase {
                       .getOption(GameOptions.REVENGE_MODE));
         assertNotNull(spec("classic").getOptionGroup(GameOptions.GAMEOPTIONS_VICTORY_CONDITIONS)
                       .getOption(GameOptions.LAST_COLONY_DEFEAT));
+    }
+
+    /**
+     * The original's sailing time (W13): a levi ship takes two turns
+     * between Europe and the New World (landfall 1503 -&gt; 1505, clip008
+     * 1513 -&gt; 1515 and 1508 -&gt; 1510), the classic and freecol rules
+     * three; Magellan's -1 still applies.
+     */
+    public void testSailingTime() {
+        assertEquals(2, spec(LEVI).getInteger(GameOptions.TURNS_TO_SAIL));
+        assertEquals(3, spec("classic").getInteger(GameOptions.TURNS_TO_SAIL));
+        assertEquals(3, spec("freecol").getInteger(GameOptions.TURNS_TO_SAIL));
+        final Game game = getStandardGame(LEVI);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Unit ship = new ServerUnit(game, dutch.getEurope(), dutch,
+            game.getSpecification().getUnitType("model.unit.merchantman"));
+        assertEquals(2, ship.getSailTurns());
+        dutch.addFather(game.getSpecification()
+            .getFoundingFather("model.foundingFather.ferdinandMagellan"));
+        assertEquals(1, ship.getSailTurns());
     }
 
     /**

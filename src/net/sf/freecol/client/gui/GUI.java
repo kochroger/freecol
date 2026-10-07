@@ -1230,6 +1230,19 @@ public class GUI extends FreeColClientHolder {
      */
     public void animateUnitMoveQueued(Unit unit, Tile srcTile, Tile dstTile) {}
 
+    /**
+     * A unit has sailed for Europe: the server accepted its move toward
+     * Europe ({@code InGameController.moveTowardEurope}), before the
+     * changes are shown.  No-op here; a GUI can show the departure.
+     *
+     * Used by: client InGameController
+     *
+     * @param unit The {@code Unit} that sailed.
+     * @param from The {@code Tile} it left, or null if it was not on the
+     *     map (a ship at sea that turned around).
+     */
+    public void unitSailedForEurope(Unit unit, Tile from) {}
+
 
     // Dialog primitives
 

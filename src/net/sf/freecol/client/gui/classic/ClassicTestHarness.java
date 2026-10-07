@@ -102,6 +102,19 @@ final class ClassicTestHarness {
         if (rec != null) rec.setProbe(h::probe);
         final String script = System.getProperty(ClassicScriptDriver.SCRIPT_PROPERTY);
         if (script != null && !script.isBlank()) {
+            // A run minimized without activation keeps its sub-windows (the
+            // Europe screen, a stopgap popup) off the desktop too.
+            ClassicGUI.childWindowHook = w -> {
+                final JFrame main = gui.currentFrame();
+                if (main == null || w == main
+                    || (main.getExtendedState() & java.awt.Frame.ICONIFIED) == 0) return;
+                w.setAutoRequestFocus(false);
+                if (w instanceof java.awt.Frame) {
+                    ((java.awt.Frame) w).setExtendedState(java.awt.Frame.ICONIFIED);
+                }
+                ClassicFrameRecorder.event("harness", "sub-window kept minimized: "
+                    + w.getClass().getSimpleName());
+            };
             ClassicScriptDriver.start(new File(script), h.new Host());
         }
     }
@@ -218,6 +231,13 @@ final class ClassicTestHarness {
         if (d != null) {
             final Component c = d.getMostRecentFocusOwner();
             return (c != null) ? c : d;
+        }
+        // A classic screen (the Europe screen, W13) of a minimized run.
+        final Window s = this.gui.openScreen();
+        if (s != null) {
+            final Component c = s.getMostRecentFocusOwner();
+            if (c != null) return c;
+            if (s instanceof JFrame) return ((JFrame) s).getContentPane();
         }
         final JFrame f = this.gui.currentFrame();
         if (f != null) {

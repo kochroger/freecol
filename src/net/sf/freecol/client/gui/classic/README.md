@@ -55,7 +55,14 @@ save plays on as it was (R1b re-applies the rules on load, later).
   `foundColonyDuringRebellion`, 12 `saveProductionOverflow` off, 13
   `allowStudentSelection`, 17 Pocahontas also lifts the mission bans
   (`model.event.resetBannedMissions`). Every other row, and every other
-  option and difficulty value, is classic's (`LeviRulesTest`).
+  option and difficulty value, is classic's (`LeviRulesTest`), except:
+- **The original's sailing time** (W13): `model.option.turnsToSail` 2, not
+  classic's and freecol's 3. Measured in the clips: landfall off the map in
+  1503, in Amsterdam at the start of 1505; clip008 off the map in 1513, in
+  Amsterdam in 1515, and from Amsterdam in 1508, back on the map in 1510 (both
+  ways 2 turns; Roger's levi game took 3, 1503 -> 1506). Magellan's -1 still
+  applies (1 turn). New games only: a save keeps its option
+  (`LeviRulesTest.testSailingTime`).
 - **House rules** (game options; rules and saves without them get FreeCol's
   behaviour from `Specification.fixGameOptions`):
   - `model.option.cancelKeepsMove` on (D1, moved here from the classic
@@ -1356,6 +1363,93 @@ Tests: `ClassicGUISeamTest` (`testEscapeAnswersNo`, `testEscapeCancelsAChoice`,
 `ClassicTurnFlowTest.testCancelKeepsTheUnitUp`,
 `InGameControllerTest.testLearnSkillQuestionKeepsTheMove` (server).
 
+### Voyages (`ClassicVoyages`, `ClassicBands`; master plan W13, spec R4, Part H3)
+
+Roger (2026-10-07): his ship arrived in Amsterdam, nothing showed it, and with
+no unit left on the map the automatic end ran 42 empty turns (1504-1545).
+FreeCol's controller never opens Europe (its turn report has a line to click),
+and units at sea or in Europe never count as movable. Now as the original:
+
+- **Bands on the top strip** (`ClassicGUI.showBand`, the first scene's
+  `ClassicMenuStrip.setBand`; the menu takes no input meanwhile, a new band
+  replaces the one up). Texts (`ClassicBands`): NAMES `@NATIONALITY` + the
+  ship's `@UNIT` (its type, never its name) + LABELS `@MISC` 5/7/6 + `@HOMEPORT`;
+  FreeCol's words for missing pieces, never an empty band.
+  - **Departure** "Holl. Handelsschiff Ziel: Amsterdam", 137 frames (1.955 s,
+    landfall #25735, clip008 #44180), from the new no-op seam
+    `GUI.unitSailedForEurope(Unit, Tile)` that `InGameController.moveTowardEurope`
+    calls after the server accepted the move (every path: "Jawohl", R, G, a goto,
+    the high-seas move); only for our ship that had a tile (not one that turns
+    around at sea). Play goes on under it; the automatic end waits for it and
+    comes 485 ms after its end (`ClassicTurnFlow.bandEnded`, which re-arms only
+    the idle end and never re-bases a pending hand-over).
+  - **Arrival in Europe** "... Trifft jetzt ein in Amsterdam" and **back in the
+    New World** "... Ankunft aus Amsterdam" (below).
+- **Arrivals** (`ClassicVoyages`): our ships at sea are noted while our turn is
+  shown (the 50-ms poll) and when our end goes out; at the next turn start a noted
+  ship now in Europe, or one of a FreeCol "model.unit.arriveInEurope" message
+  (taken out of the notices: no FreeCol box any more; a first laden ship still
+  brings woodcut 9 there, before the band), has arrived there; a noted ship now on
+  the map has come back. Taken once per turn (the turn's notes and messages are
+  forgotten, so the chain cannot start again). A ship on a trade route: nothing
+  (FreeCol sends no message). A loaded save of the arrival turn (the message is
+  gone, no turn start is shown): its ships in port with work 0 (FreeCol leaves
+  that at the arrival, our next end makes it -1) get the same chain right after
+  the view is built.
+- **The chain** (`ClassicVoyages.Chain`), inside the turn flow's hold before the
+  year flips (`ClassicGUI.holdTurnStart`: the father offer first, then the
+  arrivals; the hold is asked only when no box is up, so the band comes on the
+  next paint after the last turn-start box): one band per ship in Europe, 542 ms
+  apart; Europe opens 542 ms after the last (38 frames, landfall #27878 ->
+  #27916); a box up then (an emigration question): Europe after its close; open
+  already (windowed): brought to the front and refreshed; the band goes when
+  Europe is open; Europe not open after 1 s: counts as closed (logged). When
+  Europe closes: per ship back in the New World the view jumps to it, its band
+  (137 frames) one frame later, the hold ends 128 ms after the band (the wipe,
+  clip008 #26208/#26209/#26218); the turn start's jump is decided at the wipe,
+  so the ship's block comes 300 ms after it with no second jump. Then the wipe.
+- **Europe holds the end** (`ClassicTurnFlow.Host.europeOpen` =
+  `ClassicGUI.europeHoldsTheEnd`): while the Europe window exists (in front,
+  behind the map or minimized) or was asked for less than 1 s ago, the automatic
+  end waits; the player's close is a box's close (`europeClosed`: its "Abb" or
+  Escape, the window's X and Alt+F4 through `WINDOW_CLOSING`; Alt+Enter's
+  re-framing and a replacement in `showEuropePanel` are no close): the end comes
+  485 ms after it.
+- **The guard** (`ClassicGUI.openEuropeInstead`, I: never recorded): at the
+  automatic end (Spielzugende off), with no colony, no unit on the map and no
+  ship at sea, a Europe, no band up and no Europe screen in this turn yet, Europe
+  opens instead of the end, once per turn; the end comes after its close. So the
+  turns never run on unseen while everything waits in Europe (Roger's 1600
+  defeat rule would have ended his game without a key press). Right after a
+  load (which shows no automatic end while nothing can move: it waits for a
+  key, G acceptance A5) the guard's Europe comes at once. During a voyage
+  (a ship at sea) the turns end by themselves as in the original (at most
+  `turnsToSail - 1` = 1 in a row).
+- **`@TUTORIAL17`** 557 ms after the game's first Europe screen is drawn,
+  whatever opened it, with Tutortips on (landfall #27956, box (7,10,306,90),
+  `%STRING0/1/2` = home port, country, the New World's name). Once per game,
+  kept in the save: `Player.classicTips` (bit k for `@TUTORIALk`, as
+  `classicWoodcuts`; marked on the server's copy in single player). Over the
+  Europe window it is the stopgap's box until W22.
+- **Sailing time**: levi's `turnsToSail` 2 (the original's, "The rules" above).
+- Not yet: the Europe status line and the band carried into Europe's top bar
+  (W22), the ship's slide onto the Seeweg before it leaves (R2 section 8),
+  woodcut 9 after the band (it comes before it), the colony notices after Europe
+  (W23).
+- Tests: `ClassicVoyagesTest` (arrivals, the message, port order, the guard's
+  condition, the load fallback, a voyage through the server's turns both ways,
+  the chain on a test clock), `ClassicBandsTest` (stand-in and the pack's texts,
+  `bandX` 94/71/83/83), `ClassicTurnFlowTest.testBandHoldsTheIdleEnd`,
+  `testEuropeHoldsTheEnd`, `testGuardOpensEuropeOncePerTurn`, `testNoSilentRun`,
+  `testArrivalHoldsTheWipe`, `ClassicGUISeamTest.testVoyageSeams`,
+  `testWoodcutsOfTheEventsAndNotices`, `PlayerTest.testClassicTips`,
+  `LeviRulesTest.testSailingTime`.
+- Scripted runs (`ClassicTestHarness` only; `ClassicGUI.childWindowHook` is
+  null in a game): a sub-window opened while the game's window is minimized
+  opens minimized and without focus, and the script's keys go to an open
+  classic screen when no window has the focus, so a minimized run can open
+  and close Europe without a window on the desktop.
+
 ### Advisor boxes (`ClassicAdvisorBox`, `ClassicAdvisorLayer`; build spec W7)
 
 Every question, choice and notice of the game is now the original's
@@ -2604,8 +2698,9 @@ Layout:
   **Escape** both close the screen.
 
 **Reaching it — the `updateActions()` fix.** The Europe screen is opened by the
-reused `EuropeAction` (the **Europe** menu item, accelerator **E**) or
-automatically when a ship arrives in Europe (the controller calls
+reused `EuropeAction` (the **Europe** menu item, accelerator **E**), and by the
+Classic UI itself when a ship of ours arrives in Europe and by the guard (W13,
+"Voyages" in the map section; FreeCol's controller never calls
 `showEuropePanel`). The menu item is the intended trigger, but the reused
 `FreeColAction`s were **stuck disabled** in the classic HUD: `SwingGUI` refreshes
 their enabled state through the `Canvas` on every view change / panel open, and

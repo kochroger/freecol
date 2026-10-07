@@ -268,6 +268,11 @@ final class ClassicMenuStrip extends JComponent {
         repaint();
     }
 
+    /** @return The band shown instead of the titles, or null. */
+    String band() {
+        return this.band;
+    }
+
     /** The integer scale of the canvas this strip is part of. */
     private int scale() {
         return Math.max(1, getWidth() / ClassicMenuBar.WIDTH);

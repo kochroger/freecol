@@ -1626,7 +1626,9 @@ public final class InGameController extends FreeColClientHolder {
      */
     private boolean moveTowardEurope(Unit unit, Europe europe) {
         UnitWas unitWas = new UnitWas(unit);
+        final Tile from = unit.getTile();
         if (askServer().moveTo(unit, europe)) {
+            getGUI().unitSailedForEurope(unit, from);
             fireChanges(unitWas);
             updateGUI(null, false);
         }

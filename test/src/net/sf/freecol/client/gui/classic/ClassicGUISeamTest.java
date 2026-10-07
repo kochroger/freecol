@@ -2540,7 +2540,8 @@ public class ClassicGUISeamTest extends FreeColTestCase {
      * landing's event shows nothing and its closing callback still runs.
      * The notices' woodcuts before their boxes, once each: the Fountain of
      * Youth (8, also when its recruit box comes first), the first laden
-     * ship in Europe (9; an empty one: none), a burning (11), a destroyed
+     * ship in Europe (9; an empty one: none; the arrival itself is no box,
+     * W13), a burning (11), a destroyed
      * (12) and a raided colony (13); a dropped notice still brings its
      * woodcut.
      */
@@ -2578,9 +2579,9 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             msg.apply("combat.colonyBurned.ours", dutch),
             msg.apply("combat.raid.ours", dutch),
             msg.apply("combat.raid.ours", dutch))));
-        assertEquals(List.of("message model.unit.arriveInEurope", "woodcut 9",
-                             "message model.unit.arriveInEurope",
-                             "message model.unit.arriveInEurope",
+        // The arrivals in Europe are no boxes (W13: the band and Europe
+        // at the turn start); the first laden one still brings its woodcut.
+        assertEquals(List.of("woodcut 9",
                              "woodcut 11", "message combat.raid.building",
                              "woodcut 12", "message combat.colonyBurned.ours",
                              "woodcut 13", "message combat.raid.ours",
@@ -3000,5 +3001,58 @@ public class ClassicGUISeamTest extends FreeColTestCase {
 
     private static <T> T last(List<T> l) {
         return l.get(l.size() - 1);
+    }
+
+    /**
+     * W13 (spec R4 section 7.4): the departure seam
+     * {@code GUI.unitSailedForEurope} exists and is empty in {@code GUI},
+     * the standard {@code SwingGUI} does not override it, the Classic UI
+     * does; the controller calls it from {@code moveTowardEurope}.  Without
+     * a client nothing happens; nothing holds the end without a Europe
+     * screen, and the guard needs a player.
+     */
+    public void testVoyageSeams() throws Exception {
+        final Class<?>[] sig = { Unit.class, Tile.class };
+        assertNotNull(net.sf.freecol.client.gui.GUI.class
+            .getDeclaredMethod("unitSailedForEurope", sig));
+        assertNotNull(ClassicGUI.class.getDeclaredMethod("unitSailedForEurope", sig));
+        try {
+            net.sf.freecol.client.gui.SwingGUI.class
+                .getDeclaredMethod("unitSailedForEurope", sig);
+            fail("SwingGUI must keep FreeCol's behaviour");
+        } catch (NoSuchMethodException e) {
+            // expected
+        }
+        final String igc = new String(Files.readAllBytes(new File(
+            "src/net/sf/freecol/client/control/InGameController.java").toPath()),
+            StandardCharsets.UTF_8);
+        final int at = igc.indexOf("private boolean moveTowardEurope(");
+        assertTrue(at > 0);
+        assertTrue(igc.substring(at, at + 400).contains(
+            "getGUI().unitSailedForEurope(unit, from);"));
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Unit ship = new ServerUnit(game, dutch.getEurope(), dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        // The band: our ship that left the map; not one that turned round
+        // at sea (no tile, R4 verifier item 4), a land unit, a foreign ship.
+        final Tile edge = game.getMap() == null ? null : game.getMap().getTile(1, 1);
+        final Tile from = (edge != null) ? edge : new Tile(game,
+            spec().getTileType("model.tile.highSeas"), 1, 1);
+        assertTrue(ClassicGUI.showsDeparture(ship, from, dutch));
+        assertFalse(ClassicGUI.showsDeparture(ship, null, dutch));
+        assertFalse(ClassicGUI.showsDeparture(ship, from, null));
+        final Player english = game.getPlayerByNationId("model.nation.english");
+        assertFalse(ClassicGUI.showsDeparture(ship, from, english));
+        final Unit colonist = new ServerUnit(game, dutch.getEurope(), dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        assertFalse(ClassicGUI.showsDeparture(colonist, from, dutch));
+        assertFalse(ClassicGUI.showsDeparture(null, from, dutch));
+        final ClassicGUI gui = new ClassicGUI(null);
+        onEdt(() -> gui.unitSailedForEurope(ship, null));
+        onEdt(() -> gui.unitSailedForEurope(null, null));
+        assertFalse(gui.europeHoldsTheEnd());
+        assertFalse(gui.openEuropeInstead());
+        assertFalse(gui.holdForArrivals());
     }
 }

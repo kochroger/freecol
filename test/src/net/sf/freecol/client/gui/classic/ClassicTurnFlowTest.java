@@ -254,6 +254,27 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
             if (this.hold) this.calls.add("hold");
             return this.hold;
         }
+
+        /** A Europe screen exists (W13); a band is on the strip. */
+        boolean europe = false, band = false;
+
+        /** The turn the guard last opened Europe in (the GUI's once per turn). */
+        int guardTurn = -1;
+
+        /** Whether the guard's other conditions hold (nothing out, a Europe). */
+        boolean guardWanted = false;
+
+        @Override public boolean europeOpen() { return this.europe; }
+        @Override public boolean bandUp() { return this.band; }
+
+        @Override
+        public boolean openEuropeInstead() {
+            if (!this.guardWanted || this.guardTurn == this.turn || this.band) return false;
+            this.guardTurn = this.turn;
+            this.europe = true;
+            this.calls.add("guard");
+            return true;
+        }
     }
 
     /** A flow without a thread, on the fake clock and host. */
@@ -869,6 +890,13 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(1, r.count("wipe"));
         r.advanceMs(485);
         assertEquals(2, r.count("endTurn"));
+    }
+
+    /** After our end went through: our turn {@code turn}, not shown yet. */
+    private static void ourTurn(Rig r, int turn) {
+        r.host.turn = turn;
+        r.host.myTurn = true;
+        r.host.current = r.host.me;
     }
 
     /** Our end, the AI phase, and our turn {@code turn}, not shown yet. */
@@ -1989,6 +2017,172 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(1, r.count("wipe"));
         r.advanceMs(300);
         assertEquals(2, r.count("activate " + b.getId()));
+    }
+
+    /**
+     * W13: a band holds the automatic end; it comes 485 ms after the
+     * band's end, not before (R4 section 5.6, U3).  The band's end does
+     * not re-base a pending hand-over (R4 verifier item 5: the next unit
+     * comes under the band, clip008 #44199/#44215).
+     */
+    public void testBandHoldsTheIdleEnd() {
+        final Rig r = new Rig(this.game);
+        r.host.band = true;                     // "Holl. Handelsschiff Ziel: Amsterdam"
+        r.flow.noUnitLeft();
+        r.advanceMs(485);
+        assertEquals(0, r.count("endTurn"));
+        for (int i = 0; i < 30; i++) {          // 1.5 s of polls: nothing re-armed
+            r.flow.tick();
+            r.advanceMs(50);
+        }
+        assertEquals(0, r.count("endTurn"));
+        assertNull(r.flow.pending());
+        r.host.band = false;
+        r.flow.bandEnded();
+        r.advanceMs(484.9);
+        assertEquals(0, r.count("endTurn"));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("endTurn"));
+
+        // A hand-over pending when a band ends keeps its time.
+        final Unit a = ship(5, 5), b = ship(7, 5);
+        nextTurn(r, 2);
+        assertTrue(r.flow.unitChosen(a, null));
+        r.advanceMs(300);
+        assertEquals(1, r.count("activate " + a.getId()));
+        a.setMovesLeft(0);
+        r.flow.screenChanged();
+        assertTrue(r.flow.unitChosen(b, a));
+        r.advanceMs(200);
+        r.flow.bandEnded();
+        r.advanceMs(299.9);
+        assertEquals(0, r.count("activate " + b.getId()));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("activate " + b.getId()));
+    }
+
+    /**
+     * W13: an open Europe holds the automatic end also behind the active
+     * map (windowed, not blocked), for a minute and more; its close is a
+     * box's close: the end 485 ms after it.
+     */
+    public void testEuropeHoldsTheEnd() {
+        final Rig r = new Rig(this.game);
+        r.host.europe = true;
+        r.host.blocked = ClassicGUI.screenUp(true, false, true);   // behind the map
+        assertFalse(r.host.blocked);
+        r.flow.noUnitLeft();
+        for (int i = 0; i < 1200; i++) {        // a minute of polls
+            r.flow.tick();
+            r.advanceMs(50);
+        }
+        assertEquals(0, r.count("endTurn"));
+        r.host.europe = false;                  // closed
+        r.flow.boxClosed();
+        r.advanceMs(484.9);
+        assertEquals(0, r.count("endTurn"));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("endTurn"));
+        // The Spielzugende mode is not held by Europe (the prompt waits anyway).
+        nextTurn(r, 2);
+        r.host.promptPref = true;
+        r.host.europe = true;
+        r.flow.noUnitLeft();
+        r.advanceMs(500);
+        assertTrue(r.flow.isPrompt());
+    }
+
+    /**
+     * W13 guard (R4 section 5.7): with nothing out, the automatic end
+     * opens Europe instead, once per turn; the end comes 485 ms after its
+     * close; the next turn again.  Off in the Spielzugende mode and while
+     * a band is up (the band first).
+     */
+    public void testGuardOpensEuropeOncePerTurn() {
+        final Rig r = new Rig(this.game);
+        r.host.guardWanted = true;
+        r.flow.noUnitLeft();
+        r.advanceMs(485);
+        assertEquals(1, r.count("guard"));
+        assertEquals(0, r.count("endTurn"));
+        r.advanceMs(5000);
+        assertEquals(0, r.count("endTurn"));
+        r.host.europe = false;
+        r.flow.boxClosed();
+        r.advanceMs(485);
+        assertEquals(1, r.count("guard"));
+        assertEquals(1, r.count("endTurn"));
+        // The next turn: again.
+        ourTurn(r, 2);
+        r.flow.noUnitLeft();
+        r.advanceMs(485);
+        assertEquals(2, r.count("guard"));
+        assertEquals(1, r.count("endTurn"));
+        // With Spielzugende on: never.
+        r.host.europe = false;
+        nextTurn(r, 3);
+        r.host.promptPref = true;
+        r.flow.noUnitLeft();
+        r.advanceMs(500);
+        assertEquals(2, r.count("guard"));
+        assertTrue(r.flow.isPrompt());
+    }
+
+    /**
+     * W13 (R4 section 7.3 testNoSilentRun): 60 turns with nothing in the
+     * New World and a ship in port: every turn shows Europe exactly once
+     * before it ends; none ends unseen.
+     */
+    public void testNoSilentRun() {
+        final Rig r = new Rig(this.game);
+        r.host.guardWanted = true;
+        for (int turn = 1; turn <= 60; turn++) {
+            if (turn > 1) ourTurn(r, turn);
+            r.flow.noUnitLeft();
+            r.advanceMs(485);
+            assertEquals("turn " + turn, turn, r.count("guard"));
+            assertEquals("turn " + turn, turn - 1, r.count("endTurn"));
+            r.advanceMs(3000);                  // the player looks at Europe
+            assertEquals("turn " + turn, turn - 1, r.count("endTurn"));
+            r.host.europe = false;
+            r.flow.boxClosed();
+            r.advanceMs(485);
+            assertEquals("turn " + turn, turn, r.count("endTurn"));
+        }
+    }
+
+    /**
+     * W13: the arrival chain holds the turn start's wipe (the year flips
+     * only after Europe closed, landfall #27878, clip008 #52677); the
+     * view's jump to a ship back in the New World during the hold makes
+     * the turn start's own jump unneeded (clip008 #26208 -&gt; #26239:
+     * the block 300 ms after the wipe, no second jump; R4 verifier item 3).
+     */
+    public void testArrivalHoldsTheWipe() {
+        final Unit a = ship(5, 5);
+        final Rig r = new Rig(this.game);
+        nextTurn(r, 2);
+        r.host.hold = true;                     // the chain runs
+        r.host.jump = true;                     // the ship is off the view
+        assertTrue(r.flow.unitChosen(a, null));
+        assertEquals(0, r.count("wipe"));
+        r.host.europe = true;                   // Europe up (windowed, not blocked)
+        for (int i = 0; i < 100; i++) {
+            r.flow.tick();
+            r.advanceMs(50);
+        }
+        assertEquals(0, r.count("wipe"));
+        assertEquals(0, r.count("activate " + a.getId()));
+        r.host.europe = false;
+        r.host.jump = false;                    // the chain jumped to the ship
+        r.host.hold = false;                    // and is done
+        r.flow.boxClosed();
+        assertEquals(1, r.count("wipe"));
+        r.advanceMs(299.9);
+        assertEquals(0, r.count("activate " + a.getId()));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("activate " + a.getId()));
+        assertEquals(0, r.count("jump " + a.getId()));
     }
 
     /** The indicator's colours: the table, the prediction, ours, none. */

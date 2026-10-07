@@ -141,6 +141,8 @@
       <xs:attribute name="currentFather" type="xs:string" use="optional"/>
       <!-- The Classic UI's woodcuts seen in this game (a bit set, W9). -->
       <xs:attribute name="classicWoodcuts" type="xs:int" use="optional"/>
+      <!-- The Classic UI's tutorial tips seen in this game (a bit set, W13). -->
+      <xs:attribute name="classicTips" type="xs:int" use="optional"/>
 
       <!-- @compat 0.11.0 Briefly existed by mistake in this release only -->
       <xs:attribute name="index.land" type="xs:string" use="optional"/>
