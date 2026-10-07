@@ -690,14 +690,19 @@ final class ClassicMapViewer extends JPanel {
      * {@code BuildColonyAction} ({@code InGameController.buildColony}).  The
      * controller does the rest — it checks the unit can build, confirms any
      * site warnings, asks {@link ClassicGUI#getNewColonyName} for the name, and
-     * on success opens the colony screen.  Guarded by the same precondition as
-     * the action's {@code shouldBeEnabled}, so pressing B with (say) a ship
-     * selected quietly does nothing rather than provoking an error panel the
-     * classic GUI would swallow anyway.
+     * on success opens the colony screen.  A unit that cannot found a colony
+     * now gets the original's refusal instead ({@link ClassicGUI#colonyRefused}:
+     * a ship @SEACOLONY, a wagon train @ONLYCOL, a colonist without moves
+     * nothing; R3); the controller's site refusals come as the original's
+     * boxes through {@link ClassicGUI#colonyNotice}.
      */
     private void buildColony() {
         final Unit unit = this.activeUnit;
-        if (unit == null || !unit.hasTile() || !unit.canBuildColony()) return;
+        if (unit == null || !unit.hasTile()) return;
+        if (!unit.canBuildColony()) {
+            if (this.gui != null) this.gui.colonyRefused(unit);
+            return;
+        }
         this.freeColClient.getInGameController().buildColony(unit);
     }
 
@@ -813,6 +818,18 @@ final class ClassicMapViewer extends JPanel {
                         ClassicFrameRecorder.event("move-done", "unit=" + u.getId()
                             + " at=" + xy(u.getTile()) + " moves=" + u.getMovesLeft()
                             + " question");
+                    }
+                    repaint();
+                    return;
+                }
+                // A refused move gets the original's box, or nothing, and
+                // never reaches the controller: no sound, no move cost, the
+                // unit stays active (R3).
+                if (this.gui != null && this.gui.illegalMoveKey(u, d)) {
+                    if (ClassicFrameRecorder.on()) {
+                        ClassicFrameRecorder.event("move-done", "unit=" + u.getId()
+                            + " at=" + xy(u.getTile()) + " moves=" + u.getMovesLeft()
+                            + " refused");
                     }
                     repaint();
                     return;

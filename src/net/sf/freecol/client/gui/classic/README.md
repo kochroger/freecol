@@ -1519,7 +1519,7 @@ same notice (`ClassicNotices.RULES`), else in FreeCol's:
 | `scoutSettlement.speakTales`, `speakNothing`, `speakDie` | @CHIEFAREA, @CHIEFBORED, @CHIEFKILL (I) | chief |
 | `info.noMoreSkill` | @LEARNALREADY (V #37156) | chief |
 | `learnSkill.leave`, `learnSkill.die` | @LEARNMAD, @CHIEFKILL (I) | chief |
-| `buildColony.badUnit` | @ONLYCOL (I) | none |
+| `buildColony.badUnit` | @ONLYCOL (I); the GUI first takes the unit's own cause (Refusals below) | none |
 | the rumours: mounds empty / gift / treasure | @BURIAL1 (V landfall #20177), @BURIAL2, @BURIAL3 | frontiersman |
 | the rumours: nothing, vanished, chief's gift, ruins, Cibola, fountain, survivors | @LOSTCITY6, 5, 7, 3, 2, 1, 9 | frontiersman |
 | `model.lostCityRumour.burialGround` | @SCREWED (the tribe) | chief (I) |
@@ -1527,9 +1527,12 @@ same notice (`ClassicNotices.RULES`), else in FreeCol's:
 The tribe is the owner of the notice's object (the village), else the
 nation of its `%nation%`. A notice whose value the original does not have
 (a tribe or nation outside its eight and four) keeps FreeCol's words.
-Silent, as in the original: an illegal move (`move.noAccess*`,
-`move.noAttackWater`, `move.noTile`) and a key while it is not our turn
-(`info.notYourTurn`); the recorder logs `notice-silent`. On the event
+Silent: a key while it is not our turn (`info.notYourTurn`), and FreeCol's
+illegal-move messages (`move.noAccess*`, `move.noAttackWater`,
+`move.noTile`), which only a goto's failed last step still posts: a move
+key gets the original's refusal before the controller (next section). The
+recorder logs `notice-silent`. `buildColony.badUnit` and FreeCol's site
+refusals (`model.noClaimReason.*`) come as the refusals below. On the event
 thread the box is asked at once (the controller posts these with
 `invokeLater`); from another thread it is posted, so no server message
 waits for the player.
@@ -1538,6 +1541,55 @@ Tests: `ClassicNoticesTest` (the silent ones, the rules, the tribe, the
 words with the pack, the GUI's two seams; and `testGoldenAgainstTheClips`:
 @BURIAL1, @CHIEFGUIDES, @LEARNALREADY and @CHIEFGIFT as the GUI builds
 them from FreeCol's messages, 0 px off on box and portrait).
+
+### Refusals (`ClassicIllegalMoves`; R3, Part H1)
+
+An order the game refuses gets GAME.TXT's box for it, where the original
+has one, before FreeCol's controller sees it: no FreeCol sound, no server
+call, no move cost (Roger's house rule; the original's @LEARNMASTER ended
+the unit's turn), the unit stays the active unit and blinks again when the
+box closes; nothing ends the turn. FreeCol's own rules decide what is
+refused (`Unit.getMoveType`, `Unit.canBuildColony`,
+`Player.canClaimToFoundSettlementReason`, the actions' `shouldBeEnabled`);
+no rule is added.
+
+| Order | Refused because (FreeCol) | Box | Portrait (I) |
+|---|---|---|---|
+| move | merchantman, caravel, galleon into a foreign ship (`MOVE_NO_ATTACK_CIVILIAN`) | @SHIPCOMBAT | admiral |
+| move | civilian into a foreign unit or colony (`NO_ATTACK_CIVILIAN`, `NO_ACCESS_SETTLEMENT`) | @CANNOTATTACK | soldier |
+| move | from aboard onto an enemy square (`NO_ATTACK_MARINE`, `NO_ACCESS_WATER`, a civilian aboard); a loaded ship onto land a foreign unit holds | @LANDFIRST | frontiersman |
+| move | ship or wagon train into a foreign colony at war, or not contacted (`NO_ACCESS_WAR`, `NO_ACCESS_TRADE`) | @TRADEATWAR | none |
+| move | the same, contacted and at peace, without de Witt | @TRADEMERCANTILISM in FreeCol's words (`%STRING0` unknown) | none |
+| move | ship at an uncontacted village (`NO_ACCESS_CONTACT`) | @DONTKNOWSHIPS | admiral |
+| move | empty ship or wagon train at a village (`NO_ACCESS_GOODS`) | @TRADENOCARGO | the chief |
+| move | the rebels' ship past the edge (no Europe) | @EUROPENOTLEAVE | admiral |
+| move | into the sea without our ship, onto a full ship, off the map, an empty ship onto land | nothing | |
+| B | a ship | @SEACOLONY | frontiersman |
+| B | a type that cannot found colonies (wagon train, artillery, treasure) | @ONLYCOL | none |
+| B | the war of independence with `foundColonyDuringRebellion` off (never in levi) | @NOCOLONIESEITHER | none |
+| B, menu | a colonist without moves | nothing | |
+| B, menu | FreeCol's site refusal: at sea / mountains / next to a colony (`terrain`, `settlement`, `worked`, `europeans`) | @SEACOLONY / @TOOMOUNTAIN / @TOONEAR (the colony's name) | frontiersman |
+| P, R | a land unit that is no pioneer | @ONLYPIO | none |
+| P | the land is ploughed | @NOPLOW | none |
+| R | a road is there | @NOROAD | none |
+| P, R | anything else (a ship, no moves, foreign land) | nothing | |
+
+Legal moves, a move without moves left (FreeCol's SKIPPED), a landing
+(W8b) and the village's skill and mission answers (D11) go to the
+controller as before. FreeCol's illegal-move sound is dropped on every
+path that still reaches it (a goto's failed step, those village answers;
+`ClassicSoundController.isDropped`, recorder `sound-dropped`): the
+original has no such sound (landfall 06-audio section 5). The move box comes the landing box's time after the
+key (`landfallShowAt`, I); B, P and R at once. Without the pack the words
+are `classic.refusal.<SECTION>` (FreeColMessages). The recorder logs
+`illegal-move` (with the move type and the section), `move-done ...
+refused` and `refused`. No clip shows any of these boxes: the words are
+GAME.TXT's, the triggers and portraits are inferred.
+
+Tests: `ClassicIllegalMovesTest` (every verdict, classic and levi, both
+topologies by the suite), `ClassicGUISeamTest.testRefusalBoxes` (the
+boxes, the moves kept), `ClassicMapViewerTest.testRefusedMoveKey`,
+`ClassicHudTest` (the P/R hook).
 
 ### The silent seams (`ClassicSeams`; master plan N15, G1)
 

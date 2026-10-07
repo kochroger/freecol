@@ -2764,6 +2764,131 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertEquals(0, d & ClassicWoodcut.bit(ClassicWoodcut.FOUNTAIN));
     }
 
+    /**
+     * R3, Roger's case through the map's keys, in his levi rules: a
+     * merchantman's arrow into a foreign ship asks exactly one box,
+     * @SHIPCOMBAT with the admiral (with the pack: the original's words,
+     * {@code @width=190}), and never reaches the controller (the test map
+     * viewer has no client): the ship keeps its place, its moves and its
+     * state and stays the active unit.  A legal move is not refused; a
+     * refusal without words asks nothing.  B with the ship @SEACOLONY; P
+     * with a colonist @ONLYPIO; the controller's colony refusals from
+     * their cause: a colonist without moves (menu row "Kolonie
+     * anschließen") nothing, a wagon train @ONLYCOL, the mountains
+     * @TOOMOUNTAIN.
+     */
+    public void testRefusalBoxes() throws Exception {
+        final Game game = getStandardGame("levi");
+        final Specification spec = game.getSpecification();
+        final MapBuilder builder = new MapBuilder(game);
+        builder.setDimensions(20, 15)
+            .setBaseTileType(spec.getTileType("model.tile.ocean"))
+            .setExploredByAll(true);
+        for (int y = 0; y < 15; y++) {
+            for (int x = 0; x < 10; x++) {
+                builder.setTileType(x, y, spec.getTileType("model.tile.plains"));
+            }
+        }
+        final Map map = builder.build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        final Tile at = map.getTile(12, 6);
+        new ServerUnit(game, map.getTile(13, 6), french,
+            spec.getUnitType("model.unit.caravel"));
+        final Unit ship = new ServerUnit(game, at, dutch,
+            spec.getUnitType("model.unit.merchantman"));
+        final int moves = ship.getMovesLeft();
+        final Unit.UnitState state = ship.getState();
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                java.awt.Image iconOf(net.sf.freecol.common.model.FreeColObject d) {
+                    return null;   // no image resources here
+                }
+            };
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final java.awt.event.ActionEvent e = new java.awt.event.ActionEvent(mv,
+            java.awt.event.ActionEvent.ACTION_PERFORMED, "key");
+        try {
+            mv.setFocus(at);
+            gui.changeView(ship, false);
+            assertSame(ship, mv.getActiveUnit());
+            mv.getActionMap().get("move_RIGHT").actionPerformed(e);   // E
+            assertEquals(1, fake.boxes.size());
+            final ClassicAdvisorBox.Request r = fake.boxes.get(0);
+            assertEquals("SHIPCOMBAT", r.id);
+            assertTrue(r.isNotice());
+            assertSame(ClassicAdvisorBox.Portrait.ADMIRAL, r.portrait);
+            if (t != null) {
+                assertEquals("Nur Kaperschiffe und Fregatten können gegnerische"
+                    + " Schiffe angreifen.", r.plainText());
+                assertEquals(190, r.width);
+            } else {
+                assertEquals(Messages.message("classic.refusal.SHIPCOMBAT"), r.plainText());
+            }
+            assertSame(at, ship.getTile());
+            assertEquals(moves, ship.getMovesLeft());
+            assertEquals(state, ship.getState());
+            assertSame(ship, mv.getActiveUnit());
+            // A legal move is the controller's; a refusal without words
+            // asks nothing.
+            final Direction south = map.getDirection(at, map.getTile(12, 8)) != null
+                ? map.getDirection(at, map.getTile(12, 8))
+                : map.getDirection(at, map.getTile(12, 7));
+            assertNotNull(south);
+            assertFalse(gui.illegalMoveKey(ship, south));
+            final Unit colonist = new ServerUnit(game, map.getTile(9, 3), dutch,
+                spec.getUnitType("model.unit.freeColonist"));
+            assertTrue(gui.illegalMoveKey(colonist, Direction.E));   // into the sea
+            assertEquals(1, fake.boxes.size());
+            // B with the ship.
+            mv.getActionMap().get("classic_buildColony").actionPerformed(e);
+            assertEquals("SEACOLONY", last(fake.boxes).id);
+            assertSame(ClassicAdvisorBox.Portrait.SCOUT, last(fake.boxes).portrait);
+            assertEquals(moves, ship.getMovesLeft());
+            // P with a colonist that is no pioneer.
+            gui.changeView(colonist, false);
+            assertSame(colonist, mv.getActiveUnit());
+            ClassicKeyMap.Binding p = null;
+            for (ClassicKeyMap.Binding b : ClassicKeyMap.bindings()) {
+                if (b.key.equals(javax.swing.KeyStroke.getKeyStroke("P"))) p = b;
+            }
+            gui.orderRefused(p);
+            assertEquals("ONLYPIO", last(fake.boxes).id);
+            final int asked = fake.boxes.size();
+            // The controller's refusals: a colonist without moves (menu
+            // row 6 on a colony tile) hears nothing, a wagon train @ONLYCOL.
+            colonist.setMovesLeft(0);
+            assertNull(gui.showInformationPanel(colonist, StringTemplate
+                .template("buildColony.badUnit").addName("%unit%", "x")));
+            SwingUtilities.invokeAndWait(() -> { });
+            assertEquals(asked, fake.boxes.size());
+            final Unit wagon = new ServerUnit(game, map.getTile(8, 3), dutch,
+                spec.getUnitType("model.unit.wagonTrain"));
+            gui.showInformationPanel(wagon, StringTemplate
+                .template("buildColony.badUnit").addName("%unit%", "x"));
+            SwingUtilities.invokeAndWait(() -> { });        // the posted box
+            assertEquals("ONLYCOL", last(fake.boxes).id);
+            // FreeCol's site refusal: the mountains.
+            final Tile mountain = map.getTile(4, 4);
+            mountain.setType(spec.getTileType("model.tile.mountains"));
+            final Unit climber = new ServerUnit(game, mountain, dutch,
+                spec.getUnitType("model.unit.freeColonist"));
+            gui.changeView(climber, false);
+            gui.showInformationPanel(null, "model.noClaimReason.terrain.description");
+            SwingUtilities.invokeAndWait(() -> { });
+            assertEquals("TOOMOUNTAIN", last(fake.boxes).id);
+            assertEquals(asked + 2, fake.boxes.size());
+            for (ClassicAdvisorBox.Request b : fake.boxes) assertTrue(b.isNotice());
+        } finally {
+            mv.dispose();
+        }
+    }
+
     private static <T> T last(List<T> l) {
         return l.get(l.size() - 1);
     }

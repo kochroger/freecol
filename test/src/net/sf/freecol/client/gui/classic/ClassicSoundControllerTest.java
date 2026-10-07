@@ -85,6 +85,11 @@ public class ClassicSoundControllerTest extends TestCase {
         assertFalse(ClassicSoundController.isMusicKey("sound.event.illegalMove"));
         assertFalse(ClassicSoundController.isMusicKey("sound.attack.artillery"));
         assertFalse(ClassicSoundController.isMusicKey("sound.event.shipSunk"));
+        // FreeCol's illegal-move sound is dropped (R3), no other effect.
+        assertTrue(ClassicSoundController.isDropped("sound.event.illegalMove"));
+        assertFalse(ClassicSoundController.isDropped("sound.attack.artillery"));
+        assertFalse(ClassicSoundController.isDropped("sound.event.shipSunk"));
+        assertFalse(ClassicSoundController.isDropped(null));
 
         // Only a nation intro (PreGameController.startGameInternal) means
         // "a game has started"; the general intro does not.

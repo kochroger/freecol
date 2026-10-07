@@ -57,10 +57,14 @@ import net.sf.freecol.common.model.StringTemplate;
  * A rule whose value is missing (a tribe or nation the original does not
  * have) gives FreeCol's words instead.
  *
- * <p><b>Silent.</b>  An illegal move does nothing in the original, with no
- * message (clip008 D0b; FreeCol's {@code move.noAccess*},
- * {@code move.noAttackWater}, {@code move.noTile}), and a key while it is
- * not our turn does nothing (W5d; {@code info.notYourTurn}).
+ * <p><b>Silent.</b>  A key while it is not our turn does nothing (W5d;
+ * {@code info.notYourTurn}).  FreeCol's illegal-move messages
+ * ({@code move.noAccess*}, {@code move.noAttackWater}, {@code move.noTile})
+ * stay silent here too, but only as the backstop of a goto's failed last
+ * step: a move key never reaches them, {@link ClassicIllegalMoves} answers
+ * it first with the original's refusal box (GAME.TXT has one for most of
+ * them, R3; the earlier "the original shows nothing" was an inference,
+ * clip008 11-spec-delta.md:106, and wrong).
  */
 final class ClassicNotices {
 
@@ -71,7 +75,11 @@ final class ClassicNotices {
         /** The chief of the tribe the notice is about. */
         CHIEF,
         /** The frontiersman (MSS3), as at the rumours. */
-        SCOUT
+        SCOUT,
+        /** The admiral (MSS0), as at @SAILHOME. */
+        ADMIRAL,
+        /** The soldier (MSS1), as at @WHACKINDIANS. */
+        SOLDIER
     }
 
     /** What a placeholder takes. */
@@ -257,22 +265,34 @@ final class ClassicNotices {
             if (v == null) return null;
             values.put((String) r.values[i], v);
         }
-        final ClassicAdvisorBox.Portrait p;
-        switch (r.who) {
-        case CHIEF:
-            if (tribe < 0) return null;
-            p = ClassicAdvisorBox.Portrait.chief(tribe);
-            break;
-        case SCOUT:
-            p = ClassicAdvisorBox.Portrait.SCOUT;
-            break;
-        default:
-            p = ClassicAdvisorBox.Portrait.NONE;
-            break;
-        }
+        if (r.who == Who.CHIEF && tribe < 0) return null;
+        final ClassicAdvisorBox.Portrait p = portrait(r.who, tribe);
         final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText(r.section,
             m, values);
         return (b == null) ? null : b.portrait(p);
+    }
+
+    /**
+     * Who stands at a box, as its portrait.
+     *
+     * @param who Who.
+     * @param tribe The tribe's {@link ClassicGUI#TRIBES} index (the chief's).
+     * @return The portrait; {@link ClassicAdvisorBox.Portrait#NONE} for a
+     *     chief of no original tribe.
+     */
+    static ClassicAdvisorBox.Portrait portrait(Who who, int tribe) {
+        switch (who) {
+        case CHIEF:
+            return ClassicAdvisorBox.Portrait.chief(tribe);
+        case SCOUT:
+            return ClassicAdvisorBox.Portrait.SCOUT;
+        case ADMIRAL:
+            return ClassicAdvisorBox.Portrait.ADMIRAL;
+        case SOLDIER:
+            return ClassicAdvisorBox.Portrait.SOLDIER;
+        default:
+            return ClassicAdvisorBox.Portrait.NONE;
+        }
     }
 
     /** A placeholder's value, or null when it is not known. */

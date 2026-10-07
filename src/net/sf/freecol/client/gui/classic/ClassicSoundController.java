@@ -573,16 +573,37 @@ public final class ClassicSoundController extends SoundController {
      * {@inheritDoc}
      *
      * Music-family keys are diverted to {@link #playMusic} whatever their
-     * {@code .type}; everything else (including {@code null} = stop the
-     * effect) is a FreeCol sound effect and unchanged.
+     * {@code .type}; FreeCol's illegal-move sound is dropped
+     * ({@link #isDropped}); everything else (including {@code null} = stop
+     * the effect) is a FreeCol sound effect and unchanged.
      */
     @Override
     public void playSound(String sound) {
         if (isMusicKey(sound)) {
             playMusic(sound);
+        } else if (isDropped(sound)) {
+            ClassicFrameRecorder.event("sound-dropped", sound);
         } else {
             super.playSound(sound);
         }
+    }
+
+    /** FreeCol's illegal-move sound ({@code InGameController.moveDirection}). */
+    static final String ILLEGAL_MOVE_KEY = "sound.event.illegalMove";
+
+    /**
+     * Is this an effect the original never plays?  FreeCol's illegal-move
+     * sound: the original's refusals are silent boxes or nothing (landfall
+     * 06-audio section 5: no move or box sound, V), and a move key's
+     * refusal never reaches the controller (R3, {@link ClassicIllegalMoves});
+     * this drops it on the paths that still do (a goto's failed step, the
+     * village's skill and mission answers).
+     *
+     * @param key The sound resource key (may be null).
+     * @return True if it is never played.
+     */
+    static boolean isDropped(String key) {
+        return ILLEGAL_MOVE_KEY.equals(key);
     }
 
     /**

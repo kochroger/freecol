@@ -27,6 +27,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -284,6 +285,28 @@ final class ClassicKeyMap {
                                    Supplier<ClassicMenuModel.Context> context,
                                    BooleanSupplier blocked,
                                    BooleanSupplier waiting) {
+        return install(host, mapViewer, lookup, mode, context, blocked, waiting,
+                       null);
+    }
+
+    /**
+     * {@link #install(JComponent, JComponent, Function, Supplier, Supplier,
+     * BooleanSupplier, BooleanSupplier)}, and a key whose actions are all
+     * disabled now (none can fire) goes to {@code refused}: the Classic UI
+     * answers P and R there with the original's refusal (R3,
+     * {@link ClassicGUI#orderRefused}).
+     *
+     * @param refused Takes the binding of a key that cannot fire now, or
+     *     null.
+     * @return The keystrokes bound.
+     */
+    static List<KeyStroke> install(JComponent host, JComponent mapViewer,
+                                   Function<String, Action> lookup,
+                                   Supplier<GUI.ViewMode> mode,
+                                   Supplier<ClassicMenuModel.Context> context,
+                                   BooleanSupplier blocked,
+                                   BooleanSupplier waiting,
+                                   Consumer<Binding> refused) {
         final Set<KeyStroke> skip = mapViewerKeys();
         if (mapViewer != null) {
             final KeyStroke[] ks = mapViewer.getInputMap(
@@ -311,7 +334,10 @@ final class ClassicKeyMap {
                                 final Action a = lookup.apply(i);
                                 return a != null && a.isEnabled();
                             });
-                        if (id == null) return;
+                        if (id == null) {
+                            if (refused != null) refused.accept(b);
+                            return;
+                        }
                         final Action a = lookup.apply(id);
                         if (a != null) {
                             a.actionPerformed(new ActionEvent(host,

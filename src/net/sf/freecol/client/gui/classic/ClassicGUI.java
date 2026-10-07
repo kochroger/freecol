@@ -1818,7 +1818,7 @@ public class ClassicGUI extends GUI {
                                               mapViewer.getViewMode()),
             () -> sceneShowing || boxBusy()
                 || (menuStrip != null && menuStrip.isMenuOpen()),
-            this::turnInputBlocked);
+            this::turnInputBlocked, this::orderRefused);
         // The advisor boxes on the same canvas (build spec W7).
         this.boxLayer = new ClassicAdvisorLayer(new BoxHost(pack, tiny, wood),
             waitClock(), SwingUtilities::invokeLater, true);
@@ -3606,9 +3606,12 @@ public class ClassicGUI extends GUI {
      * drops them, so every result of speaking to a chief, every "not
      * enough gold", every village's answer came without a word.  Each is
      * a notice box now ({@link ClassicNotices}: GAME.TXT's words where the
-     * original has the notice), except the ones the original never shows
-     * (an illegal move, a key out of turn).  On the event thread the box
-     * is asked at once (the controller posts these with
+     * original has the notice), except a key out of turn and FreeCol's
+     * illegal-move messages, which only a goto's failed step still posts
+     * (a move key gets the original's refusal first,
+     * {@link #illegalMoveKey}).  The colony refusals come as the original's
+     * boxes from their cause ({@link #colonyNotice}).  On the event thread
+     * the box is asked at once (the controller posts these with
      * {@code invokeLater}); from another thread it is posted, so no
      * server message waits for the player.
      */
@@ -3617,6 +3620,24 @@ public class ClassicGUI extends GUI {
                                              StringTemplate template) {
         if (template == null) return null;
         final String id = template.getId();
+        // The controller's colony refusals (menu row and B alike): the
+        // original's box from the unit and its tile (R3).
+        final ClassicIllegalMoves.Verdict v = colonyNotice(id, displayObject);
+        if (v != null) {
+            if (ClassicFrameRecorder.on()) {
+                ClassicFrameRecorder.event("refused", id + " section="
+                    + ((v.section == null) ? "-" : v.section));
+            }
+            if (!v.isSilent()) {
+                final ClassicAdvisorBox.Request r = refusalRequest(v, 0L);
+                if (SwingUtilities.isEventDispatchThread()) {
+                    this.prompter.ask(r);
+                } else {
+                    SwingUtilities.invokeLater(() -> this.prompter.ask(r));
+                }
+            }
+            return null;
+        }
         if (ClassicNotices.silent(id)) {
             ClassicFrameRecorder.event("notice-silent", id);
             return null;
@@ -3629,6 +3650,32 @@ public class ClassicGUI extends GUI {
             this.prompter.ask(r);
         } else {
             SwingUtilities.invokeLater(() -> this.prompter.ask(r));
+        }
+        return null;
+    }
+
+    /**
+     * The original's refusal of a colony the controller posted (R3):
+     * {@code buildColony.badUnit} from the unit's own cause
+     * ({@link ClassicIllegalMoves#colonyRefusal}: a colonist with no moves
+     * left, joining a colony by the menu row, hears nothing, never
+     * @ONLYCOL), and FreeCol's site refusals {@code model.noClaimReason.*}
+     * (posted without a display object) from the active unit's tile
+     * ({@link ClassicIllegalMoves#siteRefusal}).
+     *
+     * @param id The message id.
+     * @param display The display object, or null.
+     * @return The refusal, or null for the ordinary notice.
+     */
+    ClassicIllegalMoves.Verdict colonyNotice(String id, FreeColObject display) {
+        if ("buildColony.badUnit".equals(id)) {
+            final Unit u = (display instanceof Unit) ? (Unit) display : getActiveUnit();
+            final ClassicIllegalMoves.Verdict v = ClassicIllegalMoves.colonyRefusal(u);
+            return (v == null) ? ClassicIllegalMoves.SILENT : v;
+        }
+        if (display == null && id != null
+            && id.startsWith(ClassicIllegalMoves.NO_CLAIM)) {
+            return ClassicIllegalMoves.siteRefusal(getActiveUnit(), id);
         }
         return null;
     }
@@ -5075,10 +5122,26 @@ public class ClassicGUI extends GUI {
      * @return True if the order asks the question.
      */
     static boolean asksSailHome(Unit unit, Direction direction) {
+        return sailsPastView(unit, direction)
+            && unit.getOwner().getEurope() != null;
+    }
+
+    /**
+     * Whether a ship's order takes it past the view's edge from the high
+     * seas ({@link #asksSailHome} without the question's need of Europe):
+     * where the rebels' ships hear @EUROPENOTLEAVE
+     * ({@link ClassicIllegalMoves#judge}).
+     *
+     * @param unit The unit ordered.
+     * @param direction The direction ordered.
+     * @return True for a ship with moves on the high seas at the edge,
+     *     ordered past it.
+     */
+    static boolean sailsPastView(Unit unit, Direction direction) {
         if (unit == null || direction == null || !unit.isNaval()
             || !unit.hasTile() || unit.getMovesLeft() <= 0
             || !unit.getType().canMoveToHighSeas()
-            || unit.getOwner() == null || unit.getOwner().getEurope() == null) {
+            || unit.getOwner() == null) {
             return false;
         }
         final Tile tile = unit.getTile();
@@ -5117,6 +5180,104 @@ public class ClassicGUI extends GUI {
         }
         if (confirmed(chosen)) sailHome(unit);
         return true;
+    }
+
+    // The original's refusals (R3, ClassicIllegalMoves).
+
+    /**
+     * A map key's move order, if the game refuses it
+     * ({@link ClassicIllegalMoves#judge}): the original's box for it, or
+     * nothing, instead of FreeCol's illegal-move sound.  The controller
+     * never sees the order: the unit keeps its moves, its state and its
+     * place, and stays the active unit; the box's close restarts its blink
+     * ({@link ClassicDialog.Watcher}), and nothing ends the turn.  The box
+     * comes the landing box's time after the key ({@link #landfallShowAt},
+     * I: no clip shows a refusal).  EDT only.
+     *
+     * @param unit The unit ordered.
+     * @param direction The direction ordered.
+     * @return True if the order was refused (with a box or without),
+     *     false if the controller takes it.
+     */
+    boolean illegalMoveKey(Unit unit, Direction direction) {
+        final ClassicIllegalMoves.Verdict v = ClassicIllegalMoves.judge(unit, direction);
+        if (v == null) return false;
+        if (ClassicFrameRecorder.on()) {
+            final Tile from = unit.getTile();
+            ClassicFrameRecorder.event("illegal-move", "unit=" + unit.getId()
+                + ((from == null) ? "" : " at=" + from.getX() + "," + from.getY())
+                + " dir=" + direction + " type=" + unit.getMoveType(direction)
+                + " section=" + ((v.section == null) ? "-" : v.section));
+        }
+        if (v.isSilent()) return true;
+        final ClassicAdvisorLayer layer = this.boxLayer;
+        final long at = (layer == null || this.mapViewer == null) ? 0L
+            : landfallShowAt(this.mapViewer.moveKeyNanos(), waitClock().now(),
+                layer.loadsPalette(ClassicNotices.portrait(v.who, v.tribe)));
+        this.prompter.ask(refusalRequest(v, at));
+        return true;
+    }
+
+    /**
+     * B with a unit that cannot found a colony now: the original's box for
+     * it ({@link ClassicIllegalMoves#colonyRefusal}), or nothing.  EDT only.
+     *
+     * @param unit The active unit.
+     */
+    void colonyRefused(Unit unit) {
+        refused("B", unit, ClassicIllegalMoves.colonyRefusal(unit));
+    }
+
+    /**
+     * An order key whose FreeCol order cannot be given now
+     * ({@link ClassicKeyMap#install}'s refusal): P and R get the original's
+     * box for the cause ({@link ClassicIllegalMoves#orderRefusal}); every
+     * other key does nothing, as before.  EDT only.
+     *
+     * @param binding The key's binding.
+     */
+    void orderRefused(ClassicKeyMap.Binding binding) {
+        if (binding == null || binding.key == null) return;
+        final int code = binding.key.getKeyCode();
+        if (binding.key.getModifiers() != 0
+            || (code != KeyEvent.VK_P
+                && code != KeyEvent.VK_R)) return;
+        if (this.mapViewer == null
+            || this.mapViewer.getViewMode() != GUI.ViewMode.MOVE_UNITS) return;
+        final Unit unit = this.mapViewer.getActiveUnit();
+        refused((code == KeyEvent.VK_R) ? "R" : "P", unit,
+            ClassicIllegalMoves.orderRefusal(unit,
+                code == KeyEvent.VK_R));
+    }
+
+    /**
+     * Show a refusal of a key's order (B, P, R): its box at once, or nothing.
+     *
+     * @param key The key, for the recorder.
+     * @param unit The unit, or null.
+     * @param v The refusal, or null (then nothing happens).
+     */
+    private void refused(String key, Unit unit, ClassicIllegalMoves.Verdict v) {
+        if (v == null) return;
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("refused", key + " unit="
+                + ((unit == null) ? "-" : unit.getId())
+                + " section=" + ((v.section == null) ? "-" : v.section));
+        }
+        if (!v.isSilent()) this.prompter.ask(refusalRequest(v, 0L));
+    }
+
+    /**
+     * A refusal's box ({@link ClassicIllegalMoves#request}) from the pack.
+     *
+     * @param v The refusal, with a section.
+     * @param showAtNanos When it should be on screen, 0 for at once.
+     * @return The box.
+     */
+    ClassicAdvisorBox.Request refusalRequest(ClassicIllegalMoves.Verdict v,
+                                             long showAtNanos) {
+        return ClassicIllegalMoves.request(ClassicText.load(ClassicPackFiles.runtime()),
+            v, showAtNanos, Messages.message("classic.dialog.messages"));
     }
 
     /**
