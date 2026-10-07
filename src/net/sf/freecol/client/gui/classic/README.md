@@ -2361,7 +2361,12 @@ in its own `JFrame` (no `Canvas`). The original **`EUROPE.PIK`** harbour picture
 (sky, sea, the wooden piers, the row of European town houses) is blitted as the
 backdrop (loaded straight by its pack key `image.classic_original.pik.EUROPE.PIK`,
 with a plain sea/sky fallback when the pack is absent); the live figures are drawn
-over it. Layout:
+over it. The original opens this screen without loading the picture's own
+palette, so the converter decodes it under the game palette (W22p,
+`PikDecoder.GAME_PALETTE_PIKS`): the sea under the piers and the market fill
+show the game's blues 54-59, 0 px off the backdrop in clip005 #18653, clip006
+#7980/#8120 and clip008 #17007, #52974, #53113 (`ClassicIndexGoldenTest`).
+Layout:
 
 - **Title bar** — port name, turn, tax and treasury, gold on black.
 - **Action buttons** (top right) — the three golden buttons **Anwerben / Kaufen /

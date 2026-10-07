@@ -272,6 +272,77 @@ public class ClassicAssetDecoderTest extends TestCase {
         assertEquals(0xFFFF0000, img.getRGB(0, 0));
     }
 
+    /**
+     * A 2x1 screen of indices 57 and 7, with or without its own palette:
+     * 57 = (19,24,42) = #4D61AA (EUROPE.PIK's own market blue), 7 = #282828.
+     */
+    private static byte[] twoPixelPik(boolean ownPalette) {
+        byte[] header = new byte[8];
+        putU16(header, 0, 1);
+        putU16(header, 2, 2);
+        byte[] image = { 57, 7 };
+        if (!ownPalette) return madspack(header, image);
+        byte[] palette = new byte[768];
+        palette[57 * 3] = 19;
+        palette[57 * 3 + 1] = 24;
+        palette[57 * 3 + 2] = 42;
+        palette[7 * 3] = palette[7 * 3 + 1] = palette[7 * 3 + 2] = 10;
+        return madspack(header, image, palette);
+    }
+
+    /** A VICEROY.PAL: 57 = (16,22,41) = #4159A6 (the game's), 7 = #515151. */
+    private static byte[] gameViceroy() {
+        byte[] raw = new byte[1024];
+        raw[57 * 3] = 16;
+        raw[57 * 3 + 1] = 22;
+        raw[57 * 3 + 2] = 41;
+        raw[7 * 3] = raw[7 * 3 + 1] = raw[7 * 3 + 2] = 20;
+        return raw;
+    }
+
+    /**
+     * W22p: a screen the original draws without loading its palette is
+     * decoded under VICEROY.PAL, every other one under its own; the
+     * two-argument decode is the latter.  Without VICEROY.PAL such a
+     * screen cannot be decoded.
+     */
+    public void testPikDecodeWithTheGamePalette() {
+        Palette viceroy = Palette.readViceroy(gameViceroy());
+        byte[] file = twoPixelPik(true);
+        BufferedImage own = PikDecoder.decode(file, viceroy, false);
+        assertEquals(0xFF4D61AA, own.getRGB(0, 0));
+        assertEquals(0xFF282828, own.getRGB(1, 0));
+        BufferedImage game = PikDecoder.decode(file, viceroy, true);
+        assertEquals(0xFF4159A6, game.getRGB(0, 0));
+        assertEquals(0xFF515151, game.getRGB(1, 0));
+        assertSamePixels("two-argument decode", own, PikDecoder.decode(file, viceroy));
+        assertSamePixels("own palette, no VICEROY", own, PikDecoder.decode(file, null, false));
+        // Palette-less: VICEROY.PAL either way.
+        assertSamePixels("palette-less", game,
+                         PikDecoder.decode(twoPixelPik(false), viceroy, true));
+        assertSamePixels("palette-less, own asked", game,
+                         PikDecoder.decode(twoPixelPik(false), viceroy, false));
+        try {
+            PikDecoder.decode(file, null, true);
+            fail("expected IllegalStateException");
+        } catch (IllegalStateException expected) {
+            // ok
+        }
+    }
+
+    /** Only EUROPE.PIK is drawn under the game palette (W22p), any case. */
+    public void testDrawnWithGamePalette() {
+        assertTrue(PikDecoder.drawnWithGamePalette("EUROPE.PIK"));
+        assertTrue(PikDecoder.drawnWithGamePalette("europe.pik"));
+        for (String name : new String[] { "COLONY.PIK", "CCBKGD.PIK", "WOODPANL.PIK",
+                                          "REPORT1.PIK", "NATIONS.PIK", "OPENMENU.PIK",
+                                          "LEVN0001.PIK", "EUROPE.SS", "" }) {
+            assertFalse(name, PikDecoder.drawnWithGamePalette(name));
+        }
+        assertFalse(PikDecoder.drawnWithGamePalette(null));
+        assertEquals(1, PikDecoder.GAME_PALETTE_PIKS.size());
+    }
+
     public void testSsDecodeSpriteWithTransparency() {
         // 2x1 sprite: pixel 0 = colour index 1 (red), pixel 1 = transparent.
         byte[] header = new byte[152];
@@ -592,6 +663,37 @@ public class ClassicAssetDecoderTest extends TestCase {
             Files.delete(install.resolve("CYCLE.DAT"));
             assertFalse(ClassicAssetConverter.copyCycleTable(install,
                     out.resolve("other").resolve("CYCLE.DAT")));
+        } finally {
+            try (Stream<Path> s = Files.walk(install)) {
+                s.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            }
+        }
+    }
+
+    /**
+     * W22p in the converter: of two screens with the same bytes,
+     * EUROPE.PIK's PNG has the game palette's colours and the other one's
+     * its own palette's.
+     */
+    public void testConverterDrawsEuropeUnderTheGamePalette() throws Exception {
+        final Path install = Files.createTempDirectory("classic-install");
+        final Path out = install.resolve("pack");
+        try {
+            Files.write(install.resolve("VICEROY.PAL"), gameViceroy());
+            Files.write(install.resolve("EUROPE.PIK"), twoPixelPik(true));
+            Files.write(install.resolve("OTHER.PIK"), twoPixelPik(true));
+            ClassicAssetConverter.main(new String[] {
+                    "--install", install.toString(), "--out", out.toString() });
+
+            final Path pik = out.resolve("resources").resolve("images").resolve("pik");
+            BufferedImage europe = javax.imageio.ImageIO.read(
+                pik.resolve("EUROPE.PIK.png").toFile());
+            BufferedImage other = javax.imageio.ImageIO.read(
+                pik.resolve("OTHER.PIK.png").toFile());
+            assertEquals(0xFF4159A6, europe.getRGB(0, 0));
+            assertEquals(0xFF515151, europe.getRGB(1, 0));
+            assertEquals(0xFF4D61AA, other.getRGB(0, 0));
+            assertEquals(0xFF282828, other.getRGB(1, 0));
         } finally {
             try (Stream<Path> s = Files.walk(install)) {
                 s.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());

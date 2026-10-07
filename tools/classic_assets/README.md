@@ -37,7 +37,9 @@ The `classic-assets` Ant target compiles the source and runs
 `net.sf.freecol.tools.classicassets.ClassicAssetConverter`, which:
 
 1. Reads the master palette `VICEROY.PAL` (used to decode the palette-less PIK
-   screens such as `COLONY.PIK`).
+   screens such as `COLONY.PIK`, and `EUROPE.PIK`, whose own palette the
+   original never loads: its sea and market blues 54-59 come from the game
+   palette, `PikDecoder.GAME_PALETTE_PIKS`).
 2. Decodes every `*.SS` sprite set and `*.PIK` screen straight from the MADSPACK
    containers into `BufferedImage`s and writes them as PNG:
    - `.PIK` → `resources/images/pik/NAME.PIK.png`

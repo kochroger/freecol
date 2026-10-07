@@ -37,7 +37,8 @@ import junit.framework.TestCase;
  * Golden checks of the index pipeline (M1c design 10 §4, item W6e) on the
  * <b>real</b> converted pack ({@link ClassicPackFiles#runtime}).  Without
  * a pack, or with a pack converted before W6e, every test logs a note and
- * passes (Critic 10(d)).
+ * passes (Critic 10(d)).  Also the Europe backdrop's palette (W22p),
+ * which fails on a pack converted before W22p, on purpose.
  *
  * <p>The expected numbers are measurements, not art: the designer's own
  * decode of the install ({@code m1c-sea/10-support/tools/SsIdx.java},
@@ -378,6 +379,115 @@ public class ClassicIndexGoldenTest extends TestCase {
             if (key.endsWith(".png")) pngs++;
         }
         assertEquals(pngs, frames);
+    }
+
+    /** EUROPE.PIK's own blues 54-59, lighter than the game's (W22p). */
+    private static final int[] EUROPE_OWN_54 = {
+        0x718EC7, 0x657DBE, 0x5971B2, 0x4D61AA, 0x41519E, 0x384596
+    };
+
+    /** EUROPE.PIK's px of 54-59: the sea under the piers, 57 the market fill. */
+    private static final int[] EUROPE_BLUES = { 1036, 511, 460, 6071, 595, 619 };
+
+    /**
+     * The Europe frames (W22p): the frame, its px showing one of the game
+     * blues 54-59 where the backdrop shows another colour (the game's own
+     * drawing: the three buttons at x 272-319, y 80-127, goods icons), and
+     * its px differing from the backdrop at all (the title, ships, holds,
+     * goods, prices, labels, the arrow).  The backdrop of a pack converted
+     * before W22p gives 7,610 / 7,890 / 7,890 / 8,034 / 8,034 / 7,990 blues
+     * and 13,744 / 13,693 / 13,693 / 13,546 / 13,386 / 13,406 differences.
+     */
+    private static final Object[][] EUROPE_FRAMES = {
+        { "clip005/frame_018653.png", 141, 6275 },  // opens after the arrival
+        { "clip006/frame_007980.png", 141, 5944 },  // opens, no palette change
+        { "clip006/frame_008120.png", 141, 5944 },  // the plan's acceptance frame
+        { "clip008/frame_017007.png", 152, 5664 },  // E1, 0.071 s after the menu
+        { "clip008/frame_052974.png", 141, 5493 },  // E2, the merchantman in port
+        { "clip008/frame_053113.png", 141, 5557 },  // E2, the title line
+    };
+
+    /** The pack's EUROPE.PIK backdrop, read from disk (not cached). */
+    private BufferedImage europe() throws IOException {
+        final String rel = this.pack.string(ClassicPackFiles.pikKey("EUROPE.PIK"));
+        assertNotNull("EUROPE.PIK", rel);
+        return ImageIO.read(new File(this.pack.directory(), rel));
+    }
+
+    /**
+     * W22p: the original opens the Europe screen without loading
+     * EUROPE.PIK's palette, so the pack's backdrop has only game palette
+     * colours, its 54-59 the game's blues in their exact counts and none
+     * of the file's own lighter ones.  Fails on a pack converted before
+     * W22p: re-run ant classic-assets.
+     */
+    public void testEuropeBackdropUsesTheGamePalette() throws IOException {
+        if (this.pack == null) return;
+        final BufferedImage img = europe();
+        assertEquals(320, img.getWidth());
+        assertEquals(200, img.getHeight());
+        final Set<Integer> game = new TreeSet<>();
+        for (int c : this.pack.gamePalette()) game.add(c);
+        final Map<Integer, Integer> count = new HashMap<>();
+        int notInGame = 0;
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                final int c = img.getRGB(x, y) & 0xFFFFFF;
+                count.merge(c, 1, Integer::sum);
+                if (!game.contains(c)) notInGame++;
+            }
+        }
+        assertEquals("px not in the game palette (a pack from before W22p?"
+                     + " re-run ant classic-assets)", 0, notInGame);
+        for (int k = 0; k < EUROPE_BLUES.length; k++) {
+            assertEquals("#" + (54 + k), EUROPE_BLUES[k],
+                count.getOrDefault(ClassicGamePaletteTest.VICEROY_54[k], 0).intValue());
+            assertNull("own #" + (54 + k), count.get(EUROPE_OWN_54[k]));
+        }
+    }
+
+    /**
+     * W22p against the clips (needs {@code -Dclassic.clips}): over six
+     * Europe frames of three clips ({@link #EUROPE_FRAMES}) the backdrop
+     * shows the frame's blues wherever the game drew none over them, and
+     * differs from the frame only in the measured px of the game's drawing.
+     * (The G4 spec's own decode of EUROPE.PIK's indices: 0 px off on every
+     * pixel where the frame shows the picture's index.)
+     */
+    public void testEuropeBackdropAgainstTheClips() throws IOException {
+        if (this.pack == null) return;
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        final File dir = (clips == null) ? null : new File(clips);
+        if (dir == null || !new File(dir, "clip008").isDirectory()) {
+            System.err.println("ClassicIndexGoldenTest." + getName()
+                + ": skipped, no recordings (-D"
+                + ClassicTerrainGoldenTest.CLIPS_PROPERTY + ")");
+            return;
+        }
+        final BufferedImage img = europe();
+        final Set<Integer> blues = new TreeSet<>();
+        for (int k = 0; k < EUROPE_BLUES.length; k++) {
+            blues.add(ClassicGamePaletteTest.VICEROY_54[k]);
+        }
+        final StringBuilder got = new StringBuilder();
+        for (Object[] f : EUROPE_FRAMES) {
+            final BufferedImage frame = ImageIO.read(new File(dir, (String) f[0]));
+            assertNotNull((String) f[0], frame);
+            int blueOff = 0, off = 0;
+            for (int y = 0; y < 200; y++) {
+                for (int x = 0; x < 320; x++) {
+                    final int fc = frame.getRGB(x, y) & 0xFFFFFF;
+                    final int pc = img.getRGB(x, y) & 0xFFFFFF;
+                    if (fc == pc) continue;
+                    off++;
+                    if (blues.contains(fc)) blueOff++;
+                }
+            }
+            got.append(' ').append(f[0]).append('=').append(blueOff).append('/').append(off);
+            assertEquals((String) f[0] + " blues", ((Integer) f[1]).intValue(), blueOff);
+            assertEquals((String) f[0] + " all", ((Integer) f[2]).intValue(), off);
+        }
+        System.out.println("ClassicIndexGoldenTest: Europe backdrop vs clips," + got);
     }
 
     /** The alias table gives each tile type its TERRAIN.SS frame (§6.1). */

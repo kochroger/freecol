@@ -109,7 +109,8 @@ public final class ClassicAssetConverter {
             return;
         }
 
-        // Master gameplay palette, used to decode palette-less PIK screens.
+        // Master gameplay palette, used to decode palette-less PIK screens
+        // and the screens drawn without their own palette (EUROPE.PIK).
         Palette viceroy = Palette.readViceroy(Files.readAllBytes(
             findIgnoreCase(install, "VICEROY.PAL")));
 
@@ -132,7 +133,8 @@ public final class ClassicAssetConverter {
         int pikCount = 0;
         for (Path pik : listByExtension(install, ".pik")) {
             String name = pik.getFileName().toString();       // e.g. COLONY.PIK
-            BufferedImage img = PikDecoder.decode(Files.readAllBytes(pik), viceroy);
+            BufferedImage img = PikDecoder.decode(Files.readAllBytes(pik), viceroy,
+                PikDecoder.drawnWithGamePalette(name));
             String png = name + ".png";
             ImageIO.write(img, "png", pikDir.resolve(png).toFile());
             entries.put(KEY_PREFIX + ".pik." + name, "resources/images/pik/" + png);
