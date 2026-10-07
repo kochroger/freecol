@@ -20,6 +20,7 @@
 
 package net.sf.freecol.server.model;
 
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
@@ -878,7 +879,57 @@ public class ServerUnit extends Unit implements TurnTaker {
                     .addStringTemplate("%enemyNation%", enemy));
         }
 
-        csCheckDiscoverRegion(newTile, cs);
+        // The original's Pacific is discovered on sight, the other
+        // regions (and FreeCol's Pacific) when a unit enters them.
+        final Region sighted = csCheckSightedPacific(newTiles, cs);
+        if (sighted == null || newTile.getDiscoverableRegion() != sighted) {
+            csCheckDiscoverRegion(newTile, cs);
+        }
+    }
+
+    /**
+     * Check for the original's Pacific coming into sight
+     * ({@link ServerRegion#hasClassicPacific}): its woodcut 6 came when
+     * a ship's move brought a Pacific tile at the edge of its 3x3 into
+     * view, the ship itself staying outside (I-prep pacific.md, Roger's
+     * clip opening_012 #290: (30,67) to (29,67), the new tile (28,68)).
+     *
+     * Only the tiles newly in sight count: {@link Region#checkDiscover}
+     * answers true again for the same unit until the region is named (its
+     * desynch work-around), so a check of all the tiles in sight would
+     * send the naming again on every move until the answer came.  The
+     * client drops a repeat ({@code newRegionNameHandler}: no longer
+     * discoverable; the Classic UI's woodcut once per game).
+     *
+     * @param newTiles The tiles newly in this unit's sight (explored now,
+     *     or not visible before), or null.
+     * @param cs A {@code ChangeSet} to update.
+     * @return The Pacific if its discovery was sent, else null.
+     */
+    public Region csCheckSightedPacific(Collection<Tile> newTiles,
+                                        ChangeSet cs) {
+        if (newTiles == null || newTiles.isEmpty()
+            || !getOwner().isEuropean()
+            || !ServerRegion.hasClassicPacific(getGame().getMap())) {
+            return null;
+        }
+        Tile best = null;
+        for (Tile t : newTiles) {
+            final Region r = t.getDiscoverableRegion();
+            if (r == null || !r.isPacific()) continue;
+            // The same tile every time: the northernmost, then westernmost.
+            if (best == null || t.getY() < best.getY()
+                || (t.getY() == best.getY() && t.getX() < best.getX())) {
+                best = t;
+            }
+        }
+        if (best == null) return null;
+        final Region region = best.getDiscoverableRegion();
+        if (!region.checkDiscover(this)) return null;
+        cs.add(See.only(getOwner()),
+            new NewRegionNameMessage(region, best, this,
+                getOwner().getNameForRegion(region)));
+        return region;
     }
 
     /**

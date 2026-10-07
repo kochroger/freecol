@@ -110,7 +110,8 @@ import javax.swing.JComponent;
  * them.  One woodcut: the whole screen black, the frame and its ribbon
  * 86 ms later, the picture's dissolve 43 ms after that, one step per
  * original frame on the timer's deadlines; then it waits for a fresh key
- * or click made after the picture is complete (any key, also Escape: a
+ * or click (anywhere in the window, the letterbox border too) made after
+ * the picture is complete (any key, also Escape: a
  * woodcut has no "Nein"); then black, the game palette back a frame
  * later, and 300 ms after the black the layer goes and the screen is
  * painted from the current state.  The next box comes no earlier than the
@@ -927,8 +928,10 @@ final class ClassicAdvisorLayer extends JComponent {
         if (p == null || predates(e.getWhen())) return;
         final Point v = virtual(e.getPoint());
         if (p.woodcut != null) {
-            // A press and its release on the canvas count as a key (I).
-            p.pressed = p.phase == Phase.HELD && v != null;
+            // A press and its release anywhere in the window count as a
+            // key, the letterbox border too (Roger: any click closes it;
+            // I-prep cycle.md 3C).
+            p.pressed = p.phase == Phase.HELD;
             return;
         }
         final int row = (v == null) ? -1 : p.layout.rowAt(v.x, v.y);

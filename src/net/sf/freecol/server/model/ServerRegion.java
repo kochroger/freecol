@@ -560,7 +560,18 @@ public class ServerRegion extends Region {
                 if (tSP != null && tSA != null) break;
             }
             int nNP = 0, nSP = 0, nNA = 0, nSA = 0;
-            
+            if (hasClassicPacific(map)) {
+                final int[] n = fillClassicOceans(map,
+                    new Tile[] { tNP, tSP, tNA, tSA },
+                    northPacific, southPacific, northAtlantic, southAtlantic);
+                lb.add(" filled the original's ocean regions ",
+                    n[0], " North Pacific, ",
+                    n[1], " South Pacific, ",
+                    n[2], " North Atlantic, ",
+                    n[3], " South Atlantic.\n");
+                return result;
+            }
+
             Rectangle rNP = new Rectangle(0,0,       midx,midy);
             Rectangle rSP = new Rectangle(0,midy,    midx,maxy-midy);
             Rectangle rNA = new Rectangle(midx,0,    maxx-midx,midy);
@@ -589,6 +600,132 @@ public class ServerRegion extends Region {
                 nSA, " South Atlantic.\n");
         }
         return result;
+    }
+
+    /**
+     * Does a map have the original Colonization's Pacific?  The Classic
+     * UI's maps are the square ones ({@link Topology#SQUARE}, as for the
+     * outer ring in {@code TerrainGenerator}); FreeCol's isometric maps
+     * keep FreeCol's Pacific and its trigger.
+     *
+     * The original's Pacific (I-prep pacific.md, 0 mismatches against
+     * bit 0x20 of the MASK layer of its saves on three maps) is, in each
+     * row, the water west of the row's westernmost land, from x = 1 to
+     * x = width/2 - 1 (28 on its 58x72 maps), and its woodcut 6 comes
+     * when one of these tiles first comes into a European unit's sight
+     * ({@code ServerUnit.csCheckSightedPacific}), not when a unit
+     * enters one.
+     *
+     * @param map The {@code Map} to check.
+     * @return True for the original's Pacific.
+     */
+    public static boolean hasClassicPacific(Map map) {
+        return map != null && map.getTopology() == Topology.SQUARE;
+    }
+
+    /**
+     * Fill the ocean regions of a map as the original does
+     * ({@link #hasClassicPacific}): the Pacific is a row scan, not a
+     * flood fill, and nothing east of x = width/2 - 1 is Pacific.
+     *
+     * <ol>
+     *   <li>The sea: the water 8-connected to the four start tiles of
+     *       FreeCol's fills (the first water above and below the middle
+     *       row on the west and east edges).  Other water is a lake,
+     *       which {@code TerrainGenerator.createLakeRegions} still
+     *       finds (no region).</li>
+     *   <li>The Pacific: for each row y, x = 1, 2, ... width/2 - 1, each
+     *       sea tile until the first land (or lake) tile, north of the
+     *       middle row (y &lt; height/2) in the North Pacific, else in the
+     *       South Pacific.  Column 0 is never Pacific.</li>
+     *   <li>The Atlantic: FreeCol's fills from the east edge (quadrant,
+     *       half, whole map), which do not enter the Pacific's tiles,
+     *       then every sea tile still without a region (column 0, water
+     *       behind an island or in a bay that the Pacific cuts off) by
+     *       its row.</li>
+     * </ol>
+     *
+     * @param map The {@code Map} to fill in.
+     * @param starts FreeCol's start tiles: north and south Pacific, north
+     *     and south Atlantic (each may be null).
+     * @param northPacific The north Pacific region.
+     * @param southPacific The south Pacific region.
+     * @param northAtlantic The north Atlantic region.
+     * @param southAtlantic The south Atlantic region.
+     * @return The numbers of tiles filled, in the same order.
+     */
+    private static int[] fillClassicOceans(Map map, Tile[] starts,
+        ServerRegion northPacific, ServerRegion southPacific,
+        ServerRegion northAtlantic, ServerRegion southAtlantic) {
+        final int maxx = map.getWidth();
+        final int midx = maxx / 2;
+        final int maxy = map.getHeight();
+        final int midy = maxy / 2;
+        final int[] n = new int[4];
+
+        // 1. The sea.
+        final boolean[][] sea = new boolean[maxx][maxy];
+        final Queue<Tile> q = new LinkedList<>();
+        for (Tile s : starts) {
+            if (s != null && !sea[s.getX()][s.getY()]) {
+                sea[s.getX()][s.getY()] = true;
+                q.add(s);
+            }
+        }
+        Tile tile;
+        while ((tile = q.poll()) != null) {
+            for (Direction direction : Direction.values()) {
+                Tile t = map.getAdjacentTile(tile, direction);
+                if (t != null && !sea[t.getX()][t.getY()] && !t.isLand()
+                    && t.getRegion() == null) {
+                    sea[t.getX()][t.getY()] = true;
+                    q.add(t);
+                }
+            }
+        }
+
+        // 2. The Pacific, row by row.
+        for (int y = 0; y < maxy; y++) {
+            for (int x = 1; x < midx; x++) { // x = 1 .. width/2 - 1
+                Tile t = map.getTile(x, y);
+                if (t == null || t.isLand() || !sea[x][y]) break;
+                if (y < midy) {
+                    northPacific.addTile(t);
+                    n[0]++;
+                } else {
+                    southPacific.addTile(t);
+                    n[1]++;
+                }
+            }
+        }
+
+        // 3. The Atlantic: FreeCol's fills from the east, then the rest.
+        final Tile tNA = starts[2], tSA = starts[3];
+        final Rectangle[] bounds = {
+            new Rectangle(midx, 0, maxx - midx, midy),
+            new Rectangle(midx, midy, maxx - midx, maxy - midy),
+            new Rectangle(0, 0, maxx, midy),
+            new Rectangle(0, midy, maxx, maxy - midy),
+            new Rectangle(0, 0, maxx, maxy),
+            new Rectangle(0, 0, maxx, maxy) };
+        for (int i = 0; i < bounds.length; i += 2) {
+            if (tNA != null) n[2] += fillOcean(map, tNA, northAtlantic, bounds[i]);
+            if (tSA != null) n[3] += fillOcean(map, tSA, southAtlantic, bounds[i + 1]);
+        }
+        for (int y = 0; y < maxy; y++) {
+            for (int x = 0; x < maxx; x++) {
+                Tile t = map.getTile(x, y);
+                if (!sea[x][y] || t.getRegion() != null) continue;
+                if (y < midy) {
+                    northAtlantic.addTile(t);
+                    n[2]++;
+                } else {
+                    southAtlantic.addTile(t);
+                    n[3]++;
+                }
+            }
+        }
+        return n;
     }
 
     /**

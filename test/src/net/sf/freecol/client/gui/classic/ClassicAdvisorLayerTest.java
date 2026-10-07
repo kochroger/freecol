@@ -964,6 +964,41 @@ public class ClassicAdvisorLayerTest extends TestCase {
     }
 
     /**
+     * I1 (Roger: any click closes a woodcut; I-prep cycle.md 3C): in a
+     * window wider than the canvas, a press and release on the letterbox
+     * border close a complete woodcut; the same click during the dissolve
+     * does nothing.
+     */
+    public void testWoodcutClosesOnTheLetterbox() throws Exception {
+        edt(() -> {
+                this.layer.setSize(640, 480);   // scale 2: canvas y 40..439
+                return null;
+            });
+        final Ended e = woodcut(0L, 0.0);
+        flush();
+        assertEquals("woodcut_3:black", probe());
+        this.clock.advanceMs(ClassicWoodcut.FRAME_AFTER_BLACK_MS);
+        runTimer();
+        this.clock.advanceMs(ClassicWoodcut.DISSOLVE_AFTER_FRAME_MS);
+        runTimer();
+        mouse(MouseEvent.MOUSE_PRESSED, 320, 10);
+        mouse(MouseEvent.MOUSE_RELEASED, 320, 10);
+        assertFalse(probe(), "woodcut_3:closing".equals(probe()));
+        dissolve();
+        assertEquals("woodcut_3:held", probe());
+        mouse(MouseEvent.MOUSE_PRESSED, 320, 10);      // the top border
+        assertEquals("woodcut_3:held", probe());
+        mouse(MouseEvent.MOUSE_RELEASED, 320, 470);    // the bottom border
+        assertEquals("woodcut_3:closing", probe());
+        this.clock.advanceMs(ClassicWoodcut.FRAME_MS);
+        runTimer();
+        this.clock.advanceMs(ClassicWoodcut.MAP_BACK_MS);
+        runTimer();
+        assertTrue(e.get() != ClassicAdvisorLayer.NOT_SHOWN);
+        assertEquals(List.of(3), this.host.ended);
+    }
+
+    /**
      * W9: a woodcut due while the map still paints (slides queued before
      * it, the AI phase) comes 57 ms after the map's last final draw, as
      * after its trigger.
