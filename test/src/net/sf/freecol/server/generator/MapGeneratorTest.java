@@ -385,6 +385,175 @@ public class MapGeneratorTest extends FreeColTestCase {
     }
 
     /**
+     * A new game on the given rules with only the given European nations,
+     * every native nation and the REF, without a map.
+     *
+     * @param rules The identifier of the rules.
+     * @param europeans The identifiers of the European nations to play.
+     * @return The new {@code Game}.
+     */
+    private static Game makeNewGame(String rules, List<String> europeans) {
+        Specification spec = FreeCol.loadSpecification(
+            FreeColRules.getFreeColRulesFile(rules), null,
+            "model.difficulty.medium");
+        spec.setFile(MapGeneratorOptions.IMPORT_FILE, null);
+        MapGeneratorOptions.applyTopologyDefaults(spec.getMapGeneratorOptions());
+        Game game = new ServerGame(spec);
+        NationOptions nationOptions = new NationOptions(spec);
+        for (Nation n : spec.getEuropeanNations()) {
+            nationOptions.setNationState(n, (europeans.contains(n.getId()))
+                ? NationOptions.NationState.AVAILABLE
+                : NationOptions.NationState.NOT_AVAILABLE);
+        }
+        game.setNationOptions(nationOptions);
+        for (Nation n : spec.getNations()) {
+            if (n.isUnknownEnemy()) continue;
+            boolean european = n.getType().isEuropean() && !n.getType().isREF();
+            if (european && !europeans.contains(n.getId())) continue;
+            Player p = new ServerPlayer(game, false, n);
+            p.setAI(!european);
+            game.addPlayer(p);
+        }
+        return game;
+    }
+
+    /**
+     * Generate a map for a game and give the start tile of each of the
+     * given European nations: the tile of its ship, its entry tile.
+     *
+     * @param game The {@code Game} to generate the map for.
+     * @param seed The map generator's seed.
+     * @param nations The identifiers of the European nations.
+     * @return Their start tiles, in the same order.
+     */
+    private static List<Tile> startTiles(Game game, int seed,
+                                         List<String> nations) {
+        new SimpleMapGenerator(new Random(seed))
+            .generateMap(game, null, true, new LogBuilder(-1));
+        List<Tile> starts = new ArrayList<>();
+        for (String id : nations) {
+            final Player p = game.getPlayerByNationId(id);
+            final Tile t = p.getEntryTile();
+            assertNotNull(id + " seed " + seed, t);
+            assertTrue(id + " seed " + seed, p.getUnitSet().stream()
+                .anyMatch(u -> u.isNaval() && u.getTile() == t));
+            starts.add(t);
+        }
+        return starts;
+    }
+
+    /**
+     * Whether tiles are given north to south.
+     *
+     * @param tiles The {@code Tile}s.
+     * @return True if every tile lies south of the one before.
+     */
+    private static boolean northToSouth(List<Tile> tiles) {
+        for (int i = 1; i < tiles.size(); i++) {
+            if (tiles.get(i).getY() <= tiles.get(i - 1).getY()) return false;
+        }
+        return true;
+    }
+
+    /**
+     * The European start order (master plan N6): the nations take the
+     * fixed order England, France, the Netherlands, Spain, and the other
+     * nations of the rules follow in the specification's order, whatever
+     * order the players come in.
+     */
+    public void testStartOrderList() {
+        final List<String> order = List.of(
+            "model.nation.english", "model.nation.french",
+            "model.nation.dutch", "model.nation.spanish",
+            "model.nation.portuguese", "model.nation.swedish",
+            "model.nation.danish", "model.nation.russian");
+        assertEquals(order.subList(0, 4),
+                     EuropeanStartingPositionsGenerator.START_ORDER);
+        Game game = makeNewGame("freecol", order);
+        List<Player> players = new ArrayList<>();
+        for (Player p : game.getLiveEuropeanPlayerList()) {
+            if (!p.isREF()) players.add(p);
+        }
+        assertEquals(order.size(), players.size());
+        java.util.Collections.reverse(players);
+        for (int round = 0; round < 2; round++) {
+            List<String> ids = new ArrayList<>();
+            for (Player p : EuropeanStartingPositionsGenerator.startOrder(
+                     game.getSpecification(), players)) {
+                ids.add(p.getNationId());
+            }
+            assertEquals(order, ids);
+            java.util.Collections.shuffle(players, new Random(round));
+        }
+    }
+
+    /**
+     * The fixed start order on the map (master plan N6): on a square map,
+     * the Classic UI's, the ships of England, France, the Netherlands and
+     * Spain start from north to south, every one in the column inside the
+     * outer ring (C2).  Fewer nations keep their order, and the other
+     * nations of the freecol rules start south of Spain, the Russians on
+     * the west coast as before.  An isometric map keeps FreeCol's
+     * shuffled order.
+     */
+    public void testFixedStartOrderNorthToSouth() {
+        final Topology saved = Topology.current();
+        final List<String> classic
+            = EuropeanStartingPositionsGenerator.START_ORDER;
+        final List<String> all = List.of(
+            "model.nation.english", "model.nation.french",
+            "model.nation.dutch", "model.nation.spanish",
+            "model.nation.portuguese", "model.nation.swedish",
+            "model.nation.danish");
+        final String russian = "model.nation.russian";
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            // The Classic UI's new game: the levi rules, four nations.
+            for (int seed = 1; seed <= 5; seed++) {
+                Game game = makeNewGame("levi", classic);
+                final List<Tile> starts = startTiles(game, seed, classic);
+                final String what = "levi seed " + seed + " " + starts;
+                assertTrue(what, northToSouth(starts));
+                for (Tile t : starts) {
+                    assertEquals(what, game.getMap().getWidth() - 2, t.getX());
+                }
+            }
+            // Two nations: the Netherlands north of Spain.
+            final List<String> two = List.of("model.nation.dutch",
+                                             "model.nation.spanish");
+            for (int seed = 1; seed <= 3; seed++) {
+                final List<Tile> starts
+                    = startTiles(makeNewGame("levi", two), seed, two);
+                assertTrue("two, seed " + seed + " " + starts,
+                           northToSouth(starts));
+            }
+            // All the European nations of the freecol rules.
+            final List<String> eight = new ArrayList<>(all);
+            eight.add(russian);
+            for (int seed = 1; seed <= 3; seed++) {
+                Game game = makeNewGame("freecol", eight);
+                final List<Tile> starts = startTiles(game, seed, eight);
+                final String what = "freecol seed " + seed + " " + starts;
+                assertTrue(what, northToSouth(starts.subList(0, all.size())));
+                assertEquals(what, 1, starts.get(all.size()).getX());
+            }
+
+            // Isometric: no ring, FreeCol's shuffle.
+            Topology.setCurrent(Topology.ISOMETRIC);
+            int shuffled = 0;
+            for (int seed = 1; seed <= 3; seed++) {
+                Game game = makeNewGame("freecol", eight);
+                final List<Tile> starts = startTiles(game, seed, all);
+                assertFalse(game.getMap().hasOuterRing());
+                if (!northToSouth(starts)) shuffled++;
+            }
+            assertTrue("isometric starts keep FreeCol's shuffle", shuffled > 0);
+        } finally {
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
      * The terrain of a map and the tiles of the European ships, as text.
      *
      * @param game The {@code Game} with the map.

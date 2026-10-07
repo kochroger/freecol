@@ -871,6 +871,17 @@ have it too. Isometric maps, and maps built otherwise (the tests'
   clamp (FINAL F1). At the original's start the high seas are one column
   wide: (56,42) is Seeweg, (55,42) is ocean (EUQ move M1), so there the
   innermost high seas tile is the last drawn column.
+- **The start order (N6).** With the classic starting positions (the
+  default), the nations take the start tiles of such a map from north to
+  south in a fixed order: England, France, the Netherlands, Spain
+  (`EuropeanStartingPositionsGenerator.START_ORDER`, Roger's "Probelauf" in
+  the original). Nations the list does not name (the freecol rules' other
+  four) follow in the specification's order; fewer nations keep the order.
+  FreeCol's sampling of the column's rows is unchanged: with four nations on
+  our maps it gives the rows 9, 26, 43 and 60 (20 of 20 generated games), so
+  England starts at (56,9), France at (56,26), the Netherlands at (56,43) and
+  Spain at (56,60). Before, the same four tiles were dealt out in FreeCol's
+  shuffled order. A map without the ring (isometric) keeps the shuffle.
 - **Repeatable starts (N18).** `--seed N` now also seeds a new game's server
   random numbers (`FreeColServer`; before, only a loaded game's), and that one
   `Random` feeds the map generator, the start positions and the AI: the same
@@ -879,8 +890,10 @@ have it too. Isometric maps, and maps built otherwise (the tests'
 
 Tests: `OuterRingTest` (the ring, moves, paths to and from Europe, the edge
 columns, start tiles, the safe tile, the attribute, the load fixes),
-`MapGeneratorTest.testStartsKeepOffTheOuterRing` (both topologies) and
-`testSeedFixesTheNewGame`, `ClassicViewRuleTest.testNewGamesStartInCell14x6`,
+`MapGeneratorTest.testStartsKeepOffTheOuterRing` (both topologies),
+`testSeedFixesTheNewGame`, `testStartOrderList` and
+`testFixedStartOrderNorthToSouth` (N6),
+`ClassicViewRuleTest.testNewGamesStartInCell14x6`,
 `InGameControllerTest.testMoveOntoTheOuterRingIsRefused` (the server).
 
 ### End of turn and hand-over (`ClassicTurnFlow`, `ClassicOneShot`; build spec W5)

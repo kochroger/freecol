@@ -55,13 +55,48 @@ import net.sf.freecol.server.model.ServerUnit;
 class EuropeanStartingPositionsGenerator {
     
     private static final Logger logger = Logger.getLogger(EuropeanStartingPositionsGenerator.class.getName());
+
+    /**
+     * The fixed start order of the European nations, north to south, on a
+     * map with the outer ring (the Classic UI's square maps) with the
+     * classic starting positions: England, France, the Netherlands,
+     * Spain, as in Roger's "Probelauf" game of the original (master plan
+     * N6).  A nation not named here follows them, in the order of the
+     * specification.
+     */
+    static final List<String> START_ORDER = List.of(
+        "model.nation.english", "model.nation.french",
+        "model.nation.dutch", "model.nation.spanish");
+
     private final Random random;
-    
-    
+
+
     EuropeanStartingPositionsGenerator(Random random) {
         this.random = random;
     }
-    
+
+
+    /**
+     * Sort European players into the fixed start order.
+     *
+     * @param spec The {@code Specification} that orders the nations
+     *     {@link #START_ORDER} does not name.
+     * @param players The European players.
+     * @return A new list of the players, in {@link #START_ORDER} and then
+     *     in the specification's order of their nations.
+     */
+    static List<Player> startOrder(Specification spec, List<Player> players) {
+        final List<Nation> nations = spec.getNations();
+        final ToIntFunction<Player> rank = p -> {
+            final int i = START_ORDER.indexOf(p.getNationId());
+            return (i >= 0) ? i
+                : START_ORDER.size() + nations.indexOf(p.getNation());
+        };
+        return players.stream()
+            .sorted(Comparator.comparingInt(rank))
+            .collect(Collectors.toList());
+    }
+
 
     /**
      * Creates and places the European units as determined by the map settings.
@@ -283,6 +318,7 @@ class EuropeanStartingPositionsGenerator {
         }
 
         // Now consider what type of positions we are selecting from
+        List<Player> order = europeanPlayers;
         switch (positionType) {
         case GameOptions.STARTING_POSITIONS_CLASSIC:
             // Break the lists up into at least <number> candidate
@@ -291,6 +327,17 @@ class EuropeanStartingPositionsGenerator {
             sampleTiles(eastSeaTiles, number);
             sampleTiles(westLandTiles, number);
             sampleTiles(westSeaTiles, number);
+            if (map.hasOuterRing()) {
+                // The original's order: the candidates north to south,
+                // taken by the nations in START_ORDER.
+                final Comparator<Tile> northToSouth
+                    = Comparator.comparingInt(Tile::getY);
+                eastLandTiles.sort(northToSouth);
+                eastSeaTiles.sort(northToSouth);
+                westLandTiles.sort(northToSouth);
+                westSeaTiles.sort(northToSouth);
+                order = startOrder(map.getSpecification(), europeanPlayers);
+            }
             break;
         case GameOptions.STARTING_POSITIONS_RANDOM:
             // Random starts are the same as classic but do not
@@ -305,7 +352,7 @@ class EuropeanStartingPositionsGenerator {
         }
 
         final java.util.Map<Player, Tile> playerStartingTiles = new HashMap<>();
-        for (Player player : europeanPlayers) {
+        for (Player player : order) {
             boolean startEast = player.getNation().getStartsOnEastCoast();
             boolean startAtSea = !playerStartingUnits.get(player).getCarriers().isEmpty();
 
