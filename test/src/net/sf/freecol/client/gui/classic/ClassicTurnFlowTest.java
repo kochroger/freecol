@@ -94,6 +94,8 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         java.util.function.UnaryOperator<Unit> cycle = a -> null;
         /** The scripted "anything due". */
         boolean due = false;
+        /** The classic pref turnStartFromCursor (I2; on as by default). */
+        boolean fromCursor = true;
 
         @Override public boolean myTurn() { return this.myTurn; }
         @Override public boolean blocked() { return this.blocked; }
@@ -108,6 +110,11 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         public Unit cycleNext(Unit anchor) {
             return (this.real != null) ? this.real.next(anchor, this.me)
                 : this.cycle.apply(anchor);
+        }
+
+        @Override
+        public void finished(Unit unit) {
+            if (this.real != null) this.real.finished(unit, this.me);
         }
 
         @Override
@@ -130,6 +137,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         public void turnEnding() {
             this.calls.add("ending");
             if (this.real != null) this.real.snapshot(this.me);
+            if (this.real != null) this.real.turnEnds(this.me, this.fromCursor);
         }
 
         @Override
@@ -145,12 +153,14 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         public void runGoto(Unit unit) {
             this.calls.add("goto " + unit.getId());
             if (this.real != null) this.real.ran(unit);
+            if (this.real != null) this.real.activated(unit);
             if (this.onGoto != null) this.onGoto.accept(unit);
         }
 
         @Override
         public void visit(Unit unit) {
             this.calls.add("visit " + unit.getId());
+            if (this.real != null) this.real.activated(unit);
         }
 
         @Override
@@ -178,6 +188,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         public void activate(Unit unit) {
             this.active = unit;
             this.calls.add("activate " + unit.getId());
+            if (this.real != null) this.real.activated(unit);
         }
 
         @Override
@@ -1206,13 +1217,39 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
      * stays the player's, due as ORDERS, and is not run again (FreeCol's
      * end-of-turn goto pass must not find it, C FINAL "Open" item 9);
      * skipped, the cycle goes on after it; next turn it is a goto unit
-     * again, at its place (c6 #9413: the G of 1730).
+     * again, at its place (c6 #9413: the G of 1730).  The turn start with
+     * the switch turnStartFromCursor off (I2): the head of the due units,
+     * as the clips.
      */
     public void testGotoRunsOncePerTurn() {
+        final Rig r = gotoRunsOncePerTurn(false);
+        final Unit g = r.host.real.next(null, r.host.me);
+        assertSame(g, r.flow.pending().unit);
+        assertNotNull(g.getDestination());
+        assertEquals("TURN_START ACTIVATE@300 GOTO@400", r.flow.pending().toString());
+    }
+
+    /**
+     * {@link #testGotoRunsOncePerTurn} with the switch on (Roger's rule,
+     * the default): the turn ended with b up and due, so the next turn
+     * starts with b, not with the goto unit at the head.
+     */
+    public void testGotoRunsOncePerTurnFromTheCursor() {
+        final Rig r = gotoRunsOncePerTurn(true);
+        final Unit b = r.flow.pending().unit;
+        assertNull(b.getDestination());
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertEquals("TURN_START ACTIVATE@300", r.flow.pending().toString());
+        assertEquals(ClassicUnitCycle.cursorOn(b), ClassicUnitCycle.cursor(r.host.me));
+    }
+
+    /** The goto-once run up to the next turn start, with the switch as given. */
+    private Rig gotoRunsOncePerTurn(boolean fromCursor) {
         final Unit a = ship(5, 5), g = ship(7, 5), b = ship(9, 5);
         g.setDestination(this.map.getTile(12, 12));
         final Rig r = new Rig(this.game);
         r.host.real = new ClassicUnitCycle();
+        r.host.fromCursor = fromCursor;
         assertSame(ClassicUnitCycle.Kind.GOTO, r.host.dueKind(g));
         assertSame(ClassicUnitCycle.Kind.ORDERS, r.host.dueKind(b));
         r.host.active = a;
@@ -1237,12 +1274,102 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         r.advanceMs(500);
         assertEquals(1, r.count("activate " + b.getId()));
         assertEquals(1, r.count("goto " + g.getId()));
-        // The next turn: a goto unit again, the head of the due units.
+        // The next turn: a goto unit again, at its place.
         nextTurn(r, 2);
         g.setState(Unit.UnitState.ACTIVE);         // the server's new turn
         assertTrue(r.flow.unitChosen(b, null));
-        assertSame(g, r.flow.pending().unit);
-        assertEquals("TURN_START ACTIVATE@300 GOTO@400", r.flow.pending().toString());
+        return r;
+    }
+
+    /** A turn of three ships for the cursor tests: a, b, c, with the real cycle. */
+    private Unit[] threeShips(Rig r, boolean fromCursor) {
+        final Unit[] u = { ship(5, 5), ship(7, 5), ship(9, 5) };
+        r.host.real = new ClassicUnitCycle();
+        r.host.fromCursor = fromCursor;
+        return u;
+    }
+
+    /**
+     * I2, the turn start through the cursor: a turn whose last finished
+     * unit was b (a and c done before) starts with c, the first due unit
+     * after b (Roger's rule); with the switch off with a, the head (the
+     * clips).  The last move goes through the flow's end view
+     * ({@link ClassicTurnFlow#dueInstead}), which moves the cursor past b.
+     */
+    public void testTurnStartFromTheCursor() {
+        for (boolean on : new boolean[] { true, false }) {
+            final Rig r = new Rig(this.game);
+            final Unit[] u = threeShips(r, on);
+            final Unit a = u[0], b = u[1], c = u[2];
+            r.host.me.setClassicCycleCursor(-1L);
+            a.setMovesLeft(0);
+            c.setMovesLeft(0);
+            choose(r, a, null);                          // the first unit: b
+            assertEquals(1, r.count("activate " + b.getId()));
+            assertEquals(ClassicUnitCycle.cursorOn(b), ClassicUnitCycle.cursor(r.host.me));
+            b.setMovesLeft(0);                           // its last move
+            assertFalse(r.flow.dueInstead(b));           // nothing due: the end view
+            assertEquals(ClassicUnitCycle.cursorPast(b), ClassicUnitCycle.cursor(r.host.me));
+            r.flow.noUnitLeft();
+            nextTurn(r, 2);
+            assertEquals((on) ? ClassicUnitCycle.cursorPast(b) : -1L,
+                         ClassicUnitCycle.cursor(r.host.me));
+            for (Unit x : u) x.setMovesLeft(x.getInitialMovesLeft());
+            r.host.active = null;
+            assertTrue(r.flow.unitChosen(a, null));      // the turn start
+            assertSame("on=" + on, (on) ? c : a, r.flow.pending().unit);
+            assertEquals("TURN_START ACTIVATE@300", r.flow.pending().toString());
+            assertEquals((on) ? 2 : 1, r.count("putBack " + a.getId()));
+            for (Unit x : u) x.dispose();
+        }
+    }
+
+    /**
+     * I2: no unit up in the middle of the turn (back from a colony or
+     * Europe, after a box or the terrain view) and the controller chooses
+     * the ship by its own order: the unit at the cursor comes, at once,
+     * never the ship; the unit there done meanwhile, the next one after
+     * it.  Also through the flow's other null anchors (no candidate,
+     * the idle end's due units).
+     */
+    public void testNoUnitUpBringsTheCursorsUnit() {
+        final Rig r = new Rig(this.game);
+        final Unit[] u = threeShips(r, true);
+        final Unit a = u[0], b = u[1], c = u[2];
+        choose(r, a, null);                              // the first unit: a, the head
+        assertEquals(1, r.count("activate " + a.getId()));
+        assertEquals(0, r.count("putBack " + a.getId()));
+        assertTrue(r.flow.waited(a));                    // W: b now
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertEquals(ClassicUnitCycle.cursorOn(b), ClassicUnitCycle.cursor(r.host.me));
+        // The colony screen: no unit up; the controller's choice a.
+        r.host.active = null;
+        assertTrue(r.flow.unitChosen(a, null));
+        assertEquals(2, r.count("activate " + b.getId()));
+        assertEquals(1, r.count("putBack " + a.getId()));
+        assertSame(b, r.host.active);
+        assertNull(r.flow.pending());                    // at once
+        // b done meanwhile (unseen): the next after it, c.
+        b.setMovesLeft(0);
+        r.host.active = null;
+        assertTrue(r.flow.unitChosen(a, null));
+        assertEquals(1, r.count("activate " + c.getId()));
+        assertEquals(2, r.count("putBack " + a.getId()));
+        // The controller's own choice is the cycle's: at once, as before.
+        r.host.active = null;
+        assertFalse(r.flow.unitChosen(c, null));
+        // The end view with no unit up: the cursor's unit, as a hand-over.
+        r.host.active = null;
+        assertTrue(r.flow.dueInstead(null));
+        assertSame(c, r.flow.pending().unit);
+        // A click is not replaced.
+        assertFalse(r.flow.unitClicked(a, null));
+        for (Unit x : u) x.dispose();
+    }
+
+    /** The controller chooses: the flow takes it, or it is made active at once (ClassicGUI.changeView). */
+    private static void choose(Rig r, Unit unit, Unit previous) {
+        if (!r.flow.unitChosen(unit, previous)) r.host.activate(unit);
     }
 
     /**

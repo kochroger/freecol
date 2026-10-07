@@ -65,7 +65,7 @@ import net.sf.freecol.common.model.Unit;
  *   <li><b>Turn start</b> (W5e): the panel is wiped and the year changes
  *   in one paint ({@link #wipe}), when the controller first shows our new
  *   turn and no box is up (so FreeCol's turn-start messages come before
- *   the year flips, W5g); the head of the cycle's block follows
+ *   the year flips, W5g); the block of the cycle's first unit (from its cursor) follows
  *   {@link #TURN_START_MS} later, or with a jump the jump at
  *   {@link #TURN_START_JUMP_MS} and the block one to two frames after it;
  *   a goto unit's first step {@link #GOTO_START_MS} after its block.</li>
@@ -227,11 +227,21 @@ final class ClassicTurnFlow {
 
         /**
          * @param anchor The unit that has just finished, or null for the
-         *     head of the list (the turn start).
+         *     cycle's cursor (the turn start, and any choice with no unit
+         *     that has just finished).
          * @return The cycle's next due unit, or null
          *     ({@link ClassicUnitCycle#next}).
          */
         Unit cycleNext(Unit anchor);
+
+        /**
+         * A unit is finished for this turn (its last move, Space, its goto
+         * ran, its visit shown, gone): the cycle's cursor moves past it
+         * ({@link ClassicUnitCycle#finished}).
+         *
+         * @param unit The unit.
+         */
+        void finished(Unit unit);
 
         /** @return Whether any unit is due in the cycle. */
         boolean anyDue();
@@ -816,7 +826,7 @@ final class ClassicTurnFlow {
      * fallback tile), but the unit cycle has one due: a goto unit, a
      * visit, or a goto unit that ran and is still active with moves.  It
      * comes as a hand-over from the previous unit, or as the turn start's
-     * head of the list; the map keeps the previous unit meanwhile (W5b).
+     * first unit (from the cycle's cursor); the map keeps the previous unit meanwhile (W5b).
      * FreeCol's controller no longer brings goto units in the Classic UI
      * (its batch is off, W5f).
      *
@@ -832,7 +842,11 @@ final class ClassicTurnFlow {
             || (p != null && p.kind == Kind.PROMPT_END)) return false;
         final int turn = this.host.turnNumber();
         final boolean newTurn = !this.turnStarted || turn != this.activatedTurn;
-        if (newTurn) beginTurn();
+        if (newTurn) {
+            beginTurn();
+        } else if (ranOut(previous)) {
+            this.host.finished(previous);   // also the turn's last unit
+        }
         if (!this.host.anyDue()) return false;
         this.choices++;
         if (p != null && (p.kind == Kind.TURN_START || p.kind == Kind.HANDOVER)) {
@@ -945,7 +959,18 @@ final class ClassicTurnFlow {
             return true;
         }
         if (unit == previous) return false;   // the re-selection after a move
+        if (!fixed && previous == null) {
+            // No unit up in the middle of the turn (back from a colony or
+            // Europe, after a box or the terrain view): the cycle's choice
+            // from its cursor, not the controller's (its own order, which
+            // brought the ship again), at once as the controller's.
+            final Unit target = cycleChoice(unit, null, "no unit up");
+            if (target == unit) return false;
+            bringNow(target);
+            return true;
+        }
         if (ranOut(previous)) {
+            this.host.finished(previous);
             if (boarding) {
                 ClassicFrameRecorder.event("handover", "after boarding: carrier "
                     + unit.getId() + " (boarded " + previous.getId() + ")");
@@ -1045,8 +1070,8 @@ final class ClassicTurnFlow {
 
     /**
      * The unit the cycle brings instead of the controller's choice
-     * {@code chosen}: the next due unit after {@code anchor} (the head at
-     * the turn start).  The controller's choice is put back to the front
+     * {@code chosen}: the next due unit after {@code anchor} (without one, from the
+     * cycle's cursor: the turn start, no unit up).  The controller's choice is put back to the front
      * of FreeCol's cycle when another unit comes.
      *
      * @param chosen The controller's choice, or null.
@@ -1070,7 +1095,7 @@ final class ClassicTurnFlow {
     }
 
     /**
-     * Start the turn start for the head of the cycle, with the wipe now if
+     * Start the turn start for the cycle's first unit, with the wipe now if
      * no box is up (else at the box's close).
      *
      * @param target The unit.
@@ -1104,7 +1129,9 @@ final class ClassicTurnFlow {
      * @param why What hands over (for the recorder).
      */
     private void afterUnit(Unit anchor, String why) {
-        if (this.disposed || !this.host.myTurn() || this.ending || !this.turnStarted) return;
+        if (this.disposed || !this.host.myTurn() || this.ending) return;
+        this.host.finished(anchor);   // not after our end: it settled the cursor
+        if (!this.turnStarted) return;
         final Unit next = this.host.cycleNext(anchor);
         if (next != null) {
             if (ClassicFrameRecorder.on()) {

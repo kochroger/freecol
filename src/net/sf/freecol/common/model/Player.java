@@ -214,6 +214,16 @@ public class Player extends FreeColGameObject implements Nameable {
      */
     protected volatile int classicTips = 0;
 
+    /**
+     * The Classic UI's unit cycle cursor: a place in the original's unit
+     * list, -1 for the head, else twice the cycle's rank of a unit (plus one
+     * for just past it).  Where the cycle goes on after a load, and where
+     * the next turn starts (kept in the save).
+     * Written by the client's view on the event thread, read by the
+     * server's save.
+     */
+    protected volatile long classicCycleCursor = -1L;
+
     /** Is this player an admin? */
     protected boolean admin;
 
@@ -519,6 +529,26 @@ public class Player extends FreeColGameObject implements Nameable {
      */
     public void setClassicTips(int classicTips) {
         this.classicTips = classicTips;
+    }
+
+    /**
+     * Gets the Classic UI's unit cycle cursor.
+     *
+     * @return The cursor, -1 for the head (and in a save without the
+     *     attribute).
+     */
+    public long getClassicCycleCursor() {
+        return classicCycleCursor;
+    }
+
+    /**
+     * Sets the Classic UI's unit cycle cursor.
+     *
+     * @param classicCycleCursor The cursor; any negative value is the
+     *     head (-1).
+     */
+    public void setClassicCycleCursor(long classicCycleCursor) {
+        this.classicCycleCursor = (classicCycleCursor < 0) ? -1L : classicCycleCursor;
     }
 
     /**
@@ -4208,6 +4238,8 @@ public class Player extends FreeColGameObject implements Nameable {
         // Never forgets one: a woodcut seen stays seen.
         this.classicWoodcuts |= o.getClassicWoodcuts();
         this.classicTips |= o.getClassicTips();
+        // The unit cycle cursor is the client's own (the server's copy only
+        // mirrors it for the save): an update in flight never moves it.
         this.admin = o.isAdmin();
         this.ai = o.isAI();
         this.ready = o.getReady();
@@ -4261,6 +4293,7 @@ public class Player extends FreeColGameObject implements Nameable {
     private static final String ATTACKED_BY_PRIVATEERS_TAG = "attackedByPrivateers";
     private static final String BANKRUPT_TAG = "bankrupt";
     private static final String BAN_MISSIONS_TAG = "banMissions";
+    private static final String CLASSIC_CYCLE_CURSOR_TAG = "classicCycleCursor";
     private static final String CLASSIC_TIPS_TAG = "classicTips";
     private static final String CLASSIC_WOODCUTS_TAG = "classicWoodcuts";
     private static final String CURRENT_FATHER_TAG = "currentFather";
@@ -4349,6 +4382,10 @@ public class Player extends FreeColGameObject implements Nameable {
 
             if (classicTips != 0) {
                 xw.writeAttribute(CLASSIC_TIPS_TAG, classicTips);
+            }
+
+            if (classicCycleCursor >= 0) {
+                xw.writeAttribute(CLASSIC_CYCLE_CURSOR_TAG, classicCycleCursor);
             }
         }
 
@@ -4532,6 +4569,8 @@ public class Player extends FreeColGameObject implements Nameable {
         classicWoodcuts = xr.getAttribute(CLASSIC_WOODCUTS_TAG, 0);
 
         classicTips = xr.getAttribute(CLASSIC_TIPS_TAG, 0);
+
+        setClassicCycleCursor(xr.getAttribute(CLASSIC_CYCLE_CURSOR_TAG, -1L));
 
         independentNationName = xr.getAttribute(INDEPENDENT_NATION_NAME_TAG,
                                                 (String)null);

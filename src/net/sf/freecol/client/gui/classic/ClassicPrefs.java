@@ -74,6 +74,17 @@ import net.sf.freecol.common.io.FreeColDirectories;
  *   <tr><td>{@value #REPORT_TRAINED} ... {@value #REPORT_REBEL_MAJORITY}</td><td>Bericht, wenn / bei ...</td><td>the matching FreeCol notices ({@link #REPORTS})</td></tr>
  * </table>
  *
+ * <p>Keys in no box ({@link #HIDDEN}), set only in the file (or by a
+ * script's {@code pref}):
+ * <table>
+ *   <caption>Hidden prefs</caption>
+ *   <tr><th>Key</th><th>Default</th><th>Here</th></tr>
+ *   <tr><td>{@value #TURN_START_FROM_CURSOR}</td><td>on</td><td>a new turn
+ *   starts where the last one stopped (Roger's rule; off: at the head of
+ *   the unit list, as every turn start of the clips, I-prep cycle.md
+ *   section 2), {@link ClassicUnitCycle#turnEnds}</td></tr>
+ * </table>
+ *
  * <p>Read a pref where it is used ({@code ClassicPrefs.get().is(...)}), not
  * once at start: the original applies a change in the same turn (the
  * Spielzugende row is read at the idle decision).  Unknown keys are a
@@ -143,7 +154,15 @@ final class ClassicPrefs {
     /** Bericht bei Rebellen-Mehrheiten. */
     static final String REPORT_REBEL_MAJORITY = "reportRebelMajority";
 
-    /** The classic prefs and their defaults, in the boxes' order. */
+    /**
+     * In no box: a new turn starts with the first due unit after the one
+     * that finished last, or with the unit still up when the turn ended
+     * (Roger's rule, on); off: at the head of the unit list, as the clips
+     * show ({@link ClassicUnitCycle#turnEnds}).
+     */
+    static final String TURN_START_FROM_CURSOR = "turnStartFromCursor";
+
+    /** The classic prefs and their defaults, in the boxes' order, then {@link #HIDDEN}. */
     static final Map<String, Boolean> DEFAULTS;
     static {
         final Map<String, Boolean> m = new LinkedHashMap<>();
@@ -162,8 +181,13 @@ final class ClassicPrefs {
         m.put(REPORT_NEW_GOODS, Boolean.TRUE);
         m.put(REPORT_SONS_OF_LIBERTY, Boolean.TRUE);
         m.put(REPORT_REBEL_MAJORITY, Boolean.TRUE);
+        m.put(TURN_START_FROM_CURSOR, Boolean.TRUE);
         DEFAULTS = Collections.unmodifiableMap(m);
     }
+
+    /** The classic prefs that no box shows (set in the file only). */
+    static final List<String> HIDDEN = Collections.unmodifiableList(Arrays.asList(
+        TURN_START_FROM_CURSOR));
 
     /**
      * The original's rows that are FreeCol client options: classic name to

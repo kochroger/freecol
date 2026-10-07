@@ -58,6 +58,7 @@ import net.sf.freecol.common.model.TileType;
 import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.option.GameOptions;
+import net.sf.freecol.server.FreeColServer;
 import net.sf.freecol.server.ServerTestHelper;
 import net.sf.freecol.server.model.LootSession;
 import net.sf.freecol.server.model.ServerEurope;
@@ -2679,6 +2680,58 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             onEdt(() -> goOn[0] = gui3.villageEntryKey(scout, toVillage));
             assertFalse(goOn[0]);                      // no map viewer: the move is dropped
             assertEquals(List.of("woodcut 7"), gui3.order);
+        }
+    }
+
+    /**
+     * I2: a save in the middle of a turn holds the unit cycle's cursor on
+     * the unit up (the view's activation, {@code ClassicGUI.cycleActivated}),
+     * and a load goes on at that same unit (clip006 began its load at U1,
+     * a settler in the middle of the list), through the server's real save
+     * and load; the next unit then the one after it.  A unit of another
+     * player does not move our cursor.
+     */
+    public void testLoadGoesOnAtTheSameUnit() throws Exception {
+        final File file = File.createTempFile("cursor-", ".fsg");
+        try {
+            final Game game = ServerTestHelper.startServerGame(getTestMap(true));
+            final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+            final Player french = game.getPlayerByNationId("model.nation.french");
+            final net.sf.freecol.common.model.UnitType colonist
+                = spec().getUnitType("model.unit.freeColonist");
+            final Map map = game.getMap();
+            final Unit a = new ServerUnit(game, map.getTile(5, 5), dutch, colonist);
+            final Unit b = new ServerUnit(game, map.getTile(6, 5), dutch, colonist);
+            final Unit c = new ServerUnit(game, map.getTile(7, 5), dutch, colonist);
+            final Unit f = new ServerUnit(game, map.getTile(9, 9), french, colonist);
+            final WoodcutGUI gui = new WoodcutGUI(game, dutch);
+            dutch.setClassicCycleCursor(-1L);
+            final Unit head = gui.unitCycle.next(null, dutch);
+            assertNotNull(head);
+            assertNotSame(b, head);
+            gui.cycleActivated(b);                       // b is up
+            gui.cycleActivated(f);                       // not ours: no change
+            gui.cycleActivated(null);
+            final long cursor = ClassicUnitCycle.cursorOn(b);
+            assertEquals(cursor, dutch.getClassicCycleCursor());
+            ServerTestHelper.getServer().saveGame(file, null, null);
+            ServerTestHelper.stopServerGame();
+
+            final FreeColServer loaded = ServerTestHelper.startServer(file, false, true);
+            final Game g2 = loaded.getGame();
+            final Player d2 = g2.getPlayerByNationId("model.nation.dutch");
+            assertEquals(cursor, d2.getClassicCycleCursor());
+            final Unit b2 = g2.getFreeColGameObject(b.getId(), Unit.class);
+            assertNotNull(b2);
+            final WoodcutGUI gui2 = new WoodcutGUI(g2, d2);
+            assertSame("the load goes on at b", b2, gui2.unitCycle.next(null, d2));
+            b2.setMovesLeft(0);
+            assertSame(g2.getFreeColGameObject(c.getId(), Unit.class),
+                       gui2.unitCycle.next(b2, d2));
+            assertTrue(a.getIdNumber() < b.getIdNumber());
+        } finally {
+            ServerTestHelper.stopServerGame();
+            file.delete();
         }
     }
 

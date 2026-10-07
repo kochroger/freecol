@@ -39,13 +39,15 @@ public class ClassicPrefsTest extends TestCase {
         assertFalse(p.is(ClassicPrefs.MOVE_ACCELERATOR));
         assertFalse(p.is(ClassicPrefs.END_TURN_PROMPT));
         assertTrue(p.is(ClassicPrefs.WATER_CYCLING));
+        assertTrue(p.is(ClassicPrefs.TURN_START_FROM_CURSOR));   // I2: Roger's rule
         assertEquals(Arrays.asList("showNativeMoves", "showEuropeanMoves",
                                    "moveAccelerator", "endTurnPrompt", "waterCycling",
                                    "buildingLabels", "goodsTerrainLabels",
                                    "reportTrained", "reportFoodShortage",
                                    "reportRawMaterialShortage", "reportToolsNeeded",
                                    "reportBadGovernment", "reportNewGoods",
-                                   "reportSonsOfLiberty", "reportRebelMajority"),
+                                   "reportSonsOfLiberty", "reportRebelMajority",
+                                   "turnStartFromCursor"),
                      new ArrayList<>(ClassicPrefs.DEFAULTS.keySet()));
         // The colony report options: all on (I, no clip shows the box).
         for (String k : ClassicPrefs.COLONY_ROWS) assertTrue(k, p.is(k));
@@ -105,7 +107,14 @@ public class ClassicPrefsTest extends TestCase {
             assertTrue(k, ClassicPrefs.isKnown(k));
             assertTrue(k, seen.add(k));
         }
-        assertEquals(ClassicPrefs.DEFAULTS.size() + ClassicPrefs.CLIENT_OPTIONS.size(),
+        // Every key in a box but the hidden ones (I2: turnStartFromCursor).
+        assertEquals(Arrays.asList("turnStartFromCursor"), ClassicPrefs.HIDDEN);
+        for (String k : ClassicPrefs.HIDDEN) {
+            assertTrue(k, ClassicPrefs.isKnown(k));
+            assertFalse(k, seen.contains(k));
+        }
+        assertEquals(ClassicPrefs.DEFAULTS.size() - ClassicPrefs.HIDDEN.size()
+                     + ClassicPrefs.CLIENT_OPTIONS.size(),
                      seen.size());
     }
 

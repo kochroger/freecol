@@ -344,6 +344,41 @@ public class PlayerTest extends FreeColTestCase {
         assertEquals(1 << 17, dutch.getClassicTips());
     }
 
+    /**
+     * The Classic UI's unit cycle cursor (I2): the attribute
+     * {@code classicCycleCursor} goes into a save and to its owner only
+     * while it is not the head (-1); a save or an older one without it
+     * reads -1; a rank past 32 bits survives; an update ({@code copyIn})
+     * never moves it (the client's own); a negative value is the head.
+     */
+    public void testClassicCycleCursor() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        assertEquals(-1L, dutch.getClassicCycleCursor());
+        assertFalse(dutch.serialize(net.sf.freecol.common.io.FreeColXMLWriter
+                .WriteScope.toSave()).contains("classicCycleCursor"));
+        final long rank = (1L << 32) | 5888L;
+        dutch.setClassicCycleCursor(rank);
+        final String save = dutch.serialize(
+            net.sf.freecol.common.io.FreeColXMLWriter.WriteScope.toSave());
+        assertTrue(save.contains("classicCycleCursor=\"" + rank + "\""));
+        assertTrue(dutch.serialize(dutch).contains("classicCycleCursor"));
+        assertFalse(dutch.serialize(french).contains("classicCycleCursor"));
+        final Player read = readPlayer(game, save);
+        assertEquals(rank, read.getClassicCycleCursor());
+        assertEquals(-1L, readPlayer(game, save.replace("classicCycleCursor=\"" + rank
+            + "\"", "")).getClassicCycleCursor());
+        read.setClassicCycleCursor(7L);
+        assertTrue(dutch.copyIn(read));
+        assertEquals(rank, dutch.getClassicCycleCursor());
+        read.setClassicCycleCursor(-1L);
+        assertTrue(dutch.copyIn(read));
+        assertEquals(rank, dutch.getClassicCycleCursor());
+        dutch.setClassicCycleCursor(-5L);
+        assertEquals(-1L, dutch.getClassicCycleCursor());
+    }
+
     /** A player read from XML, outside the game. */
     private static Player readPlayer(Game game, String xml) throws Exception {
         try (net.sf.freecol.common.io.FreeColXMLReader xr

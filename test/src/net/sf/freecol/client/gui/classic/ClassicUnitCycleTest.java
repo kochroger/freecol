@@ -456,4 +456,268 @@ public class ClassicUnitCycleTest extends FreeColTestCase {
         assertEquals(ClassicUnitCycle.rank(pioneer), ClassicUnitCycle.rank(pc));
         assertTrue(ClassicUnitCycle.rank(pc) < ClassicUnitCycle.rank(soldier));
     }
+
+
+    // The cursor (I2, I-prep cycle.md 3A/3B)
+
+    /**
+     * The start units (pioneer, soldier, ship: the ship first) and three
+     * later ones (farmer, Knecht, scout), every one due.
+     */
+    private static final class Six {
+        final Coast c = new Coast();
+        final Unit pioneer = c.land(5, 7), soldier = c.land(5, 8), ship = c.ship(10, 7);
+        final Unit farmer = c.land(4, 7), knecht = c.land(4, 8), scout = c.land(3, 7);
+        final ClassicUnitCycle cycle = new ClassicUnitCycle();
+
+        List<Unit> all() {
+            return List.of(ship, pioneer, soldier, farmer, knecht, scout);
+        }
+
+        /** Every unit done (its last move). */
+        void allDone() {
+            for (Unit u : all()) u.setMovesLeft(0);
+        }
+
+        /** The server's new turn: moves back, Space forgotten. */
+        void newTurn() {
+            for (Unit u : all()) {
+                if (u.isDisposed()) continue;
+                u.setMovesLeft(u.getInitialMovesLeft());
+                if (u.getState() == Unit.UnitState.SKIPPED) u.setState(Unit.UnitState.ACTIVE);
+            }
+            this.cycle.turnStarted(this.c.dutch);
+        }
+
+        /** A unit comes up, makes its last move, and the cycle goes on after it. */
+        Unit lastMove(Unit u) {
+            this.cycle.activated(u);
+            u.setMovesLeft(0);
+            this.cycle.finished(u, this.c.dutch);
+            return this.cycle.next(u, this.c.dutch);
+        }
+    }
+
+    /**
+     * Roger's rule (switch on): a turn that ended after the pioneer's last
+     * move (the others done before it) starts with the first due unit
+     * after the pioneer, the soldier; a later one after the soldier with
+     * the farmer; after the last unit of the list the wrap, the ship.
+     * Off: the head, the ship, as every clip turn start (clip008 1511
+     * -&gt; 1512 #35590: pioneer last, ship first).
+     */
+    public void testTurnStartsAfterTheLastFinishedUnit() {
+        for (boolean on : new boolean[] { true, false }) {
+            final Six s = new Six();
+            final Player d = s.c.dutch;
+            assertEquals(-1L, ClassicUnitCycle.cursor(d));
+            assertSame("a new game: the head", s.ship, s.cycle.next(null, d));
+            s.allDone();
+            s.pioneer.setMovesLeft(1);
+            assertNull(s.lastMove(s.pioneer));
+            assertEquals(ClassicUnitCycle.cursorPast(s.pioneer), ClassicUnitCycle.cursor(d));
+            s.cycle.turnEnds(d, on);
+            s.newTurn();
+            assertSame("on=" + on, on ? s.soldier : s.ship, s.cycle.next(null, d));
+            if (!on) continue;
+            s.allDone();
+            s.soldier.setMovesLeft(1);
+            assertNull(s.lastMove(s.soldier));
+            s.cycle.turnEnds(d, true);
+            s.newTurn();
+            assertSame(s.farmer, s.cycle.next(null, d));
+            s.allDone();
+            s.scout.setMovesLeft(1);
+            assertNull(s.lastMove(s.scout));
+            s.cycle.turnEnds(d, true);
+            s.newTurn();
+            assertSame(s.ship, s.cycle.next(null, d));
+        }
+    }
+
+    /**
+     * The turn ended while a unit was still up and due (Enter, the menu):
+     * the next turn starts with that unit.  A unit whose last move the
+     * cycle did not see (no finish call) is settled at the end: past it.
+     * A refused end puts the cursor back; with the switch off the end
+     * goes to the head, and a refusal back to the unit.  The turn start
+     * and clear() keep the cursor.
+     */
+    public void testTurnEndSettlesTheCursor() {
+        final Six s = new Six();
+        final Player d = s.c.dutch;
+        s.cycle.activated(s.farmer);
+        assertEquals(ClassicUnitCycle.cursorOn(s.farmer), ClassicUnitCycle.cursor(d));
+        s.cycle.turnEnds(d, true);
+        assertEquals("still due: on it", ClassicUnitCycle.cursorOn(s.farmer),
+                     ClassicUnitCycle.cursor(d));
+        s.newTurn();
+        assertSame(s.farmer, s.cycle.next(null, d));
+        // Unseen last move: settled past it.
+        s.cycle.activated(s.farmer);
+        s.farmer.setMovesLeft(0);
+        s.cycle.turnEnds(d, true);
+        assertEquals(ClassicUnitCycle.cursorPast(s.farmer), ClassicUnitCycle.cursor(d));
+        s.newTurn();
+        assertSame(s.knecht, s.cycle.next(null, d));
+        // Refused: back where it was.
+        s.cycle.activated(s.knecht);
+        s.cycle.turnEnds(d, false);
+        assertEquals(-1L, ClassicUnitCycle.cursor(d));
+        s.cycle.endRefused();
+        assertEquals(ClassicUnitCycle.cursorOn(s.knecht), ClassicUnitCycle.cursor(d));
+        assertSame(s.knecht, s.cycle.next(null, d));
+        // A second refusal without an end changes nothing.
+        s.cycle.endRefused();
+        assertEquals(ClassicUnitCycle.cursorOn(s.knecht), ClassicUnitCycle.cursor(d));
+        s.cycle.turnStarted(d);
+        s.cycle.clear();
+        assertEquals(ClassicUnitCycle.cursorOn(s.knecht), ClassicUnitCycle.cursor(d));
+    }
+
+    /**
+     * The cursor is a place, not a unit: the unit there gone, the next one
+     * ranked after it comes (also when it is gone after its finish); a new
+     * unit (bought, trained: a higher id) comes before the wrap; a unit
+     * not due there is passed over; a unit not due does not move it when
+     * it is selected again (the re-selection after a last move).
+     */
+    public void testCursorIsAPlace() {
+        final Six s = new Six();
+        final Player d = s.c.dutch;
+        s.cycle.activated(s.farmer);
+        s.farmer.dispose();
+        assertSame(s.knecht, s.cycle.next(null, d));
+        s.cycle.finished(s.farmer, d);             // gone: past it
+        assertEquals(ClassicUnitCycle.cursorPast(s.farmer), ClassicUnitCycle.cursor(d));
+        assertSame(s.knecht, s.cycle.next(null, d));
+        // The last of the list finished: a new unit before the wrap.
+        s.cycle.activated(s.scout);
+        s.scout.setMovesLeft(0);
+        s.cycle.finished(s.scout, d);
+        final Unit recruit = s.c.land(2, 7);
+        assertTrue(recruit.getIdNumber() > s.scout.getIdNumber());
+        assertSame(recruit, s.cycle.next(null, d));
+        // Not due there: passed over (here: in Europe).
+        recruit.setLocation(d.getEurope());
+        assertSame("the wrap", s.ship, s.cycle.next(null, d));
+        // Re-selection after the last move: no change.
+        final long before = ClassicUnitCycle.cursor(d);
+        s.cycle.activated(s.scout);
+        assertEquals(before, ClassicUnitCycle.cursor(d));
+        s.cycle.activated(null);
+        s.cycle.finished(null, d);
+        s.cycle.finished(s.ship, null);
+        assertEquals(before, ClassicUnitCycle.cursor(d));
+    }
+
+    /**
+     * Space: not again this turn (the cycle goes on after it, also from
+     * the cursor), again the next turn, in its place.  Two Ws in a row:
+     * both come again after the others, in the order of the Ws; W does not
+     * move the cursor past the waiting unit (the next unit's activation
+     * moves it on to that one).
+     */
+    public void testSpaceAndWait() {
+        final Six s = new Six();
+        final Player d = s.c.dutch;
+        s.ship.setMovesLeft(0);
+        s.cycle.activated(s.pioneer);
+        s.pioneer.setState(Unit.UnitState.SKIPPED);
+        s.cycle.finished(s.pioneer, d);
+        assertSame(s.soldier, s.cycle.next(s.pioneer, d));
+        assertSame(s.soldier, s.cycle.next(null, d));
+        for (Unit u : List.of(s.soldier, s.farmer, s.knecht, s.scout)) {
+            assertNotSame(s.pioneer, s.lastMove(u));
+        }
+        assertNull(s.cycle.next(null, d));          // nothing due: not the skipped one
+        s.cycle.turnEnds(d, true);
+        s.newTurn();
+        assertSame(s.ship, s.cycle.next(null, d)); // after the scout: the wrap
+        assertSame(s.pioneer, s.lastMove(s.ship)); // in its place again
+
+        // Two Ws: the pioneer waits, then the soldier.
+        final Six w = new Six();
+        final Player wd = w.c.dutch;
+        w.ship.setMovesLeft(0);
+        w.cycle.activated(w.pioneer);
+        Unit next = w.cycle.next(w.pioneer, wd);    // W
+        assertSame(w.soldier, next);
+        assertEquals(ClassicUnitCycle.cursorOn(w.pioneer), ClassicUnitCycle.cursor(wd));
+        w.cycle.activated(next);
+        next = w.cycle.next(w.soldier, wd);         // W
+        assertSame(w.farmer, next);
+        assertSame(w.knecht, w.lastMove(w.farmer));
+        assertSame(w.scout, w.lastMove(w.knecht));
+        assertSame(w.pioneer, w.lastMove(w.scout));
+        assertSame(w.soldier, w.lastMove(w.pioneer));
+        assertNull(w.lastMove(w.soldier));
+    }
+
+    /**
+     * The cursor goes where the game view says (the server's copy of our
+     * player too, for the save), only when it changes.
+     */
+    public void testCursorStore() {
+        final Six s = new Six();
+        final List<String> stored = new ArrayList<>();
+        s.cycle.storeWith((p, c) -> {
+                stored.add(p.getNationId() + "=" + c);
+                p.setClassicCycleCursor(c);
+            });
+        s.cycle.activated(s.farmer);
+        s.cycle.activated(s.farmer);
+        assertEquals(List.of("model.nation.dutch=" + ClassicUnitCycle.cursorOn(s.farmer)), stored);
+        s.cycle.storeWith(null);
+        s.cycle.activated(s.knecht);
+        assertEquals(1, stored.size());
+        assertEquals(ClassicUnitCycle.cursorOn(s.knecht), ClassicUnitCycle.cursor(s.c.dutch));
+        assertSame(s.knecht, ClassicUnitCycle.unitAt(s.c.dutch, ClassicUnitCycle.rank(s.knecht)));
+        assertNull(ClassicUnitCycle.unitAt(s.c.dutch, 5L));
+        assertEquals(-1L, ClassicUnitCycle.cursor(null));
+    }
+
+    /**
+     * The clip turn starts (I-prep cycle.md section 2) with the switch off
+     * (the head, as the clips show) and on (Roger's rule): clip007 1513
+     * -&gt; 1514, the ship skipped with Space last, the pioneer and the
+     * soldier on land due: off the ship (#9274), on the pioneer; landfall
+     * turn 7 -&gt; 8, the soldier's last move: off the ship (#18602), on
+     * the ship too (the wrap after the last of the list).
+     */
+    public void testClipTurnStartsWithTheSwitch() {
+        for (boolean on : new boolean[] { false, true }) {
+            Coast c = new Coast();
+            Unit pioneer = c.land(5, 7), soldier = c.land(5, 8), ship = c.ship(10, 7);
+            ClassicUnitCycle cycle = new ClassicUnitCycle();
+            pioneer.setMovesLeft(0);
+            soldier.setMovesLeft(0);
+            cycle.activated(ship);
+            ship.setState(Unit.UnitState.SKIPPED);
+            cycle.finished(ship, c.dutch);
+            cycle.turnEnds(c.dutch, on);
+            for (Unit u : List.of(pioneer, soldier, ship)) {
+                u.setMovesLeft(u.getInitialMovesLeft());
+            }
+            ship.setState(Unit.UnitState.ACTIVE);
+            cycle.turnStarted(c.dutch);
+            assertSame("c7 #9274 on=" + on, (on) ? pioneer : ship, cycle.next(null, c.dutch));
+
+            c = new Coast();
+            pioneer = c.land(5, 7);
+            soldier = c.land(5, 8);
+            ship = c.ship(10, 7);
+            cycle = new ClassicUnitCycle();
+            ship.setMovesLeft(0);
+            pioneer.setMovesLeft(0);
+            cycle.activated(soldier);
+            soldier.setMovesLeft(0);
+            cycle.finished(soldier, c.dutch);
+            cycle.turnEnds(c.dutch, on);
+            for (Unit u : List.of(pioneer, soldier, ship)) {
+                u.setMovesLeft(u.getInitialMovesLeft());
+            }
+            assertSame("LF #18602 on=" + on, ship, cycle.next(null, c.dutch));
+        }
+    }
 }

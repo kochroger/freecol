@@ -1846,8 +1846,10 @@ public class ClassicGUI extends GUI {
                 }
             });
         // The unit cycle of this game (W5f): FreeCol's goto batch off, the
-        // goto units move when the cycle reaches them.
+        // goto units move when the cycle reaches them.  Its cursor goes
+        // into the save too (I2).
         this.unitCycle.clear();
+        this.unitCycle.storeWith(this::storeCycleCursor);
         ClassicUnitCycle.show(this.unitCycle);
         gotoBatch(false);
         this.turnFlow = new ClassicTurnFlow(new TurnHost(), waitClock(),
@@ -2420,6 +2422,40 @@ public class ClassicGUI extends GUI {
     private void activateNow(Unit unit) {
         if (this.infoPanel != null) this.infoPanel.releaseBlock();
         this.mapViewer.changeToMoveUnits(unit);
+        cycleActivated(unit);
+    }
+
+    /**
+     * An own unit became the active one: the unit cycle's cursor is on it
+     * (I2, {@link ClassicUnitCycle#activated}; not for a unit that is not
+     * due, as the re-selection after a last move).
+     *
+     * @param unit The unit, or null.
+     */
+    void cycleActivated(Unit unit) {
+        final Player me = myPlayer();
+        if (unit != null && me != null && unit.getOwner() == me) {
+            this.unitCycle.activated(unit);
+        }
+    }
+
+    /**
+     * Put the unit cycle's cursor on our player and, in a single player
+     * game, on the server's copy of our player, which every save writes
+     * (autosaves included), so a load goes on at the same unit
+     * ({@link #markWoodcut}'s pattern).  Multiplayer: this session only.
+     *
+     * @param p Our player.
+     * @param cursor The cursor, -1 for the head.
+     */
+    private void storeCycleCursor(Player p, long cursor) {
+        p.setClassicCycleCursor(cursor);
+        final FreeColClient fcc = getFreeColClient();
+        final FreeColServer server = (fcc == null) ? null : fcc.getFreeColServer();
+        final Game sg = (server == null) ? null : server.getGame();
+        final Player sp = (sg == null) ? null
+            : sg.getFreeColGameObject(p.getId(), Player.class);
+        if (sp != null && sp != p) sp.setClassicCycleCursor(cursor);
     }
 
     /**
@@ -2751,6 +2787,11 @@ public class ClassicGUI extends GUI {
         }
 
         @Override
+        public void finished(Unit unit) {
+            unitCycle.finished(unit, getMyPlayer());
+        }
+
+        @Override
         public boolean anyDue() {
             return unitCycle.anyDue(getMyPlayer());
         }
@@ -2769,6 +2810,8 @@ public class ClassicGUI extends GUI {
         @Override
         public void turnEnding() {
             unitCycle.snapshot(getMyPlayer());
+            unitCycle.turnEnds(getMyPlayer(),
+                prefs().is(ClassicPrefs.TURN_START_FROM_CURSOR));
             voyages.note(getMyPlayer());
         }
 
@@ -2811,6 +2854,7 @@ public class ClassicGUI extends GUI {
             if (mapViewer == null) return;
             if (infoPanel != null) infoPanel.releaseBlock();
             mapViewer.changeToMoveUnits(unit);
+            cycleActivated(unit);
             // The block now, on time, in ONE panel paint: it is the panel
             // refresh the blink's first OFF is timed from (W3), and a second
             // one queued behind it would shift that phase.  So the actions
@@ -2857,11 +2901,13 @@ public class ClassicGUI extends GUI {
             // The goto unit is the one up while it moves (its block counts
             // its moves down).
             if (mapViewer.getActiveUnit() != unit) mapViewer.changeToMoveUnits(unit);
+            cycleActivated(unit);
             getFreeColClient().getInGameController().moveToDestination(unit);
         }
 
         @Override
         public void visit(Unit unit) {
+            cycleActivated(unit);
             if (mapViewer != null) mapViewer.visit(unit);
         }
 

@@ -1050,6 +1050,27 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   A goto unit that ran and is still active with moves is ORDERS: never run
   twice (FreeCol's end-of-turn goto pass must not find it, C FINAL "Open"
   item 9).
+- **The cycle's cursor (I2, `ClassicUnitCycle.cursor`, I-prep cycle.md
+  3A/3B).** A place in the unit list, kept on the player
+  (`Player.classicCycleCursor`, written to the save only when set; old
+  saves read -1, the head): twice a unit's rank when the unit became
+  active (the cycle's choice, a click, the boarding's carrier, a goto run,
+  a visit; a unit not due, as the re-selection after a last move, does
+  not move it), plus one once it finished (its last move, Space, its goto
+  ran, its visit shown, gone; W is no finish). Every choice with no unit
+  that has just finished takes the first due unit at or after the cursor,
+  wrapping (a unit gone or not due there is passed over, a new unit comes
+  before the wrap): back from a colony or Europe, after a box or the
+  terrain view, a load (the controller's own choice no longer stands there:
+  before, the ship came again), and the turn start. At our end request
+  the cursor is settled (`turnEnds`): past a unit that is done, on a unit
+  still due (the turn ended while it was up); with the classic pref
+  **`turnStartFromCursor`** (in `classic-options.properties`, in no box,
+  default on = Roger's rule) off it goes to the head instead, as every
+  turn start of the clips. A refused end puts it back. The view mirrors it
+  onto the server's copy of our player (as `markWoodcut`), so every save
+  holds it: a mid-turn save goes on at the unit up, a turn-start autosave
+  where the new turn starts.
 - **Goto units (W5f).** FreeCol's goto batch is off in the Classic UI
   (`InGameController.setGotoBatch(false)` while the game view is up, on
   again when it goes; default on, the standard GUI and the AI unchanged),

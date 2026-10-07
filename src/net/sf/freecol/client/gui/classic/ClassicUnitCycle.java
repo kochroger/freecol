@@ -27,6 +27,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.ObjLongConsumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -58,11 +59,25 @@ import net.sf.freecol.common.model.Unit;
  *   #35590, #40835; the empty ship after the last passenger landed,
  *   clip007 #3697.  A carrier with older passengers is not put before them
  *   (F2's rule, which put the empty start ship behind the pioneer).</li>
- *   <li><b>Where it goes on</b> ({@link #next}): each turn at the head of
- *   the list; after that, the first due unit after the one that has just
- *   finished, wrapping round to the head.  Clip006 rules out "the nearest
- *   unit first" and the tile order (U2 -&gt; U3 at (23,16), U3 -&gt;
- *   U4).</li>
+ *   <li><b>Where it goes on</b> ({@link #next}): after a unit that has just
+ *   finished, the first due unit after it, wrapping round to the head.
+ *   Clip006 rules out "the nearest unit first" and the tile order (U2
+ *   -&gt; U3 at (23,16), U3 -&gt; U4).  With no such unit (the turn start,
+ *   back from a colony or Europe, a box, the terrain view, a load): from
+ *   the <b>cursor</b>, never the head by default.</li>
+ *   <li><b>The cursor</b> (I-prep cycle.md 3A, {@link #cursor}): a place in
+ *   the order, -1 for the head, kept on the player
+ *   ({@code Player.classicCycleCursor}, in the save).  A unit that becomes
+ *   active puts it on itself ({@link #activated}); one that finishes (its
+ *   last move, Space, its goto ran, its visit shown, gone) moves it past
+ *   itself ({@link #finished}); W does not.  From the cursor the first due
+ *   unit ranked at or after it comes, wrapping round to the head; a unit
+ *   gone or not due there is passed over, a new unit (higher id) comes
+ *   before the wrap.  The turn start too: at our end the cursor is settled
+ *   ({@link #turnEnds}), past the unit if it is done, on it if it is still
+ *   due; with the classic pref {@code turnStartFromCursor} off (the clips:
+ *   every turn start at the head, cycle.md section 2) it goes back to the
+ *   head instead, so a turn-start autosave shows the same.</li>
  *   <li><b>Due units</b> ({@link #kind}): a unit that can take orders
  *   ({@code isCandidateForNextActiveUnit}, also W18's woken passengers);
  *   a goto or trade-route unit on the map that has not run yet this turn
@@ -80,11 +95,13 @@ import net.sf.freecol.common.model.Unit;
  *   listed (clip008 #45293).</li>
  * </ul>
  *
- * <p>The per-turn state is not saved: after a load the first unit is
- * FreeCol's saved active unit and the cycle goes on after it, and the
- * completions of a turn start before an (auto)save get no visit.  Event
- * thread only, except the static display helpers, which read what the
- * event thread last set.
+ * <p>The cursor is saved: a load goes on at the saved unit (a save in the
+ * middle of a turn holds the active unit, clip006 began a load at U1),
+ * or, from a turn-start autosave, where the new turn starts.  A save
+ * without it (older builds) starts at the head.  The rest of the per-turn
+ * state is not saved: the completions of a turn start before an
+ * (auto)save get no visit.  Event thread only, except the static display
+ * helpers, which read what the event thread last set.
  */
 final class ClassicUnitCycle {
 
@@ -155,6 +172,19 @@ final class ClassicUnitCycle {
     /** The tiles whose road is held (not drawn, not listed) now. */
     private final Set<Tile> heldRoads
         = Collections.newSetFromMap(new IdentityHashMap<>());
+
+    /**
+     * Where a new cursor goes: the player's field; the game view also puts
+     * it on the server's copy of our player, which the saves write
+     * ({@link #storeWith}).
+     */
+    private ObjLongConsumer<Player> store = Player::setClassicCycleCursor;
+
+    /** The player of our end request in flight, or null. */
+    private Player endPlayer = null;
+
+    /** The cursor before {@link #turnEnds}, put back if the end is refused. */
+    private long beforeEnd = -1L;
 
 
     // The order
@@ -313,10 +343,13 @@ final class ClassicUnitCycle {
     /**
      * The next unit of the cycle: the first due unit after {@code anchor}
      * in the original's order, wrapping to the head; the anchor itself
-     * last (W: a waiting unit comes again after the wrap).
+     * last (W: a waiting unit comes again after the wrap).  Without an
+     * anchor: the first due unit ranked at or after the player's cursor
+     * ({@link #cursor}; -1: the head), wrapping to the head.
      *
-     * @param anchor The unit that has just finished, or null for the head
-     *     (the turn start).
+     * @param anchor The unit that has just finished, or null for the
+     *     cursor (the turn start, and every choice in the middle of a turn
+     *     with no unit that has just finished).
      * @param player The player.
      * @return The unit, or null if none is due.
      */
@@ -330,6 +363,11 @@ final class ClassicUnitCycle {
             while (start < order.size() && rank(order.get(start), lowest, count) <= r) {
                 start++;
             }
+        } else {
+            final long c = cursor(player);
+            while (start < order.size() && cursorAt(rank(order.get(start), lowest, count)) < c) {
+                start++;
+            }
         }
         for (int i = 0; i < order.size(); i++) {
             final Unit u = order.get((start + i) % order.size());
@@ -337,6 +375,135 @@ final class ClassicUnitCycle {
         }
         return (anchor != null && anchor.getOwner() == player
                 && kind(anchor) != null) ? anchor : null;
+    }
+
+    // The cursor
+
+    /**
+     * The cursor on a rank: twice the rank (so "on a unit" and "just past
+     * it" are two values that never meet the next unit's, whose id may be
+     * the next number).
+     *
+     * @param rank A rank ({@link #rank}).
+     * @return The cursor on it.
+     */
+    static long cursorAt(long rank) {
+        return rank << 1;
+    }
+
+    /**
+     * @param u A unit.
+     * @return The cursor on it (with its owner's numbers).
+     */
+    static long cursorOn(Unit u) {
+        return cursorAt(rank(u));
+    }
+
+    /**
+     * @param u A unit.
+     * @return The cursor just past it (with its owner's numbers).
+     */
+    static long cursorPast(Unit u) {
+        return cursorAt(rank(u)) + 1;
+    }
+
+    /**
+     * Where a new cursor goes besides the player's field (the game view:
+     * also the server's copy of our player, as {@code markWoodcut}).
+     *
+     * @param s The store, or null for the player's field alone.
+     */
+    void storeWith(ObjLongConsumer<Player> s) {
+        this.store = (s == null) ? Player::setClassicCycleCursor : s;
+    }
+
+    /**
+     * The player's cursor: -1 for the head, else twice a rank
+     * ({@link #cursorAt}), plus one for just past that unit.
+     *
+     * @param p The player, or null.
+     * @return The cursor.
+     */
+    static long cursor(Player p) {
+        return (p == null) ? -1L : p.getClassicCycleCursor();
+    }
+
+    /** Put the cursor, if it changes. */
+    private void setCursor(Player p, long c, String why) {
+        if (p == null) return;
+        final long now = (c < 0) ? -1L : c;
+        if (now == cursor(p)) return;
+        this.store.accept(p, now);
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("cycle-cursor", why + " cursor="
+                + ((now < 0) ? "head" : ((now & 1L) == 0 ? "on " : "past ")
+                   + Long.toHexString(now >>> 1)));
+        }
+    }
+
+    /**
+     * A unit becomes active (the cycle's choice, a click, the boarding's
+     * carrier, a goto run, a visit): the cursor is on it.  A unit that is
+     * not due (re-selected after its last move, a landed passenger) does
+     * not move it.
+     *
+     * @param u The unit, or null.
+     */
+    void activated(Unit u) {
+        if (u == null || u.getOwner() == null || kind(u) == null) return;
+        setCursor(u.getOwner(), cursorOn(u), "active " + u.getId());
+    }
+
+    /**
+     * A unit is finished for this turn (its last move, Space, its goto
+     * ran, its visit shown, gone: disposed, joined a colony, boarded,
+     * sailed): the cursor moves just past it.  W is no finish.
+     *
+     * @param u The unit.
+     * @param p Its owner (a unit gone may have none).
+     */
+    void finished(Unit u, Player p) {
+        if (u == null || p == null) return;
+        setCursor(p, cursorAt(rank(u, lowestId(p), startCount(p))) + 1, "finished " + u.getId());
+    }
+
+    /**
+     * Our end request goes out: the cursor is settled for the next turn
+     * start.  On a unit that is done now (finished unseen) it moves past
+     * it; on a unit still due (the turn ended while it was up) it stays on
+     * it.  With {@code fromCursor} off (the classic pref
+     * {@code turnStartFromCursor}) it goes to the head, as every turn start
+     * of the clips; the turn-start autosave holds that too.  A refused end
+     * puts it back ({@link #endRefused}).
+     *
+     * @param p Our player, or null.
+     * @param fromCursor Whether the next turn starts from the cursor.
+     */
+    void turnEnds(Player p, boolean fromCursor) {
+        this.endPlayer = p;
+        this.beforeEnd = cursor(p);
+        if (p == null) return;
+        long c = this.beforeEnd;
+        if (c >= 0 && (c & 1L) == 0) {
+            final Unit at = unitAt(p, c >>> 1);
+            if (at != null && kind(at) == null) c++;
+        }
+        setCursor(p, (fromCursor) ? c : -1L, (fromCursor) ? "turn end" : "turn end, head");
+    }
+
+    /**
+     * The player's unit at a rank.
+     *
+     * @param p The player.
+     * @param r The rank.
+     * @return The unit, or null if none is there.
+     */
+    static Unit unitAt(Player p, long r) {
+        final int lowest = lowestId(p), count = startCount(p);
+        for (Unit u : p.getUnitSet()) {
+            if (rank(u, lowest, count) == r) return u;
+        }
+        return null;
     }
 
     /**
@@ -403,11 +570,16 @@ final class ClassicUnitCycle {
 
     /**
      * Our end-of-turn request was refused: the turn goes on, so nothing is
-     * held any more (the next request takes a new snapshot).
+     * held any more (the next request takes a new snapshot), and the
+     * cursor is where it was before {@link #turnEnds}.
      */
     void endRefused() {
         this.holding = false;
         rehold();
+        if (this.endPlayer != null) {
+            setCursor(this.endPlayer, this.beforeEnd, "end refused");
+            this.endPlayer = null;
+        }
     }
 
     /**
@@ -415,11 +587,13 @@ final class ClassicUnitCycle {
      * run yet, and the visits are the snapshot's units whose order FreeCol
      * completed at this turn start (FORTIFYING became FORTIFIED; IMPROVING
      * ended with the improvement complete or the tile changed), on the
-     * same tile.  Every other held letter and road is released.
+     * same tile.  Every other held letter and road is released.  The
+     * cursor stays as our end settled it ({@link #turnEnds}).
      *
      * @param player Our player, or null.
      */
     void turnStarted(Player player) {
+        this.endPlayer = null;
         this.gotoRan.clear();
         this.visits.clear();
         for (Map.Entry<Unit, Snap> e : this.snapshot.entrySet()) {
@@ -461,8 +635,13 @@ final class ClassicUnitCycle {
         rehold();
     }
 
-    /** The game changes (load, new game) or the view goes: forget everything. */
+    /**
+     * The game changes (load, new game) or the view goes: forget everything
+     * but the cursor, which is the player's (a load brings its own, a new
+     * game's player has none).
+     */
     void clear() {
+        this.endPlayer = null;
         this.gotoRan.clear();
         this.snapshot.clear();
         this.visits.clear();
