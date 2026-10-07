@@ -1971,9 +1971,23 @@ terrain copied from the capture).  Green `0x559634`, gold `0xC7A220`.
   from phase (0,0) (not `WOODPANL`); minimap frame: 1-px `0xAA5500` ring
   (251,8,58,41), interior (252,9,56,39) black where unexplored; black row
   y 49.
-- Minimap: 1 px per tile, explored ocean `0x202C8A`, own units/colonies in the
-  nation colour, land in FreeCol's minimap colours (the 000 land colours are
-  not mapped yet).  Window: x origin 1 when the map is ≤ 58 wide (else
+- Minimap (build spec W16): 1 px per tile, unexplored black, explored ocean,
+  high seas (and FreeCol's lake and great river) `0x202C8A`; a tile with a
+  colony or unit in its owner's colour: the Europeans' fill (Holland
+  `0xFF7100`), a tribe its NAMES.TXT `@TRIBES` colour (`indicatorRgb`:
+  Araukaner villages 54 in every frame of landfall and clips 004-008, Sioux
+  braves 118 in clip004); land by terrain, a forest in its base terrain's
+  colour (`ClassicHud.MINIMAP_LAND_RGB`, measured over all matched frames of
+  clips 004-008 and landfall): tundra/boreal 72 `0xBABA41`, desert/scrub 88
+  `0xCFB28E`, plains/mixed 92 `0x867151`, prairie/broadleaf 75 `0x8A8E3C`,
+  grassland/conifer 70 `0x1C6D10`, savannah/tropical 67 `0x75A64D`,
+  marsh/wetland 58 `0x34499E`, swamp/rain forest 67, hills 89 `0xBAA27D`,
+  mountains 108 `0xDBCFAE`; roads, rivers, plowing and resources do not
+  change it. Inferred: boreal and swamp (by the pairing), savannah and marsh
+  (map art only), arctic (in no clip: index 19 `0xE3E3E3`), six of the eight
+  tribes (NAMES.TXT, same indices as the turn indicator). This also explains
+  D6's four off-palette colours (FreeCol's one land green `0x24801F` and its
+  Iroquois, Sioux and Apache colours).  Window: x origin 1 when the map is ≤ 58 wide (else
   scrolls, assumed); y so the white 15x12 viewport ring sits at rows 13..24,
   clamped (032/052/083: ring (293,22); 000: y 26).  The ring shows the map
   viewer's actual view (`ClassicMapViewer.viewOrigin`).  A click in the
@@ -2044,7 +2058,7 @@ the older guesses.
   offsets, unit tables, the HUD layout, the key map: no duplicate, no map
   key, P/G/M/V rules, U/O context, Ctrl+N), `ClassicTextTest` (`menu`,
   `label`).
-- Open / assumed: minimap land colours and horizontal
+- Open / assumed: the minimap's arctic, swamp and boreal colours and horizontal
   scrolling; fractional moves; the position line's coordinate base; list overflow;
   COLONIPÄDIE position and groups; the second fortify line; whether the
   keyboard bar skips greyed rows and Left/Right switch menus; the four

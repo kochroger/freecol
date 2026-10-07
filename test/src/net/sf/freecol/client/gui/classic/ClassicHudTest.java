@@ -368,6 +368,134 @@ public class ClassicHudTest extends TestCase {
     }
 
     /**
+     * The minimap's land colours (build spec W16, G2 spec 3.1): every tile
+     * type of the classic rules, a forest in its base terrain's colour,
+     * water as ocean.  Each line names a clip tile whose minimap pixel has
+     * this palette entry (landfall {@code minitile_terrain.txt},
+     * {@code g2-mini-clip004..008.txt}).
+     */
+    public void testMinimapLandColours() {
+        final Object[][] want = {
+            { "tundra", 0xBABA41 },          // 72: clip006 #2037 (22,18)
+            { "borealForest", 0xBABA41 },    // 72: the pairing (I)
+            { "desert", 0xCFB28E },          // 88: TERRAIN.SS.008 tiles
+            { "scrubForest", 0xCFB28E },     // 88: clip008 (43,43)
+            { "plains", 0x867151 },          // 92: clip005 (14,57)
+            { "mixedForest", 0x867151 },     // 92: landfall (48,44)
+            { "prairie", 0x8A8E3C },         // 75: clip005 (25,20)
+            { "broadleafForest", 0x8A8E3C }, // 75: landfall (47,46)
+            { "grassland", 0x1C6D10 },       // 70: clip005 (24,23)
+            { "coniferForest", 0x1C6D10 },   // 70: landfall (49,43)
+            { "savannah", 0x75A64D },        // 67: clip006 #2037 (25,31)
+            { "tropicalForest", 0x75A64D },  // 67: landfall (46,42)
+            { "marsh", 0x34499E },           // 58: clip006 #2037 (22,14)
+            { "wetlandForest", 0x34499E },   // 58: landfall (47,45)
+            { "swamp", 0x75A64D },           // 67: the pairing (I)
+            { "rainForest", 0x75A64D },      // 67: landfall (50,44)
+            { "hills", 0xBAA27D },           // 89: clip005 (23,16)
+            { "mountains", 0xDBCFAE },       // 108: landfall (47,43), (52,42)
+            { "arctic", 0xE3E3E3 },          // in no clip (I)
+        };
+        for (Object[] w : want) {
+            assertEquals((String) w[0], ((Integer) w[1]).intValue(),
+                         ClassicHud.minimapLandRgb("model.tile." + w[0], true));
+        }
+        for (String water : new String[] { "ocean", "highSeas", "lake", "greatRiver" }) {
+            assertEquals(water, ClassicHud.OCEAN_RGB,
+                         ClassicHud.minimapLandRgb("model.tile." + water, false));
+        }
+        // An unknown land type: plains (I).
+        assertEquals(0x867151, ClassicHud.minimapLandRgb("model.tile.unknown", true));
+        assertEquals(0x867151, ClassicHud.minimapLandRgb(null, true));
+        // Every land type of the classic rules is in the table.
+        final net.sf.freecol.common.model.Specification spec
+            = FreeColTestCase.spec("classic");
+        for (net.sf.freecol.common.model.TileType tt : spec.getTileTypeList()) {
+            if (tt.isWater()) continue;
+            final String s = net.sf.freecol.common.model.Role.getRoleIdSuffix(tt.getId());
+            boolean found = false;
+            for (Object[] w : want) found |= w[0].equals(s);
+            assertTrue(tt.getId(), found);
+        }
+    }
+
+    /**
+     * The minimap of a live map (build spec W16): unexplored black, a Dutch
+     * colony and a French unit in their fills, an Araukaner village and a
+     * Sioux brave in their {@code @TRIBES} colours (54 and 118), plain
+     * tiles in the land table, water as ocean.
+     */
+    public void testMinimapOwners() {
+        final Game game = FreeColTestCase.getStandardGame();
+        final net.sf.freecol.common.model.Specification spec = FreeColTestCase.spec();
+        final FreeColTestCase.MapBuilder mb = new FreeColTestCase.MapBuilder(game);
+        mb.setBaseTileType(spec.getTileType("model.tile.plains")).setExploredByAll(true)
+            .setTileType(2, 2, spec.getTileType("model.tile.coniferForest"))
+            .setTileType(3, 2, spec.getTileType("model.tile.mountains"))
+            .setTileType(4, 2, spec.getTileType("model.tile.ocean"));
+        final net.sf.freecol.common.model.Map map = mb.build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        final Player arawak = game.getPlayerByNationId("model.nation.arawak");
+        final Player sioux = game.getPlayerByNationId("model.nation.sioux");
+        net.sf.freecol.util.test.FreeColTestUtils.getColonyBuilder().player(dutch)
+            .colonyTile(map.getTile(5, 8)).build();
+        new FreeColTestCase.IndianSettlementBuilder(game).player(arawak)
+            .settlementTile(map.getTile(8, 8)).build();
+        final net.sf.freecol.common.model.UnitType colonist
+            = spec.getUnitType("model.unit.freeColonist");
+        new net.sf.freecol.server.model.ServerUnit(game, map.getTile(9, 3), french, colonist);
+        new net.sf.freecol.server.model.ServerUnit(game, map.getTile(10, 3), sioux,
+            spec.getUnitType("model.unit.brave"));
+        map.getTile(12, 12).setType(null);   // unexplored
+        final ClassicHud.MinimapModel m = ClassicHud.minimapOf(map, 1, 1);
+        assertEquals(0xFF7100, m.at(5, 8));
+        assertEquals(0x698AC3, m.at(8, 8));
+        assertEquals(0x5555FF, m.at(9, 3));
+        assertEquals(0x920000, m.at(10, 3));
+        assertEquals(0x867151, m.at(1, 1));
+        assertEquals(0x1C6D10, m.at(2, 2));
+        assertEquals(0xDBCFAE, m.at(3, 2));
+        assertEquals(ClassicHud.OCEAN_RGB, m.at(4, 2));
+        assertEquals(ClassicHud.UNEXPLORED, m.at(12, 12));
+    }
+
+    /**
+     * With the pack (skipped without it): every minimap colour is the
+     * game palette's entry at the index measured in the clips.
+     */
+    public void testMinimapColoursAreGamePaletteEntries() {
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final int[] pal = (pack == null) ? null : pack.gamePalette();
+        if (pal == null) {
+            System.err.println("testMinimapColoursAreGamePaletteEntries skipped: no pack");
+            return;
+        }
+        final Object[][] want = {
+            { "tundra", 72 }, { "desert", 88 }, { "plains", 92 }, { "prairie", 75 },
+            { "grassland", 70 }, { "savannah", 67 }, { "marsh", 58 }, { "swamp", 67 },
+            { "borealForest", 72 }, { "scrubForest", 88 }, { "mixedForest", 92 },
+            { "broadleafForest", 75 }, { "coniferForest", 70 }, { "tropicalForest", 67 },
+            { "wetlandForest", 58 }, { "rainForest", 67 }, { "hills", 89 },
+            { "mountains", 108 }, { "arctic", 19 },
+        };
+        for (Object[] w : want) {
+            assertEquals((String) w[0], pal[(Integer) w[1]],
+                         ClassicHud.minimapLandRgb("model.tile." + w[0], true));
+        }
+        assertEquals(pal[60], ClassicHud.OCEAN_RGB);
+        // The tribes' colours (NAMES.TXT @TRIBES): Araukaner 54, Sioux 118.
+        final Game game = FreeColTestCase.getStandardGame();
+        assertEquals(pal[54], ClassicHud.indicatorRgb(
+            game.getPlayerByNationId("model.nation.arawak")));
+        assertEquals(pal[118], ClassicHud.indicatorRgb(
+            game.getPlayerByNationId("model.nation.sioux")));
+        assertEquals(pal[13], ClassicHud.indicatorRgb(
+            game.getPlayerByNationId("model.nation.dutch")));
+    }
+
+    /**
      * The minimap-only repaint (C3, a blink's dot, a jump's ring, a native
      * cue's pixel): the panel painted with one minimap and then only its
      * minimap area with another is pixel for pixel the panel painted with

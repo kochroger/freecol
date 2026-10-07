@@ -27,7 +27,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import net.sf.freecol.client.gui.ImageLibrary;
 import net.sf.freecol.common.i18n.Messages;
 import net.sf.freecol.common.model.AbstractGoods;
 import net.sf.freecol.common.model.Direction;
@@ -180,6 +179,51 @@ final class ClassicHud {
             java.util.Map.entry("model.nation.french", 0x5555FF),
             java.util.Map.entry("model.nation.spanish", 0xFFFF55),
             java.util.Map.entry("model.nation.dutch", 0xFF7100));
+
+    /**
+     * The minimap's land colours by FreeCol tile-type suffix (build spec
+     * W16; G2 spec 3.1): the original's palette entries, measured over all
+     * matched frames of clips 004-008 and the landfall clip.  A forest has
+     * its base terrain's colour (V six times: mixed = plains, broadleaf =
+     * prairie, conifer = grassland, tropical = savannah, wetland = marsh,
+     * scrub = desert); roads, rivers, plowing and resources do not change
+     * it (clip005 (14,57) "Flachland (Straße)", landfall (47,46) "(Wild)").
+     */
+    private static final java.util.Map<String, Integer> MINIMAP_LAND_RGB
+        = java.util.Map.ofEntries(
+            // Index 72: clip006 #2037 (22,18) .. (24,20), unforested tiles
+            // whose cell is TERRAIN.SS.000; boreal by the pairing (I).
+            java.util.Map.entry("tundra", 0xBABA41),
+            java.util.Map.entry("borealForest", 0xBABA41),
+            // 88: tiles of TERRAIN.SS.001/008; scrub clip008 (43,43), (47,41).
+            java.util.Map.entry("desert", 0xCFB28E),
+            java.util.Map.entry("scrubForest", 0xCFB28E),
+            // 92: clip005 (14,57) "Flachland"; mixed clip008 (44,44).
+            java.util.Map.entry("plains", 0x867151),
+            java.util.Map.entry("mixedForest", 0x867151),
+            // 75: clip005 (25,20) "Prärie"; broadleaf landfall (47,46).
+            java.util.Map.entry("prairie", 0x8A8E3C),
+            java.util.Map.entry("broadleafForest", 0x8A8E3C),
+            // 70: clip005 (24,23) "Grünland"; conifer landfall (49,43).
+            java.util.Map.entry("grassland", 0x1C6D10),
+            java.util.Map.entry("coniferForest", 0x1C6D10),
+            // 67: savannah from the map art only (clip006 #2037 (25,31));
+            // tropical landfall (46,42).
+            java.util.Map.entry("savannah", 0x75A64D),
+            java.util.Map.entry("tropicalForest", 0x75A64D),
+            // 58: marsh from the map art only (clip006 #2037 (22,14));
+            // wetland landfall and clip008 (47,45).
+            java.util.Map.entry("marsh", 0x34499E),
+            java.util.Map.entry("wetlandForest", 0x34499E),
+            // 67: rain forest landfall, clip008 (50,44); swamp by the pairing (I).
+            java.util.Map.entry("swamp", 0x75A64D),
+            java.util.Map.entry("rainForest", 0x75A64D),
+            // 89: clip005 (23,16) "Hügellandschaft"; 108: landfall (47,43).
+            java.util.Map.entry("hills", 0xBAA27D),
+            java.util.Map.entry("mountains", 0xDBCFAE),
+            // Arctic is in no clip: the light grey of index 19 (I), kept
+            // apart from the white blink dot and ring.
+            java.util.Map.entry("arctic", 0xE3E3E3));
 
 
     /**
@@ -1887,10 +1931,29 @@ final class ClassicHud {
     }
 
     /**
-     * The minimap of the player's known map: unexplored black, a tile with
-     * a colony or unit in its owner's colour, ocean {@link #OCEAN_RGB},
-     * land in FreeCol's minimap terrain colour (approximate: the original's
-     * land colours are not mapped yet).
+     * A tile type's minimap colour without an owner (build spec W16):
+     * {@link #MINIMAP_LAND_RGB} for land, {@link #OCEAN_RGB} for water
+     * (ocean and high seas measured; FreeCol's lake and great river, which
+     * the original has not, read as ocean).
+     *
+     * @param tileTypeId The FreeCol tile type id, e.g. {@code model.tile.plains}.
+     * @param land Whether the tile is land.
+     * @return The RGB; an unknown land type gets the plains colour (I).
+     */
+    static int minimapLandRgb(String tileTypeId, boolean land) {
+        if (!land) return OCEAN_RGB;
+        final Integer c = (tileTypeId == null) ? null
+            : MINIMAP_LAND_RGB.get(Role.getRoleIdSuffix(tileTypeId));
+        return (c != null) ? c : MINIMAP_LAND_RGB.get("plains");
+    }
+
+    /**
+     * The minimap of the player's known map (build spec W16): unexplored
+     * black, a tile with a colony or unit in its owner's colour -- the
+     * Europeans' fill, the tribes' NAMES.TXT {@code @TRIBES} colour
+     * ({@link #indicatorRgb}: Araukaner villages 54 in every frame of
+     * landfall and clips 004-008, Sioux braves 118 in clip004) -- else the
+     * terrain's colour ({@link #minimapLandRgb}).
      *
      * @param map The client's map (the player's knowledge).
      * @param c0 The view's top-left column.
@@ -1916,16 +1979,9 @@ final class ClassicHud {
                     final Unit u = tile.getFirstUnit();
                     if (u != null) owner = u.getOwner();
                 }
-                int c;
-                if (owner != null) {
-                    c = nationRgb(owner);
-                } else if (tile.isLand() && tile.getType() != null) {
-                    final Color lc = ImageLibrary.getMinimapPoliticsColor(tile.getType());
-                    c = (lc == null) ? GREEN : (lc.getRGB() & 0xFFFFFF);
-                } else {
-                    c = OCEAN_RGB;
-                }
-                rgb[y * w + x] = c;
+                rgb[y * w + x] = (owner != null) ? indicatorRgb(owner)
+                    : minimapLandRgb((tile.getType() == null) ? null
+                                     : tile.getType().getId(), tile.isLand());
             }
         }
         return new MinimapModel(w, h, rgb, c0, r0);
