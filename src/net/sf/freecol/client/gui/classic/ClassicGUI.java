@@ -4650,7 +4650,8 @@ public class ClassicGUI extends GUI {
         if (carrier != null) {
             final Player p = carrier.getOwner();
             final List<Unit> cycle = (p == null) ? new ArrayList<>()
-                : cycleAfter(lander, p.getUnits().toList());
+                : cycleAfter(lander,
+                    p.getUnits().collect(Collectors.toList()));
             wakePassengers(carrier, lander);
             final long close = landfallClosed();
             onEventThread(() -> {
