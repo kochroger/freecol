@@ -198,8 +198,9 @@ public class ClassicGUISeamTest extends FreeColTestCase {
      * W0e: Escape (and the close button) answers "no" in every classic
      * confirm, whichever option Enter takes; Enter still takes the
      * controller's default.  The confirms of the learn question, the site
-     * warnings (land-locked), the landing, the rumour and the hostile
-     * action, with their controller's {@code defaultOk}.
+     * warnings (land-locked), the rumour and the hostile action, with
+     * their controller's {@code defaultOk} (the landing has its own box,
+     * {@link #testLandfallBox}).
      */
     public void testEscapeAnswersNo() {
         final ClassicGUI gui = new ClassicGUI(null);
@@ -214,7 +215,6 @@ public class ClassicGUISeamTest extends FreeColTestCase {
                   .addName("%skill%", "Pelzjäger"),
               "learnSkill.yes", "learnSkill.no", true },
             { landLocked, "buildColony.yes", "buildColony.no", true },
-            { StringTemplate.key("disembark.text"), "ok", "cancel", true },
             { StringTemplate.key("exploreLostCityRumour.text"),
               "exploreLostCityRumour.yes", "exploreLostCityRumour.no", true },
             { StringTemplate.template("confirmHostile.peace")
@@ -366,8 +366,8 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertFalse(ClassicGUI.silentNo(StringTemplate.key("learnSkill.text")));
         assertFalse(ClassicGUI.silentNo(null));
         assertTrue(gui.modalConfirmDialog(null,
-                StringTemplate.key("disembark.text"), (ImageIcon) null,
-                "ok", "cancel", true));
+                StringTemplate.key("exploreLostCityRumour.text"), (ImageIcon) null,
+                "exploreLostCityRumour.yes", "exploreLostCityRumour.no", true));
         assertEquals(1, fake.asked.size());
     }
 
@@ -1306,6 +1306,249 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertNull(gui.showModelMessages(List.of(famine)));
         assertNull(gui.showReportTurnPanel(List.of(famine)));
         assertTrue(fake.boxes.isEmpty());
+    }
+
+    /**
+     * A classic GUI without a client that wakes the passengers itself (the
+     * controller's state change needs a server) and keeps whom it woke.
+     */
+    private static final class LandingGUI extends ClassicGUI {
+
+        final List<Unit> woken = new ArrayList<>();
+
+        LandingGUI() {
+            super(null);
+        }
+
+        @Override
+        void wake(Unit unit) {
+            this.woken.add(unit);
+            unit.setState(Unit.UnitState.ACTIVE);
+        }
+    }
+
+    /** FreeCol's landing list for a ship: one row per unit that can go, then "Alle". */
+    private static List<ChoiceItem<Unit>> landingChoices(Unit ship, Tile target) {
+        final List<ChoiceItem<Unit>> choices = new ArrayList<>();
+        for (Unit u : ship.getUnitList()) {
+            if (u.getMoveType(target).isProgress()) {
+                choices.add(new ChoiceItem<>(u.getDescription(Unit.UnitLabelType.NATIONAL), u));
+            }
+        }
+        choices.add(new ChoiceItem<>(Messages.message("all"), ship));
+        return choices;
+    }
+
+    /**
+     * The landing box (build spec W8b): GAME.TXT @LANDFALL with the
+     * frontiersman, the bar on "Bei den Schiffen bleiben" (row 1), Escape
+     * staying; without the pack FreeCol's question with the same rows.  A
+     * set time from the key: 72 ms with the palette load, 86 without.
+     */
+    public void testLandfallBox() {
+        assertTrue(ClassicGUI.isLandfall(StringTemplate.key("disembark.text")));
+        assertFalse(ClassicGUI.isLandfall(StringTemplate.key("highseas.text")));
+        assertFalse(ClassicGUI.isLandfall(null));
+
+        final ClassicAdvisorBox.Request fallback = ClassicGUI.landfallRequest(null, 0L);
+        assertEquals(ClassicGUI.LANDFALL_SECTION, fallback.id);
+        assertEquals(2, fallback.rows.size());
+        assertEquals(0, fallback.defaultRow);
+        assertEquals(0, fallback.escapeAnswer());
+        assertSame(ClassicAdvisorBox.Portrait.SCOUT, fallback.portrait);
+        assertEquals(0L, fallback.showAtNanos);
+        assertEquals(123L, ClassicGUI.landfallRequest(null, 123L).showAtNanos);
+
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t != null && t.message("LANDFALL") != null) {
+            final ClassicAdvisorBox.Request r = ClassicGUI.landfallRequest(t, 0L);
+            assertEquals(List.of("Bei den Schiffen bleiben", "An Land gehen"),
+                         List.of(r.plainRows()));
+            assertTrue(r.plainText().startsWith("Sollen wir an Land gehen"));
+            assertEquals(0, r.defaultRow);
+            assertEquals(0, r.escapeAnswer());
+            assertSame(ClassicAdvisorBox.Portrait.SCOUT, r.portrait);
+            assertEquals(190, r.width);
+        } else {
+            System.err.println(getClass().getSimpleName()
+                + ": no pack texts, the GAME.TXT rows are not checked");
+        }
+
+        final long key = 1_000_000_000L;
+        assertEquals(key + 72_000_000L, ClassicGUI.landfallShowAt(key, key + 30_000_000L, true));
+        assertEquals(key + 86_000_000L, ClassicGUI.landfallShowAt(key, key + 30_000_000L, false));
+        assertEquals(0L, ClassicGUI.landfallShowAt(0L, key, true));
+        assertEquals(0L, ClassicGUI.landfallShowAt(key, key + 2_000_000_000L, false));
+    }
+
+    /**
+     * "An Land gehen" (build spec W8b, master plan W18): FreeCol's list
+     * seam returns only its first unit, the one aboard longest; every
+     * other passenger asleep is woken, also one without moves; "Bei den
+     * Schiffen bleiben", Escape and a box that could not open land
+     * nothing, and "Alle" is never the answer.  The ship's re-selection
+     * after the move hands over to the next unit in the cycle after the
+     * landed one: a passenger aboard made after it.
+     */
+    public void testLandfallSendsTheLongestAboard() {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile sea = map.getTile(10, 7), land = map.getTile(9, 7);
+        assertTrue(!sea.isLand() && land.isLand() && sea.isAdjacent(land));
+        final net.sf.freecol.common.model.UnitType colonist
+            = spec().getUnitType("model.unit.freeColonist");
+        final Unit ship = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final Unit a = new ServerUnit(game, ship, dutch, colonist);   // aboard first
+        final Unit b = new ServerUnit(game, ship, dutch, colonist);
+        final Unit c = new ServerUnit(game, ship, dutch, colonist);   // boarded this turn
+        c.setMovesLeft(0);
+        final int shipMoves = ship.getMovesLeft();
+        for (Unit u : List.of(a, b, c)) assertEquals(Unit.UnitState.SENTRY, u.getState());
+        final StringTemplate q = StringTemplate.key("disembark.text");
+
+        final LandingGUI gui = new LandingGUI();
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        try {
+            mv.setFocus(sea);
+            mv.changeToMoveUnits(ship);
+            final List<ChoiceItem<Unit>> choices = landingChoices(ship, land);
+            assertEquals(3, choices.size());   // a, b and "Alle"
+
+            // Stay, Escape (row 0) and a closed box: nothing lands, nobody woken.
+            for (int answer : new int[] { 0, -1 }) {
+                fake.answer = answer;
+                assertNull(gui.modalChoiceDialog(sea, q, (ImageIcon) null, "none", choices));
+            }
+            assertTrue(gui.woken.isEmpty());
+            assertEquals(2, fake.boxes.size());
+            assertEquals(ClassicGUI.LANDFALL_SECTION, last(fake.boxes).id);
+            assertEquals(2, last(fake.asked).length);   // never a row per unit, never "Alle"
+            assertEquals(Integer.valueOf(0), last(fake.defaults));
+
+            // An Land gehen: a only; b and c woken.
+            fake.answer = 1;
+            assertSame(a, gui.modalChoiceDialog(sea, q, (ImageIcon) null, "none", choices));
+            assertEquals(List.of(b, c), gui.woken);
+            assertEquals(Unit.UnitState.SENTRY, a.getState());
+            assertEquals(shipMoves, ship.getMovesLeft());
+
+            // FreeCol moves a ashore (all its moves) and re-selects the
+            // ship: the landed unit is the one that just finished, and the
+            // cycle goes on after it -- b, aboard, then the ship.
+            a.setLocation(land);
+            a.setMovesLeft(0);
+            gui.changeView(ship, true);
+            assertSame(a, mv.getActiveUnit());
+            assertTrue(b.isActivePassenger());
+            assertFalse(c.isActivePassenger());       // no moves
+            assertSame(b, dutch.getNextActiveUnit());
+            assertSame(ship, dutch.getNextActiveUnit());
+            gui.changeView(b, false);                 // no turn flow: at once
+            assertSame(b, mv.getActiveUnit());
+            assertSame(b, mv.displayUnit(sea));       // drawn instead of the ship
+
+            // The one-unit seam (FreeCol's confirm): b is the only one that
+            // can go; stay is false, An Land gehen true.
+            mv.changeToMoveUnits(ship);
+            fake.answer = 0;
+            assertFalse(gui.modalConfirmDialog(land, q, (ImageIcon) null, "ok", "cancel", true));
+            fake.answer = -1;
+            assertFalse(gui.modalConfirmDialog(land, q, (ImageIcon) null, "ok", "cancel", true));
+            fake.answer = 1;
+            assertTrue(gui.modalConfirmDialog(land, q, (ImageIcon) null, "ok", "cancel", true));
+            assertEquals(ClassicGUI.LANDFALL_SECTION, last(fake.boxes).id);
+            // A landing that did not go ashore leaves the ship selected.
+            gui.changeView(ship, true);
+            assertSame(ship, mv.getActiveUnit());
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /**
+     * clip007 landing 2: the soldier boarded before the older pioneer, so
+     * it goes ashore; the next unit is the farmer on land, made after the
+     * soldier, not the pioneer aboard.  The farmer boards: the ship comes
+     * next, and the unit the controller chose is put back to come after
+     * it.  The cycle's order and a carrier ranked before its passengers.
+     */
+    public void testLandingCycleAndBoarding() {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile sea = map.getTile(10, 7), land = map.getTile(9, 7);
+        final Tile shore = map.getTile(9, 6);
+        final net.sf.freecol.common.model.UnitType colonist
+            = spec().getUnitType("model.unit.freeColonist");
+        final Unit ship = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final Unit pioneer = new ServerUnit(game, shore, dutch, colonist);
+        final Unit soldier = new ServerUnit(game, ship, dutch, colonist);
+        pioneer.setLocation(ship);                       // boards after the soldier
+        final Unit farmer = new ServerUnit(game, shore, dutch, colonist);
+        assertEquals(List.of(soldier, pioneer), ship.getUnitList());
+        assertSame(soldier, ClassicGUI.firstLander(ship, land));
+        assertSame(ship, ClassicGUI.landingCarrier(ship, land));
+        assertNull(ClassicGUI.landingCarrier(ship, map.getTile(5, 7)));   // not next to it
+        assertNull(ClassicGUI.landingCarrier(farmer, land));               // no carrier
+
+        // The ship ranks before what it carries: ship, pioneer, soldier, farmer.
+        assertTrue(ClassicGUI.cycleRank(ship) < ClassicGUI.cycleRank(pioneer));
+        assertEquals(List.of(farmer, ship, pioneer),
+                     ClassicGUI.cycleAfter(soldier, List.of(farmer, soldier, pioneer, ship)));
+
+        final LandingGUI gui = new LandingGUI();
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        try {
+            mv.setFocus(sea);
+            mv.changeToMoveUnits(ship);
+            fake.answer = 1;
+            assertSame(soldier, gui.modalChoiceDialog(sea, StringTemplate.key("disembark.text"),
+                (ImageIcon) null, "none", landingChoices(ship, land)));
+            assertEquals(List.of(pioneer), gui.woken);
+            soldier.setLocation(land);
+            soldier.setMovesLeft(0);
+            gui.changeView(ship, true);
+            assertSame(soldier, mv.getActiveUnit());
+            assertSame(farmer, dutch.getNextActiveUnit());   // not the pioneer aboard
+            gui.changeView(farmer, false);
+            assertSame(farmer, mv.getActiveUnit());
+
+            // The farmer boards (a movement key): the controller's
+            // re-selection keeps it, then (say) it chooses the pioneer
+            // aboard; the ship comes instead, and the pioneer is put back
+            // to come next, before the ship's turn in the cycle.
+            gui.unitBoarding(farmer);
+            farmer.setLocation(ship);
+            farmer.setMovesLeft(0);
+            gui.changeView(farmer, true);
+            assertSame(farmer, mv.getActiveUnit());
+            assertSame(ship, mv.displayUnit(sea));           // asleep aboard: the ship
+            gui.changeView(pioneer, false);
+            gui.unitBoarding(null);
+            assertSame(ship, mv.getActiveUnit());
+            assertSame(pioneer, dutch.getNextActiveUnit());
+            assertSame(ship, dutch.getNextActiveUnit());
+            // A carrier that cannot move: no boarding hand-over.
+            gui.unitBoarding(farmer);
+            ship.setMovesLeft(0);
+            mv.changeToMoveUnits(farmer);
+            gui.changeView(pioneer, false);
+            gui.unitBoarding(null);
+            assertSame(pioneer, mv.getActiveUnit());
+        } finally {
+            mv.dispose();
+        }
     }
 
     private static <T> T last(List<T> l) {

@@ -109,6 +109,15 @@ final class ClassicInfoPanel extends JComponent {
     private List<ClassicHud.UnitFacts> staleList = new ArrayList<>();
 
     /**
+     * The landing (build spec W8b, master plan W18): from the landing box
+     * until the next unit's block, the panel keeps the block it showed
+     * when the ship was ordered onto land -- the passengers still
+     * "Wache" -- although FreeCol wakes them before the box and the ship
+     * keeps its moves (clip007 #3040 -&gt; #3107: only the minimap changes).
+     */
+    private boolean blockHeld = false;
+
+    /**
      * The Spielzugende mode (build spec W17): the tile the panel shows in
      * the tile mode instead of the unit block, as it was when the mode
      * began, or null; and whether the end command froze the word white
@@ -190,6 +199,26 @@ final class ClassicInfoPanel extends JComponent {
         this.staleList = new ArrayList<>();
         this.promptFacts = null;
         this.promptFrozen = false;
+        this.blockHeld = false;
+    }
+
+    /**
+     * Keep the unit block as last painted, live or not, until
+     * {@link #releaseBlock} (the landing, {@link #blockHeld}); the minimap
+     * and the lines above the block stay live.
+     */
+    void holdBlock() {
+        this.blockHeld = true;
+    }
+
+    /** The block follows the live game again (the next unit, a box answered "stay"). */
+    void releaseBlock() {
+        this.blockHeld = false;
+    }
+
+    /** @return Whether the block is held ({@link #holdBlock}). */
+    boolean isBlockHeld() {
+        return this.blockHeld;
     }
 
     /**
@@ -359,11 +388,11 @@ final class ClassicInfoPanel extends JComponent {
         ClassicHud.UnitFacts active = null;
         List<ClassicHud.UnitFacts> list = new ArrayList<>();
         final Unit unit = this.mapViewer.getActiveUnit();
-        if (showsLive(unit, this.staleUnit)) {
+        if (liveBlock(this.blockHeld, unit, this.staleUnit)) {
             active = facts(unit);
             final List<Unit> others = new ArrayList<>();
             if (unit.isCarrier() && unit.hasCargo()) {
-                others.addAll(unit.getUnitList());
+                others.addAll(cargoNewestFirst(unit));
             } else {
                 final Tile t = unit.getTile();
                 for (Unit u : t.getUnitList()) {
@@ -396,6 +425,34 @@ final class ClassicInfoPanel extends JComponent {
     static boolean showsLive(Unit unit, Unit remembered) {
         return unit != null && unit.hasTile()
             && (unit.getMovesLeft() > 0 || unit != remembered);
+    }
+
+    /**
+     * Whether the panel builds its block from the live game now: not while
+     * a landing holds it ({@link #holdBlock}), else as {@link #showsLive}.
+     *
+     * @param held The block is held.
+     * @param unit The active unit, or null.
+     * @param remembered The unit of the remembered block, or null.
+     * @return True to build the block from the live unit.
+     */
+    static boolean liveBlock(boolean held, Unit unit, Unit remembered) {
+        return !held && showsLive(unit, remembered);
+    }
+
+    /**
+     * A carrier's passengers as the panel lists them: the one that boarded
+     * last on top, so the bottom entry is the one a landing sends ashore
+     * (clip007 #5093, #6188, #6989; master plan W18).  FreeCol's list
+     * appends on boarding, so it is reversed.
+     *
+     * @param carrier The carrier.
+     * @return Its units, newest first.
+     */
+    static List<Unit> cargoNewestFirst(Unit carrier) {
+        final List<Unit> units = new ArrayList<>(carrier.getUnitList());
+        java.util.Collections.reverse(units);
+        return units;
     }
 
     /**

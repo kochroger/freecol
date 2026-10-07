@@ -840,7 +840,10 @@ public class ClassicAdvisorBoxTest extends TestCase {
             b.portrait(who);
             final BufferedImage pic = (who.sprite == null) ? null
                 : pack.image(ClassicPackFiles.ssKey(who.sprite));
-            final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(b.build(), tiny, pic);
+            // The landing box as the game asks for it (build spec W8b).
+            final ClassicAdvisorBox.Request req = ClassicGUI.LANDFALL_SECTION.equals(c[1])
+                ? ClassicGUI.landfallRequest(t, 0L) : b.build();
+            final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(req, tiny, pic);
             assertNotNull(name, l);
             final File f = new File(dir, name + "_1x.png");
             final BufferedImage crop = ImageIO.read(f);

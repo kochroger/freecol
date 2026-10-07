@@ -48,7 +48,10 @@ import net.sf.freecol.common.model.Unit;
  *   unit after the previous one ran out of moves, its panel block comes
  *   {@link #HANDOVER_MS} after the last change, and a view jump it needs
  *   at {@link #HANDOVER_JUMP_MS}.  Until then the map and the panel show
- *   the previous unit, as it was before its last move (W5b).</li>
+ *   the previous unit, as it was before its last move (W5b).  A skipped
+ *   unit counts as done; after a boarding the carrier comes
+ *   {@link #BOARDING_HANDOVER_MS} after it ({@link #carrierChosen}, spec
+ *   delta W18).</li>
  *   <li><b>Turn start</b> (W5e): the panel is wiped and the year changes
  *   in one paint ({@link #wipe}), when the controller first shows our new
  *   turn and no box is up (so FreeCol's turn-start messages come before
@@ -103,6 +106,20 @@ final class ClassicTurnFlow {
 
     /** Hand-over: the view jump to the next unit, if it needs one (271-285 ms). */
     static final double HANDOVER_JUMP_MS = 280.0;
+
+    /**
+     * Hand-over after a boarding: the carrier's block after the boarding
+     * slide's final draw (clip007 #4272 -&gt; #4281, #6179 -&gt; #6188,
+     * #6980 -&gt; #6989: 9 frames each; spec delta W18).
+     */
+    static final double BOARDING_HANDOVER_MS = 128.0;
+
+    /**
+     * Hand-over after a boarding with a view jump: the carrier's block
+     * this long after the jump (I: never seen; one to two frames, as at
+     * the turn start).
+     */
+    static final double BOARDING_BLOCK_MS = 21.0;
 
     /** Turn start: the first unit's block after the wipe, no jump (270-410 ms). */
     static final double TURN_START_MS = 300.0;
@@ -478,6 +495,21 @@ final class ClassicTurnFlow {
     }
 
     /**
+     * The stages of the hand-over to a carrier after a unit boarded it
+     * (spec delta W18).
+     *
+     * @param jump The carrier needs a view jump.
+     * @return Block at 128 ms, or jump at 128 ms and block 21 ms later.
+     */
+    static Stage[] boardingStages(boolean jump) {
+        return (jump)
+            ? new Stage[] { new Stage(BOARDING_HANDOVER_MS, Action.JUMP),
+                            new Stage(BOARDING_HANDOVER_MS + BOARDING_BLOCK_MS,
+                                      Action.ACTIVATE) }
+            : new Stage[] { new Stage(BOARDING_HANDOVER_MS, Action.ACTIVATE) };
+    }
+
+    /**
      * The stages of a turn start.
      *
      * @param jump The first unit needs a view jump.
@@ -497,14 +529,16 @@ final class ClassicTurnFlow {
     }
 
     /**
-     * Whether a unit can move no more this turn: its last move is done,
-     * or it is gone.
+     * Whether a unit is done for this turn: its last move is done, it was
+     * skipped ("Keine Befehle", Space: the next unit comes as after a last
+     * move, clip007 #1397 -&gt; #1449, I), or it is gone.
      *
      * @param u The unit, or null.
-     * @return True if it ran out of moves or no longer exists.
+     * @return True if it ran out of moves, was skipped or no longer exists.
      */
     static boolean ranOut(Unit u) {
-        return u != null && (u.isDisposed() || !u.hasTile() || u.getMovesLeft() <= 0);
+        return u != null && (u.isDisposed() || !u.hasTile() || u.getMovesLeft() <= 0
+            || u.getState() == Unit.UnitState.SKIPPED);
     }
 
 
@@ -581,6 +615,31 @@ final class ClassicTurnFlow {
      *     make it active at once.
      */
     boolean unitChosen(Unit unit, Unit previous) {
+        return unitChosen(unit, previous, false);
+    }
+
+    /**
+     * A unit has boarded a carrier that can still move: the carrier comes
+     * next, {@link #BOARDING_HANDOVER_MS} after the boarding's final draw
+     * instead of the hand-over's {@link #HANDOVER_MS} (spec delta W18).
+     *
+     * @param carrier The carrier.
+     * @param boarded The unit that boarded it (the map's active unit).
+     * @return As {@link #unitChosen(Unit, Unit)}.
+     */
+    boolean carrierChosen(Unit carrier, Unit boarded) {
+        return unitChosen(carrier, boarded, true);
+    }
+
+    /**
+     * {@link #unitChosen(Unit, Unit)}, after a boarding or not.
+     *
+     * @param unit The unit, or null.
+     * @param previous The map's active unit now, or null.
+     * @param boarding The previous unit has just boarded {@code unit}.
+     * @return True if the flow takes it over.
+     */
+    private boolean unitChosen(Unit unit, Unit previous, boolean boarding) {
         if (this.disposed) return false;
         this.choices++;
         // Our end may have gone through without the poll seeing another
@@ -631,8 +690,13 @@ final class ClassicTurnFlow {
         }
         if (this.afterGoto || ranOut(previous)) {
             this.afterGoto = false;
+            final boolean jump = this.host.wouldJump(unit);
+            if (boarding) {
+                ClassicFrameRecorder.event("handover", "after boarding: carrier "
+                    + unit.getId() + " (boarded " + previous.getId() + ")");
+            }
             start(new Pending(Kind.HANDOVER, unit, lastChangeBase(),
-                    handOverStages(this.host.wouldJump(unit))));
+                    (boarding) ? boardingStages(jump) : handOverStages(jump)));
             return true;
         }
         return false;

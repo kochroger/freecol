@@ -73,12 +73,37 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         assertFalse(mv.isShownAt(ship, sea));
         mv.setBlinkOff(false);
 
-        // The passenger active: drawn instead of its ship, with the stack
-        // marker (W18's ON state).
+        // A passenger that has just boarded is asleep: while it is still
+        // the active unit, until the hand-over, the ship is drawn (clip007
+        // #4272).
+        assertEquals(Unit.UnitState.SENTRY, passenger.getState());
+        mv.changeToMoveUnits(passenger);
+        assertSame(ship, mv.displayUnit(sea));
+        assertFalse(mv.isShownAt(passenger, sea));
+
+        // A woken passenger active: drawn instead of its ship, with the
+        // stack marker (W18's ON state, clip007 #3107).
+        passenger.setState(Unit.UnitState.ACTIVE);
         mv.changeToMoveUnits(passenger);
         assertSame(passenger, mv.displayUnit(sea));
         assertSame(ClassicHud.STACK_MARKER, mv.markerOf(passenger, sea));
         assertTrue(mv.isShownAt(passenger, sea));
+
+        // The landing: the landed unit is the active unit, with no moves
+        // left, no blink and no view test; the ship is drawn again.
+        passenger.setLocation(land);
+        passenger.setMovesLeft(0);
+        mv.changeToMoveUnits(ship);
+        assertTrue(mv.isBlinkArmed());
+        mv.finishedUnit(passenger);
+        assertSame(passenger, mv.getActiveUnit());
+        assertFalse(mv.isBlinkArmed());
+        assertFalse(mv.isBlinkOff());
+        assertSame(ship, mv.displayUnit(sea));
+        assertSame(passenger, mv.displayUnit(land));
+        assertSame(ClassicHud.NO_MARKER, mv.markerOf(ship, sea));
+        passenger.setLocation(ship);
+        passenger.setMovesLeft(3);
 
         // Land: one unit plain, a second one adds the stack marker.
         final Unit a = new ServerUnit(game, land, dutch, colonistType);
@@ -166,8 +191,9 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         assertSame(mm, ClassicInfoPanel.blinkDot(mm, null, true));
         assertNull(ClassicInfoPanel.blinkDot(null, ship, true));
 
-        // The passenger active (W18's case, landfall #13140): OFF shows the
-        // bare sea -- the carrier goes with it.
+        // The woken passenger active (W18's case, landfall #13140): OFF
+        // shows the bare sea -- the carrier goes with it.
+        passenger.setState(Unit.UnitState.ACTIVE);
         mv.changeToMoveUnits(passenger);
         assertTrue(mv.isShownAt(passenger, sea));
         mv.blinkToggle(1);
@@ -314,6 +340,16 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         mv.blinkToggle(1);
         assertFalse(mv.isBlinkOff());
         assertTrue(mv.isShownAt(ship, sea));
+        // Skipped (Space) with its moves: no blink either (clip007 #1397).
+        ship.setMovesLeft(3);
+        mv.changeToMoveUnits(ship);
+        assertTrue(mv.isBlinkArmed());
+        ship.setState(Unit.UnitState.SKIPPED);
+        mv.rearmBlink("skip");
+        assertFalse(mv.isBlinkArmed());
+        assertFalse(mv.isBlinkOff());
+        ship.setState(Unit.UnitState.ACTIVE);
+        ship.setMovesLeft(0);
 
         // The stale block: live while it can move, remembered after.
         assertTrue(ClassicInfoPanel.showsLive(ship, null));
@@ -325,6 +361,18 @@ public class ClassicMapViewerTest extends FreeColTestCase {
             spec().getUnitType("model.unit.merchantman"));
         other.setMovesLeft(0);
         assertTrue(ClassicInfoPanel.showsLive(other, ship));
+        // A landing holds the block as it was (W8b): never live then.
+        assertTrue(ClassicInfoPanel.liveBlock(false, other, ship));
+        assertFalse(ClassicInfoPanel.liveBlock(true, other, ship));
+        assertFalse(ClassicInfoPanel.liveBlock(true, ship, null));
+
+        // The cargo list: the passenger that boarded last on top (W18).
+        final UnitType colonistType = spec().getUnitType("model.unit.freeColonist");
+        final Unit first = new ServerUnit(game, ship, dutch, colonistType);
+        final Unit second = new ServerUnit(game, ship, dutch, colonistType);
+        assertEquals(java.util.List.of(first, second), ship.getUnitList());
+        assertEquals(java.util.List.of(second, first),
+                     ClassicInfoPanel.cargoNewestFirst(ship));
 
         // The jump question: the origin stays; a tile in the margin or
         // off the view would jump, one inside would not.

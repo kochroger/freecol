@@ -284,6 +284,60 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertFalse(ClassicTurnFlow.ranOut(null));
         a.setMovesLeft(0);
         assertTrue(ClassicTurnFlow.ranOut(a));
+        // Skipped (Space) is done too, with its moves.
+        final Unit b = ship(6, 5);
+        b.setState(Unit.UnitState.SKIPPED);
+        assertTrue(b.getMovesLeft() > 0);
+        assertTrue(ClassicTurnFlow.ranOut(b));
+
+        // After a boarding (spec delta W18): the carrier at 128 ms.
+        s = ClassicTurnFlow.boardingStages(false);
+        assertEquals(1, s.length);
+        assertEquals(128.0, s[0].ms);
+        assertEquals(ClassicTurnFlow.Action.ACTIVATE, s[0].action);
+        s = ClassicTurnFlow.boardingStages(true);
+        assertEquals(2, s.length);
+        assertEquals(ClassicTurnFlow.Action.JUMP, s[0].action);
+        assertEquals(128.0, s[0].ms);
+        assertEquals(149.0, s[1].ms);
+    }
+
+    /**
+     * After a boarding the carrier comes 128 ms after the boarding's final
+     * draw (clip007 #4272 -&gt; #4281: 9 frames), re-based on a later
+     * change as any hand-over; a skipped unit hands over as after its last
+     * move (500 ms).
+     */
+    public void testHandOverAfterBoardingAndSkip() {
+        final Unit ship = ship(5, 5), b = ship(7, 5);
+        final Unit soldier = new ServerUnit(this.game, ship,
+            this.game.getPlayerByNationId("model.nation.dutch"),
+            spec().getUnitType("model.unit.freeColonist"));
+        soldier.setMovesLeft(0);   // it has just boarded
+        final Rig r = new Rig(this.game);
+        r.host.active = soldier;
+        r.flow.screenChanged();                    // the boarding's final draw
+        r.clock.advanceMs(2);
+        assertTrue(r.flow.carrierChosen(ship, soldier));
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
+        assertSame(ship, r.flow.pending().unit);
+        assertTrue(r.flow.isInputBlocked());
+        assertTrue(r.flow.unitChosen(ship, soldier));   // asked again: kept
+        r.advanceMs(125.9);
+        assertEquals(0, r.count("activate " + ship.getId()));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("activate " + ship.getId()));
+        assertNull(r.flow.pending());
+
+        // Space on the ship: the next unit as after a last move, 500 ms.
+        r.host.active = ship;
+        ship.setState(Unit.UnitState.SKIPPED);
+        r.flow.screenChanged();                    // the skip's redraw
+        assertTrue(r.flow.unitChosen(b, ship));
+        r.advanceMs(499.9);
+        assertEquals(0, r.count("activate " + b.getId()));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("activate " + b.getId()));
     }
 
     /**

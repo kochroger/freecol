@@ -543,6 +543,87 @@ public class UnitTest extends FreeColTestCase {
             other.getUnitList().get(0).getId());
     }
     
+    /**
+     * A woken passenger aboard a carrier on the map, with moves and no
+     * orders, is a candidate for the next active unit (the Classic UI's
+     * landing, master plan W18); an asleep or skipped one, one without
+     * moves or with a destination is not, and goto and trade routes
+     * ({@code couldMove}) still leave every passenger alone.  The
+     * passengers keep the order they boarded in, also through the save
+     * format (the landing sends the one aboard longest).
+     */
+    public void testActivePassenger() {
+        Game game = getStandardGame();
+        Map map = getCoastTestMap(plains, true);
+        game.changeMap(map);
+        Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        Tile sea = map.getTile(15, 7), land = map.getTile(5, 7);
+
+        Unit ship = new ServerUnit(game, sea, dutch, merchantmanType);
+        Unit a = new ServerUnit(game, land, dutch, colonistType);
+        Unit b = new ServerUnit(game, ship, dutch, colonistType);
+        a.setLocation(ship);                      // boards after b
+        assertEquals(Unit.UnitState.SENTRY, a.getState());
+        assertFalse(a.isActivePassenger());
+        assertFalse(a.isCandidateForNextActiveUnit());
+
+        a.setState(Unit.UnitState.ACTIVE);
+        assertTrue(a.isActivePassenger());
+        assertTrue(a.isCandidateForNextActiveUnit());
+        assertFalse(a.couldMove());
+        a.setMovesLeft(0);
+        assertFalse(a.isCandidateForNextActiveUnit());
+        a.setMovesLeft(3);
+        a.setState(Unit.UnitState.SKIPPED);
+        assertFalse(a.isCandidateForNextActiveUnit());
+        a.setState(Unit.UnitState.ACTIVE);
+        a.setDestination(land);
+        assertFalse(a.isCandidateForNextActiveUnit());
+        a.setDestination(null);
+        assertTrue(a.isCandidateForNextActiveUnit());
+
+        // A unit on land: the rule as before.
+        Unit c = new ServerUnit(game, land, dutch, colonistType);
+        assertFalse(c.isActivePassenger());
+        assertTrue(c.isCandidateForNextActiveUnit());
+        assertTrue(ship.isCandidateForNextActiveUnit());
+        assertFalse(ship.isActivePassenger());
+
+        // The boarding order, through a copy (the save format).
+        assertEquals(b, ship.getUnitList().get(0));
+        Unit copy = ship.copy(game);
+        assertEquals(b.getId(), copy.getUnitList().get(0).getId());
+        assertEquals(a.getId(), copy.getUnitList().get(1).getId());
+    }
+
+    /**
+     * The cycle of active units can be restarted on a given order (the
+     * Classic UI's hand-over after a landing): those that can move come
+     * in that order, then the cycle refills as before; a unit taken can be
+     * put back to come next again.
+     */
+    public void testActiveUnitCycleRestart() {
+        Game game = getStandardGame();
+        Map map = getTestMap(plains, true);
+        game.changeMap(map);
+        Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        Unit u1 = new ServerUnit(game, map.getTile(4, 4), dutch, colonistType);
+        Unit u2 = new ServerUnit(game, map.getTile(6, 6), dutch, colonistType);
+        Unit u3 = new ServerUnit(game, map.getTile(8, 8), dutch, colonistType);
+        u2.setMovesLeft(0);
+
+        dutch.restartActiveUnitCycle(java.util.List.of(u3, u2, u1));
+        assertSame(u3, dutch.getNextActiveUnit());
+        assertTrue(dutch.putBackActiveUnit(u3));
+        assertSame(u3, dutch.getNextActiveUnit());
+        assertFalse(dutch.putBackActiveUnit(u2));   // cannot move
+        assertSame(u1, dutch.getNextActiveUnit());
+        // Used up: the cycle refills with every unit that can move.
+        assertTrue(dutch.hasNextActiveUnit());
+        Unit next = dutch.getNextActiveUnit();
+        assertTrue(next == u1 || next == u3);
+    }
+
     public void testDefaultRole() {
         for (UnitType type : spec().getUnitTypeList()) {
             assertNotNull(type.getDefaultRole());

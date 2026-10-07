@@ -78,6 +78,10 @@ import javax.swing.JComponent;
  *       it appears (2-8 frames in the clip); the recorder's frames get the
  *       portrait's entries then ({@link ClassicFrameRecorder#portraitPalette}).
  *       The same portrait again loads nothing.</li>
+ *   <li>A box with a {@link ClassicAdvisorBox.Request#showAtNanos} comes
+ *       at that time, no earlier than it could otherwise; its palette goes
+ *       in the lead before it, or what is left of the lead, at least a
+ *       frame (the landing box, a set time after its key).</li>
  *   <li>The bar moves in one paint; the close restores the screen in one.</li>
  * </ul>
  *
@@ -107,6 +111,9 @@ final class ClassicAdvisorLayer extends JComponent {
 
     /** {@link #PALETTE_LEAD_FRAMES} in ms (70.0863 Hz frames). */
     static final double PALETTE_LEAD_MS = PALETTE_LEAD_FRAMES * 1000.0 / 70.0863;
+
+    /** One frame of the original (70.0863 Hz), in ms. */
+    static final double FRAME_MS = 1000.0 / 70.0863;
 
     /** {@link #show}: the box could not be drawn (no font, too many rows). */
     static final int UNAVAILABLE = Integer.MIN_VALUE + 1;
@@ -301,6 +308,27 @@ final class ClassicAdvisorLayer extends JComponent {
         return (p == null) ? null : p.layout;
     }
 
+    /**
+     * Whether a box with this portrait would load the portrait's palette
+     * before it ({@link #PALETTE_LEAD_FRAMES}): another portrait was the
+     * last one shown.
+     *
+     * @param p The portrait.
+     * @return True if its palette goes in first.
+     */
+    boolean loadsPalette(ClassicAdvisorBox.Portrait p) {
+        return p != null && p.sprite != null && !p.sprite.equals(this.lastPortrait);
+    }
+
+    /**
+     * @return When the last box on screen closed, on the layer's clock, or
+     *     {@code Long.MIN_VALUE} before the first (the landing's slide is
+     *     timed from it, build spec W8b).
+     */
+    long lastCloseNanos() {
+        return this.lastClose;
+    }
+
     /** @return The bar's row of the box on screen, or -1 (tests). */
     int currentBar() {
         final Pending p = this.current;
@@ -385,11 +413,21 @@ final class ClassicAdvisorLayer extends JComponent {
         final String sprite = (p.layout.portrait == null) ? null
             : p.request.portrait.sprite;
         final boolean load = sprite != null && !sprite.equals(this.lastPortrait);
+        long at = due + ((load) ? Math.round(PALETTE_LEAD_MS * 1e6) : 0L);
+        if (p.request.showAtNanos != 0L) {
+            // A box due at a given time: the palette goes in the lead
+            // before it, or as much of the lead as is left, at least a
+            // frame (the landing box after its key, build spec W8b).
+            at = Math.max(p.request.showAtNanos,
+                          due + ((load) ? Math.round(FRAME_MS * 1e6) : 0L));
+            if (load) due = Math.max(due, at - Math.round(PALETTE_LEAD_MS * 1e6));
+            else due = at;
+        }
         if (load) {
-            final long at = due + Math.round(PALETTE_LEAD_MS * 1e6);
+            final long show = at;
             this.timer.schedule(due, () -> {
                     loadPalette(p);
-                    if (!p.done) this.timer.schedule(at, () -> display(p));
+                    if (!p.done) this.timer.schedule(show, () -> display(p));
                 });
         } else if (due <= now) {
             display(p);

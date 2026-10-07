@@ -245,6 +245,25 @@ final class ClassicMapViewer extends JPanel {
     private Unit keyMoveUnit = null;
 
     /**
+     * The passenger a landing sends ashore ("An Land gehen", build spec
+     * W8b), and when its slide may start: {@link #LANDING_SLIDE_MS} after
+     * the box closed; null when none is due.
+     */
+    private Unit landingUnit = null;
+    private long landingDue = 0L;
+
+    /** When the last movement key was taken, on the slide clock; 0 before the first. */
+    private long moveKeyNanos = 0L;
+
+    /**
+     * From the close of the landing box to the landed unit's offset 0
+     * over the ship: 6-9 frames in the clips (landfall #11570 -&gt; #11576/7,
+     * clip007 #3039 -&gt; #3048, #5736 -&gt; #5743, #6575 -&gt; #6583:
+     * 86-128 ms).
+     */
+    static final double LANDING_SLIDE_MS = 110.0;
+
+    /**
      * A slide ended, so the next paint is its final draw: offset 16,
      * together with the tiles the move revealed (logged as
      * {@code final-draw}, see {@link ClassicFrameRecorder}).
@@ -601,6 +620,13 @@ final class ClassicMapViewer extends JPanel {
      * {@code SkipUnitAction}.  With no active unit there is nothing to skip, so —
      * as in the original game — Space ends the turn instead; a unit off the
      * map (a ship that has sailed for Europe) counts as none.
+     *
+     * <p>A passenger offered aboard stays aboard (master plan W18).  The
+     * skipped unit stays drawn ON and stops blinking, and the next unit
+     * comes as after a last move (clip007 #1397 -&gt; #1449, #1528,
+     * {@code ClassicTurnFlow.ranOut}).  The controller's state change
+     * already asks for the next unit; asking once more took two units
+     * from the cycle, so the first of them was passed over.
      */
     private void skipActiveUnitOrEndTurn() {
         final Unit unit = this.activeUnit;
@@ -608,13 +634,31 @@ final class ClassicMapViewer extends JPanel {
             endTurn();
             return;
         }
-        if (unit.getState() != Unit.UnitState.SKIPPED) {
-            this.freeColClient.getInGameController()
-                .changeState(unit, Unit.UnitState.SKIPPED);
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("skip", "unit=" + unit.getId()
+                + " at=" + xy(unit.getTile()) + " moves=" + unit.getMovesLeft()
+                + (unit.isOnCarrier() ? " aboard=" + unit.getCarrier().getId() : ""));
+        }
+        if (unit.getState() != Unit.UnitState.SKIPPED
+            && this.freeColClient.getInGameController()
+                .changeState(unit, Unit.UnitState.SKIPPED)) {
+            skipped();
+            return;   // its updateGUI brought the next unit
         }
         if (unit.getState() == Unit.UnitState.SKIPPED) {
+            skipped();
             this.freeColClient.getInGameController().nextActiveUnit();
         }
+    }
+
+    /**
+     * The skipped unit is redrawn ON and stops blinking; the redraw is the
+     * last change the next unit's pause runs from (clip007 #1528: the
+     * sprite redrawn off its rhythm, the end 0.513 s later).
+     */
+    private void skipped() {
+        rearmBlink("skip");
+        if (this.gui != null) this.gui.screenChanged();
     }
 
     /**
@@ -739,6 +783,7 @@ final class ClassicMapViewer extends JPanel {
             final Direction d = intentToDirection(intent, this.activeUnit.getTile());
             if (d != null) {
                 final Unit u = this.activeUnit;
+                this.moveKeyNanos = this.slideClock.now();
                 if (ClassicFrameRecorder.on()) {
                     ClassicFrameRecorder.event("move-key", intent + " " + d
                         + " unit=" + u.getId() + " at=" + xy(u.getTile())
@@ -757,10 +802,17 @@ final class ClassicMapViewer extends JPanel {
                     return;
                 }
                 this.keyMoveUnit = u;
+                // A unit that boards a ship hands over to the ship (spec
+                // delta W18): the GUI picks the carrier when the controller
+                // asks for the next unit, which it does inside moveUnit.
+                final boolean boarding = this.gui != null
+                    && u.getMoveType(d) == Unit.MoveType.EMBARK;
+                if (boarding) this.gui.unitBoarding(u);
                 try {
                     this.freeColClient.getInGameController().moveUnit(u, d);
                 } finally {
                     this.keyMoveUnit = null;
+                    if (boarding) this.gui.unitBoarding(null);
                 }
                 if (ClassicFrameRecorder.on()) {
                     ClassicFrameRecorder.event("move-done", "unit=" + u.getId()
@@ -914,6 +966,7 @@ final class ClassicMapViewer extends JPanel {
      * the panel refresh (build spec W3).
      */
     void changeToMoveUnits(Unit unit) {
+        final Unit before = this.activeUnit;
         final boolean activated = unit != this.activeUnit
             || this.viewMode != GUI.ViewMode.MOVE_UNITS;
         // The Spielzugende square goes (left, or frozen until this
@@ -933,9 +986,20 @@ final class ClassicMapViewer extends JPanel {
         if (jumped) {
             paintNow(null);
             if (this.gui != null) this.gui.paintBlinkDot();
+        } else if (activated && (aboard(unit) || aboard(before))) {
+            // A passenger drawn instead of its ship, or the ship back in
+            // its place: the cells change with the block (clip007 #3107,
+            // landfall #13118), not when a repaint gets through.
+            if (before != null && before != unit) paintCellNow(before.getTile());
+            paintCellNow((unit == null) ? null : unit.getTile());
         } else {
             repaint();
         }
+    }
+
+    /** Whether a unit is a passenger on the map (drawn instead of its ship while active). */
+    private static boolean aboard(Unit u) {
+        return u != null && u.isOnCarrier() && u.getTile() != null;
     }
 
     /**
@@ -1049,6 +1113,46 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
+     * The landing box sent {@code unit} ashore ("An Land gehen", build
+     * spec W8b): its slide starts at {@code due} at the earliest.
+     *
+     * @param unit The passenger, or null to drop a landing whose slide did
+     *     not come.
+     * @param due The earliest start on the slide clock.
+     */
+    void landingSlide(Unit unit, long due) {
+        this.landingUnit = unit;
+        this.landingDue = due;
+    }
+
+    /**
+     * @return When the last movement key was taken, on the slide clock
+     *     ({@link #slideClock}); 0 before the first (the landing box is
+     *     timed from it, build spec W8b).
+     */
+    long moveKeyNanos() {
+        return this.moveKeyNanos;
+    }
+
+    /**
+     * The unit a landing put ashore becomes the active unit, as the unit
+     * that has just made its last move (master plan W18): no view test,
+     * no paint (the map shows it already), and no blink, since it has no
+     * moves left.  The ship it left is drawn as before, and the hand-over
+     * to the next unit follows (build spec W5e).
+     *
+     * @param unit The landed unit.
+     */
+    void finishedUnit(Unit unit) {
+        if (unit == null) return;
+        this.viewMode = GUI.ViewMode.MOVE_UNITS;
+        this.activeUnit = unit;
+        this.lastUnit = unit;
+        if (unit.getTile() != null) this.selectedTile = unit.getTile();
+        rearmBlink("landed");
+    }
+
+    /**
      * Slide {@code unit}'s sprite from {@code srcTile} to {@code dstTile}:
      * the original's slide ({@link ClassicSlide}, build spec W2).
      *
@@ -1076,6 +1180,10 @@ final class ClassicMapViewer extends JPanel {
      *   <li>Until its slide starts, a foreign unit stays at its source
      *   although the model has moved it ({@link #moveQueued}; M1
      *   acceptance F5).</li>
+     *   <li>The passenger a landing sends ashore starts no earlier than
+     *   {@link #LANDING_SLIDE_MS} after the landing box closed
+     *   ({@link #landingSlide}, build spec W8b); its offset 0 shows it
+     *   instead of its ship ({@link #paintOccupant}).</li>
      * </ul>
      *
      * <p>The controller delivers the hook on the EDT (an own move from
@@ -1129,6 +1237,16 @@ final class ClassicMapViewer extends JPanel {
                 }
             }
             if (cue) showNativeCue(unit, srcTile);
+            if (unit == this.landingUnit) {
+                // The landed unit leaves its ship the original's pause after
+                // the landing box closed (build spec W8b).
+                this.landingUnit = null;
+                try {
+                    this.slideClock.waitUntil(this.landingDue);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             final boolean shown = isShownAt(unit, srcTile);
             // The view rule on the SOURCE tile, now the move is accepted and
             // before the first step (build spec W4 (b)/(c), also for native
@@ -1595,10 +1713,11 @@ final class ClassicMapViewer extends JPanel {
      * Restart the blink: ON now, the first OFF one half-period later (or
      * after the panel refresh that follows, {@link #blinkPanelPainted}).
      * The counter is reset, not resumed (landfall #7703 / #8163 / #8187).
-     * Without an active unit in MOVE_UNITS, or once it has no moves left,
-     * the clock stops instead: after its last move the unit stays on
-     * screen and does not blink, through the pause before the next unit or
-     * the end of turn (landfall 03 section 1, {@code ship_w1.png}).
+     * Without an active unit in MOVE_UNITS, or once it has no moves left
+     * or was skipped, the clock stops instead: after its last move (or
+     * Space, clip007 #1397, #1528) the unit stays on screen and does not
+     * blink, through the pause before the next unit or the end of turn
+     * (landfall 03 section 1, {@code ship_w1.png}).
      *
      * @param reason What re-arms it (for the recorder's events).
      */
@@ -1608,7 +1727,8 @@ final class ClassicMapViewer extends JPanel {
         setBlinkOff(false);
         final Unit u = this.activeUnit;
         if (this.viewMode == GUI.ViewMode.MOVE_UNITS && u != null
-            && u.getTile() != null && u.getMovesLeft() > 0) {
+            && u.getTile() != null && u.getMovesLeft() > 0
+            && u.getState() != Unit.UnitState.SKIPPED) {
             this.blink.arm();
             if (ClassicFrameRecorder.on()) {
                 ClassicFrameRecorder.event("blink", "arm " + reason + " unit="
@@ -1912,13 +2032,21 @@ final class ClassicMapViewer extends JPanel {
      */
     private void paintBlinkCell() {
         final Unit u = this.activeUnit;
+        paintCellNow((u == null) ? null : u.getTile());
+    }
+
+    /**
+     * Paint one tile's cell now, plus the icon's reach; the whole map
+     * later while a final draw is pending or without the tile.
+     *
+     * @param t The tile, or null.
+     */
+    private void paintCellNow(Tile t) {
         final int[] o = this.origin;
-        if (this.finalDrawPending || u == null || u.getTile() == null
-            || o == null) {
+        if (this.finalDrawPending || t == null || o == null) {
             repaint();
             return;
         }
-        final Tile t = u.getTile();
         final Rectangle r = new Rectangle(screenX(t.getX(), o[0]),
             screenY(t.getY(), o[1]), tileW(), tileH());
         final int m = ICON_MARGIN * scale();
@@ -2368,6 +2496,11 @@ final class ClassicMapViewer extends JPanel {
             && this.activeUnit.getTile() == tile) return;
         // The native cue's square hides the sprite under it (W19).
         if (this.cueSquare && tile == this.cueTile) return;
+        // A passenger leaving its ship: offset 0 shows it instead of the
+        // ship, as an active passenger is drawn (landfall #11577, clip007
+        // #3048); the ship is back under the sprite from the steps on.
+        if (this.animUnit != null && this.animOffset == 0 && tile == this.animFrom
+            && !this.animUnit.isNaval() && !tile.isLand()) return;
         // A unit mid-slide is painted by paintAnimatedUnit instead.
         final Unit unit = displayUnit(tile);
         if (unit != null) paintUnit(g, unit, sx, sy, markerOf(unit, tile));
@@ -2375,16 +2508,19 @@ final class ClassicMapViewer extends JPanel {
 
     /**
      * The unit drawn on a tile: the active unit when it is there (also a
-     * passenger: it is drawn instead of its ship), else the first unit,
-     * never the one mid-slide.  A foreign unit whose announced move has
-     * not slid yet stays at that move's source ({@link #moveQueued}).
+     * passenger offered aboard: it is drawn instead of its ship, clip007
+     * #3107; but not one that has just boarded and sits sentried until the
+     * hand-over, #4272), else the first unit, never the one mid-slide.  A
+     * foreign unit whose announced move has not slid yet stays at that
+     * move's source ({@link #moveQueued}).
      *
      * @param tile The tile.
      * @return The unit, or null.
      */
     Unit displayUnit(Tile tile) {
         final Unit a = this.activeUnit;
-        if (a != null && a != this.animUnit && a.getTile() == tile) return a;
+        if (a != null && a != this.animUnit && a.getTile() == tile
+            && !(a.isOnCarrier() && a.getState() == Unit.UnitState.SENTRY)) return a;
         for (Unit u : tile.getUnitList()) {
             if (u == this.animUnit) continue;
             final Tile from = queuedSource(u);

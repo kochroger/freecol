@@ -145,7 +145,8 @@ save plays on as it was (R1b re-applies the rules on load, later).
   The classic dialogs are Phase 3, but three controller flows can't proceed
   without an answer, so these are wired now with plain (unstyled) Swing dialogs:
   `modalConfirmDialog` (e.g. the build-colony site warnings), `modalChoiceDialog`
-  (e.g. which unit(s) to disembark from a laden ship) and `getNewColonyName`
+  (e.g. which unit(s) to disembark from a laden ship; now the original's
+  landing box, see "The landing") and `getNewColonyName`
   (which returns FreeCol's suggested name, made unique, rather than prompting —
   the base `modalInputDialog` still no-ops). Without these, founding a colony —
   and hence the colony screen — would be unreachable. All run their dialog on the
@@ -635,8 +636,12 @@ cell-fitted sprites (`drawCentered`, `UNIT_CELL_FRACTION`).
   (landfall #13302). The map paints in two passes, terrain then
   settlements/units, so a shadow or an overhang lies on the neighbour's
   terrain.
-- **Which unit.** The active unit when it is on the tile (a passenger is drawn
-  instead of its ship, W18), else the first unit, never the one mid-slide.
+- **Which unit.** The active unit when it is on the tile (a woken passenger
+  offered aboard is drawn instead of its ship, W18, clip007 #3107; one that has
+  just boarded and is asleep is not, the ship is, #4272), else the first unit,
+  never the one mid-slide.  An activation that puts a passenger in its ship's
+  place, or the ship back, paints the cell at once (`paintCellNow`), in step
+  with the block.
 - **No cursor box** in MOVE_UNITS (the original has none); TERRAIN keeps the
   selected-tile box, but only while the player can use it
   (`ClassicMapViewer.isCursorShown`): not while the player waits
@@ -662,7 +667,8 @@ it used to land in the final draw's own frame in 21 of 53 slides. Steps repaint 
 the cells the sprite crosses (`slideBounds`); every step restores the source
 tile; diagonals step (+-1,+-1); nothing is mirrored. Offset 0 is painted first,
 one step before offset 1, when the view jumps for the move or the player's own
-unit is not on screen at its source (blink OFF, a passenger leaving its ship);
+unit is not on screen at its source (blink OFF, a passenger leaving its ship:
+its offset 0 shows it instead of the ship, landfall #11577, clip007 #3048);
 offset 1 is due one step after offset 0's map paint has *returned* (a jump's
 full repaint took 8-27 ms out of offset 0's tick before, M1 acceptance F3;
 the minimap and the recorder's event after it do not count, `ClassicSlide.run`'s
@@ -969,6 +975,17 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   the old block still up). The controller's re-selection of the shown unit
   meanwhile keeps the hand-over. A unit with no moves left does not blink
   (`rearmBlink`), so nothing changes on the map during the pause.
+  - **Space** ("Keine Befehle") makes the unit done too (`ranOut`, I: clip007
+    #1397 -> #1449, #1528): it is redrawn ON, stops blinking, and the next
+    unit comes 500 ms after that redraw. The key asks the controller once:
+    its state change already brings the next unit, and the second request
+    used to take two units from the cycle, passing the first over.
+  - **After a boarding** (spec delta W18) the carrier comes next, if it can
+    still move, **128 ms** after the boarding's final draw (clip007 #4272 ->
+    #4281, #6179 -> #6188, #6980 -> #6989: 9 frames), not the unit the
+    controller chose, which is put back to come after it
+    (`ClassicGUI.carrierAfterBoarding`, `Player.putBackActiveUnit`).
+  - **After a landing** see "The landing" below.
 - **Turn start (W5e, W5g).** The controller's first view change of our new
   turn wipes the panel (no block, new season line, no indicator, one paint),
   unless a box is up -- FreeCol's turn-start report ("Rundenende") comes
@@ -1305,7 +1322,8 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
   mercenaries on their "no", listed first), the first contact (the tribe's
   chief at the right; "Ja" first and barred; FreeCol's words until W8c),
   the natives' demands (the refusal first and barred); `sailHomeKey`
-  (GAME.TXT @SAILHOME with the admiral); `modalChoiceDialog` (one row per
+  (GAME.TXT @SAILHOME with the admiral); `askLandfall` (GAME.TXT @LANDFALL
+  with the frontiersman, in both landing seams); `modalChoiceDialog` (one row per
   choice, the cancel row last, greyed choices); and the notices: each model
   message is a box of its own, one after the other (the original has no
   paged report), the error and "not yet" notices too. The answers are
@@ -1315,8 +1333,8 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
   without the pack's FONTTINY, or when the rows do not fit on the screen,
   the stopgap stays (`ClassicDialog`, the selection list for a choice).
 - **Not yet.** FreeCol's words in the FreeCol boxes (the GAME.TXT texts of
-  the landing, the villages, the rumours, the first contact chain, the
-  King's texts are W8b-W8f, W24); @SAILPORT's indented port rows; the
+  the villages, the rumours, the first contact chain, the King's texts are
+  W8c-W8f, W24; the landing's  is below); @SAILPORT's indented port rows; the
   @LANDHO input field; the King's KING2 gesture (W24); a notice's
   portrait (N1); the original's list boxes with "(F1 für Hilfe)" (D2).
 - **Recorder events:** `box-palette` and `palette-portrait` (the portrait's
@@ -1341,6 +1359,92 @@ chained boxes 200 ms apart, the palette's lead, notices, teardown),
 outside on the real bar: `testConfirmBoxKeys`, `testChoiceBoxKeys`,
 `testSailHomeBoxKeys`, `testKingsBoxEnterKissesTheRing`,
 `testNativeDemandEnterRefuses`, `testNoticesOneBoxEach`).
+
+### The landing (`ClassicGUI.askLandfall`; build spec W8b, master plan W18)
+
+The original's landing, as measured in the landfall clip and clip007
+(landing-slow `02-landing.md`, clips-004-007 `clip007-01-deep.md` §5-§7) and
+as Roger describes it: the unit that boarded first goes ashore; the others
+are woken and offered one by one; Space keeps a unit aboard.
+
+- **The question.** A ship ordered onto land asks FreeCol's landing question
+  in one of two seams: `modalConfirmDialog` when one passenger can go ashore,
+  `modalChoiceDialog` (one row per passenger and "Alle") when several can.
+  Both put the original's box instead (`isLandfall`, `landfallRequest`):
+  GAME.TXT `@LANDFALL` with the frontiersman, "Sollen wir an Land gehen, Eure
+  Exzellenz, und die Schiffe zurücklassen?", the bar on row 1 "Bei den
+  Schiffen bleiben" (`@default=1`), Escape and a click beside the box staying.
+  Golden: the box and the portrait equal landfall #11157 and clip007 #5400,
+  #6446 at 0 px, the bar on row 2 #11399 and #5518
+  (`ClassicAdvisorBoxTest.testGoldenAgainstTheLandfallClip` builds those
+  crops with `landfallRequest`). Without the pack: FreeCol's question with
+  "Abbrechen" / "OK" in the same order.
+- **When.** The box is on screen 6 frames after the move key when the
+  frontiersman's palette goes in first (landfall #11151 -> #11157), 7
+  without (clip007 #5393 -> #5400): `landfallShowAt` from the key's time
+  (`ClassicMapViewer.moveKeyNanos`), and the layer loads the palette the
+  3-frame lead before it, or what is left of it
+  (`ClassicAdvisorBox.Request.showAtNanos`). FreeCol asks only after waking
+  the passengers on the server, 10-50 ms after the key.
+- **"An Land gehen"** sends exactly one passenger: FreeCol's first choice (or
+  its one unit), the one aboard longest, whatever its kind (`firstLander`;
+  the carrier's list grows at the end on boarding and keeps its order
+  through a save). "Alle" is never the answer. Every other passenger asleep
+  aboard is woken ("Wache" -> "Keine Befehle"), also one without moves
+  (clip007 landing 3; FreeCol woke only those that can go). FreeCol's move
+  sends the passenger in the ship's direction; its slide starts 110 ms after
+  the box closed (`ClassicMapViewer.LANDING_SLIDE_MS`; the clips 86-128 ms,
+  6-9 frames), and its offset 0 shows it instead of the ship. The ship keeps
+  its moves; the landed unit has none (FreeCol's disembark).
+- **"Bei den Schiffen bleiben"** (and Escape) lands nothing; the ship stays
+  the active unit with its moves. The passengers FreeCol woke before the
+  question stay awake (**I**: never chosen in a clip, Roger's question F2).
+- **The panel** keeps the block it showed when the ship was ordered (the
+  passengers still "Wache") from the box until the next unit's block
+  (`ClassicInfoPanel.holdBlock`; clip007 #3040 -> #3107: only the minimap
+  changes); a "stay" shows the new states at once. The cargo list is newest
+  first, so the bottom entry is the one that lands (#5093, #6188, #6989).
+- **The next unit.** When the controller re-selects the ship after the move
+  (`landingDone`), the landed unit becomes the unit that has just made its
+  last move (`ClassicMapViewer.finishedUnit`: no blink, no paint), and the
+  controller's next unit comes as a hand-over from it, 500 ms after its final
+  draw. It is the next one in the original's cycle after the landed unit
+  (clip007 §3.6: ship, pioneer, soldier, farmer, scout fit all six
+  hand-overs): the units in the order they came into the game, which
+  FreeCol's ids keep, a carrier counting as made before what it carries (the
+  original's start ship is its unit 0, FreeCol makes it after its
+  passengers) (`cycleAfter`, `cycleRank`; `Player.restartActiveUnitCycle`).
+  Ranked when the box is answered; FreeCol's cycle carries on from there.
+  So a woken passenger made after the landed one comes next, aboard (clip007
+  #3107, landfall #13118), and a land unit made after it before an older
+  passenger aboard (clip007 landing 2: the farmer, #5804).
+- **Passengers as active units.** `Unit.isActivePassenger` (common model):
+  a passenger on a carrier on the map, active, with moves, no orders, is a
+  candidate for the next active unit (`isCandidateForNextActiveUnit`), so
+  the turn waits for it (W5a). `readyAndAble`, which goto and trade routes
+  use, is unchanged. It is drawn instead of its ship with the stack marker,
+  and its blink OFF shows the bare water (landfall #13140, clip007 #3130).
+  A direction key onto land is FreeCol's ordinary move from a carrier: no
+  box, all moves spent. Space keeps it aboard, skipped ("Keine Befehle");
+  at the next turn FreeCol makes it active again, so it is offered again
+  while the ship stays (I). A ship's move puts its passengers to sleep
+  again (FreeCol, until Roger's F2).
+- **Not built:** `@LANDFALL2` (a river) and `@LANDFIRST` (a foreign unit on
+  the target: FreeCol plays the illegal-move sound only); a click on a
+  passenger aboard (a map click selects the ship).
+- Recorder events: `landfall carrier= unit= aboard= chosen= ashore|stay`,
+  `handover after landing ...`, `handover after boarding ...`, `skip unit=`.
+
+Live check (F2, `freecol-spike-results\f\f2`): three scripted scenarios built
+from E1's west-edge save, in both topologies, reproduce the clips' sequences
+(landfall L, clip007 landings 1-3 with both boardings) to the unit and the
+frame window. Tests: `ClassicGUISeamTest` (`testLandfallBox`,
+`testLandfallSendsTheLongestAboard`, `testLandingCycleAndBoarding`),
+`ClassicAdvisorLayerTest.testABoxDueAtATime`,
+`ClassicTurnFlowTest.testHandOverAfterBoardingAndSkip`,
+`ClassicMapViewerTest` (the passenger asleep and awake, `finishedUnit`, the
+skipped unit's blink, the held block, the cargo order),
+`UnitTest.testActivePassenger`, `UnitTest.testActiveUnitCycleRestart`.
 
 ### Option boxes (`ClassicOptionBoxes`; build spec W14)
 
@@ -1687,7 +1791,7 @@ terrain copied from the capture).  Green `0x559634`, gold `0xC7A220`.
   otherwise); then 7 apart from y 93: the colonist's skill `@JOB` (gold), the
   tools "(" + n / tools word + ")" (gold, 007), the orders `@ORDERS` (gold),
   "(" + terrain + ")" and "(" + road + ")" (green).
-- List (cargo of a carrier, else the tile's other units): first sprite 10
+- List (cargo of a carrier, newest first, else the tile's other units): first sprite 10
   below the last active line, text at x 260 from sprite.y + 4, all gold:
   the veteran word (misc 64) for a veteran in a military role, the expert word (misc 4)
   + tool count for a unit in its own skill (hardy pioneer; scouts and

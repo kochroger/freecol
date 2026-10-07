@@ -566,4 +566,80 @@ public class ClassicAdvisorLayerTest extends TestCase {
         assertEquals(ClassicAdvisorBox.Bar.DISMISSED, a.get());
         assertEquals(0.0, question("q").openDelayMs, 0.0);
     }
+
+    /**
+     * A box due at a set time (the landing box after its key, build spec
+     * W8b): it comes then; a new portrait's palette goes in the lead
+     * before it, or at once with what is left of the lead (at least a
+     * frame); without a load it comes at the time.  A time already past
+     * is no wait.
+     */
+    public void testABoxDueAtATime() throws Exception {
+        assertTrue(edt(() -> this.layer.loadsPalette(ClassicAdvisorBox.Portrait.SCOUT)));
+        // Due 100 ms on: the palette 42.8 ms before, the box at 100.
+        final long t0 = this.clock.now();
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request.builder("land")
+            .freeColText("a").rows("a", "a").portrait(ClassicAdvisorBox.Portrait.SCOUT)
+            .showAt(t0 + 100_000_000L).build();
+        final Answer a = ask(r);
+        flush();
+        runTimer();
+        assertTrue(this.host.palettes.isEmpty());
+        this.clock.advanceMs(100 - ClassicAdvisorLayer.PALETTE_LEAD_MS + 0.1);
+        runTimer();
+        assertEquals(List.of("MSS3.SS.000"), this.host.palettes);
+        assertFalse(up());
+        this.clock.advanceMs(ClassicAdvisorLayer.PALETTE_LEAD_MS - 0.2);
+        runTimer();
+        assertFalse(up());
+        this.clock.advanceMs(0.2);
+        runTimer();
+        assertTrue(up());
+        assertFalse(edt(() -> this.layer.loadsPalette(ClassicAdvisorBox.Portrait.SCOUT)));
+        key(KeyEvent.VK_ENTER);
+        assertEquals(0, a.get());
+
+        // The same portrait, due 100 ms on: no load, the box at 100.
+        this.clock.advanceMs(ClassicAdvisorLayer.CHAIN_MS);
+        final long t1 = this.clock.now();
+        final Answer b = ask(ClassicAdvisorBox.Request.builder("land")
+            .freeColText("a").rows("a", "a").portrait(ClassicAdvisorBox.Portrait.SCOUT)
+            .showAt(t1 + 100_000_000L).build());
+        flush();
+        this.clock.advanceMs(99.9);
+        runTimer();
+        assertFalse(up());
+        this.clock.advanceMs(0.2);
+        runTimer();
+        assertTrue(up());
+        assertEquals(1, this.host.palettes.size());
+        key(KeyEvent.VK_ENTER);
+        assertEquals(0, b.get());
+
+        // A new portrait due 20 ms on: the load at once, the box at the
+        // time; a time already past: at once.
+        this.clock.advanceMs(ClassicAdvisorLayer.CHAIN_MS);
+        final long t2 = this.clock.now();
+        final Answer c = ask(ClassicAdvisorBox.Request.builder("land")
+            .freeColText("a").rows("a", "a").portrait(ClassicAdvisorBox.Portrait.ADMIRAL)
+            .showAt(t2 + 20_000_000L).build());
+        flush();
+        runTimer();
+        assertEquals(2, this.host.palettes.size());
+        assertFalse(up());
+        this.clock.advanceMs(20.0);
+        runTimer();
+        assertTrue(up());
+        key(KeyEvent.VK_ENTER);
+        assertEquals(0, c.get());
+        this.clock.advanceMs(ClassicAdvisorLayer.CHAIN_MS);
+        final Answer d = ask(ClassicAdvisorBox.Request.builder("land")
+            .freeColText("a").rows("a", "a").portrait(ClassicAdvisorBox.Portrait.ADMIRAL)
+            .showAt(t2).build());
+        flush();
+        assertTrue(up());
+        key(KeyEvent.VK_ENTER);
+        assertEquals(0, d.get());
+        assertEquals(14.27, ClassicAdvisorLayer.FRAME_MS, 0.01);
+    }
 }

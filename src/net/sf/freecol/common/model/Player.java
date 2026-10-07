@@ -2187,6 +2187,29 @@ public class Player extends FreeColGameObject implements Nameable {
     }
 
     /**
+     * Restart the cycle of active units on a given order (the Classic
+     * UI's hand-over after a landing, master plan W18): those of the
+     * units that can be made active come next, in this order, then the
+     * cycle goes on as usual.
+     *
+     * @param order The units, in the order wanted.
+     */
+    public void restartActiveUnitCycle(List<Unit> order) {
+        nextActiveUnitIterator.restart(order);
+    }
+
+    /**
+     * Put a unit {@link #getNextActiveUnit} returned back at the front
+     * of the cycle, so it comes next again.
+     *
+     * @param unit The {@code Unit} to put back.
+     * @return True if it was put back.
+     */
+    public boolean putBackActiveUnit(Unit unit) {
+        return nextActiveUnitIterator.putBack(unit);
+    }
+
+    /**
      * Gets a new going-to unit.
      *
      * @return A {@code Unit} that can be made active.

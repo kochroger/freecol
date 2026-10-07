@@ -93,6 +93,37 @@ public class UnitIterator implements Iterator<Unit> {
     }
 
     /**
+     * Restart the iterator on a given order: the units of {@code order}
+     * that satisfy the predicate come next, in that order, and once they
+     * are used up the iterator refills as usual.
+     *
+     * @param order The units, in the order wanted.
+     */
+    public void restart(List<Unit> order) {
+        this.units.clear();
+        for (Unit u : order) {
+            if (u != null && !this.units.contains(u) && this.predicate.test(u)) {
+                this.units.add(u);
+            }
+        }
+    }
+
+    /**
+     * Put a unit that {@link #next} returned back at the front, so it
+     * comes next again (a caller that took it and showed another unit
+     * first).
+     *
+     * @param unit The {@code Unit} to put back.
+     * @return True if it was put back (it satisfies the predicate).
+     */
+    public boolean putBack(Unit unit) {
+        if (unit == null || !this.predicate.test(unit)) return false;
+        this.units.remove(unit);
+        this.units.add(0, unit);
+        return true;
+    }
+
+    /**
      * Removes a specific unit from this unit iterator.
      *
      * @param u The {@code Unit} to remove.

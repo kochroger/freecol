@@ -296,6 +296,15 @@ final class ClassicAdvisorBox {
          */
         final double openDelayMs;
 
+        /**
+         * When the box should be on screen, on the box layer's clock, or 0
+         * for no such time: the landing box comes the original's time after
+         * the move key (build spec W8b); a portrait palette goes in
+         * {@code ClassicAdvisorLayer.PALETTE_LEAD_MS} before it, or as much
+         * of that as is left.
+         */
+        final long showAtNanos;
+
         /** The stopgap's window title, when the box cannot be drawn. */
         final String title;
 
@@ -325,6 +334,7 @@ final class ClassicAdvisorBox {
                 : Arrays.copyOf(b.checks, n);
             this.toggles = (this.checks == null) ? null : b.toggles;
             this.openDelayMs = Math.max(0.0, b.openDelayMs);
+            this.showAtNanos = b.showAtNanos;
             this.title = (b.title == null) ? "" : b.title;
             this.icon = b.icon;
             this.list = b.list;
@@ -408,6 +418,7 @@ final class ClassicAdvisorBox {
         private boolean[] checks = null;
         private Toggles toggles = null;
         private double openDelayMs = 0.0;
+        private long showAtNanos = 0L;
         private String title = null;
         private Image icon = null;
         private boolean list = false;
@@ -507,6 +518,12 @@ final class ClassicAdvisorBox {
         /** @param ms The box comes no earlier than this after it is asked for. */
         Builder openDelay(double ms) {
             this.openDelayMs = ms;
+            return this;
+        }
+
+        /** @param nanos When the box should be on screen (the layer's clock), 0 for any time. */
+        Builder showAt(long nanos) {
+            this.showAtNanos = nanos;
             return this;
         }
 

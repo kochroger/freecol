@@ -2780,9 +2780,30 @@ public class Unit extends GoodsLocation
      * @return True if this unit could still be moved by the player.
      */
     public boolean isCandidateForNextActiveUnit() {
-        return couldMove() && !isInEurope();
+        return (couldMove() && !isInEurope()) || isActivePassenger();
     }
-    
+
+    /**
+     * Is this unit a woken passenger that can still go ashore: aboard a
+     * carrier on the map, active (not sentried or skipped), with moves
+     * left and no orders?  Such a unit is offered as the active unit
+     * aboard, as the original game offers the passengers a landing woke
+     * (Classic UI, master plan W18).  {@link #readyAndAble} still excludes
+     * it, as goto orders and trade routes need.
+     *
+     * @return True if this passenger could still be moved by the player.
+     */
+    public boolean isActivePassenger() {
+        final Unit carrier = getCarrier();
+        return carrier != null
+            && !isDisposed()
+            && carrier.hasTile()
+            && getState() == UnitState.ACTIVE
+            && getMovesLeft() > 0
+            && getDestination() == null
+            && getTradeRoute() == null;
+    }
+
     /**
      * Checks if the unit is currently movable by the player.
      *

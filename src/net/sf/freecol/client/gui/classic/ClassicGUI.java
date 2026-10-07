@@ -1169,6 +1169,8 @@ public class ClassicGUI extends GUI {
         if (this.frame != null) this.frame.setJMenuBar(null);
         ClassicDialog.setWatcher(null);
         restoreSessionOptions();
+        this.landing = null;
+        this.boardedUnit = null;
         this.mapViewer = null;
         this.terrainOracle = null;
         this.waterCycle = null;
@@ -2101,24 +2103,48 @@ public class ClassicGUI extends GUI {
      * spec W5e): the turn flow takes them over and activates them later.
      * A unit off the map with nothing left to move is no unit: the end
      * view, as {@link #changeView()} ({@link #goneWithNothingLeft}).
+     *
+     * <p>After a landing the ship's re-selection hands over to the next
+     * unit in the cycle instead ({@link #landingDone}); after a boarding
+     * the carrier comes next, sooner ({@link #carrierAfterBoarding}; spec
+     * delta W18).
      */
     @Override
     public void changeView(Unit unit, boolean force) {
         if (this.mapViewer != null) {
             if (droppedViewChange("unit")) return;
             final Unit previous = this.mapViewer.getActiveUnit();
-            if (goneWithNothingLeft(unit)) {
+            final Unit carrier;
+            if (landingDone(unit)) {
+                // The hand-over from the landed unit is on its way.
+            } else if (goneWithNothingLeft(unit)) {
                 ClassicFrameRecorder.event("handover", "off the map "
                     + unit.getId() + ": no unit left");
                 this.mapViewer.changeToEndTurn();
                 if (this.turnFlow != null) this.turnFlow.noUnitLeft();
+            } else if ((carrier = carrierAfterBoarding(unit, previous)) != null) {
+                if (this.turnFlow == null
+                    || !this.turnFlow.carrierChosen(carrier, previous)) {
+                    activateNow(carrier);
+                }
             } else if (this.turnFlow == null
                 || !this.turnFlow.unitChosen(unit, previous)) {
-                this.mapViewer.changeToMoveUnits(unit);
+                activateNow(unit);
             }
         }
         repaintInfo();
         updateActions();
+    }
+
+    /**
+     * Make a unit the map's active unit now: the panel's block follows it
+     * again, also after a landing held it.
+     *
+     * @param unit The unit.
+     */
+    private void activateNow(Unit unit) {
+        if (this.infoPanel != null) this.infoPanel.releaseBlock();
+        this.mapViewer.changeToMoveUnits(unit);
     }
 
     /**
@@ -2412,6 +2438,7 @@ public class ClassicGUI extends GUI {
         @Override
         public void activate(Unit unit) {
             if (mapViewer == null) return;
+            if (infoPanel != null) infoPanel.releaseBlock();
             mapViewer.changeToMoveUnits(unit);
             // The block now, on time, in ONE panel paint: it is the panel
             // refresh the blink's first OFF is timed from (W3), and a second
@@ -3830,6 +3857,10 @@ public class ClassicGUI extends GUI {
      * answered "no" at once, so that move is a plain one (W0f).  The
      * Europe question comes only at the map's east and west edges
      * ({@link #sailHomeKey}).
+     *
+     * <p>FreeCol's landing question for a ship with one passenger that can
+     * go ashore is the original's @LANDFALL box ({@link #askLandfall},
+     * build spec W8b).
      */
     @Override
     public boolean modalConfirmDialog(Tile tile, StringTemplate template,
@@ -3838,6 +3869,11 @@ public class ClassicGUI extends GUI {
         if (silentNo(template)) {
             ClassicFrameRecorder.event("dialog-silent", template.getId() + " no");
             return false;
+        }
+        if (isLandfall(template)) {
+            final Unit carrier = landingCarrier((this.mapViewer == null) ? null
+                : this.mapViewer.getActiveUnit(), tile);
+            return askLandfall(carrier, firstLander(carrier, tile));
         }
         final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request
             .builder("confirm " + template.getId())
@@ -3977,12 +4013,24 @@ public class ClassicGUI extends GUI {
      * no choice (null), as before.  Without the in-game canvas, or when the
      * rows do not fit on the screen, the stopgap selection list stays
      * ({@link #chooseFromList}).
+     *
+     * <p>FreeCol's landing list (a ship with several passengers that can
+     * go ashore: one row per unit and "Alle") is the original's @LANDFALL
+     * box ({@link #askLandfall}, build spec W8b): "An Land gehen" takes
+     * FreeCol's first choice, the passenger aboard longest, and nothing
+     * else; "Alle" is never the answer.
      */
     @Override
     protected <T> T modalChoiceDialog(Tile tile, StringTemplate template,
                                       ImageIcon icon, String cancelKey,
                                       List<ChoiceItem<T>> choices) {
         if (choices == null || choices.isEmpty()) return null;
+        if (isLandfall(template)) {
+            final T first = choices.get(0).getObject();
+            final Unit lander = (first instanceof Unit) ? (Unit) first : null;
+            final Unit carrier = (lander == null) ? null : lander.getCarrier();
+            return (askLandfall(carrier, lander) && lander != null) ? first : null;
+        }
         final ClassicAdvisorBox.Request r = choiceRequest(
             Messages.message(template), (cancelKey == null) ? null
                 : Messages.message(cancelKey), choices, colony(tile),
@@ -4203,6 +4251,405 @@ public class ClassicGUI extends GUI {
             .defaultRow(0).cancelRow(1)
             .portrait(ClassicAdvisorBox.Portrait.ADMIRAL)
             .stopgap(colony(null), null).build();
+    }
+
+    // The landing, as the original's (build spec W8b, master plan W18,
+    // landing-slow 02-landing.md).
+
+    /** GAME.TXT's landing question (@LANDFALL). */
+    static final String LANDFALL_SECTION = "LANDFALL";
+
+    /** FreeCol's landing question, in both of its seams. */
+    static final String DISEMBARK_QUESTION = "disembark.text";
+
+    /** The @LANDFALL row that goes ashore ("An Land gehen"); row 0 stays. */
+    static final int LANDFALL_LAND_ROW = 1;
+
+    /**
+     * A landing the box sent ashore, until the controller re-selects the
+     * ship after the move ({@link #landingDone}).
+     */
+    private static final class Landing {
+
+        /** The ship. */
+        final Unit carrier;
+
+        /** The passenger sent ashore. */
+        final Unit unit;
+
+        /**
+         * The player's units in the cycle after it ({@link #cycleAfter}),
+         * ranked before the move, with the passenger still aboard.
+         */
+        final List<Unit> cycle;
+
+        Landing(Unit carrier, Unit unit, List<Unit> cycle) {
+            this.carrier = carrier;
+            this.unit = unit;
+            this.cycle = cycle;
+        }
+    }
+
+    /** The landing under way, or null. */
+    private Landing landing = null;
+
+    /**
+     * The unit a movement key is putting aboard a carrier (spec delta
+     * W18), while its move runs ({@link #unitBoarding},
+     * {@link #carrierAfterBoarding}).
+     */
+    private Unit boardedUnit = null;
+
+    /**
+     * Whether a question is FreeCol's landing question.
+     *
+     * @param template The question.
+     * @return True for {@code disembark.text}.
+     */
+    static boolean isLandfall(StringTemplate template) {
+        return template != null && DISEMBARK_QUESTION.equals(template.getId());
+    }
+
+    /**
+     * The ship of a landing asked through the one-passenger seam: the
+     * active unit, a carrier with passengers next to the target tile (the
+     * landing comes from its move order).
+     *
+     * @param active The map's active unit, or null.
+     * @param target The land tile it was ordered onto.
+     * @return The carrier, or null if the active unit is none.
+     */
+    static Unit landingCarrier(Unit active, Tile target) {
+        if (active == null || target == null || !active.isCarrier()
+            || !active.hasTile() || active.getUnitCount() == 0
+            || !active.getTile().isAdjacent(target)) return null;
+        return active;
+    }
+
+    /**
+     * The passenger a landing sends ashore: the one aboard longest that
+     * can go onto the target, FreeCol's first disembarkable unit
+     * (the carrier's list grows at the end on boarding).  The original
+     * lands the longest aboard whatever its kind (clip007 landing 2: the
+     * soldier, with the pioneer aboard); one without moves left cannot go
+     * (I: in every landing seen the longest aboard had moves).
+     *
+     * @param carrier The ship, or null.
+     * @param target The land tile.
+     * @return The passenger, or null.
+     */
+    static Unit firstLander(Unit carrier, Tile target) {
+        if (carrier == null || target == null) return null;
+        for (Unit u : carrier.getUnitList()) {
+            if (u.getMoveType(target).isProgress()) return u;
+        }
+        return null;
+    }
+
+    /**
+     * The landing question, in the original's advisor box (build spec
+     * W8b): GAME.TXT {@code @LANDFALL} with the frontiersman, the bar on
+     * "Bei den Schiffen bleiben" ({@code @default=1}; landfall #11157,
+     * clip007 #2603, #5400, #6446).  Escape and a click beside the box
+     * stay too.
+     *
+     * <ul>
+     *   <li>From the order to the next unit the panel keeps its block as
+     *   it was before the box ({@link ClassicInfoPanel#holdBlock}): FreeCol
+     *   has already woken the passengers that can go ashore, and the
+     *   original's panel still shows them "Wache" (clip007 #3040).</li>
+     *   <li>"An Land gehen": exactly one passenger goes ashore, the one
+     *   FreeCol's seam names first, which is the one aboard longest
+     *   ({@link #firstLander}); FreeCol's own move sends it, in the ship's
+     *   direction, {@link ClassicMapViewer#LANDING_SLIDE_MS} after the
+     *   close.  Every other passenger asleep aboard is woken, also one
+     *   without moves left (clip007 landing 3, the farmer).  The ship
+     *   keeps its moves.  When the controller then re-selects the ship,
+     *   the next unit in the cycle after the landed one comes instead
+     *   ({@link #landingDone}).</li>
+     *   <li>"Bei den Schiffen bleiben": nothing goes ashore; the ship stays
+     *   the active unit with its moves.  The passengers FreeCol woke stay
+     *   awake (I: never seen in a clip; Roger's question F2), and the
+     *   panel shows them so.</li>
+     * </ul>
+     *
+     * @param carrier The ship, or null if it is not known (then only the
+     *     box is shown and answered).
+     * @param lander The passenger that would go ashore, or null.
+     * @return True for "An Land gehen".
+     */
+    boolean askLandfall(Unit carrier, Unit lander) {
+        final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
+        final int chosen = onEventThread(() -> {
+                this.landing = null;
+                if (this.infoPanel != null) this.infoPanel.holdBlock();
+                final ClassicAdvisorLayer layer = this.boxLayer;
+                final long at = (layer == null || this.mapViewer == null) ? 0L
+                    : landfallShowAt(this.mapViewer.moveKeyNanos(), waitClock().now(),
+                        layer.loadsPalette(ClassicAdvisorBox.Portrait.SCOUT));
+                return this.prompter.ask(landfallRequest(text, at));
+            }, ClassicAdvisorBox.Bar.DISMISSED);
+        final boolean land = chosen == LANDFALL_LAND_ROW && lander != null;
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("landfall", "carrier="
+                + ((carrier == null) ? "-" : carrier.getId())
+                + " unit=" + ((lander == null) ? "-" : lander.getId())
+                + " aboard=" + ((carrier == null) ? "-" : carrier.getUnitList())
+                + " chosen=" + chosen + ((land) ? " ashore" : " stay"));
+        }
+        if (!land) {
+            onEventThread(() -> {
+                    if (this.infoPanel != null) {
+                        this.infoPanel.releaseBlock();
+                        this.infoPanel.repaint();
+                    }
+                    return null;
+                }, null);
+            return false;
+        }
+        if (carrier != null) {
+            final Player p = carrier.getOwner();
+            final List<Unit> cycle = (p == null) ? new ArrayList<>()
+                : cycleAfter(lander, p.getUnits().toList());
+            wakePassengers(carrier, lander);
+            final long close = landfallClosed();
+            onEventThread(() -> {
+                    this.landing = new Landing(carrier, lander, cycle);
+                    if (this.mapViewer != null) {
+                        this.mapViewer.landingSlide(lander, close
+                            + Math.round(ClassicMapViewer.LANDING_SLIDE_MS * 1e6));
+                    }
+                    return null;
+                }, null);
+        }
+        return true;
+    }
+
+    /**
+     * When the landing box closed, on the slide clock: the box layer's
+     * close, else now (the stopgap window).
+     *
+     * @return The close.
+     */
+    private long landfallClosed() {
+        final long now = waitClock().now();
+        final ClassicAdvisorLayer layer = this.boxLayer;
+        final long close = (layer == null) ? Long.MIN_VALUE : layer.lastCloseNanos();
+        return (close != Long.MIN_VALUE && close <= now
+                && now - close < 1_000_000_000L) ? close : now;
+    }
+
+    /**
+     * "An Land gehen" wakes every other passenger asleep aboard ("Wache"
+     * becomes "Keine Befehle"), also one without moves left (clip007
+     * landing 3; FreeCol wakes only those that can go ashore, before the
+     * question).
+     *
+     * @param carrier The ship.
+     * @param lander The passenger going ashore.
+     */
+    private void wakePassengers(Unit carrier, Unit lander) {
+        for (Unit u : new ArrayList<>(carrier.getUnitList())) {
+            if (u != lander && u.getState() == Unit.UnitState.SENTRY) wake(u);
+        }
+    }
+
+    /**
+     * Wake a passenger: the controller's state change, on the server.
+     *
+     * @param unit The passenger.
+     */
+    void wake(Unit unit) {
+        final FreeColClient fcc = getFreeColClient();
+        if (fcc != null) {
+            fcc.getInGameController().changeState(unit, Unit.UnitState.ACTIVE);
+        }
+    }
+
+    /**
+     * The landing box: GAME.TXT {@code @LANDFALL} from the pack, its rows
+     * "Bei den Schiffen bleiben" (the bar's, Escape's) and "An Land gehen",
+     * the frontiersman at the box; else FreeCol's question with its
+     * "Abbrechen" and "OK" in the same order.
+     *
+     * @param t The original texts, or null.
+     * @param showAtNanos When the box should be on screen
+     *     ({@link #landfallShowAt}), 0 for at once.
+     * @return The box.
+     */
+    static ClassicAdvisorBox.Request landfallRequest(ClassicText t,
+                                                     long showAtNanos) {
+        final ClassicText.Message m = (t == null) ? null
+            : t.message(LANDFALL_SECTION);
+        final ClassicAdvisorBox.Builder b = (m == null || m.text.isEmpty()
+            || m.options.size() < 2) ? null
+            : ClassicAdvisorBox.fromGameText(LANDFALL_SECTION, m, new HashMap<>());
+        if (b != null) {
+            return b.defaultRow(ClassicHud.clamp(ClassicAdvisorBox.defaultRow(m), 0, 1))
+                .cancelRow(0).portrait(ClassicAdvisorBox.Portrait.SCOUT)
+                .showAt(showAtNanos).stopgap(colony(null), null).build();
+        }
+        return ClassicAdvisorBox.Request.builder(LANDFALL_SECTION)
+            .freeColText(Messages.message(DISEMBARK_QUESTION))
+            .rows(ClassicAdvisorBox.literal(Messages.message("cancel")),
+                  ClassicAdvisorBox.literal(Messages.message("ok")))
+            .defaultRow(0).cancelRow(0)
+            .portrait(ClassicAdvisorBox.Portrait.SCOUT)
+            .showAt(showAtNanos).stopgap(colony(null), null).build();
+    }
+
+    /**
+     * From the move key to the landing box's display when the
+     * frontiersman's palette goes in first: the clip shows the box 6
+     * frames after the key (landfall #11151 -&gt; #11154 -&gt; #11157,
+     * clip007 #2597 -&gt; #2600 -&gt; #2603: 86 ms frame to frame); a paint
+     * shows in the frame after it, so the display comes half a frame and
+     * the paint's time (about 6 ms) earlier.
+     */
+    static final double LANDFALL_OPEN_PALETTE_MS = 72.0;
+
+    /**
+     * The same without a palette load: 7 frames (clip007 #5393 -&gt;
+     * #5400: 100 ms frame to frame).
+     */
+    static final double LANDFALL_OPEN_MS = 86.0;
+
+    /**
+     * When the landing box should be on screen: the original's time after
+     * the move key ({@link #LANDFALL_OPEN_PALETTE_MS},
+     * {@link #LANDFALL_OPEN_MS}).  The controller asks only after FreeCol
+     * has woken the passengers that can go ashore, 10-50 ms after the key;
+     * the box layer loads the palette before it
+     * ({@link ClassicAdvisorBox.Request#showAtNanos}).
+     *
+     * @param keyNanos When the key was taken (0: unknown, at once).
+     * @param now Now, on the same clock.
+     * @param palette The portrait's palette goes in first.
+     * @return The time, or 0 for at once.
+     */
+    static long landfallShowAt(long keyNanos, long now, boolean palette) {
+        if (keyNanos == 0L || now - keyNanos > 1_000_000_000L) return 0L;
+        return keyNanos + Math.round(((palette) ? LANDFALL_OPEN_PALETTE_MS
+                : LANDFALL_OPEN_MS) * 1e6);
+    }
+
+    /**
+     * The controller re-selects the ship after a landing's move
+     * ({@code moveDirection}'s redisplay): the landed unit becomes the
+     * unit that has just made its last move, and the next unit comes as a
+     * hand-over from it, 500 ms after its final draw (build spec W5e): the
+     * next one in the cycle after it, not the ship (clip007 #3107, #5804,
+     * #6643; landfall #13118).  The cycle is the original's unit list, the
+     * order the units came into the game, which FreeCol's ids keep
+     * ({@link #cycleAfter}, ranked when the box was answered, the
+     * passenger still aboard); FreeCol's cycle carries on from there.  A
+     * landing whose unit did not go ashore leaves the ship selected.
+     *
+     * @param unit The unit the controller chose.
+     * @return True if it was the landing's ship and the hand-over is on
+     *     its way.
+     */
+    private boolean landingDone(Unit unit) {
+        final Landing l = this.landing;
+        if (l == null) return false;
+        this.landing = null;
+        if (this.mapViewer != null) this.mapViewer.landingSlide(null, 0L);
+        if (unit != l.carrier || l.unit.isDisposed() || !l.unit.hasTile()
+            || l.unit.getLocation() == l.carrier) {
+            ClassicFrameRecorder.event("handover", "landing " + l.unit.getId()
+                + " not ashore: the ship stays");
+            if (this.infoPanel != null) this.infoPanel.releaseBlock();
+            return false;
+        }
+        // The controller's moveUnit asks for the next unit right after
+        // this (its updateGUI: the active unit is now the landed one,
+        // which cannot move); asking here too took two units from the
+        // cycle.
+        final Player p = l.carrier.getOwner();
+        this.mapViewer.finishedUnit(l.unit);
+        if (p != null) p.restartActiveUnitCycle(l.cycle);
+        ClassicFrameRecorder.event("handover", "after landing " + l.unit.getId()
+            + " from " + l.carrier.getId() + ": the cycle after it");
+        return true;
+    }
+
+    /**
+     * The original's cycle of units after {@code unit}: the units that
+     * came into the game after it, in that order, then those before it
+     * (landing-slow 02-landing.md section 3.6: ship, pioneer, soldier,
+     * farmer, scout fit all six hand-overs).  FreeCol numbers its units in
+     * the order they are made ({@link #cycleRank}).
+     *
+     * @param unit The unit that has just finished.
+     * @param units The player's units.
+     * @return Every other unit, in the cycle's order.
+     */
+    static List<Unit> cycleAfter(Unit unit, List<Unit> units) {
+        final List<Unit> sorted = new ArrayList<>(units);
+        sorted.sort(java.util.Comparator.comparingLong(ClassicGUI::cycleRank));
+        final long n = cycleRank(unit);
+        final List<Unit> cycle = new ArrayList<>(sorted.size());
+        for (Unit u : sorted) if (u != unit && cycleRank(u) > n) cycle.add(u);
+        for (Unit u : sorted) if (u != unit && cycleRank(u) <= n) cycle.add(u);
+        return cycle;
+    }
+
+    /**
+     * A unit's place in the original's unit list ({@link #cycleAfter}):
+     * the order FreeCol made it in, its id's number.  A carrier counts as
+     * made before the units it carries: the original's ship of the start
+     * is its unit 0, before its passengers (landfall and clip007 turn
+     * starts: ship, pioneer, soldier), where FreeCol makes the start
+     * ship after them.
+     *
+     * @param u The unit.
+     * @return Its rank, lower first.
+     */
+    static long cycleRank(Unit u) {
+        long min = u.getIdNumber();
+        boolean carries = false;
+        for (Unit p : u.getUnitList()) {
+            carries = true;
+            min = Math.min(min, p.getIdNumber());
+        }
+        return 2 * min - ((carries) ? 1 : 0);
+    }
+
+    /**
+     * A movement key orders {@code unit} aboard a carrier (spec delta
+     * W18): when the controller then asks for the next unit (inside its
+     * {@code moveUnit}), the carrier comes, if it can still move
+     * ({@link #carrierAfterBoarding}).
+     *
+     * @param unit The unit boarding, or null once the move is over.
+     */
+    void unitBoarding(Unit unit) {
+        this.boardedUnit = unit;
+    }
+
+    /**
+     * The carrier that comes next after a boarding: the unit's carrier,
+     * if it can still move, instead of the unit the controller chose,
+     * which is put back to come next in its cycle (clip007 #4281, #6188,
+     * #6989: the ship, 128 ms after the boarding's final draw).
+     *
+     * @param unit The unit the controller chose.
+     * @param previous The map's active unit.
+     * @return The carrier, or null for no boarding hand-over.
+     */
+    private Unit carrierAfterBoarding(Unit unit, Unit previous) {
+        final Unit boarded = this.boardedUnit;
+        if (boarded == null || unit == boarded) return null;   // its re-selection
+        this.boardedUnit = null;
+        final Unit carrier = boarded.getCarrier();
+        if (previous != boarded || carrier == null
+            || carrier.getOwner() != boarded.getOwner()
+            || !carrier.isCandidateForNextActiveUnit()) return null;
+        if (unit != null && unit != carrier) {
+            final Player p = boarded.getOwner();
+            if (p != null) p.putBackActiveUnit(unit);
+        }
+        return carrier;
     }
 
     /**
