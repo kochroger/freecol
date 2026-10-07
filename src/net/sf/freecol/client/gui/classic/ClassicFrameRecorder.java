@@ -84,11 +84,13 @@ import javax.swing.JComponent;
  * harness probe changed: turn, current player, view mode, active unit and
  * moves, view origin, dialogs), {@code script}, {@code script-error},
  * {@code script-end}, {@code key-post/press/release}, {@code click},
- * {@code move-key}, {@code move-done}, {@code pan}, {@code slide-start},
+ * {@code move} (the pointer only), {@code move-key}, {@code move-done},
+ * {@code pan}, {@code slide-start},
  * {@code slide-step}, {@code slide-end}, {@code slide-skip},
  * {@code final-draw}, {@code end-turn}, {@code dialog-open/close},
- * {@code menu-open/close}, {@code blink} (W3: {@code arm <reason>},
- * {@code rebase panel}, {@code off n=..}, {@code on n=..},
+ * {@code menu-open/close}, {@code menu-bar} (W20: the slot a press or a
+ * drag barred, -1 after a press outside the box), {@code blink} (W3:
+ * {@code arm <reason>}, {@code rebase panel}, {@code off n=..}, {@code on n=..},
  * {@code hold <reason>}, {@code stop <reason>}),
  * {@code view-jump} (W4: {@code <reason> <old> -> <new> tile=.. cell=..
  * now=..}, the reason {@code activate}, {@code move}, {@code foreign-move},

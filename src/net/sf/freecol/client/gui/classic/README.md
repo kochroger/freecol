@@ -1856,11 +1856,19 @@ The other menus list every item (004 shows both view-mode items green).
 
 ### Interaction (`ClassicMenuStrip`)
 
-- Mouse (001-005 were opened with the mouse: no bar): a press on a title
-  opens its menu (or closes it if open); moving over a normal-ink row bars
-  it; releasing over one fires it (press-drag-release works too); a press
-  anywhere else closes the menu and is swallowed (the drop layer covers the
-  canvas while open).
+- Mouse (001-005 were opened with the mouse: no bar; build spec W20): a
+  press on a title opens its menu (or closes it if open); the bar never
+  follows the pointer (landing-slow #335-#373 and clip006 #706-#791: no bar
+  pixels while the pointer rests on or crosses the rows); a press on a
+  normal-ink row bars it, a drag with the button held moves the bar (I),
+  and the release over a row fires it (press-drag-release works too;
+  landing-slow #384 -> #391, clip006 #833 -> #842); a press anywhere else
+  removes the bar and is swallowed, and its release closes the menu
+  (dago-colony #189 -> #194; a release back inside the box leaves it open
+  without a bar, I). The drop layer covers the canvas while open. The
+  recorder logs `menu-bar slot=n` when a press or a drag moves the bar.
+  The stopgap `ClassicDialog` plates follow the same rule: no hover light,
+  a left press marks a plate, the release on it takes it.
 - Keys (053 was opened with Alt+G: row 0 barred): Alt + a title's gold
   letter (G V O R T C) opens it with the first normal-ink row barred (SPIEL:
   row 0, as in 053).  While open a `KeyEventDispatcher` takes every key:
@@ -3278,16 +3286,21 @@ differing pixels.
     shows the file name and date. A daemon thread then replaces it with the
     original-style label "Entdecker Dago der Holl., Herbst 1729", read by
     streaming `savegame.xml` up to the owner's `<player>` (about 30 ms per
-    save). The thread stops as soon as the box closes or reopens. Enter or a
-    click loads; Esc or a right click goes back. The wheel moves one row per
-    notch (precise touchpad deltas are summed).
+    save). The thread stops as soon as the box closes or reopens. Enter, or a
+    left press on a row and its release there, loads; Esc or a right press goes
+    back. The wheel moves one row per notch (precise touchpad deltas are
+    summed).
   - RUHMESHALLE → `showHighScoresPanel(null, HighScore.loadHighScores())`. It
     runs on the client side and works before any game.
   - NEUE WELT and loading catch any `RuntimeException`, show it and return to
     the title; otherwise the BUSY box (which ignores all input) would stay up
     forever.
   - Keys: Up/Down (and keypad), Home/End, Enter. PgUp/PgDn page in the load
-    box and jump to the first/last item on the title. Hover moves the bar.
+    box and jump to the first/last item on the title. The pointer alone moves
+    nothing (build spec W20, I: no clip shows the title with the mouse): a
+    left press bars the item or row, its release over it fires; a release
+    elsewhere fires nothing, and a press that skipped the intro, closed a
+    notice or ended the chain cannot fire the item its release lands on.
     Esc on the title opens the quit box (see "Full screen, Alt+Enter and
     exit" below); the original ignores it there.
 - **Lifecycle overrides:**
@@ -4170,10 +4183,10 @@ DOSBox: no window chrome anywhere. (2026-10-04)
     Nein (`Mode.QUIT`, `paintQuitBox`), drawn with `ClassicMenuBox` in the
     title style and modelled on the original's own exit question (GAME.TXT
     `@DOS`: "Abbrechen zu DOS?" Ja/Nein, `@default=2`, so **Nein** is barred
-    first). Up/Down, Enter, hover and click; Esc again or a right click =
-    Nein. Ja → `FreeColClient.quit()` — FreeCol's normal quit path (stop
-    server, prune autosaves, `quitGUI`, `FreeCol.quit(0)`), the one FreeCol's
-    own window listener uses when no game runs. The box is sized to its
+    first). Up/Down, Enter, a left press and release on a row; Esc again or a
+    right press = Nein. Ja → `FreeColClient.quit()` — FreeCol's normal quit
+    path (stop server, prune autosaves, `quitGUI`, `FreeCol.quit(0)`), the one
+    FreeCol's own window listener uses when no game runs. The box is sized to its
     prompt (interior at least 80 px; `@DOS` has no `@width`), centred, over
     the bare title picture like the load box.
 - **Open / not yet:**

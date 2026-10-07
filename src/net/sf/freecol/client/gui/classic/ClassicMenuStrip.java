@@ -65,11 +65,16 @@ import javax.swing.SwingUtilities;
  * screen that does not exist yet), which look like the original's but only
  * say "follows later" when fired ({@link Host#unavailable}).
  *
- * <p><b>Mouse</b> (captures 001-005 were opened with the mouse: no bar): a
- * press on a title opens its menu, or closes it when it is open; moving
- * over a normal-ink row puts the bar on it; releasing over one fires it (so
- * a press on the title, a drag and a release work as well as two clicks);
- * a press anywhere else closes the menu and is swallowed.
+ * <p><b>Mouse</b> (captures 001-005 were opened with the mouse: no bar;
+ * build spec W20): a press on a title opens its menu, or closes it when it
+ * is open; the bar never follows the pointer -- a press on a normal-ink row
+ * puts the bar on it, dragging with the button held moves it, and the
+ * release over a row fires it (so a press on the title, a drag and a
+ * release work as well as two clicks; landing-slow #335 no bar until the
+ * press #384, closed #391; clip006 #706 -&gt; #833 -&gt; #842).  A press
+ * anywhere else removes the bar and is swallowed, and its release closes
+ * the menu (dago-colony #189 bar gone, #194 menu gone); a release back
+ * inside the box leaves it open without a bar.
  *
  * <p><b>Keyboard</b> (the manual; capture 053 was opened with Alt+G: row 0
  * barred, and row 0 of SPIEL is an inert row) Alt plus a title's gold letter
@@ -165,6 +170,12 @@ final class ClassicMenuStrip extends JComponent {
     /** A bare Alt was pressed while the menu was open (closes on its release). */
     private boolean altArmed = false;
 
+    /**
+     * The last press on the open menu's layer was outside its box (not on a
+     * title): the bar is gone and the release outside closes the menu (W20).
+     */
+    private boolean pressedOutside = false;
+
 
     /**
      * @param host The game side.
@@ -235,6 +246,16 @@ final class ClassicMenuStrip extends JComponent {
     /** Whether a menu is open. */
     boolean isMenuOpen() {
         return this.openIndex >= 0;
+    }
+
+    /** @return The barred slot of the open menu, or -1 (tests). */
+    int barSlot() {
+        return this.selSlot;
+    }
+
+    /** @return The open dropdown's box in 320x200 pixels, or null (tests). */
+    Rectangle openBox() {
+        return (this.openIndex < 0) ? null : box(slots(this.openIndex));
     }
 
     /**
@@ -392,6 +413,7 @@ final class ClassicMenuStrip extends JComponent {
         this.openIndex = m;
         this.selSlot = barFirst ? nextSelectable(slots(m), -1, 1) : -1;
         this.altArmed = false;
+        this.pressedOutside = false;
         if (this.dispatcher == null) {
             this.dispatcher = this::dispatchOpen;
             KeyboardFocusManager.getCurrentKeyboardFocusManager()
@@ -411,6 +433,7 @@ final class ClassicMenuStrip extends JComponent {
                 .removeKeyEventDispatcher(this.dispatcher);
             this.dispatcher = null;
         }
+        this.pressedOutside = false;
         if (this.openIndex < 0) return;
         final Rectangle was = box(slots(this.openIndex));
         this.openIndex = -1;
@@ -625,8 +648,10 @@ final class ClassicMenuStrip extends JComponent {
 
     /**
      * The open dropdown over the whole canvas: paints only the box, takes
-     * every mouse event while visible (a press outside the box closes the
-     * menu, as a press outside any menu does).
+     * every mouse event while visible.  Pointer moves without a button do
+     * nothing (W20: the bar never follows the pointer); a press outside the
+     * box removes the bar and its release closes the menu, as in the
+     * boxes ({@code ClassicAdvisorBox.Bar}).
      */
     private final class DropLayer extends JComponent {
 
@@ -646,7 +671,7 @@ final class ClassicMenuStrip extends JComponent {
 
                     @Override
                     public void mouseMoved(MouseEvent e) {
-                        onMove(e);
+                        e.consume();   // no hover (W20)
                     }
 
                     @Override
@@ -679,6 +704,7 @@ final class ClassicMenuStrip extends JComponent {
         void onPress(MouseEvent e) {
             e.consume();
             if (openIndex < 0) return;
+            pressedOutside = false;
             final int t = titleAt(e.getX() / s(), e.getY() / s());
             if (t >= 0) {
                 if (t == openIndex) closeMenu(); else openMenu(t, false);
@@ -687,14 +713,23 @@ final class ClassicMenuStrip extends JComponent {
             final List<ClassicMenuModel.Slot> slots = slots(openIndex);
             final Rectangle b = box(slots);
             if (b == null || !b.contains(e.getX() / s(), e.getY() / s())) {
-                closeMenu();
+                // Outside: the bar goes at the press, the menu at the
+                // release (dago-colony #189 -> #194).
+                pressedOutside = true;
+                if (selSlot >= 0) {
+                    selSlot = -1;
+                    repaint();
+                    paintNow(b);
+                    ClassicFrameRecorder.event("menu-bar", "slot=-1 outside");
+                }
                 return;
             }
             onMove(e);
         }
 
+        /** A press or a drag inside the box bars the row under it (W20). */
         void onMove(MouseEvent e) {
-            if (openIndex < 0) return;
+            if (openIndex < 0 || pressedOutside) return;
             final List<ClassicMenuModel.Slot> slots = slots(openIndex);
             final int k = slotAt(e.getPoint(), slots);
             if (k < 0) return;      // outside the box: the bar stays
@@ -703,13 +738,24 @@ final class ClassicMenuStrip extends JComponent {
                 selSlot = sel;
                 repaint();
                 paintNow(box(slots));
+                ClassicFrameRecorder.event("menu-bar", "slot=" + sel);
             }
         }
 
         void onRelease(MouseEvent e) {
             if (openIndex < 0) return;
-            if (!SwingUtilities.isLeftMouseButton(e)) return;
             final List<ClassicMenuModel.Slot> slots = slots(openIndex);
+            if (pressedOutside) {
+                // After a press outside: a release outside closes, one back
+                // inside the box leaves the menu open without a bar (I).
+                pressedOutside = false;
+                final Rectangle b = box(slots);
+                if (b == null || !b.contains(e.getX() / s(), e.getY() / s())) {
+                    closeMenu();
+                }
+                return;
+            }
+            if (!SwingUtilities.isLeftMouseButton(e)) return;
             final int k = slotAt(e.getPoint(), slots);
             if (k >= 0) fire(slots.get(k));
         }

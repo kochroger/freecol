@@ -914,6 +914,74 @@ public class ClassicGUISeamTest extends FreeColTestCase {
     }
 
     /**
+     * The stopgap window's plates (build spec W20): the pointer alone
+     * lights nothing and has no mouse-motion listener at all; a left press
+     * marks a plate (painted lighter), the release on the same plate takes
+     * it, a release elsewhere only unmarks; the right button does nothing.
+     */
+    public void testStopgapPressMarksReleaseTakes() {
+        final List<ClassicDialog.Page> pages = List.of(new ClassicDialog.Page("x", null));
+        final ClassicDialog d = new ClassicDialog(pages, new String[] { "aaaa", "bbbb" },
+                                                  0, true);
+        assertEquals(0, d.getMouseMotionListeners().length);
+        final java.awt.Dimension size = d.getPreferredSize();
+        d.setSize(size);
+        final java.awt.image.BufferedImage before = paintDialog(d);
+        final java.awt.Rectangle p0 = d.plateBounds(0), p1 = d.plateBounds(1);
+        assertNotNull(p0);
+        assertNotNull(p1);
+        final int x0 = p0.x + p0.width / 2, y0 = p0.y + p0.height / 2;
+        final int x1 = p1.x + p1.width / 2, y1 = p1.y + p1.height / 2;
+        // A press on plate 0 marks it, its plate turns lighter.
+        dialogMouse(d, java.awt.event.MouseEvent.MOUSE_PRESSED, x0, y0, true);
+        assertEquals(0, d.pressedPlate());
+        assertEquals(-1, d.chosen());
+        final java.awt.image.BufferedImage marked = paintDialog(d);
+        assertFalse(before.getRGB(p0.x + 3, p0.y + 3) == marked.getRGB(p0.x + 3, p0.y + 3));
+        assertEquals(before.getRGB(p1.x + 3, p1.y + 3), marked.getRGB(p1.x + 3, p1.y + 3));
+        // Released over plate 1: nothing is taken, the mark goes.
+        dialogMouse(d, java.awt.event.MouseEvent.MOUSE_RELEASED, x1, y1, true);
+        assertEquals(-1, d.pressedPlate());
+        assertEquals(-1, d.chosen());
+        assertEquals(before.getRGB(p0.x + 3, p0.y + 3),
+                     paintDialog(d).getRGB(p0.x + 3, p0.y + 3));
+        // The right button marks nothing.
+        dialogMouse(d, java.awt.event.MouseEvent.MOUSE_PRESSED, x1, y1, false);
+        assertEquals(-1, d.pressedPlate());
+        // Press and release on plate 1: taken.
+        dialogMouse(d, java.awt.event.MouseEvent.MOUSE_PRESSED, x1, y1, true);
+        assertEquals(1, d.pressedPlate());
+        dialogMouse(d, java.awt.event.MouseEvent.MOUSE_RELEASED, x1, y1, true);
+        assertEquals(1, d.chosen());
+    }
+
+    private static java.awt.image.BufferedImage paintDialog(ClassicDialog d) {
+        final java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+            d.getWidth(), d.getHeight(), java.awt.image.BufferedImage.TYPE_INT_RGB);
+        final java.awt.Graphics2D g = img.createGraphics();
+        try {
+            d.paint(g);
+        } finally {
+            g.dispose();
+        }
+        return img;
+    }
+
+    private static void dialogMouse(ClassicDialog d, int id, int x, int y, boolean left) {
+        final java.awt.event.MouseEvent e = new java.awt.event.MouseEvent(d, id,
+            System.currentTimeMillis(), (left && id == java.awt.event.MouseEvent.MOUSE_PRESSED)
+                ? java.awt.event.InputEvent.BUTTON1_DOWN_MASK
+                : (id == java.awt.event.MouseEvent.MOUSE_PRESSED)
+                    ? java.awt.event.InputEvent.BUTTON3_DOWN_MASK : 0,
+            x, y, 1, false, left ? java.awt.event.MouseEvent.BUTTON1
+                                 : java.awt.event.MouseEvent.BUTTON3);
+        for (java.awt.event.MouseListener l : d.getMouseListeners()) {
+            if (id == java.awt.event.MouseEvent.MOUSE_PRESSED) l.mousePressed(e);
+            if (id == java.awt.event.MouseEvent.MOUSE_RELEASED) l.mouseReleased(e);
+        }
+    }
+
+    /**
      * The natives' demand at a colony (C FINAL trap 1): the box lists the
      * refusal first with the bar on it, as the original's @INDIANGOLD,
      * @WANTSTUFF, @INDIANBEGFOOD do (no @default; D acceptance D5), so

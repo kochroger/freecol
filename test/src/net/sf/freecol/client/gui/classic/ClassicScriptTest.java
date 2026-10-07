@@ -104,6 +104,26 @@ public class ClassicScriptTest extends TestCase {
         assertTrue(parse("# nothing", "   ").commands.isEmpty());
     }
 
+    /**
+     * {@code move x y} (build spec W20): the pointer alone, parsed like
+     * {@code click}; the driver hands it to the host as a move, not a click.
+     */
+    public void testMoveParsesLikeClick() throws IOException {
+        final ClassicScript s = parse("move 40 15", "Move 0 199");
+        assertEquals(ClassicScript.Op.MOVE, s.commands.get(0).op);
+        assertEquals(40L, s.commands.get(0).number);
+        assertEquals(15, s.commands.get(0).y);
+        assertEquals(199, s.commands.get(1).y);
+        assertBad("move 5", "move needs x and y");
+        assertBad("move 320 0", "outside 0..319");
+        assertBad("move 0 x", "not a number");
+        final FakeHost h = new FakeHost();
+        final File r = resultFile();
+        new ClassicScriptDriver(parse("move 40 15", "click 40 15", "quit"), h, r).run();
+        assertEquals(Arrays.asList("move 40,15", "click 40,15", "quit"), h.calls);
+        assertEquals("ok", result(r));
+    }
+
     public void testMalformedLinesAreRejectedWithTheirLine() {
         assertBad("wait", "milliseconds expected");
         assertBad("wait -5", "negative");
@@ -182,6 +202,11 @@ public class ClassicScriptTest extends TestCase {
         @Override
         public void key(KeyStroke key, long holdMs) {
             this.calls.add("key " + key + " " + holdMs);
+        }
+
+        @Override
+        public void move(int x, int y) {
+            this.calls.add("move " + x + "," + y);
         }
 
         @Override

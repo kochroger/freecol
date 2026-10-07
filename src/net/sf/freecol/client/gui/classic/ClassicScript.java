@@ -46,6 +46,8 @@ import javax.swing.KeyStroke;
  *       Only pressed keystrokes: the release follows by itself.</li>
  *   <li>{@code click <x> <y>}: press and release the left button at a
  *       point of the 320x200 canvas.</li>
+ *   <li>{@code move <x> <y>}: move the pointer there, no button (build
+ *       spec W20: what reacts to hover).</li>
  *   <li>{@code waitGame [timeoutMs]}: until the in-game HUD is up.</li>
  *   <li>{@code waitIdle [timeoutMs]}: until our player has the controls
  *       (our turn, no dialog or scene, no slide running) for a moment.</li>
@@ -74,8 +76,8 @@ import javax.swing.KeyStroke;
 final class ClassicScript {
 
     /** The commands. */
-    enum Op { WAIT, KEY, CLICK, WAIT_GAME, WAIT_IDLE, WAIT_TURN, PREF, LOG, QUIT,
-        GOTO, WAIT_BOX }
+    enum Op { WAIT, KEY, CLICK, MOVE, WAIT_GAME, WAIT_IDLE, WAIT_TURN, PREF, LOG,
+        QUIT, GOTO, WAIT_BOX }
 
     /** Default timeouts (ms) of the waits. */
     static final long WAIT_GAME_TIMEOUT = 180_000L;
@@ -95,10 +97,10 @@ final class ClassicScript {
         /** The source text (comment stripped). */
         final String text;
 
-        /** WAIT: ms; the waits: timeout ms; CLICK, GOTO: x. */
+        /** WAIT: ms; the waits: timeout ms; CLICK, MOVE, GOTO: x. */
         final long number;
 
-        /** CLICK, GOTO: y. */
+        /** CLICK, MOVE, GOTO: y. */
         final int y;
 
         /** KEY: the key; WAIT_BOX: the key for the other boxes, or null. */
@@ -173,12 +175,13 @@ final class ClassicScript {
             return new Command(Op.WAIT, n, s, millis(rest, -1L), 0, null, null, false);
         case "key":
             return new Command(Op.KEY, n, s, 0, 0, keyStroke(rest), null, false);
-        case "click": {
+        case "click": case "move": {
             final String[] xy = rest.split("\\s+");
-            if (xy.length != 2) throw new IllegalArgumentException("click needs x and y");
+            if (xy.length != 2) throw new IllegalArgumentException(cmd + " needs x and y");
             final int x = integer(xy[0], ClassicFrameRecorder.W);
             final int y = integer(xy[1], ClassicFrameRecorder.H);
-            return new Command(Op.CLICK, n, s, x, y, null, null, false);
+            return new Command("click".equals(cmd) ? Op.CLICK : Op.MOVE, n, s, x, y,
+                               null, null, false);
         }
         case "waitgame":
             return new Command(Op.WAIT_GAME, n, s, millis(rest, WAIT_GAME_TIMEOUT),

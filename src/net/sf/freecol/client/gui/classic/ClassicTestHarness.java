@@ -372,6 +372,32 @@ final class ClassicTestHarness {
         }
 
         @Override
+        public void move(int x, int y) {
+            final long when = System.currentTimeMillis();
+            SwingUtilities.invokeLater(() -> {
+                    final ClassicHudPane pane = gui.currentHudPane();
+                    if (pane == null) {
+                        ClassicFrameRecorder.event("move", x + "," + y + " lost: no HUD");
+                        return;
+                    }
+                    final Rectangle cv = ClassicHudOverlay.canvas(pane.getWidth(),
+                                                                  pane.getHeight());
+                    final int s = ClassicHudOverlay.scale(pane.getWidth(), pane.getHeight());
+                    final Point p = new Point(cv.x + x * s + s / 2, cv.y + y * s + s / 2);
+                    final Component t = mouseTarget(pane, p);
+                    if (t == null) {
+                        ClassicFrameRecorder.event("move", x + "," + y + " lost: nothing there");
+                        return;
+                    }
+                    final Point q = SwingUtilities.convertPoint(pane, p, t);
+                    ClassicFrameRecorder.event("move", x + "," + y + " -> "
+                        + t.getClass().getSimpleName());
+                    t.dispatchEvent(new MouseEvent(t, MouseEvent.MOUSE_MOVED, when, 0,
+                        q.x, q.y, 0, false, MouseEvent.NOBUTTON));
+                });
+        }
+
+        @Override
         public void pref(String name, boolean value) {
             if (ClassicPrefs.isKnown(name)) {
                 ClassicPrefs.get().set(name, value);

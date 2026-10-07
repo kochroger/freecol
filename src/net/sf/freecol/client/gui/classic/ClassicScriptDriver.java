@@ -103,6 +103,14 @@ final class ClassicScriptDriver {
         void click(int x, int y) throws InterruptedException;
 
         /**
+         * Move the pointer over the canvas, no button held.
+         *
+         * @param x Canvas x.
+         * @param y Canvas y.
+         */
+        void move(int x, int y);
+
+        /**
          * Set an option.
          *
          * @param name A classic pref or a mapped client option name.
@@ -227,6 +235,9 @@ final class ClassicScriptDriver {
             break;
         case CLICK:
             this.host.click((int)c.number, c.y);
+            break;
+        case MOVE:
+            this.host.move((int)c.number, c.y);
             break;
         case WAIT_GAME:
             await(this.host::inGame, 0L, c.number, "the in-game HUD");

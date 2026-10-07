@@ -313,6 +313,215 @@ public class ClassicMenuBarTest extends TestCase {
         assertTrue(green1);
     }
 
+    // The strip's mouse (build spec W20): press marks, release fires, never hover.
+
+    /**
+     * A strip from a synthetic MENU.TXT (no original words: every section
+     * "Mk" with 20 items "Ik.j") whose host enables every action and logs
+     * the ones fired.
+     */
+    private static ClassicMenuStrip strip(List<String> fired) throws Exception {
+        final java.io.File dir = java.nio.file.Files.createTempDirectory("classic-strip").toFile();
+        final java.io.File g = new java.io.File(dir, "GAME.TXT"),
+            n = new java.io.File(dir, "NAMES.TXT"), l = new java.io.File(dir, "LABELS.TXT"),
+            m = new java.io.File(dir, "MENU.TXT");
+        final StringBuilder menu = new StringBuilder();
+        for (int k = 0; k < ClassicMenuModel.SECTIONS.length; k++) {
+            menu.append('@').append(ClassicMenuModel.SECTIONS[k]).append("\r\n  M")
+                .append(k).append("\r\n");
+            for (int j = 0; j < 20; j++) menu.append("  I").append(k).append('.').append(j)
+                .append("\r\n");
+            menu.append("\r\n");
+        }
+        final byte[] none = "@X\r\n\r\n".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        java.nio.file.Files.write(g.toPath(), none);
+        java.nio.file.Files.write(n.toPath(), none);
+        java.nio.file.Files.write(l.toPath(), none);
+        java.nio.file.Files.write(m.toPath(), menu.toString()
+            .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+        final ClassicText t;
+        try {
+            t = ClassicText.fromFiles(g, n, l, m);
+        } finally {
+            for (java.io.File f : new java.io.File[] { g, n, l, m }) f.delete();
+            dir.delete();
+        }
+        final ClassicMenuStrip.Host host = new ClassicMenuStrip.Host() {
+                @Override
+                public ClassicMenuModel.Context context() {
+                    return land();
+                }
+
+                @Override
+                public javax.swing.Action action(String id) {
+                    return new javax.swing.AbstractAction() {
+                            @Override
+                            public void actionPerformed(java.awt.event.ActionEvent e) {
+                                fired.add(id);
+                            }
+                        };
+                }
+
+                @Override
+                public boolean inputBlocked() {
+                    return false;
+                }
+            };
+        final ClassicMenuStrip[] s = new ClassicMenuStrip[1];
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+                s[0] = new ClassicMenuStrip(host, null, null, t);
+                s[0].setSize(320, 8);
+                s[0].dropLayer().setSize(320, 200);
+            });
+        return s[0];
+    }
+
+    /** A mouse event on the strip's drop layer, through its own listeners. */
+    private static void mouse(ClassicMenuStrip s, int id, int x, int y) throws Exception {
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+                final javax.swing.JComponent c = s.dropLayer();
+                final boolean button = id == java.awt.event.MouseEvent.MOUSE_PRESSED
+                    || id == java.awt.event.MouseEvent.MOUSE_RELEASED;
+                final java.awt.event.MouseEvent e = new java.awt.event.MouseEvent(c, id,
+                    System.currentTimeMillis(), (id == java.awt.event.MouseEvent.MOUSE_MOVED
+                        || id == java.awt.event.MouseEvent.MOUSE_RELEASED) ? 0
+                    : java.awt.event.InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false,
+                    button ? java.awt.event.MouseEvent.BUTTON1
+                    : java.awt.event.MouseEvent.NOBUTTON);
+                for (java.awt.event.MouseListener ml : c.getMouseListeners()) {
+                    if (id == java.awt.event.MouseEvent.MOUSE_PRESSED) ml.mousePressed(e);
+                    if (id == java.awt.event.MouseEvent.MOUSE_RELEASED) ml.mouseReleased(e);
+                }
+                for (java.awt.event.MouseMotionListener ml : c.getMouseMotionListeners()) {
+                    if (id == java.awt.event.MouseEvent.MOUSE_MOVED) ml.mouseMoved(e);
+                    if (id == java.awt.event.MouseEvent.MOUSE_DRAGGED) ml.mouseDragged(e);
+                }
+            });
+        javax.swing.SwingUtilities.invokeAndWait(() -> { });   // a fired row runs later
+    }
+
+    /** The centre of slot {@code k} of the open dropdown. */
+    private static int[] row(ClassicMenuStrip s, int k) {
+        final Rectangle b = s.openBox();
+        return new int[] { b.x + b.width / 2,
+                           ClassicMenuBox.dropdownSlotTop(b, k) + ClassicMenuBox.PITCH / 2 };
+    }
+
+    private static void open(ClassicMenuStrip s, boolean barFirst) throws Exception {
+        javax.swing.SwingUtilities.invokeAndWait(() -> s.openMenu(ClassicMenuModel.SPIEL,
+                                                                  barFirst));
+    }
+
+    /**
+     * A dropdown opened with the mouse has no bar while the pointer rests
+     * on or crosses its rows (landing-slow #335-#373, clip006 #706-#791:
+     * no bar pixels), and nothing fires.
+     */
+    public void testMenuHoverDoesNotBar() throws Exception {
+        final List<String> fired = new ArrayList<>();
+        final ClassicMenuStrip s = strip(fired);
+        open(s, false);
+        assertTrue(s.isMenuOpen());
+        assertEquals(-1, s.barSlot());
+        for (int k = 0; k < 3; k++) {
+            final int[] p = row(s, k);
+            mouse(s, java.awt.event.MouseEvent.MOUSE_MOVED, p[0], p[1]);
+            assertEquals(-1, s.barSlot());
+        }
+        assertTrue(s.isMenuOpen());
+        assertEquals("[]", fired.toString());
+    }
+
+    /**
+     * The bar comes with the press and the row fires at the release
+     * (landing-slow #384 -&gt; #391, clip006 #833 -&gt; #842); a drag with
+     * the button held moves the bar and the release fires the row under it
+     * (I, kept); a press on a separator removes the bar and fires nothing.
+     */
+    public void testMenuPressBarsReleaseFires() throws Exception {
+        final List<String> fired = new ArrayList<>();
+        final ClassicMenuStrip s = strip(fired);
+        open(s, false);
+        int[] p = row(s, 0);
+        mouse(s, java.awt.event.MouseEvent.MOUSE_PRESSED, p[0], p[1]);
+        assertEquals(0, s.barSlot());
+        assertTrue(s.isMenuOpen());
+        assertEquals("[]", fired.toString());
+        mouse(s, java.awt.event.MouseEvent.MOUSE_RELEASED, p[0], p[1]);
+        assertFalse(s.isMenuOpen());
+        assertEquals("[classic.gameOptions]", fired.toString());
+        // Press on row 0, drag to row 1, release there: row 1 fires.
+        fired.clear();
+        open(s, false);
+        p = row(s, 0);
+        mouse(s, java.awt.event.MouseEvent.MOUSE_PRESSED, p[0], p[1]);
+        p = row(s, 1);
+        mouse(s, java.awt.event.MouseEvent.MOUSE_DRAGGED, p[0], p[1]);
+        assertEquals(1, s.barSlot());
+        mouse(s, java.awt.event.MouseEvent.MOUSE_RELEASED, p[0], p[1]);
+        assertFalse(s.isMenuOpen());
+        assertEquals("[classic.colonyOptions]", fired.toString());
+        // A separator: no bar, nothing fires, the menu stays.
+        fired.clear();
+        open(s, true);
+        final List<ClassicMenuModel.Slot> slots = s.slots(ClassicMenuModel.SPIEL);
+        int sep = -1;
+        for (int k = 0; k < slots.size() && sep < 0; k++) {
+            if (slots.get(k).item == null) sep = k;
+        }
+        assertTrue(sep > 0);
+        p = row(s, sep);
+        mouse(s, java.awt.event.MouseEvent.MOUSE_PRESSED, p[0], p[1]);
+        assertEquals(-1, s.barSlot());
+        mouse(s, java.awt.event.MouseEvent.MOUSE_RELEASED, p[0], p[1]);
+        assertTrue(s.isMenuOpen());
+        assertEquals("[]", fired.toString());
+        javax.swing.SwingUtilities.invokeAndWait(s::closeMenu);
+    }
+
+    /**
+     * A press outside the open dropdown removes the bar and its release
+     * closes the menu (dago-colony #27-#179 bar on row 0, #189 bar gone,
+     * #194 menu gone); a drag back inside bars nothing, and a release back
+     * inside leaves the menu open without a bar (I).
+     */
+    public void testMenuOutsidePressRemovesBarReleaseCloses() throws Exception {
+        final List<String> fired = new ArrayList<>();
+        final ClassicMenuStrip s = strip(fired);
+        open(s, true);
+        assertEquals(0, s.barSlot());   // the keyboard's bar (landing-slow #32)
+        final Rectangle b = s.openBox();
+        assertFalse(b.contains(250, 128));
+        mouse(s, java.awt.event.MouseEvent.MOUSE_PRESSED, 250, 128);
+        assertTrue(s.isMenuOpen());
+        assertEquals(-1, s.barSlot());
+        final int[] p0 = row(s, 0);
+        mouse(s, java.awt.event.MouseEvent.MOUSE_DRAGGED, p0[0], p0[1]);
+        assertEquals(-1, s.barSlot());
+        mouse(s, java.awt.event.MouseEvent.MOUSE_DRAGGED, 250, 128);
+        mouse(s, java.awt.event.MouseEvent.MOUSE_RELEASED, 250, 128);
+        assertFalse(s.isMenuOpen());
+        assertEquals("[]", fired.toString());
+        // Outside press, release back inside: open, no bar, nothing fired.
+        open(s, true);
+        mouse(s, java.awt.event.MouseEvent.MOUSE_PRESSED, 250, 128);
+        mouse(s, java.awt.event.MouseEvent.MOUSE_RELEASED, p0[0], p0[1]);
+        assertTrue(s.isMenuOpen());
+        assertEquals(-1, s.barSlot());
+        assertEquals("[]", fired.toString());
+        // The next press and release on a row work as ever.
+        final int[] p1 = row(s, 1);
+        mouse(s, java.awt.event.MouseEvent.MOUSE_PRESSED, p1[0], p1[1]);
+        assertEquals(1, s.barSlot());
+        mouse(s, java.awt.event.MouseEvent.MOUSE_RELEASED, p1[0], p1[1]);
+        assertFalse(s.isMenuOpen());
+        assertEquals("[classic.colonyOptions]", fired.toString());
+        // A press on the open title still closes it at once.
+        open(s, false);
+        mouse(s, java.awt.event.MouseEvent.MOUSE_PRESSED, b.x + 3, 3);
+        assertFalse(s.isMenuOpen());
+    }
+
     /** The slot numbers drawn grey, space-separated. */
     private static String greyed(List<ClassicMenuModel.Slot> slots) {
         final List<String> out = new ArrayList<>();

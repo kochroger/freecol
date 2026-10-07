@@ -263,4 +263,83 @@ public class ClassicFontTest extends TestCase {
         assertTrue(p.offerQuit());           // already open: still taken
         assertEquals(0, quits[0]);           // never quits by itself
     }
+
+    /**
+     * The title's items (build spec W20, by analogy with the in-game
+     * menus; I): the pointer alone moves no bar, a left press bars the
+     * item and its release over it fires it, a release over another item
+     * fires nothing; the press that skips the intro fires nothing with its
+     * release on the title it showed.  The rule itself for the load and
+     * quit boxes: {@link ClassicMainMenuPanel#releaseFires}.
+     */
+    public void testTitlePressMarksReleaseFires() {
+        final int[] hall = { 0 };
+        final ClassicMainMenuPanel p = new ClassicMainMenuPanel(
+            new ClassicMainMenuPanel.Actions() {
+                @Override public void newWorld(ClassicGUI.NewWorldSetup s) {}
+                @Override public void loadGame(java.io.File file) {}
+                @Override public void hallOfFame() { hall[0]++; }
+                @Override public void quit() {}
+            });
+        p.showTitle(null);
+        assertEquals(ClassicMainMenuPanel.Mode.TITLE, p.mode());
+        final Rectangle b = ClassicMainMenuPanel.titleBounds(5);
+        final Rectangle r3 = ClassicMenuBox.rowHitRect(b, 1, ClassicMainMenuPanel.ITEM_LOAD);
+        final Rectangle r4 = ClassicMenuBox.rowHitRect(b, 1,
+            ClassicMainMenuPanel.ITEM_HALL_OF_FAME);
+        final int x = r4.x + r4.width / 2, y4 = r4.y + r4.height / 2,
+            y3 = r3.y + r3.height / 2;
+        // Scale 1, origin 0 before the first paint: event = virtual pixels.
+        titleMouse(p, java.awt.event.MouseEvent.MOUSE_MOVED, x, y4, 1);
+        assertEquals(0, p.selectedItem());
+        titleMouse(p, java.awt.event.MouseEvent.MOUSE_PRESSED, x, y4, 1);
+        assertEquals(ClassicMainMenuPanel.ITEM_HALL_OF_FAME, p.selectedItem());
+        assertEquals(0, hall[0]);
+        titleMouse(p, java.awt.event.MouseEvent.MOUSE_RELEASED, x, y3, 1);
+        assertEquals(0, hall[0]);
+        assertEquals(ClassicMainMenuPanel.Mode.TITLE, p.mode());
+        titleMouse(p, java.awt.event.MouseEvent.MOUSE_PRESSED, x, y4, 1);
+        titleMouse(p, java.awt.event.MouseEvent.MOUSE_RELEASED, x, y4, 1);
+        assertEquals(1, hall[0]);
+        // The intro: the press skips it; its release (and the second click
+        // of a double click) on the title it showed fires nothing.
+        p.enterIntro();
+        assertEquals(ClassicMainMenuPanel.Mode.INTRO, p.mode());
+        titleMouse(p, java.awt.event.MouseEvent.MOUSE_PRESSED, x, y4, 1);
+        assertEquals(ClassicMainMenuPanel.Mode.TITLE, p.mode());
+        titleMouse(p, java.awt.event.MouseEvent.MOUSE_RELEASED, x, y4, 1);
+        titleMouse(p, java.awt.event.MouseEvent.MOUSE_PRESSED, x, y4, 2);
+        titleMouse(p, java.awt.event.MouseEvent.MOUSE_RELEASED, x, y4, 2);
+        assertEquals(1, hall[0]);
+        assertEquals(0, p.selectedItem());
+        // The rule.
+        final ClassicMainMenuPanel.Mode title = ClassicMainMenuPanel.Mode.TITLE,
+            load = ClassicMainMenuPanel.Mode.LOAD, quit = ClassicMainMenuPanel.Mode.QUIT;
+        assertTrue(ClassicMainMenuPanel.releaseFires(title, 4, title, 4));
+        assertTrue(ClassicMainMenuPanel.releaseFires(load, 7, load, 7));
+        assertTrue(ClassicMainMenuPanel.releaseFires(quit, 0, quit, 0));
+        assertFalse(ClassicMainMenuPanel.releaseFires(title, 4, title, 3));
+        assertFalse(ClassicMainMenuPanel.releaseFires(title, 4, title, -1));
+        assertFalse(ClassicMainMenuPanel.releaseFires(title, 3, load, 3));
+        assertFalse(ClassicMainMenuPanel.releaseFires(null, 3, title, 3));
+        assertFalse(ClassicMainMenuPanel.releaseFires(
+            ClassicMainMenuPanel.Mode.INTRO, 4, title, 4));
+    }
+
+    private static void titleMouse(ClassicMainMenuPanel p, int id, int x, int y,
+                                   int clicks) {
+        final boolean button = id != java.awt.event.MouseEvent.MOUSE_MOVED;
+        final java.awt.event.MouseEvent e = new java.awt.event.MouseEvent(p, id,
+            System.currentTimeMillis(), (id == java.awt.event.MouseEvent.MOUSE_PRESSED)
+                ? java.awt.event.InputEvent.BUTTON1_DOWN_MASK : 0,
+            x, y, button ? clicks : 0, false,
+            button ? java.awt.event.MouseEvent.BUTTON1 : java.awt.event.MouseEvent.NOBUTTON);
+        for (java.awt.event.MouseListener l : p.getMouseListeners()) {
+            if (id == java.awt.event.MouseEvent.MOUSE_PRESSED) l.mousePressed(e);
+            if (id == java.awt.event.MouseEvent.MOUSE_RELEASED) l.mouseReleased(e);
+        }
+        for (java.awt.event.MouseMotionListener l : p.getMouseMotionListeners()) {
+            if (id == java.awt.event.MouseEvent.MOUSE_MOVED) l.mouseMoved(e);
+        }
+    }
 }

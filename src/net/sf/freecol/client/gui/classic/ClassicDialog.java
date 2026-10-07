@@ -20,7 +20,6 @@
 package net.sf.freecol.client.gui.classic;
 
 import java.awt.Color;
-import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
@@ -33,7 +32,6 @@ import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.awt.event.MouseMotionAdapter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -173,8 +171,12 @@ final class ClassicDialog extends JPanel {
     /** Virtual-space bounds of each option plate, rebuilt every paint. */
     private final List<Rectangle> buttonBounds = new ArrayList<>();
 
-    /** Index of the plate under the pointer, or -1. */
-    private int hovered = -1;
+    /**
+     * Index of the plate the left button went down on and is still held
+     * over, or -1 (build spec W20: the press marks, the release on the same
+     * plate takes it; the pointer alone never lights a plate).
+     */
+    private int pressed = -1;
 
     /** Device-space origin of the virtual canvas, set on each paint. */
     private int originX;
@@ -208,13 +210,12 @@ final class ClassicDialog extends JPanel {
         addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent e) {
-                    handleClick(e);
+                    onPress(e);
                 }
-            });
-        addMouseMotionListener(new MouseMotionAdapter() {
+
                 @Override
-                public void mouseMoved(MouseEvent e) {
-                    updateHover(e);
+                public void mouseReleased(MouseEvent e) {
+                    onRelease(e);
                 }
             });
     }
@@ -361,18 +362,47 @@ final class ClassicDialog extends JPanel {
             });
     }
 
-    private void handleClick(MouseEvent e) {
+    /** A left press on a plate marks it (W20). */
+    void onPress(MouseEvent e) {
+        if (!SwingUtilities.isLeftMouseButton(e)) return;
         final int i = buttonAt(e);
-        if (i >= 0) pick(i);
+        if (i == this.pressed) return;
+        this.pressed = i;
+        repaint();
     }
 
-    private void updateHover(MouseEvent e) {
-        final int i = buttonAt(e);
-        if (i == this.hovered) return;
-        this.hovered = i;
-        setCursor(Cursor.getPredefinedCursor(
-            (i >= 0) ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
-        repaint();
+    /** The release on the marked plate takes it; anywhere else it unmarks. */
+    void onRelease(MouseEvent e) {
+        if (!SwingUtilities.isLeftMouseButton(e)) return;
+        final int i = this.pressed;
+        this.pressed = -1;
+        if (i >= 0 && buttonAt(e) == i) {
+            pick(i);
+        } else if (i >= 0) {
+            repaint();
+        }
+    }
+
+    /** @return The plate marked by a press, or -1 (tests). */
+    int pressedPlate() {
+        return this.pressed;
+    }
+
+    /** @return The option chosen, or -1 while none is (tests). */
+    int chosen() {
+        return this.chosen;
+    }
+
+    /**
+     * @param i The plate.
+     * @return Plate {@code i} in component pixels as the last paint laid it
+     *     out, or null (tests).
+     */
+    Rectangle plateBounds(int i) {
+        if (i < 0 || i >= this.buttonBounds.size()) return null;
+        final Rectangle r = this.buttonBounds.get(i);
+        return new Rectangle(this.originX + r.x * SCALE, this.originY + r.y * SCALE,
+                             r.width * SCALE, r.height * SCALE);
     }
 
     /** The option plate under {@code e}, or -1. */
@@ -390,7 +420,7 @@ final class ClassicDialog extends JPanel {
         if (i < 0 || i >= this.options.length) return;
         if (this.page < this.pages.size() - 1) {
             this.page++;
-            this.hovered = -1;
+            this.pressed = -1;
             repaint();
         } else {
             close(i);
@@ -546,7 +576,7 @@ final class ClassicDialog extends JPanel {
         for (int i = 0; i < this.options.length; i++) {
             final Rectangle r = new Rectangle(x, y, w[i], BTN_H);
             this.buttonBounds.add(r);
-            g.setColor((i == this.hovered) ? BTN_HOT : BTN_BG);
+            g.setColor((i == this.pressed) ? BTN_HOT : BTN_BG);
             g.fillRect(r.x, r.y, r.width, r.height);
             g.setColor(BORDER_HI);
             g.drawRect(r.x, r.y, r.width - 1, r.height - 1);

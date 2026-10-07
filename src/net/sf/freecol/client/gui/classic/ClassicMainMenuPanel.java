@@ -653,6 +653,17 @@ final class ClassicMainMenuPanel extends JPanel {
      */
     private boolean introClickSeries = false;
 
+    /**
+     * The last left press on a title item, load row or quit row (build
+     * spec W20, by analogy with the in-game menus: the press marks, the
+     * release fires): the mode it was made in and what it marked, or null
+     * and -1.  Its release fires only over the same item in the same mode,
+     * so the press that skipped the intro, closed a notice or ended the
+     * new-world chain cannot fire the title item its release lands on.
+     */
+    private Mode pressMode = null;
+    private int pressItem = -1;
+
 
     /**
      * Create the panel (in {@link Mode#PASSIVE}).
@@ -671,6 +682,12 @@ final class ClassicMainMenuPanel extends JPanel {
                 public void mousePressed(MouseEvent e) {
                     trackPointer(e);
                     onPress(e);
+                }
+
+                @Override
+                public void mouseReleased(MouseEvent e) {
+                    trackPointer(e);
+                    onRelease(e);
                 }
 
                 @Override
@@ -693,8 +710,7 @@ final class ClassicMainMenuPanel extends JPanel {
         addMouseMotionListener(new MouseMotionAdapter() {
                 @Override
                 public void mouseMoved(MouseEvent e) {
-                    trackPointer(e);
-                    onHover(e);
+                    trackPointer(e);   // the arrow only: no hover (W20)
                 }
 
                 @Override
@@ -1834,28 +1850,42 @@ final class ClassicMainMenuPanel extends JPanel {
         return -1;
     }
 
-    private void onHover(MouseEvent e) {
-        final int x = vx(e), y = vy(e);
-        if (this.mode == Mode.TITLE) {
-            final int i = titleItemAt(x, y);
-            if (i >= 0 && i != this.selected) {
-                this.selected = i;
-                repaint();
-            }
-        } else if (this.mode == Mode.LOAD) {
-            final int i = loadRowAt(x, y);
-            if (i >= 0) setLoadSel(i);
-        } else if (this.mode == Mode.QUIT) {
-            final int i = quitRowAt(x, y);
-            if (i >= 0 && i != this.quitSel) {
-                this.quitSel = i;
-                repaint();
-            }
-        }
+    /** @return The mode (tests). */
+    Mode mode() {
+        return this.mode;
+    }
+
+    /** @return The barred title item (tests). */
+    int selectedItem() {
+        return this.selected;
+    }
+
+    /** @return The barred quit-box row (tests). */
+    int quitRow() {
+        return this.quitSel;
+    }
+
+    /**
+     * Whether a left release fires what the press marked (build spec
+     * W20): a press in the same mode marked an item, and the release is
+     * over that item.
+     *
+     * @param pressMode The mode of the press, or null for none.
+     * @param pressItem The item the press marked, or -1.
+     * @param mode The mode now.
+     * @param releaseItem The item under the release, or -1.
+     * @return True to fire {@code pressItem}.
+     */
+    static boolean releaseFires(Mode pressMode, int pressItem, Mode mode,
+                                int releaseItem) {
+        return pressMode != null && pressMode == mode && pressItem >= 0
+            && releaseItem == pressItem;
     }
 
     private void onPress(MouseEvent e) {
         requestFocusInWindow();
+        this.pressMode = null;
+        this.pressItem = -1;
         // The second press of a double click that skipped the intro must
         // not act on the title the skip just showed.
         if (this.introClickSeries) {
@@ -1908,11 +1938,14 @@ final class ClassicMainMenuPanel extends JPanel {
             }
             break;
         case TITLE:
+            // The left press bars the item, its release fires it (W20).
             if (e.getButton() == MouseEvent.BUTTON1) {
                 final int i = titleItemAt(x, y);
                 if (i >= 0) {
                     this.selected = i;
-                    activate(i);
+                    this.pressMode = Mode.TITLE;
+                    this.pressItem = i;
+                    repaint();
                 }
             }
             break;
@@ -1923,7 +1956,8 @@ final class ClassicMainMenuPanel extends JPanel {
                 final int i = loadRowAt(x, y);
                 if (i >= 0) {
                     setLoadSel(i);
-                    loadSelected();
+                    this.pressMode = Mode.LOAD;
+                    this.pressItem = i;
                 }
             }
             break;
@@ -1931,20 +1965,55 @@ final class ClassicMainMenuPanel extends JPanel {
             dismissNotice();
             break;
         case QUIT:
-            // Like the load box: a right click is "back" (= Nein), a left
-            // click answers with the row under the arrow; elsewhere nothing.
+            // Like the load box: a right press is "back" (= Nein), a left
+            // press bars the row under the arrow and its release answers
+            // with it; elsewhere nothing.
             if (e.getButton() == MouseEvent.BUTTON3) {
                 answerQuit(QUIT_NO);
             } else if (e.getButton() == MouseEvent.BUTTON1) {
                 final int i = quitRowAt(x, y);
                 if (i >= 0) {
                     this.quitSel = i;
-                    answerQuit(i);
+                    this.pressMode = Mode.QUIT;
+                    this.pressItem = i;
+                    repaint();
                 }
             }
             break;
         default:
             break;      // PASSIVE, BUSY: ignored
+        }
+    }
+
+    /**
+     * The left release fires the title item, load row or quit row its
+     * press marked, if it is still over it and the mode has not changed
+     * ({@link #releaseFires}); everything else waits for the next press.
+     */
+    private void onRelease(MouseEvent e) {
+        if (e.getButton() != MouseEvent.BUTTON1) return;
+        final Mode m = this.pressMode;
+        final int i = this.pressItem;
+        this.pressMode = null;
+        this.pressItem = -1;
+        if (m == null) return;
+        final int x = vx(e), y = vy(e);
+        final int under = (m == Mode.TITLE) ? titleItemAt(x, y)
+            : (m == Mode.LOAD) ? loadRowAt(x, y)
+            : (m == Mode.QUIT) ? quitRowAt(x, y) : -1;
+        if (!releaseFires(m, i, this.mode, under)) return;
+        switch (m) {
+        case TITLE:
+            activate(i);
+            break;
+        case LOAD:
+            loadSelected();
+            break;
+        case QUIT:
+            answerQuit(i);
+            break;
+        default:
+            break;
         }
     }
 
