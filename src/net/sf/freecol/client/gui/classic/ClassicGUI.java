@@ -1700,8 +1700,13 @@ public class ClassicGUI extends GUI {
                 // Phase 0 at the first in-game view (fog-start #19).
                 this.waterCycle.start();
             }
-            if (active != null) {
-                this.mapViewer.changeToMoveUnits(active);
+            // A save of this build: the unit cycle goes on from its cursor
+            // (I2), not at FreeCol's saved or first unit.
+            final Unit first = firstUnit(active);
+            if (first != null) {
+                this.mapViewer.changeToMoveUnits(first);
+                cycleActivated(first);
+                if (fromCursor(first) && this.turnFlow != null) this.turnFlow.cycleUnitUp(first);
             } else if (tile != null) {
                 this.mapViewer.changeToTerrain(tile);
             }
@@ -1716,8 +1721,8 @@ public class ClassicGUI extends GUI {
             // the player hunts for their unit.
             final Unit viewerActive = this.mapViewer.getActiveUnit();
             final Tile focusTile =
-                (active != null && active.getTile() != null)
-                    ? active.getTile()
+                (first != null && first.getTile() != null)
+                    ? first.getTile()
                 : (viewerActive != null && viewerActive.getTile() != null)
                     ? viewerActive.getTile()
                 : tile;
@@ -2437,6 +2442,38 @@ public class ClassicGUI extends GUI {
         if (unit != null && me != null && unit.getOwner() == me) {
             this.unitCycle.activated(unit);
         }
+    }
+
+    /**
+     * The unit the game view opens with (I2): with a cycle cursor on our
+     * player (a save of this build) the cycle's first due unit from it, so
+     * a load goes on at the unit up when it was saved (clip006's load
+     * began at U1), or where a turn-start autosave's new turn starts; a
+     * goto unit or a visit there, or no cursor (a new game, an older
+     * save), FreeCol's unit as before (the save's active unit, else its
+     * first one).
+     *
+     * @param active FreeCol's unit, or null.
+     * @return The unit to open with, or null.
+     */
+    Unit firstUnit(Unit active) {
+        final Player me = myPlayer();
+        if (me == null || ClassicUnitCycle.cursor(me) < 0
+            || (active != null && active.getOwner() != me)) return active;
+        final Unit next = this.unitCycle.next(null, me);
+        return (next != null && this.unitCycle.kind(next) == ClassicUnitCycle.Kind.ORDERS)
+            ? next : active;
+    }
+
+    /**
+     * @param unit The unit the view opens with.
+     * @return Whether the cycle's cursor chose it ({@link #firstUnit}).
+     */
+    private boolean fromCursor(Unit unit) {
+        final Player me = myPlayer();
+        return unit != null && me != null && ClassicUnitCycle.cursor(me) >= 0
+            && unit.getOwner() == me
+            && this.unitCycle.kind(unit) == ClassicUnitCycle.Kind.ORDERS;
     }
 
     /**

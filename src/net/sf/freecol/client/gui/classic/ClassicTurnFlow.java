@@ -529,6 +529,9 @@ final class ClassicTurnFlow {
     /** The turn whose first unit was handed control (the start's is the session's). */
     private int activatedTurn;
 
+    /** The unit the view opened with from the cycle's cursor, until the next choice. */
+    private Unit heldUp = null;
+
     /** When the last wipe was painted. */
     private long wipeNanos = 0L;
 
@@ -937,6 +940,8 @@ final class ClassicTurnFlow {
             }
             return true;
         }
+        final Unit held = this.heldUp;
+        this.heldUp = null;
         if (p != null && (p.kind == Kind.TURN_START
                 || (p.kind == Kind.HANDOVER
                     && (p.unit == unit || unit == previous
@@ -956,6 +961,16 @@ final class ClassicTurnFlow {
             this.activatedTurn = turn;
             beginTurn();
             startTurn(cycleChoice(unit, null, "turn start"));
+            return true;
+        }
+        if (held != null && !fixed && p == null && previous == held && unit != held
+            && !ranOut(held)) {
+            // The view opened with the cycle's unit from its cursor (a
+            // load, I2): FreeCol's own startup choice that follows goes
+            // back (its iterator, which brought the ship again).
+            ClassicFrameRecorder.event("cycle", "kept " + id(held) + ", controller="
+                + id(unit) + " (load)");
+            this.host.putBack(unit);
             return true;
         }
         if (unit == previous) return false;   // the re-selection after a move
@@ -1042,6 +1057,17 @@ final class ClassicTurnFlow {
         } else {
             this.host.activate(next);
         }
+    }
+
+    /**
+     * The game view opened with the unit cycle's unit from its cursor
+     * (ClassicGUI.firstUnit, a load, I2): the controller's next choice of
+     * another unit while that one is still up goes back, once.
+     *
+     * @param unit The unit up.
+     */
+    void cycleUnitUp(Unit unit) {
+        this.heldUp = unit;
     }
 
     /**

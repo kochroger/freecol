@@ -1367,6 +1367,30 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         for (Unit x : u) x.dispose();
     }
 
+    /**
+     * I2: the game view opened with the cycle's unit from its cursor (a
+     * load, ClassicGUI.firstUnit); the controller's startup choice of
+     * another unit that follows goes back, once; a click is never held.
+     */
+    public void testLoadKeepsTheCursorsUnit() {
+        final Rig r = new Rig(this.game);
+        final Unit[] u = threeShips(r, true);
+        final Unit a = u[0], b = u[1];
+        r.host.active = b;
+        r.flow.cycleUnitUp(b);
+        assertTrue(r.flow.unitChosen(a, b));
+        assertEquals(1, r.count("putBack " + a.getId()));
+        assertNull(r.flow.pending());
+        assertSame(b, r.host.active);
+        assertFalse(r.flow.unitChosen(a, b));             // once only: as before
+        r.flow.cycleUnitUp(b);
+        assertFalse(r.flow.unitClicked(a, b));            // a click: not held
+        r.flow.cycleUnitUp(b);
+        assertFalse(r.flow.unitChosen(b, b));             // the re-selection
+        assertFalse(r.flow.unitChosen(a, b));             // cleared by it
+        for (Unit x : u) x.dispose();
+    }
+
     /** The controller chooses: the flow takes it, or it is made active at once (ClassicGUI.changeView). */
     private static void choose(Rig r, Unit unit, Unit previous) {
         if (!r.flow.unitChosen(unit, previous)) r.host.activate(unit);

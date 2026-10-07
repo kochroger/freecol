@@ -2725,6 +2725,18 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             assertNotNull(b2);
             final WoodcutGUI gui2 = new WoodcutGUI(g2, d2);
             assertSame("the load goes on at b", b2, gui2.unitCycle.next(null, d2));
+            // The view opens with it (ClassicGUI.firstUnit), not with
+            // FreeCol's saved or first unit; without a cursor (an older
+            // save, a new game) FreeCol's; a goto unit there: FreeCol's.
+            final Unit a2 = g2.getFreeColGameObject(a.getId(), Unit.class);
+            assertSame(b2, gui2.firstUnit(a2));
+            assertSame(b2, gui2.firstUnit(null));
+            b2.setDestination(g2.getMap().getTile(9, 9));   // a goto unit there
+            assertSame(a2, gui2.firstUnit(a2));
+            b2.setDestination(null);
+            d2.setClassicCycleCursor(-1L);
+            assertSame(a2, gui2.firstUnit(a2));
+            d2.setClassicCycleCursor(cursor);
             b2.setMovesLeft(0);
             assertSame(g2.getFreeColGameObject(c.getId(), Unit.class),
                        gui2.unitCycle.next(b2, d2));
