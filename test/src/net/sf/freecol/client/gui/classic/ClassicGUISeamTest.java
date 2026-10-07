@@ -2075,9 +2075,12 @@ public class ClassicGUISeamTest extends FreeColTestCase {
 
     /**
      * G1 (N15): William Brewster's and the Fountain of Youth's choice of
-     * a recruit: a list box of the three, the bar on row 1, Escape and a
-     * click beside it doing nothing; a row answers its slot (1-based), a
-     * box closed without a row answers nothing.  GAME.TXT @RECRUITCHOOSE
+     * a recruit: a list box of the three, the bar on row 1, a click beside
+     * it doing nothing; a row answers its slot (1-based), a box closed
+     * without a row answers nothing.  Escape is "Nein" at Brewster's (the
+     * box closes, nothing is recruited, the controller asks again at the
+     * next turn start) and does nothing at the Fountain of Youth (a cancel
+     * would lose the free recruits); G review.  GAME.TXT @RECRUITCHOOSE
      * with our country and port over the priest, @LOSTCITY0 over the
      * frontiersman, else FreeCol's words.
      */
@@ -2104,31 +2107,40 @@ public class ClassicGUISeamTest extends FreeColTestCase {
                 rs.get(i).getSingleLabel())), r.plainRows()[i]);
         }
         assertEquals(0, r.defaultRow);
-        assertFalse(r.escapes);
-        assertEquals(ClassicAdvisorBox.Bar.OPEN, r.escapeAnswer());
+        assertTrue(r.escapes);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, r.escapeAnswer());   // no row
         assertFalse(r.outsideCancels);
         assertEquals(ClassicMenuBox.LIST_INDENT, r.rowIndent);
         fake.answer = ClassicAdvisorBox.Bar.DISMISSED;
         onEdt(() -> gui.showEmigrationDialog(dutch, true, slots::add));
         assertEquals(1, slots.size());                 // nothing taken
 
-        // The player's keys on the real bar.
+        // The player's keys on the real bar.  Brewster's: Escape closes it
+        // with no recruit (asked again at the next turn start); a click
+        // beside it does nothing.
         final KeyPrompter keys = new KeyPrompter();
         gui.prompter = keys;
         keys.press("ESC");
         onEdt(() -> gui.showEmigrationDialog(dutch, false, slots::add));
         assertEquals(1, slots.size());
-        assertEquals(0, keys.lastRow);                 // still up, on row 1
-        keys.press("OUT", "ESC");
+        assertEquals(-2, keys.lastRow);                // closed by Escape
+        keys.press("DOWN", "ESC", "ENTER");
+        onEdt(() -> gui.showEmigrationDialog(dutch, false, slots::add));
+        assertEquals(1, slots.size());                 // Escape before Enter: none
+        keys.press("OUT");
         onEdt(() -> gui.showEmigrationDialog(dutch, false, slots::add));
         assertEquals(1, slots.size());
-        assertEquals(0, keys.lastRow);
-        keys.press("ESC", "DOWN", "ENTER");
-        onEdt(() -> gui.showEmigrationDialog(dutch, false, slots::add));
+        assertEquals(0, keys.lastRow);                 // still up, on row 1
+        // The Fountain of Youth: Escape does nothing, a row must be taken.
+        keys.press("ESC", "OUT", "DOWN", "ENTER");
+        onEdt(() -> gui.showEmigrationDialog(dutch, true, slots::add));
         assertEquals(Integer.valueOf(2), last(slots));
         keys.press("DOWN", "DOWN", "DOWN", "ENTER");
         onEdt(() -> gui.showEmigrationDialog(dutch, true, slots::add));
         assertEquals(Integer.valueOf(3), last(slots));
+        keys.press("DOWN", "ENTER");
+        onEdt(() -> gui.showEmigrationDialog(dutch, false, slots::add));
+        assertEquals(Integer.valueOf(2), last(slots));
         keys.press("ENTER");
         onEdt(() -> gui.showEmigrationDialog(dutch, false, slots::add));
         assertEquals(Integer.valueOf(1), last(slots));
@@ -2137,13 +2149,15 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         onEdt(() -> gui.showEmigrationDialog(
                 game.getPlayerByNationId("model.nation.inca"), false, slots::add));
         assertEquals(asked, keys.boxes.size());
-        assertEquals(4, slots.size());
+        assertEquals(5, slots.size());
 
         // FreeCol's words without the texts.
         final ClassicAdvisorBox.Request f = ClassicSeams.emigrationRequest(null,
             dutch, false, rs, "t");
         assertEquals(Messages.message("emigrationDialog.chooseImmigrant"), f.plainText());
         assertSame(ClassicAdvisorBox.Portrait.NONE, f.portrait);
+        assertTrue(f.escapes);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, f.escapeAnswer());
         final ClassicAdvisorBox.Request ff = ClassicSeams.emigrationRequest(null,
             dutch, true, rs, "t");
         assertTrue(ff.plainText().startsWith(ClassicAdvisorBox.literal(Messages.message(
@@ -2163,7 +2177,8 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertFalse(b.plainText(), b.plainText().contains("%"));
         assertSame(ClassicAdvisorBox.Portrait.PRIEST, b.portrait);
         assertEquals(3, b.rows.size());
-        assertFalse(b.escapes);
+        assertTrue(b.escapes);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, b.escapeAnswer());
         assertEquals(ClassicMenuBox.LIST_INDENT, b.rowIndent);
         final ClassicAdvisorBox.Request s = ClassicSeams.emigrationRequest(t,
             game.getPlayerByNationId("model.nation.spanish"), false, rs, "t");
@@ -2309,6 +2324,34 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             Session.clearAll();
             ServerTestHelper.stopServerGame();
         }
+    }
+
+    /**
+     * G review: a region's naming ({@code newRegionNameHandler}'s template
+     * "nameRegion.text") is answered at once with the default name, once,
+     * and no box comes (the server counts the region discovered only on
+     * the answer; unanswered, every land goto stopped after each step).
+     * The new land's name ("newLand.text", W10) is not answered here.
+     */
+    public void testRegionNamedAtOnce() {
+        final ClassicGUI gui = new ClassicGUI(null);
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        final List<String> names = new ArrayList<>();
+        final StringTemplate region = StringTemplate.template(ClassicSeams.NAME_REGION)
+            .addStringTemplate("%type%", StringTemplate.key("model.region.land"));
+        assertTrue(ClassicSeams.namesRegion(region));
+        gui.showNamingDialog(region, "Neu-Holland", null, names::add);
+        assertEquals(List.of("Neu-Holland"), names);
+        assertTrue(fake.boxes.isEmpty());
+        // The new land's name is W10's; nothing without a handler.
+        final StringTemplate land = StringTemplate.key("newLand.text");
+        assertFalse(ClassicSeams.namesRegion(land));
+        gui.showNamingDialog(land, "Neuholland", null, names::add);
+        gui.showNamingDialog(region, "x", null, null);
+        assertFalse(ClassicSeams.namesRegion(null));
+        assertEquals(1, names.size());
+        assertTrue(fake.boxes.isEmpty());
     }
 
     /**

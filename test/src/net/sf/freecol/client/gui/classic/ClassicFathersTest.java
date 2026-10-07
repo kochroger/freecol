@@ -46,7 +46,8 @@ import net.sf.freecol.util.test.FreeColTestCase;
  * Tests of the original's founding father choice (build spec D8a,
  * {@link ClassicFathers}) and its F1 page ({@link ClassicPedia}, D8b's
  * page): the index table, the rows, the box, the keys (Enter takes, F1
- * shows the page and the box comes back on row 1, Escape does nothing),
+ * shows the page and the box comes back on row 1, Escape postpones the
+ * choice to the next turn start),
  * when it comes (after the turn start's price messages, before the year
  * flips; never after independence or in the turn a father joined), and
  * the golden checks against clip008: the box at #12765, #13304, #48314,
@@ -193,9 +194,10 @@ public class ClassicFathersTest extends FreeColTestCase {
 
     /**
      * The box: @WHICHFREEDOM at (42,59) 236x82, three prompt lines, the
-     * rows at + 13, the gold footer, the bar on row 1, no Escape, no click
-     * beside it, F1 to the hook; without the pack FreeCol's words with the
-     * same keys.
+     * rows at + 13, the gold footer, the bar on row 1, Escape closing it
+     * with no row (G review: Roger's "Esc = Nein" but at the King's), no
+     * click beside it, F1 to the hook; without the pack FreeCol's words
+     * with the same keys.
      */
     public void testTheBox() {
         final Specification s = spec();
@@ -206,7 +208,8 @@ public class ClassicFathersTest extends FreeColTestCase {
             row -> help[0] = row);
         assertEquals(5, fb.rows.size());
         assertEquals(0, fb.defaultRow);
-        assertFalse(fb.escapes);
+        assertTrue(fb.escapes);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, fb.escapeAnswer());
         assertFalse(fb.outsideCancels);
         assertEquals(ClassicMenuBox.LIST_INDENT, fb.rowIndent);
         assertNotNull(fb.help);
@@ -229,8 +232,10 @@ public class ClassicFathersTest extends FreeColTestCase {
         assertEquals(122, l.rows.get(4).y);
         assertEquals(132, l.footer.y);
         assertEquals(276, l.footer.x + tiny.stringWidth(r.footer));
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, new ClassicAdvisorBox.Bar(r).escape());
         final ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
-        assertEquals(ClassicAdvisorBox.Bar.OPEN, bar.escape());
+        bar.press(-1, false);
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, bar.release(-1, false));
         bar.down();
         bar.down();
         assertEquals(ClassicAdvisorBox.Bar.HELP, bar.help());
@@ -417,7 +422,7 @@ public class ClassicFathersTest extends FreeColTestCase {
     /**
      * The flow at a turn start: the offer waits; the turn report asks its
      * price messages, then the father box, then the other notices.  In
-     * the box Escape and a click beside it do nothing, F1 shows the page
+     * the box a click beside it does nothing, F1 shows the page
      * of the barred father (with the pack) and the box comes back on row
      * 1, a little later; Enter takes the father under the bar, whom the
      * handler gets, once.
@@ -441,7 +446,7 @@ public class ClassicFathersTest extends FreeColTestCase {
         final boolean page = ClassicPedia.load(ClassicPackFiles.runtime()) != null
             && ClassicText.load(ClassicPackFiles.runtime()) != null;
         keys.then("X")                                    // the price notice
-            .then("ESC", "OUT", "DOWN", "F1");            // the box: Hudson's page
+            .then("OUT", "DOWN", "F1");                   // the box: Hudson's page
         if (page) keys.then("X");                         // the page
         keys.then("DOWN", "DOWN", "ENTER")                // the box again: Drake
             .then("X");                                   // the famine notice
@@ -471,6 +476,36 @@ public class ClassicFathersTest extends FreeColTestCase {
         assertEquals(1, keys.boxes.size());
         assertFalse(gui.holdTurnStart());
         assertEquals(1, chosen.size());
+    }
+
+    /**
+     * Escape in the father box (G review: Roger's rule, Escape is "Nein"
+     * everywhere but at the King's decisions): the box closes with no
+     * father, the handler is not called and nothing is held; the server
+     * offers the same choice again at the next turn start, and then a
+     * father is taken.
+     */
+    public void testEscapePostponesTheChoice() {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final FatherGUI gui = new FatherGUI(game, dutch);
+        final ScriptPrompter keys = new ScriptPrompter();
+        gui.prompter = keys;
+        final List<FoundingFather> ffs = fathers(spec(), "adamSmith", "laSalle",
+            "paulRevere", "pocahontas", "williamPenn");
+        final List<FoundingFather> chosen = new ArrayList<>();
+        gui.showChooseFoundingFatherDialog(ffs, chosen::add);
+        keys.then("DOWN", "ESC", "ENTER");
+        gui.askFathers(gui.takePendingFathers());
+        assertEquals(1, keys.boxes.size());               // not asked again now
+        assertTrue(chosen.isEmpty());
+        assertFalse(gui.holdTurnStart());
+        // The next turn start: the same offer, now a father is taken.
+        gui.showChooseFoundingFatherDialog(ffs, chosen::add);
+        keys.then("DOWN", "ENTER");
+        gui.askFathers(gui.takePendingFathers());
+        assertEquals(List.of(spec().getFoundingFather("model.foundingFather.laSalle")),
+                     chosen);
     }
 
     /**

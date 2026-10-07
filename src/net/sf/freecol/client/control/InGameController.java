@@ -178,6 +178,15 @@ public final class InGameController extends FreeColClientHolder {
      */
     private boolean gotoBatch = true;
 
+    /**
+     * Whether a goto stops after a step into a region still to discover,
+     * so that the player can name it (BR#2707, {@link #moveTile}).  On by
+     * default (FreeCol); the Classic UI switches it off for its game view,
+     * where the naming is answered at once without a box and the
+     * original's goto runs on.
+     */
+    private boolean regionStops = true;
+
     /** A map of messages to be ignored. */
     private final java.util.Map<String, Integer> messagesToIgnore
         = Collections.synchronizedMap(new HashMap<>());
@@ -1119,6 +1128,40 @@ public final class InGameController extends FreeColClientHolder {
     }
 
     /**
+     * Switch the goto's stop at a region still to discover on or off
+     * ({@link #moveTile}, BR#2707).  The Classic UI switches it off while
+     * its game view is up, and back on when it goes.
+     *
+     * @param on True for FreeCol's stop (the default).
+     */
+    public void setRegionStops(boolean on) {
+        this.regionStops = on;
+    }
+
+    /**
+     * Whether a goto stops at a region still to discover
+     * ({@link #setRegionStops}).
+     *
+     * @return True if it does.
+     */
+    public boolean isRegionStops() {
+        return this.regionStops;
+    }
+
+    /**
+     * Whether automatic movement stops after a step onto a tile so that
+     * the region there can be named (BR#2707): its region is still to
+     * discover, and the stop is on ({@link #setRegionStops}).
+     *
+     * @param newTile The tile moved onto, or null.
+     * @return True if the goto stops there.
+     */
+    boolean stopsForRegion(Tile newTile) {
+        return this.regionStops && newTile != null
+            && newTile.getDiscoverableRegion() != null;
+    }
+
+    /**
      * Move one unit towards its destination (or along its trade route)
      * now: the Classic UI's unit cycle runs each goto unit when it reaches
      * it, with the batch off ({@link #setGotoBatch}).  Unlike
@@ -1959,9 +2002,9 @@ public final class InGameController extends FreeColClientHolder {
         }
 
         // Break up the goto to allow region naming to occur, BR#2707
+        // (unless switched off, setRegionStops)
         final Tile newTile = unit.getTile().getNeighbourOrNull(direction);
-        boolean discover = newTile != null
-            && newTile.getDiscoverableRegion() != null;
+        boolean discover = stopsForRegion(newTile);
 
         // Ask the server
         if (!askServer().move(unit, direction)) {
@@ -4455,6 +4498,10 @@ public final class InGameController extends FreeColClientHolder {
     public void newRegionNameHandler(Region region, Tile tile, Unit unit,
                                      String name) {
         invokeLater(() -> {
+                // Discovered meanwhile: a second step into the region came
+                // before the answer (no goto stop, setRegionStops), and
+                // the server would refuse a second name.
+                if (!region.getDiscoverable()) return;
                 if (region.hasName()) {
                     if (region.isPacific()) {
                         showEventPanel(Messages.message("event.discoverPacific"),

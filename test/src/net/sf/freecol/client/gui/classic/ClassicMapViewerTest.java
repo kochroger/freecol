@@ -214,6 +214,36 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         assertFalse(mv.isShownAt(a, land));
         assertTrue(mv.isShownAt(ship, sea));
 
+        // A visit while the active unit blinks (one that came at once
+        // after W, F or S; G review): the unit is drawn ON at once and
+        // held; the next activation re-arms it.  Without the GUI's hold
+        // (the turn flow's hand-over) the next toggle resumes it.
+        assertTrue(mv.isBlinkOff());
+        mv.visit(ship);
+        assertFalse(mv.isBlinkOff());
+        assertTrue(mv.isBlinkHeld());
+        assertTrue(mv.isShownAt(a, land));
+        mv.changeToMoveUnits(a);
+        assertFalse(mv.isBlinkHeld());
+        assertTrue(mv.isBlinkArmed());
+        mv.visit(ship);
+        assertTrue(mv.isBlinkHeld());
+        mv.blinkToggle(1);                         // no hold reason here
+        assertFalse(mv.isBlinkHeld());
+        assertFalse(mv.isBlinkOff());
+        mv.blinkToggle(1);
+        assertTrue(mv.isBlinkOff());
+
+        // A skipped unit with moves left (FreeCol's trade route without a
+        // path) stops the blink at its next toggle, as rearmBlink does.
+        a.setState(Unit.UnitState.SKIPPED);
+        assertTrue(a.getMovesLeft() > 0);
+        mv.blinkToggle(2);
+        assertFalse(mv.isBlinkArmed());
+        assertFalse(mv.isBlinkOff());
+        assertTrue(mv.isShownAt(a, land));
+        a.setState(Unit.UnitState.ACTIVE);
+
         // No active unit: no blink at all.
         mv.changeToEndTurn();
         assertFalse(mv.isBlinkArmed());

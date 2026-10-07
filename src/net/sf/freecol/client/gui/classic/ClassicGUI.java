@@ -206,9 +206,10 @@ public class ClassicGUI extends GUI {
     /**
      * The end of turn and the hand-over to the next unit (build spec W5),
      * created with the in-game HUD ({@link #installInGameHud}) and dropped
-     * with it ({@link #teardownInGame}); null without a game view.
+     * with it ({@link #teardownInGame}); null without a game view.  A test
+     * puts its own in (the blink's hold, the view toggle).
      */
-    private ClassicTurnFlow turnFlow;
+    ClassicTurnFlow turnFlow;
 
     /**
      * The original's unit cycle (master plan W5f): which unit comes at the
@@ -1803,8 +1804,14 @@ public class ClassicGUI extends GUI {
         this.hudPane = new ClassicHudPane(this.menuStrip, this.mapViewer,
             this.infoPanel, arrowSprite(pack), () -> sceneShowing
                 || (boxLayer != null && boxLayer.hidesArrow()));
+        // The keys fire the Classic UI's own actions as the strip does
+        // (V: the view toggle, classicAction).
         ClassicKeyMap.install(this.hudPane, this.mapViewer,
-            id -> (am == null) ? null : am.getFreeColAction(id),
+            id -> {
+                final javax.swing.Action own = classicAction(id);
+                if (own != null) return own;
+                return (am == null) ? null : am.getFreeColAction(id);
+            },
             () -> (mapViewer == null) ? null : mapViewer.getViewMode(),
             () -> (mapViewer == null) ? ClassicMenuModel.Context.NONE
                 : ClassicMenuModel.Context.of(mapViewer.getActiveUnit(),
@@ -1982,15 +1989,40 @@ public class ClassicGUI extends GUI {
     /** SPIEL rows 0 and 1, made on first use. */
     private javax.swing.Action gameOptionsAction = null, colonyOptionsAction = null;
 
+    /** FreeCol's view toggle as the Classic UI fires it ({@link #toggleView}), made on first use. */
+    private javax.swing.Action viewToggleAction = null;
+
+    /** The id of FreeCol's view toggle (ANSICHT V and M, the keys V and M). */
+    static final String VIEW_TOGGLE = "toggleViewModeAction";
+
     /**
      * The Classic UI's own menu actions ({@link ClassicMenuModel#GAME_OPTIONS},
-     * {@link ClassicMenuModel#COLONY_OPTIONS}): the strip fires them as it
-     * fires an engine action, after the menu has closed.
+     * {@link ClassicMenuModel#COLONY_OPTIONS}), and its own way of firing
+     * FreeCol's view toggle ({@link #VIEW_TOGGLE}): the strip fires them as
+     * it fires an engine action, after the menu has closed; the key map
+     * fires them for their keys.
      *
      * @param id An action id, or null.
      * @return The action, or null for any other id.
      */
     javax.swing.Action classicAction(String id) {
+        if (VIEW_TOGGLE.equals(id)) {
+            if (this.viewToggleAction == null) {
+                this.viewToggleAction = new javax.swing.AbstractAction(VIEW_TOGGLE) {
+                        @Override
+                        public boolean isEnabled() {
+                            final javax.swing.Action fc = freeColAction(VIEW_TOGGLE);
+                            return fc == null || fc.isEnabled();
+                        }
+
+                        @Override
+                        public void actionPerformed(java.awt.event.ActionEvent e) {
+                            toggleView(e);
+                        }
+                    };
+            }
+            return this.viewToggleAction;
+        }
         if (ClassicMenuModel.GAME_OPTIONS.equals(id)) {
             if (this.gameOptionsAction == null) {
                 this.gameOptionsAction = optionsAction(ClassicOptionBoxes.GAME_SECTION);
@@ -2004,6 +2036,43 @@ public class ClassicGUI extends GUI {
             return this.colonyOptionsAction;
         }
         return null;
+    }
+
+    /**
+     * The view toggle, V in the units view (ANSICHT row 1): the terrain
+     * view on the selected tile as the player's own tile selection
+     * ({@link #selectTile}).  FreeCol's toggle calls
+     * {@link #changeView(Tile)}, the controller's fallback when it has no
+     * unit left, which since W5f brings the unit cycle's next due unit
+     * instead: V activated the next unit, and with a visit next froze the
+     * turn (G review).  M in the terrain view (row 0) is FreeCol's toggle.
+     *
+     * @param e The event, passed on to FreeCol's toggle.
+     */
+    void toggleView(java.awt.event.ActionEvent e) {
+        final ClassicMapViewer mv = this.mapViewer;
+        if (mv != null && mv.getViewMode() == ViewMode.MOVE_UNITS) {
+            Tile t = mv.getSelectedTile();
+            final Unit u = mv.getActiveUnit();
+            if (t == null && u != null) t = u.getTile();
+            if (t == null) t = mv.getFocus();
+            ClassicFrameRecorder.event("view", "terrain"
+                + ((t == null) ? "" : " at=" + t.getX() + "," + t.getY()));
+            selectTile(t);
+            return;
+        }
+        final javax.swing.Action fc = freeColAction(VIEW_TOGGLE);
+        if (fc != null) fc.actionPerformed(e);
+    }
+
+    /**
+     * @param id An action id.
+     * @return FreeCol's action of that id, or null without a client.
+     */
+    private javax.swing.Action freeColAction(String id) {
+        final FreeColClient fcc = getFreeColClient();
+        final ActionManager am = (fcc == null) ? null : fcc.getActionManager();
+        return (am == null) ? null : am.getFreeColAction(id);
     }
 
     /** An action that opens an option box ({@link #showOptionBox}). */
@@ -2079,8 +2148,9 @@ public class ClassicGUI extends GUI {
     /**
      * Why the map's blink must hold the active unit ON now (build spec W3),
      * or null to let it blink: the first scene, an open menu, a modal box,
-     * a classic screen over the map, or not our turn (the AI phase).  EDT
-     * only; asked at every toggle.
+     * a classic screen over the map, a hand-over on its way (the unit up
+     * is the one the cycle moved past, {@link ClassicTurnFlow#holdsBlink}),
+     * or not our turn (the AI phase).  EDT only; asked at every toggle.
      *
      * @return The reason, or null.
      */
@@ -2090,6 +2160,7 @@ public class ClassicGUI extends GUI {
         if (this.menuStrip != null && this.menuStrip.isMenuOpen()) return "menu";
         if (modalDialogShowing()) return "dialog";
         if (classicScreenUp()) return "screen";
+        if (this.turnFlow != null && this.turnFlow.holdsBlink()) return "handover";
         final FreeColClient fcc = getFreeColClient();
         if (fcc == null || !fcc.currentPlayerIsMyPlayer()) return "ai";
         return null;
@@ -2163,6 +2234,7 @@ public class ClassicGUI extends GUI {
      * cycle's next due unit if there is one (a goto unit, a visit, master
      * plan W5f; {@link ClassicTurnFlow#dueInstead}), else the turn flow
      * arms the automatic end if nothing can move any more (build spec W5a).
+     * The player's view toggle no longer comes here ({@link #toggleView}).
      */
     @Override
     public void changeView(Tile tile) {
@@ -2507,19 +2579,24 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * Switch FreeCol's goto batch ({@code InGameController.setGotoBatch}):
-     * off while the classic game view is up, where each goto unit moves
-     * when the unit cycle reaches it (master plan W5f); on again when the
-     * view goes, so the standard GUI (and a test after it in the same JVM)
-     * gets FreeCol's batch.
+     * Switch FreeCol's goto batch ({@code InGameController.setGotoBatch})
+     * and its goto stop at a region to discover ({@code setRegionStops},
+     * BR#2707): both off while the classic game view is up, where each
+     * goto unit moves when the unit cycle reaches it (master plan W5f) and
+     * runs on through new regions, whose names are answered at once
+     * ({@link #showNamingDialog}; clip006 U22: three road steps in one
+     * run); on again when the view goes, so the standard GUI (and a test
+     * after it in the same JVM) gets FreeCol's.
      *
-     * @param on True for FreeCol's batch.
+     * @param on True for FreeCol's batch and stop.
      */
     private void gotoBatch(boolean on) {
         final FreeColClient fcc = getFreeColClient();
         final net.sf.freecol.client.control.InGameController igc
             = (fcc == null) ? null : fcc.getInGameController();
-        if (igc != null) igc.setGotoBatch(on);
+        if (igc == null) return;
+        igc.setGotoBatch(on);
+        igc.setRegionStops(on);
     }
 
     /**
@@ -3657,9 +3734,10 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * Ask the father box until a father is taken (EDT only): F1 shows the
-     * page of the father under the bar and asks the box again, its bar on
-     * row 1; Escape and a click beside it do nothing.  Not after
+     * Ask the father box until a father is taken or Escape (EDT only): F1
+     * shows the page of the father under the bar and asks the box again,
+     * its bar on row 1; Escape closes it with no father (the server offers
+     * it again next turn); a click beside it does nothing.  Not after
      * independence, not in the turn a father joined
      * ({@link ClassicFathers#withheld}): then nothing is asked, and the
      * handler is not called.
@@ -3696,7 +3774,9 @@ public class ClassicGUI extends GUI {
                 help[0] = -1;
                 again = true;
             } else if (chosen == ClassicAdvisorBox.Bar.DISMISSED) {
-                // The game view went (abort): the server offers it again.
+                // Escape, or the game view went (abort): the server
+                // offers it again at the next turn start.
+                ClassicFrameRecorder.event("fathers-postponed", "");
                 return;
             }
         }
@@ -4392,9 +4472,10 @@ public class ClassicGUI extends GUI {
      * <p>William Brewster (the server no longer picks the recruit) and the
      * Fountain of Youth: the list box of the three recruits
      * ({@link ClassicSeams#emigrationRequest}).  The bar starts on row 1;
-     * Enter or a click takes a recruit; Escape and a click beside the box
-     * do nothing.  The base GUI's silence meant that after Brewster no
-     * recruit ever came again.  A box that closed without a row (the game
+     * Enter or a click takes a recruit; a click beside the box does
+     * nothing, and so does Escape at the Fountain of Youth.  The base
+     * GUI's silence meant that after Brewster no recruit ever came again.
+     * A box that closed without a row (Escape at Brewster's, or the game
      * view went) calls nothing: Brewster's choice comes again at the next
      * turn start.
      */
@@ -4423,6 +4504,24 @@ public class ClassicGUI extends GUI {
                     handler.handle(Europe.MigrationType.migrantIndexToSlot(chosen));
                 }
             });
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>A region's name ({@link ClassicSeams#namesRegion}): the default
+     * name at once, no box (the original names no region).  Unanswered,
+     * the server never counted a land region discovered, and FreeCol's
+     * goto stopped after every land step that left moves (G review).  The
+     * new land's name is still silent (W10).
+     */
+    @Override
+    public void showNamingDialog(StringTemplate template, final String defaultName,
+                                 final Unit unit, DialogHandler<String> handler) {
+        if (handler == null || !ClassicSeams.namesRegion(template)) return;
+        ClassicFrameRecorder.event("region-named", defaultName
+            + ((unit == null) ? "" : " unit=" + unit.getId()));
+        handler.handle(defaultName);
     }
 
     /**

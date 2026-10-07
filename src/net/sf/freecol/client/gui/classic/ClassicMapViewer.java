@@ -2014,14 +2014,18 @@ final class ClassicMapViewer extends JPanel {
     /**
      * A toggle of the blink clock is due (the event thread; the clock has
      * dropped toggles of an older phase).  Held: show the unit ON and wait
-     * for the hold to end, which re-arms.
+     * for the hold to end, which re-arms.  A unit with no moves left or
+     * skipped stops it, as {@link #rearmBlink} does (FreeCol's trade route
+     * can leave a unit SKIPPED with moves, no box: its toggles re-based
+     * the hand-over after it).
      *
      * @param n The toggle: OFF for odd, ON for even.
      */
     void blinkToggle(int n) {
         final Unit u = this.activeUnit;
         if (this.viewMode != GUI.ViewMode.MOVE_UNITS || u == null
-            || u.getTile() == null || u.getMovesLeft() <= 0) {
+            || u.getTile() == null || u.getMovesLeft() <= 0
+            || u.getState() == Unit.UnitState.SKIPPED) {
             rearmBlink("none");
             return;
         }
@@ -2110,8 +2114,12 @@ final class ClassicMapViewer extends JPanel {
     /**
      * A silent visit (master plan W5f, c6 #3447, #4555, #4589): the view
      * jumps to the unit if it needs to, the map and the minimap ring in one
-     * paint, the unit drawn on top of its tile (I); the active unit, the
-     * panel's block and the blink stay as they are.
+     * paint, the unit drawn on top of its tile (I); the active unit and the
+     * panel's block stay as they are.  An active unit that still blinks (a
+     * visit that came at once after W, F, S or a goto order that stopped
+     * with moves left) is drawn ON and held from now: the cycle has moved
+     * past it, and the turn flow holds it until the next unit comes
+     * ({@code ClassicTurnFlow.holdsBlink}, as Space stops it).
      *
      * @param unit The unit visited.
      */
@@ -2122,6 +2130,9 @@ final class ClassicMapViewer extends JPanel {
             ClassicFrameRecorder.event("visit", "unit=" + unit.getId()
                 + " at=" + xy(unit.getTile()) + " row=" + ClassicUnitCycle.ordersRowShown(unit)
                 + " jump=" + wouldJump(unit.getTile()));
+        }
+        if (this.activeUnit != null && this.activeUnit != unit && this.blink.isArmed()) {
+            holdBlink("visit");
         }
         if (!jumpTo(unit.getTile(), "visit")) {
             this.changeToShow = true;   // the unit on top of its tile

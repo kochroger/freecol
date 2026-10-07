@@ -25,12 +25,14 @@ import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.Player;
+import net.sf.freecol.common.model.Region;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileType;
 import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.server.ServerTestHelper;
+import net.sf.freecol.server.model.ServerRegion;
 import net.sf.freecol.server.model.ServerUnit;
 import net.sf.freecol.util.test.FreeColTestCase;
 
@@ -111,5 +113,35 @@ public class MoveTest extends FreeColTestCase {
         igc.setGotoBatch(true);
         assertTrue(igc.isGotoBatch());
         assertFalse(igc.moveToDestination(null));
+    }
+
+    /**
+     * The goto's stop at a region still to discover (BR#2707, G review):
+     * on by default, as FreeCol has it, so the standard GUI's player can
+     * name the region; the Classic UI switches it off while its game view
+     * is up (it answers the naming at once, and the original's goto runs
+     * on, clip006 U22).  Only a tile whose region is still to discover
+     * stops a goto.
+     */
+    public void testRegionStopsFlag() {
+        final Game game = getStandardGame();
+        final Map map = getTestMap(plains);
+        game.changeMap(map);
+        final Tile t = map.getTile(5, 8);
+        t.setRegion(null);
+        final InGameController igc = new InGameController(null);
+        assertTrue(igc.isRegionStops());
+        assertFalse(igc.stopsForRegion(null));
+        assertFalse(igc.stopsForRegion(t));              // no region
+        final Region land = new ServerRegion(game, Region.RegionType.LAND);
+        t.setRegion(land);
+        assertTrue(land.getDiscoverable());
+        assertTrue(igc.stopsForRegion(t));
+        igc.setRegionStops(false);
+        assertFalse(igc.isRegionStops());
+        assertFalse(igc.stopsForRegion(t));
+        igc.setRegionStops(true);
+        land.setDiscoverable(false);                     // named: discovered
+        assertFalse(igc.stopsForRegion(t));
     }
 }

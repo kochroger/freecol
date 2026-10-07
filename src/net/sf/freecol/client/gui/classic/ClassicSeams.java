@@ -79,6 +79,14 @@ import net.sf.freecol.common.model.UnitType;
  *   <li><b>A village, a tile</b> ({@code showIndianSettlementPanel},
  *       {@code showTilePanel}): notices in FreeCol's words
  *       ({@link #villageText}, {@link #tileText}).</li>
+ *   <li><b>A region's name</b> ({@code showNamingDialog} with
+ *       {@code nameRegion.text}).  The server counts a region discovered
+ *       only once the client answers its naming: the base GUI's silence
+ *       left every land region to discover for the whole game, and
+ *       FreeCol's goto stopped after every land step that left moves
+ *       (BR#2707).  The default name is answered at once, no box
+ *       ({@link #namesRegion}; the original names no region).  The new
+ *       land's name ({@code newLand.text}) is W10's.</li>
  * </ul>
  */
 final class ClassicSeams {
@@ -233,9 +241,13 @@ final class ClassicSeams {
     /**
      * The recruits' box (class comment): a list box (D2's rows at
      * {@link ClassicMenuBox#LIST_INDENT}) with one row per recruit in
-     * FreeCol's names, the bar on row 1 (no {@code @default}), Escape and a
-     * click beside it doing nothing: there is no "no" row, and FreeCol's
-     * own dialog ignores Escape too (I).  With Brewster GAME.TXT
+     * FreeCol's names, the bar on row 1 (no {@code @default}), a click
+     * beside it doing nothing.  Escape is "Nein" (Roger's rule: everywhere
+     * but the King's decisions): with Brewster it closes the box with no
+     * row, nothing is recruited, and the choice comes again at the next
+     * turn start (the immigration points stay); at the Fountain of Youth
+     * it does nothing, as a cancel would throw the free recruits away
+     * (I).  With Brewster GAME.TXT
      * {@code @RECRUITCHOOSE} (our {@code @COUNTRY} and {@code @HOMEPORT})
      * over the priest, as {@code @UNREST}, the same message without the
      * choice (landfall #17902); at the Fountain of Youth {@code @LOSTCITY0}
@@ -283,8 +295,31 @@ final class ClassicSeams {
                     .getDescriptionKey()) + "\n" + choose
                 : choose);
         }
-        return b.rows(rows).defaultRow(0).noEscape().outsideCancels(false)
-            .rowIndent(ClassicMenuBox.LIST_INDENT).stopgap(title, null).build();
+        b.rows(rows).defaultRow(0).outsideCancels(false);
+        if (foy) {
+            b.noEscape();
+        } else {
+            b.noCancelRow();   // Escape: no row, not the last recruit
+        }
+        return b.rowIndent(ClassicMenuBox.LIST_INDENT).stopgap(title, null).build();
+    }
+
+
+    // A region's name
+
+    /** FreeCol's template of the region naming ({@code newRegionNameHandler}). */
+    static final String NAME_REGION = "nameRegion.text";
+
+    /**
+     * Whether a naming request is a region's (class comment): answered at
+     * once with the default name.  The new land's ({@code newLand.text})
+     * is not.
+     *
+     * @param template The request's template, or null.
+     * @return True for a region.
+     */
+    static boolean namesRegion(StringTemplate template) {
+        return template != null && NAME_REGION.equals(template.getId());
     }
 
 

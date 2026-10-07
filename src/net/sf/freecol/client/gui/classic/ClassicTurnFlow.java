@@ -84,7 +84,9 @@ import net.sf.freecol.common.model.Unit;
  * reports its final draws, jumps, blink and cursor changes, the panel
  * every paint that changed a pixel outside the indicator, and a box its
  * close ({@link #screenChanged}).  A change while a pause is pending, and
- * before any of its stages ran, re-bases the pause on it.
+ * before any of its stages ran, re-bases the pause on it; the active
+ * unit's blink is held during a hand-over ({@link #holdsBlink}), so its
+ * toggles never do.
  *
  * <p>The deadlines run on a {@link ClassicOneShot}; everything else is on
  * the event thread.  What the flow does to the game goes through its
@@ -930,10 +932,11 @@ final class ClassicTurnFlow {
 
     /**
      * Bring the cycle's next unit: as a hand-over (its pause from the last
-     * change) after a unit that ran out, else at once ({@link #bringNow}):
-     * a previous unit that is still up keeps blinking, and every toggle
-     * would re-base the pause (a goto order that stopped early with moves
-     * left: the hand-over never came, the turn never ended).
+     * change) after a unit that ran out, else at once ({@link #bringNow}),
+     * as FreeCol's controller brings its choice after orders that keep
+     * the moves.  (The previous unit's blink is held during any hand-over,
+     * {@link #holdsBlink}; before that, a goto order that stopped early
+     * left a blinking unit whose toggles re-based the pause for good.)
      *
      * @param next The unit.
      * @param previous The unit that has just finished, or null.
@@ -1048,8 +1051,10 @@ final class ClassicTurnFlow {
     /**
      * After a goto run, a visit or a unit gone: the next due unit of the
      * cycle as a hand-over from {@code anchor}, 500 ms after the last
-     * change; with none, the controller's end view and the idle end
-     * ({@link #nextUnitOrIdle}).
+     * change, also after a visit that came at once (I: the clip's visits
+     * are 0.43-0.54 s apart, c6 #4556, #4589, #4619; the unit still up
+     * meanwhile does not blink, {@link #holdsBlink}); with none, the
+     * controller's end view and the idle end ({@link #nextUnitOrIdle}).
      *
      * @param anchor The unit that has just finished.
      * @param why What hands over (for the recorder).
@@ -1320,6 +1325,23 @@ final class ClassicTurnFlow {
     boolean isInputBlocked() {
         return this.pending != null || this.ending || this.gotoRuns > 0
             || !this.turnStarted || !this.host.myTurn();
+    }
+
+    /**
+     * Whether the map's active unit must stay ON and still now: a
+     * hand-over is pending.  The unit shown until the next one comes is
+     * the one the cycle has moved past; after a last move or Space it does
+     * not blink anyway, but after W, F, S or a goto order that stopped
+     * with moves left a visit comes at once ({@link #bringNow}) and the
+     * unit is still up.  Its toggles are screen changes and re-based the
+     * hand-over after the visit for good (G review: the turn froze).  The
+     * map's blink asks this at every toggle.
+     *
+     * @return True while a hand-over is pending.
+     */
+    boolean holdsBlink() {
+        final Pending p = this.pending;
+        return p != null && p.kind == Kind.HANDOVER;
     }
 
     /**

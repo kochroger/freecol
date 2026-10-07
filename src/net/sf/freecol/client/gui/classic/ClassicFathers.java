@@ -48,9 +48,11 @@ import net.sf.freecol.common.model.Turn;
  *       arrows move the bar, Enter takes the father under it.  F1 opens
  *       the Colonopedia page of the father under the bar
  *       ({@link ClassicPedia#fatherPage}); any key closes it, and the box
- *       comes back with the bar on row 1 (3 of 3 times).  Escape does
- *       nothing, and neither does a click beside the box: the box has no
- *       cancel row, and a choice is due.</li>
+ *       comes back with the bar on row 1 (3 of 3 times).  Escape is
+ *       "Nein" (Roger's rule: everywhere but the King's decisions): the
+ *       box closes with no father, and the server offers the same choice
+ *       again at the next turn start (the bells stay; I).  A click beside
+ *       the box does nothing.</li>
  *   <li><b>When.</b>  At our turn start, after the price messages of that
  *       turn's notices and before the others (choice 1: @COTTON came
  *       after it), and before the year flips.  Not after independence
@@ -226,7 +228,7 @@ final class ClassicFathers {
                 .freeColText(Messages.message("chooseFoundingFatherDialog.title"))
                 .rows(fc);
         }
-        return b.defaultRow(0).noEscape().outsideCancels(false)
+        return b.defaultRow(0).noCancelRow().outsideCancels(false)
             .rowIndent(ClassicMenuBox.LIST_INDENT).help(help).chain(chainMs)
             .stopgap(Messages.message("chooseFoundingFatherDialog.title"), null)
             .build();

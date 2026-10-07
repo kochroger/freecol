@@ -1250,13 +1250,234 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(1, r.count("visit " + v.getId()));
         r.advanceMs(15);
         assertEquals(1, r.count("shown " + v.getId()));
-        r.advanceMs(1000);
+        // After the visit the next unit (a, after the wrap) comes, while g
+        // is still up with moves (G review: its blink re-based the pause).
+        blinkFor(r, 1000);
+        assertEquals(1, r.count("activate " + a.getId()));
+        assertFalse(r.flow.isInputBlocked());
         // Only the waiting unit due: it stays.
         final Rig s = new Rig(this.game);
         s.host.kinds.put(a, ClassicUnitCycle.Kind.ORDERS);
         s.host.cycle = x -> a;
         assertTrue(s.flow.waited(a));
         assertEquals("[]", s.host.calls.toString());
+    }
+
+    /**
+     * The map's blink of the active unit for {@code ms}: a toggle every
+     * half-period, painted (a screen change, which re-bases a pause that
+     * has not started) unless the unit cannot blink (none, no moves left,
+     * skipped) or the flow holds it during a hand-over
+     * ({@link ClassicTurnFlow#holdsBlink}), as
+     * {@code ClassicMapViewer.blinkToggle} and
+     * {@code ClassicGUI.blinkHoldReason} do.
+     */
+    private static void blinkFor(Rig r, double ms) {
+        for (double t = 0; t < ms; t += ClassicBlink.HALF_PERIOD_MS) {
+            r.advanceMs(ClassicBlink.HALF_PERIOD_MS);
+            final Unit u = r.host.active;
+            if (u == null || u.getMovesLeft() <= 0
+                || u.getState() == Unit.UnitState.SKIPPED
+                || r.flow.holdsBlink()) continue;
+            r.flow.screenChanged();
+        }
+    }
+
+    /**
+     * G review: a visit that came at once (after W, after F or S with the
+     * moves kept, after a goto order that stopped) leaves the previous
+     * unit up with moves.  The hand-over after the visit keeps its 500
+     * ms from the visit's completion (as the clip's visits, c6 #4556,
+     * #4589, #4619): the unit's blink is held meanwhile, so its toggles do
+     * not re-base the pause (before: the pause never ran out, the input
+     * stayed blocked, the turn froze).  W -&gt; visit -&gt; an ORDERS unit
+     * without a jump; W -&gt; visit -&gt; visit -&gt; the waiting unit;
+     * S and F -&gt; visit -&gt; visit; a goto run left SKIPPED with moves.
+     */
+    public void testHandOverAfterAVisitThatCameAtOnce() {
+        final Unit a = ship(5, 5), v = ship(7, 5), w = ship(9, 5), b = ship(11, 5),
+            c = ship(13, 5);
+        // W -> visit -> b, no jump.
+        final Rig r = new Rig(this.game);
+        r.host.active = a;
+        r.host.kinds.put(a, ClassicUnitCycle.Kind.ORDERS);
+        r.host.kinds.put(v, ClassicUnitCycle.Kind.VISIT);
+        r.host.kinds.put(b, ClassicUnitCycle.Kind.ORDERS);
+        r.host.cycle = x -> (x == a) ? v : (x == v) ? b : a;
+        assertFalse(r.flow.holdsBlink());
+        assertTrue(r.flow.waited(a));
+        assertTrue(r.flow.holdsBlink());           // a is passed: held
+        r.run();
+        assertEquals(1, r.count("visit " + v.getId()));
+        r.advanceMs(15);
+        assertEquals(1, r.count("shown " + v.getId()));
+        assertEquals("HANDOVER ACTIVATE@500", r.flow.pending().toString());
+        assertTrue(r.flow.holdsBlink());
+        blinkFor(r, ClassicBlink.HALF_PERIOD_MS);  // a toggle at 328.5: held
+        assertEquals(0, r.count("activate " + b.getId()));
+        r.advanceMs(500 - ClassicBlink.HALF_PERIOD_MS - 0.1);
+        assertEquals(0, r.count("activate " + b.getId()));
+        r.advanceMs(0.2);                          // 500 ms after the completion
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertFalse(r.flow.holdsBlink());
+        assertFalse(r.flow.isInputBlocked());
+
+        // W -> visit -> visit -> the waiting unit again (after the wrap).
+        final Rig t = new Rig(this.game);
+        a.setState(Unit.UnitState.ACTIVE);
+        t.host.active = a;
+        t.host.kinds.put(a, ClassicUnitCycle.Kind.ORDERS);
+        t.host.kinds.put(v, ClassicUnitCycle.Kind.VISIT);
+        t.host.kinds.put(w, ClassicUnitCycle.Kind.VISIT);
+        t.host.cycle = x -> (x == a) ? v : (x == v) ? w : a;
+        t.host.jump = true;
+        assertTrue(t.flow.waited(a));
+        t.run();
+        t.advanceMs(15);
+        assertEquals(1, t.count("shown " + v.getId()));
+        assertEquals("HANDOVER VISIT@500 SHOW@515", t.flow.pending().toString());
+        blinkFor(t, 500);                          // 657 ms: the second visit came
+        assertEquals(1, t.count("visit " + w.getId()));
+        assertEquals(1, t.count("shown " + w.getId()));
+        blinkFor(t, 2000);
+        assertEquals(1, t.count("activate " + a.getId()));
+        assertNull(t.flow.pending());
+        assertFalse(t.flow.isInputBlocked());
+
+        // S (sentry) and F (fortifying) with the moves kept -> visit -> visit.
+        for (Unit.UnitState orders : new Unit.UnitState[] {
+                Unit.UnitState.SENTRY, Unit.UnitState.FORTIFYING }) {
+            final Rig s = new Rig(this.game);
+            a.setState(orders);
+            assertTrue(a.getMovesLeft() > 0);
+            s.host.active = a;
+            s.host.kinds.put(v, ClassicUnitCycle.Kind.VISIT);
+            s.host.kinds.put(w, ClassicUnitCycle.Kind.VISIT);
+            s.host.kinds.put(c, ClassicUnitCycle.Kind.ORDERS);
+            s.host.cycle = x -> (x == a) ? v : (x == v) ? w : c;
+            assertTrue(s.flow.unitChosen(c, a));    // the controller's: c
+            s.run();
+            assertEquals(orders.toString(), 1, s.count("visit " + v.getId()));
+            blinkFor(s, 3000);
+            assertEquals(orders.toString(), 1, s.count("visit " + w.getId()));
+            assertEquals(orders.toString(), 1, s.count("activate " + c.getId()));
+            assertFalse(s.flow.isInputBlocked());
+        }
+        a.setState(Unit.UnitState.ACTIVE);
+
+        // A goto run that FreeCol leaves SKIPPED with moves (a trade route
+        // without a path): the next unit comes.
+        final Unit g = ship(15, 5);
+        final Rig q = new Rig(this.game);
+        q.host.active = a;
+        a.setMovesLeft(0);
+        q.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        q.host.kinds.put(b, ClassicUnitCycle.Kind.ORDERS);
+        q.host.cycle = x -> (x == a) ? g : (x == g) ? b : null;
+        q.host.onGoto = u -> u.setState(Unit.UnitState.SKIPPED);
+        q.flow.screenChanged();
+        assertTrue(q.flow.unitChosen(b, a));
+        q.advanceMs(500);
+        assertSame(g, q.host.active);
+        runStage(q, 28);
+        q.run();                                   // the marker
+        assertEquals(1, q.count("goto " + g.getId()));
+        assertTrue(g.getMovesLeft() > 0);
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, q.flow.pending().kind);
+        blinkFor(q, 3000);
+        assertEquals(1, q.count("activate " + b.getId()));
+        assertFalse(q.flow.isInputBlocked());
+    }
+
+    /**
+     * The blink's hold during a hand-over reaches the map through the
+     * GUI's hold reason ({@code ClassicGUI.blinkHoldReason}): "handover"
+     * while one is pending, else the other reasons (here: no client, the
+     * AI phase).
+     */
+    public void testBlinkHeldDuringAHandOver() {
+        final Unit a = ship(5, 5), b = ship(7, 5);
+        final Rig r = new Rig(this.game);
+        final ClassicGUI gui = new ClassicGUI(null);
+        gui.turnFlow = r.flow;
+        assertEquals("ai", gui.blinkHoldReason());
+        r.host.active = a;
+        a.setMovesLeft(0);
+        r.flow.screenChanged();
+        assertTrue(r.flow.unitChosen(b, a));
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
+        assertEquals("handover", gui.blinkHoldReason());
+        r.advanceMs(500);
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertEquals("ai", gui.blinkHoldReason());
+        // Not for the idle end (no unit up then).
+        r.host.active = null;
+        r.flow.noUnitLeft();
+        assertEquals(ClassicTurnFlow.Kind.END_TURN, r.flow.pending().kind);
+        assertFalse(r.flow.holdsBlink());
+    }
+
+    /**
+     * G review: V (and ANSICHT's row) puts the map into the terrain view
+     * as the player's own tile selection and brings no unit, also with a
+     * unit due as ORDERS, GOTO or VISIT; nothing pending.  It used to go
+     * through FreeCol's toggle to {@code ClassicGUI.changeView(Tile)},
+     * the controller's fallback, whose cycle step activated the next unit
+     * (or, before a visit, froze the turn).  That fallback still brings
+     * the due unit.  The key and both rows fire the Classic UI's toggle.
+     */
+    public void testViewToggleBringsNoUnit() {
+        final Unit a = ship(5, 5), v = ship(7, 5);
+        for (ClassicUnitCycle.Kind k : ClassicUnitCycle.Kind.values()) {
+            final Rig r = new Rig(this.game);
+            final ClassicGUI gui = new ClassicGUI(null);
+            final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+            gui.mapViewer = mv;
+            gui.turnFlow = r.flow;
+            try {
+                mv.setFocus(a.getTile());
+                mv.changeToMoveUnits(a);
+                r.host.active = a;
+                r.host.nextActive = true;            // a can move
+                r.host.due = true;
+                r.host.kinds.put(a, ClassicUnitCycle.Kind.ORDERS);
+                r.host.kinds.put(v, k);
+                r.host.cycle = x -> (x == a || x == null) ? v : a;
+                final javax.swing.Action toggle = gui.classicAction(ClassicGUI.VIEW_TOGGLE);
+                assertTrue(toggle.isEnabled());
+                toggle.actionPerformed(null);
+                assertEquals(k.toString(), net.sf.freecol.client.gui.GUI.ViewMode.TERRAIN,
+                             mv.getViewMode());
+                assertSame(a.getTile(), mv.getSelectedTile());
+                assertNull(k.toString(), r.flow.pending());
+                r.advanceMs(2000);
+                assertNull(r.flow.pending());
+                assertEquals(0, r.count("visit " + v.getId()));
+                assertEquals(0, r.count("activate " + v.getId()));
+                assertEquals(0, r.count("activate " + a.getId()));
+                // The controller's fallback (no candidate left) brings it.
+                r.host.nextActive = false;
+                gui.changeView(a.getTile());
+                assertEquals(k.toString(), ClassicTurnFlow.Kind.HANDOVER,
+                             r.flow.pending().kind);
+                assertSame(v, r.flow.pending().unit);
+            } finally {
+                mv.dispose();
+            }
+        }
+        // V and ANSICHT's rows 0 (M) and 1 (V) fire it.
+        boolean bound = false;
+        for (ClassicKeyMap.Binding b : ClassicKeyMap.bindings()) {
+            if (b.key.equals(javax.swing.KeyStroke.getKeyStroke("V"))) {
+                assertEquals(List.of(ClassicGUI.VIEW_TOGGLE), b.actionIds);
+                bound = true;
+            }
+        }
+        assertTrue(bound);
+        assertEquals(ClassicGUI.VIEW_TOGGLE,
+            ClassicMenuModel.items(ClassicMenuModel.ANSICHT).get(0).actionId);
+        assertEquals(ClassicGUI.VIEW_TOGGLE,
+            ClassicMenuModel.items(ClassicMenuModel.ANSICHT).get(1).actionId);
     }
 
     /**

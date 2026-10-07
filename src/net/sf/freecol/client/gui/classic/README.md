@@ -1030,9 +1030,13 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   puts the controller's back (`Player.putBackActiveUnit`); a click and the
   boarding's carrier are not replaced. After a unit that got orders and
   kept its moves (a goto order that stopped early, F, S) the cycle's next
-  unit comes at once, as the controller's always did (`bringNow`; a
-  500-ms pause would be re-based by every blink toggle of the unit still
-  up, and never come). Due units (`kind`): ORDERS
+  unit comes at once, as the controller's always did (`bringNow`). While
+  any hand-over is pending the active unit's blink is held ON
+  (`ClassicTurnFlow.holdsBlink`, `ClassicGUI.blinkHoldReason` "handover";
+  a visit that comes at once draws the unit ON at once): the unit up is
+  the one the cycle moved past, and its toggles, screen changes, re-based
+  the pause for good (G review: after W, F, S, V or a stopped goto with a
+  visit next the turn froze). Due units (`kind`): ORDERS
   (`isCandidateForNextActiveUnit`, W18's woken passengers too), GOTO (a goto
   or trade-route unit on the map that has not run this turn), VISIT (below).
   A goto unit that ran and is still active with moves is ORDERS: never run
@@ -1040,7 +1044,9 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   item 9).
 - **Goto units (W5f).** FreeCol's goto batch is off in the Classic UI
   (`InGameController.setGotoBatch(false)` while the game view is up, on
-  again when it goes; default on, the standard GUI and the AI unchanged).
+  again when it goes; default on, the standard GUI and the AI unchanged),
+  and so is its stop at a region still to discover (`setRegionStops`,
+  BR#2707; the classic UI names regions at once, "The silent seams").
   A goto unit moves when the cycle reaches it (c6 U22, U25, U26): its block
   500 ms after the last change (a jump at 280 ms), its first step **28 ms**
   after the block (0-71 ms measured; at the turn start 100 ms after the
@@ -1063,7 +1069,9 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   cycle: the jump (if needed) at the hand-over's 500 ms, the completion
   **15 ms** later (c6 #3447 -> #3450, #4555 -> #4556, #4589 -> #4590: 471-542
   ms, 1-3 frames), no block, no blink, the next unit 500 ms after the
-  completion. FreeCol completes the work before our turn is shown, so the
+  completion; also after a visit that came at once after W, F or S (I:
+  the first visit then at once, the next ones 500 ms apart as in c6
+  #4556, #4589, #4619). FreeCol completes the work before our turn is shown, so the
   cycle keeps a snapshot of our end of turn (`snapshot`, `turnStarted`):
   until the visit the map and the panel show the old letter (R, P, the black
   F; `ordersRowShown`) and the new road is neither drawn nor listed
@@ -1474,10 +1482,13 @@ menus, @RECRUIT) are advisor boxes with a few more parts, each a
 - **F1 hook** (`help`, `Help`): F1 tells the hook the barred row and the
   box closes with `Bar.HELP` (-2); the caller shows the help and may ask
   the box again. Without a hook F1 is any other key.
-- **No Escape** (`noEscape`): Escape does nothing (the father box, the
-  King's decisions, the recruit box; G1). The stopgap window of such a box
-  has no Escape binding and an inert close button
-  (`ClassicDialog.ask(..., cancellable)`).
+- **No Escape** (`noEscape`): Escape does nothing (the King's decisions,
+  G1; the Fountain of Youth's recruit box). The stopgap window of such a
+  box has no Escape binding and an inert close button
+  (`ClassicDialog.ask(..., cancellable)`). The father box and Brewster's
+  recruit box take Escape as "Nein" since the G fixer (Roger's rule: Esc
+  is "Nein" everywhere but at the King's decisions): `noCancelRow`, the
+  box closes with no row and the choice comes again next turn.
 - **A page** (`picture`): a full-screen 320x200 picture instead of a box,
   a notice of the whole screen (any key or click closes it): the
   Colonopedia page below.
@@ -1555,10 +1566,26 @@ sleep`).
   ship's trade at a foreign colony): the "not yet" notice, nothing sent.
 - **The recruits** (`showEmigrationDialog`: William Brewster, the Fountain
   of Youth). A list box of the three recruits (D2's rows), bar on row 1,
-  Escape and a click beside it do nothing: GAME.TXT `@RECRUITCHOOSE` (our
+  a click beside it doing nothing: GAME.TXT `@RECRUITCHOOSE` (our
   `@COUNTRY`, `@HOMEPORT`) over the priest, `@LOSTCITY0` over the
   frontiersman (I, in no clip); FreeCol's words without the texts. Before,
-  after Brewster no recruit ever came.
+  after Brewster no recruit ever came. Escape at Brewster's box is "Nein"
+  (Roger's rule, G fixer): no recruit, and the controller asks again at
+  the next turn start (`checkEmigrate` still true, the points stay); at
+  the Fountain of Youth it does nothing, as a cancel would throw the free
+  recruits away (I).
+- **A region's name** (`showNamingDialog` with `nameRegion.text`; G
+  fixer). The server counts a region discovered only once the client
+  answers its naming (`setNewRegionName` -> `csDiscover`): unanswered,
+  every land region stayed to discover for the whole game, and FreeCol's
+  goto stopped after every land step that left moves (BR#2707's break in
+  `InGameController.moveTile`). The default name is answered at once, no
+  box (`ClassicSeams.namesRegion`; the original names no region), and the
+  goto's stop at a new region is off while the classic game view is up
+  (`InGameController.setRegionStops`, switched with the goto batch): the
+  original's goto runs on (clip006 U22: three road steps in one run).
+  FreeCol's history then records the discoveries (and, with the game
+  option `explorationPoints`, their score), as with FreeCol's own dialog.
 - **A village, a tile** (`showIndianSettlementPanel`, `showTilePanel`):
   notices in FreeCol's words. A click on a native village centres the view
   and then shows its notice (`ClassicMapViewer.clickOn`; an invention, the
@@ -1566,8 +1593,8 @@ sleep`).
   tile notice.
 
 Listed, not changed (they do not block): `showVictoryDialog` (the win's
-question is never answered, the game goes on), `showNamingDialog` (the
-first landing's and the regions' names: the server's default names stay),
+question is never answered, the game goes on), `showNamingDialog` for the
+first landing's name (`newLand.text`, W10: the server's default stays),
 `showSelectTributeAmountDialog` (a tribute demand at a European colony is
 dropped, the move kept), and the seams the classic UI never reaches (the
 menu rows of `ClassicMenuModel.NOOP_SEAMS`, the pre-game, editor and
@@ -1575,8 +1602,9 @@ multiplayer panels).
 
 Tests: `ClassicGUISeamTest` (`testLootIsAnsweredAtOnce`,
 `testLootSessionCompletes` on a server, `testLootNotice`,
-`testEmigrationBox`, `testNegotiation`, `testVillageAndTileNotices`),
-`ClassicMapViewerTest.testClickOnAVillage`.
+`testEmigrationBox`, `testNegotiation`, `testRegionNamedAtOnce`,
+`testVillageAndTileNotices`), `ClassicMapViewerTest.testClickOnAVillage`,
+`MoveTest.testRegionStopsFlag`.
 
 ### The founding father choice (`ClassicFathers`, `ClassicPedia`; build spec D8a, D8b's page)
 
@@ -1593,8 +1621,10 @@ figures CC-nn through an explicit table (`ClassicFathers.IDS`).
   the bar, 142 ms after the box goes (clip008: 0.13-0.16 s); any key or
   click closes it, the screen under it comes back in one paint, and the
   box comes again 264 ms later with the bar on row 1 (0.257-0.271 s; 3 of
-  3 times). **Escape does nothing**, nor does a click beside the box (I:
-  no cancel row, a choice is due).
+  3 times). **Escape** closes the box with no father (G fixer, Roger's
+  rule "Esc = Nein" but at the King's; I): the server offers the same
+  choice again at the next turn start, the bells stay. A click beside the
+  box does nothing.
 - **The page** (`ClassicPedia.fatherPage`): WOODPANL.PIK, the gold header
   LABELS @MISC 107 "COLONIZATION-ENZYKLOPÄDIE" and "(Name: Gründerväter)"
   (PEDIA @PEDIA 5) at glyph tops 5 and 13, `x = (322 - w) div 2`; the
@@ -2058,7 +2088,7 @@ map must keep winning as it did over the old accelerators.
 | Shift+D | disbandUnit |
 | P | clearForest else plow |
 | R | road (land units), else back to Europe (ships, `returnToEuropeAction`): the gold letter of both BEFEHLE rows, each action enabled only for its kind |
-| M / V | toggleViewMode, only from TERRAIN / only from MOVE_UNITS |
+| M / V | toggleViewMode, only from TERRAIN / only from MOVE_UNITS; fired through `ClassicGUI.classicAction` (the strip and the keys): V is the player's own tile selection (`ClassicGUI.toggleView` -> `selectTile`, no unit brought), M is FreeCol's toggle (G fixer: FreeCol's V called the controller's fallback `changeView(Tile)`, whose cycle step activated the next unit) |
 | E Z X C | europe, zoomIn, zoomOut, center |
 | F2..F9 | Religion, Congress, Labour, Trade, Colony, Naval, Foreign, Indian |
 | F10 | HighScores |
