@@ -210,6 +210,13 @@ public class ClassicGUI extends GUI {
      */
     private ClassicTurnFlow turnFlow;
 
+    /**
+     * The original's unit cycle (master plan W5f): which unit comes at the
+     * turn start and at every hand-over, the goto units at their place in
+     * it, the visits.  Cleared with each game view.
+     */
+    final ClassicUnitCycle unitCycle = new ClassicUnitCycle();
+
     /** The turn flow's 50-ms poll (the turn indicator, W5c), with it. */
     private javax.swing.Timer turnPoll;
 
@@ -1168,6 +1175,11 @@ public class ClassicGUI extends GUI {
         if (this.turnFlow != null) this.turnFlow.dispose();
         this.turnPoll = null;
         this.turnFlow = null;
+        // FreeCol's goto batch again for whatever comes next (W5f), and
+        // no held letter or road left over.
+        gotoBatch(true);
+        this.unitCycle.clear();
+        ClassicUnitCycle.unshow(this.unitCycle);
         // The menu first: its close resumes the blink of a live viewer
         // (FINAL "Open" item 11).
         if (this.menuStrip != null) this.menuStrip.closeMenu();
@@ -1762,6 +1774,11 @@ public class ClassicGUI extends GUI {
                     if (turnFlow != null) turnFlow.boxClosed();
                 }
             });
+        // The unit cycle of this game (W5f): FreeCol's goto batch off, the
+        // goto units move when the cycle reaches them.
+        this.unitCycle.clear();
+        ClassicUnitCycle.show(this.unitCycle);
+        gotoBatch(false);
         this.turnFlow = new ClassicTurnFlow(new TurnHost(), waitClock(),
             SwingUtilities::invokeLater, true);
         this.infoPanel.setTurnFlow(this.turnFlow);
@@ -2091,12 +2108,34 @@ public class ClassicGUI extends GUI {
     /**
      * {@inheritDoc}
      *
-     * <p>The controller's fallback tile when no unit is left (and the
-     * player's own tile selections): the turn flow arms the automatic end
-     * if nothing can move any more (build spec W5a).
+     * <p>The controller's fallback tile when no unit is left: the unit
+     * cycle's next due unit if there is one (a goto unit, a visit, master
+     * plan W5f; {@link ClassicTurnFlow#dueInstead}), else the turn flow
+     * arms the automatic end if nothing can move any more (build spec W5a).
      */
     @Override
     public void changeView(Tile tile) {
+        if (this.mapViewer != null) {
+            if (droppedViewChange("tile")) return;
+            if (this.turnFlow != null
+                && this.turnFlow.dueInstead(this.mapViewer.getActiveUnit())) {
+                repaintInfo();
+                updateActions();
+                return;
+            }
+        }
+        selectTile(tile);
+    }
+
+    /**
+     * The player's own tile selection (the cursor keys in the terrain
+     * view, a click on an empty tile): the terrain view, and the turn flow
+     * arms the automatic end if nothing can move any more (build spec
+     * W5a).  Never a hand-over to a due unit.
+     *
+     * @param tile The tile.
+     */
+    void selectTile(Tile tile) {
         if (this.mapViewer != null) {
             if (droppedViewChange("tile")) return;
             this.mapViewer.changeToTerrain(tile);
@@ -2122,13 +2161,36 @@ public class ClassicGUI extends GUI {
      */
     @Override
     public void changeView(Unit unit, boolean force) {
+        changeView(unit, false, "unit");
+    }
+
+    /**
+     * A click on an own unit: it becomes active as the controller's choice
+     * would ({@link #changeView(Unit, boolean)}), but at a hand-over the
+     * unit cycle does not replace it (master plan W5f).
+     *
+     * @param unit The unit clicked.
+     */
+    void unitClicked(Unit unit) {
+        changeView(unit, true, "click");
+    }
+
+    /**
+     * {@link #changeView(Unit, boolean)}, for the controller's choice or
+     * the player's click.
+     *
+     * @param unit The unit, or null.
+     * @param clicked The player clicked it.
+     * @param what Which change (for the recorder).
+     */
+    private void changeView(Unit unit, boolean clicked, String what) {
         if (this.mapViewer != null) {
-            if (droppedViewChange("unit")) return;
+            if (droppedViewChange(what)) return;
             final Unit previous = this.mapViewer.getActiveUnit();
             final Unit carrier;
             if (landingDone(unit)) {
                 // The hand-over from the landed unit is on its way.
-            } else if (goneWithNothingLeft(unit)) {
+            } else if (goneWithNothingLeft(unit, this.unitCycle)) {
                 ClassicFrameRecorder.event("handover", "off the map "
                     + unit.getId() + ": no unit left");
                 this.mapViewer.changeToEndTurn();
@@ -2139,7 +2201,8 @@ public class ClassicGUI extends GUI {
                     activateNow(carrier);
                 }
             } else if (this.turnFlow == null
-                || !this.turnFlow.unitChosen(unit, previous)) {
+                || !((clicked) ? this.turnFlow.unitClicked(unit, previous)
+                     : this.turnFlow.unitChosen(unit, previous))) {
                 activateNow(unit);
             }
         }
@@ -2167,39 +2230,47 @@ public class ClassicGUI extends GUI {
      * restore of the active unit); after the order "Zurück nach Europa"
      * its end view did not follow (its goto mode left over), so the ship
      * stayed the active unit and the turn never ended (5 of 5 runs).  With
-     * a unit left to move the controller still brings it, as a hand-over
-     * from the ship.
+     * a unit left to move (or due in the unit cycle: a goto unit on the
+     * map, a visit) the choice goes on, as a hand-over from the ship.  A
+     * unit with a destination in Europe is not due: FreeCol's end-of-turn
+     * goto pass sends it.
      *
      * @param unit The unit chosen, or null.
+     * @param cycle The unit cycle.
      * @return True if it is no unit to show.
      */
-    static boolean goneWithNothingLeft(Unit unit) {
+    static boolean goneWithNothingLeft(Unit unit, ClassicUnitCycle cycle) {
         if (unit == null || unit.hasTile()) return false;
         final Player p = unit.getOwner();
-        return p == null || (!p.hasNextActiveUnit() && !p.hasNextGoingToUnit());
+        return p == null || (!p.hasNextActiveUnit() && !cycle.anyDue(p));
     }
 
     /**
      * {@inheritDoc}
      *
-     * <p>No unit left: the turn flow ends the turn 485 ms after the last
-     * change (build spec W5a), never FreeCol's {@code autoEndTurn}.
+     * <p>No unit left: the unit cycle's next due unit if there is one (a
+     * goto unit, a visit, master plan W5f), else the turn flow ends the
+     * turn 485 ms after the last change (build spec W5a), never FreeCol's
+     * {@code autoEndTurn}.
      */
     @Override
     public void changeView() {
         if (this.mapViewer != null) {
             if (droppedViewChange("end")) return;
-            this.mapViewer.changeToEndTurn();
-            if (this.turnFlow != null) this.turnFlow.noUnitLeft();
+            if (this.turnFlow == null
+                || !this.turnFlow.dueInstead(this.mapViewer.getActiveUnit())) {
+                this.mapViewer.changeToEndTurn();
+                if (this.turnFlow != null) this.turnFlow.noUnitLeft();
+            }
         }
         repaintInfo();
         updateActions();
     }
 
     /**
-     * Whether a view change of the controller is dropped: while the goto
-     * orders of our turn start run, FreeCol queues one for each unit it
-     * moves, and they would arrive after the moves (build spec W5f,
+     * Whether a view change of the controller is dropped: while a goto
+     * unit runs, FreeCol asks for one after each step and for the next
+     * unit after the run, which the unit cycle decides (master plan W5f,
      * {@link ClassicTurnFlow#ignoring}).
      *
      * @param what Which change (for the recorder).
@@ -2290,7 +2361,7 @@ public class ClassicGUI extends GUI {
         final Unit active = (this.mapViewer == null) ? null
             : this.mapViewer.getActiveUnit();
         return this.mapViewer != null && (active == null || !active.hasTile())
-            && p != null && !p.hasNextActiveUnit() && !p.hasNextGoingToUnit();
+            && p != null && !p.hasNextActiveUnit() && !this.unitCycle.anyDue(p);
     }
 
     /**
@@ -2384,6 +2455,63 @@ public class ClassicGUI extends GUI {
         return showing && !minimized && !mapActive;
     }
 
+    /**
+     * Switch FreeCol's goto batch ({@code InGameController.setGotoBatch}):
+     * off while the classic game view is up, where each goto unit moves
+     * when the unit cycle reaches it (master plan W5f); on again when the
+     * view goes, so the standard GUI (and a test after it in the same JVM)
+     * gets FreeCol's batch.
+     *
+     * @param on True for FreeCol's batch.
+     */
+    private void gotoBatch(boolean on) {
+        final FreeColClient fcc = getFreeColClient();
+        final net.sf.freecol.client.control.InGameController igc
+            = (fcc == null) ? null : fcc.getInGameController();
+        if (igc != null) igc.setGotoBatch(on);
+    }
+
+    /**
+     * Whether a land unit's goto run is under way: FreeCol's colony screen
+     * on its arrival at its destination colony is dropped (c6 U25 arrives
+     * at Base with moves left: "Keine Befehle", no screen).  A ship's stays
+     * (the original opens the colony screen on any docking, clip008
+     * 01-shipcolony; I for a goto).
+     *
+     * @return True while a land unit's goto runs.
+     */
+    boolean landGotoRunning() {
+        final ClassicTurnFlow f = this.turnFlow;
+        return dropsColonyScreen((f == null) ? null : f.gotoUnit());
+    }
+
+    /**
+     * The rule of {@link #landGotoRunning}.
+     *
+     * @param going The unit whose goto runs now, or null.
+     * @return True if FreeCol's colony screen is dropped.
+     */
+    static boolean dropsColonyScreen(Unit going) {
+        return going != null && !going.isNaval();
+    }
+
+    /**
+     * W (wait): the unit cycle's next unit comes at once, the waiting unit
+     * again after the wrap ({@link ClassicTurnFlow#waited}); without the
+     * turn flow FreeCol's {@code waitUnit}.
+     *
+     * @param unit The active unit, or null.
+     */
+    void waitUnit(Unit unit) {
+        final ClassicTurnFlow f = this.turnFlow;
+        if (f != null && unit != null) {
+            f.waited(unit);
+            return;
+        }
+        final FreeColClient fcc = getFreeColClient();
+        if (fcc != null) fcc.getInGameController().waitUnit();
+    }
+
     /** What the turn flow drives: the controller, the map and the panel. */
     private final class TurnHost implements ClassicTurnFlow.Host {
 
@@ -2405,17 +2533,40 @@ public class ClassicGUI extends GUI {
         }
 
         @Override
-        public boolean hasNextGoingToUnit() {
-            final Player p = getMyPlayer();
-            return p != null && p.hasNextGoingToUnit();
+        public ClassicUnitCycle.Kind dueKind(Unit unit) {
+            return unitCycle.kind(unit);
         }
 
         @Override
-        public Unit firstGoingToUnit() {
+        public Unit cycleNext(Unit anchor) {
+            return unitCycle.next(anchor, getMyPlayer());
+        }
+
+        @Override
+        public boolean anyDue() {
+            return unitCycle.anyDue(getMyPlayer());
+        }
+
+        @Override
+        public void putBack(Unit unit) {
             final Player p = getMyPlayer();
-            if (p == null) return null;
-            return p.getUnits().filter(Unit::goingToDestination)
-                .sorted(Unit.locComparator).findFirst().orElse(null);
+            if (p != null && unit != null) p.putBackActiveUnit(unit);
+        }
+
+        @Override
+        public void turnBegins() {
+            unitCycle.turnStarted(getMyPlayer());
+        }
+
+        @Override
+        public void turnEnding() {
+            unitCycle.snapshot(getMyPlayer());
+        }
+
+        @Override
+        public void endRefused() {
+            unitCycle.endRefused();
+            if (mapViewer != null) mapViewer.repaint();
         }
 
         @Override
@@ -2491,16 +2642,24 @@ public class ClassicGUI extends GUI {
         }
 
         @Override
-        public void runGotoOrders() {
+        public void runGoto(Unit unit) {
             if (mapViewer == null) return;
-            final Unit first = firstGoingToUnit();
+            unitCycle.ran(unit);
             // The goto unit is the one up while it moves (its block counts
-            // its moves down); it moves first (doExecuteGotoOrders takes
-            // the active unit first).
-            if (first != null && mapViewer.getActiveUnit() != first) {
-                mapViewer.changeToMoveUnits(first);
-            }
-            getFreeColClient().getInGameController().executeGotoOrders();
+            // its moves down).
+            if (mapViewer.getActiveUnit() != unit) mapViewer.changeToMoveUnits(unit);
+            getFreeColClient().getInGameController().moveToDestination(unit);
+        }
+
+        @Override
+        public void visit(Unit unit) {
+            if (mapViewer != null) mapViewer.visit(unit);
+        }
+
+        @Override
+        public void visitShown(Unit unit) {
+            unitCycle.visited(unit);
+            if (mapViewer != null) mapViewer.visitShown(unit);
         }
 
         @Override
@@ -2785,6 +2944,13 @@ public class ClassicGUI extends GUI {
     @Override
     public FreeColPanel showColonyPanel(Colony colony, Unit unit) {
         if (colony == null) return null;
+        if (landGotoRunning()) {
+            // A land unit arrived at its destination colony by goto: it
+            // stays the active unit, no screen (c6 U25, master plan W5f).
+            ClassicFrameRecorder.event("handover", "colony screen dropped: goto arrival at "
+                + colony.getName());
+            return null;
+        }
         SwingUtilities.invokeLater(() -> {
             try {
                 closeColonyPanel();
@@ -4812,16 +4978,9 @@ public class ClassicGUI extends GUI {
         /** The passenger sent ashore. */
         final Unit unit;
 
-        /**
-         * The player's units in the cycle after it ({@link #cycleAfter}),
-         * ranked before the move, with the passenger still aboard.
-         */
-        final List<Unit> cycle;
-
-        Landing(Unit carrier, Unit unit, List<Unit> cycle) {
+        Landing(Unit carrier, Unit unit) {
             this.carrier = carrier;
             this.unit = unit;
-            this.cycle = cycle;
         }
     }
 
@@ -4943,14 +5102,10 @@ public class ClassicGUI extends GUI {
             return false;
         }
         if (carrier != null) {
-            final Player p = carrier.getOwner();
-            final List<Unit> cycle = (p == null) ? new ArrayList<>()
-                : cycleAfter(lander,
-                    p.getUnits().collect(Collectors.toList()));
             wakePassengers(carrier, lander);
             final long close = landfallClosed();
             onEventThread(() -> {
-                    this.landing = new Landing(carrier, lander, cycle);
+                    this.landing = new Landing(carrier, lander);
                     if (this.mapViewer != null) {
                         this.mapViewer.landingSlide(lander, close
                             + Math.round(ClassicMapViewer.LANDING_SLIDE_MS * 1e6));
@@ -5074,12 +5229,11 @@ public class ClassicGUI extends GUI {
      * ({@code moveDirection}'s redisplay): the landed unit becomes the
      * unit that has just made its last move, and the next unit comes as a
      * hand-over from it, 500 ms after its final draw (build spec W5e): the
-     * next one in the cycle after it, not the ship (clip007 #3107, #5804,
-     * #6643; landfall #13118).  The cycle is the original's unit list, the
-     * order the units came into the game, which FreeCol's ids keep
-     * ({@link #cycleAfter}, ranked when the box was answered, the
-     * passenger still aboard); FreeCol's cycle carries on from there.  A
-     * landing whose unit did not go ashore leaves the ship selected.
+     * next one in the unit cycle after it ({@link ClassicUnitCycle}, the
+     * turn flow's hand-over), not the ship (clip007 #3107, #5804, #6643;
+     * landfall #13118), and after the last passenger the start ship
+     * (clip007 #3697).  A landing whose unit did not go ashore leaves the
+     * ship selected.
      *
      * @param unit The unit the controller chose.
      * @return True if it was the landing's ship and the hand-over is on
@@ -5099,56 +5253,12 @@ public class ClassicGUI extends GUI {
         }
         // The controller's moveUnit asks for the next unit right after
         // this (its updateGUI: the active unit is now the landed one,
-        // which cannot move); asking here too took two units from the
-        // cycle.
-        final Player p = l.carrier.getOwner();
+        // which cannot move), and the turn flow's hand-over takes the unit
+        // cycle's choice after it; asking here too took two units.
         this.mapViewer.finishedUnit(l.unit);
-        if (p != null) p.restartActiveUnitCycle(l.cycle);
         ClassicFrameRecorder.event("handover", "after landing " + l.unit.getId()
             + " from " + l.carrier.getId() + ": the cycle after it");
         return true;
-    }
-
-    /**
-     * The original's cycle of units after {@code unit}: the units that
-     * came into the game after it, in that order, then those before it
-     * (landing-slow 02-landing.md section 3.6: ship, pioneer, soldier,
-     * farmer, scout fit all six hand-overs).  FreeCol numbers its units in
-     * the order they are made ({@link #cycleRank}).
-     *
-     * @param unit The unit that has just finished.
-     * @param units The player's units.
-     * @return Every other unit, in the cycle's order.
-     */
-    static List<Unit> cycleAfter(Unit unit, List<Unit> units) {
-        final List<Unit> sorted = new ArrayList<>(units);
-        sorted.sort(java.util.Comparator.comparingLong(ClassicGUI::cycleRank));
-        final long n = cycleRank(unit);
-        final List<Unit> cycle = new ArrayList<>(sorted.size());
-        for (Unit u : sorted) if (u != unit && cycleRank(u) > n) cycle.add(u);
-        for (Unit u : sorted) if (u != unit && cycleRank(u) <= n) cycle.add(u);
-        return cycle;
-    }
-
-    /**
-     * A unit's place in the original's unit list ({@link #cycleAfter}):
-     * the order FreeCol made it in, its id's number.  A carrier counts as
-     * made before the units it carries: the original's ship of the start
-     * is its unit 0, before its passengers (landfall and clip007 turn
-     * starts: ship, pioneer, soldier), where FreeCol makes the start
-     * ship after them.
-     *
-     * @param u The unit.
-     * @return Its rank, lower first.
-     */
-    static long cycleRank(Unit u) {
-        long min = u.getIdNumber();
-        boolean carries = false;
-        for (Unit p : u.getUnitList()) {
-            carries = true;
-            min = Math.min(min, p.getIdNumber());
-        }
-        return 2 * min - ((carries) ? 1 : 0);
     }
 
     /**

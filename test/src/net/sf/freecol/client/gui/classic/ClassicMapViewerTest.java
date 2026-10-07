@@ -19,6 +19,8 @@
 
 package net.sf.freecol.client.gui.classic;
 
+import java.util.List;
+
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Player;
@@ -905,5 +907,75 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         } finally {
             mv.dispose();
         }
+    }
+
+    /** The road frames ({@code PHYS0} 80 the hub, 81-88 the spokes) a tile shows. */
+    private static List<Integer> roadFrames(Map map, Tile t) {
+        final List<Integer> out = new java.util.ArrayList<>();
+        ClassicTileArt.overlayFrames(map, t, ClassicTileArt.modelTypes(map), f -> {
+                if (f >= ClassicTileArt.ROAD_HUB && f <= ClassicTileArt.ROAD_HUB + 8) out.add(f);
+            });
+        return out;
+    }
+
+    /**
+     * W5f: a road under construction is never drawn (clip008 #45293: the
+     * tile and its neighbour unchanged), a complete one with a spoke into
+     * each neighbour with a complete road; a road completed at the turn
+     * start only from its builder's visit on (c6 #3447 -&gt; #3450: the hub
+     * and the spokes appear with the completion).  The visited unit is
+     * drawn on top of its tile until the next activation.
+     */
+    public void testRoadsAndTheVisit() {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final UnitType colonistType = spec().getUnitType("model.unit.freeColonist");
+        final Tile a = map.getTile(3, 3), b = map.getTile(4, 3);
+        final Unit other = new ServerUnit(game, a, dutch, colonistType);
+        final Unit pioneer = new ServerUnit(game, a, dutch, colonistType);
+        final net.sf.freecol.common.model.TileImprovement ra = a.addRoad();
+        final net.sf.freecol.common.model.TileImprovement rb = b.addRoad();
+        assertEquals(List.of(), roadFrames(map, a));
+        assertEquals(List.of(), roadFrames(map, b));
+        rb.setTurnsToComplete(0);
+        assertEquals(List.of(ClassicTileArt.ROAD_HUB), roadFrames(map, b));   // no spoke to a
+        pioneer.setWorkImprovement(ra);
+        pioneer.setState(Unit.UnitState.IMPROVING);
+
+        final ClassicUnitCycle cycle = new ClassicUnitCycle();
+        ClassicUnitCycle.show(cycle);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, null, null, false);
+        try {
+            cycle.snapshot(dutch);
+            ra.setTurnsToComplete(0);                    // FreeCol's turn start
+            pioneer.setState(Unit.UnitState.ACTIVE);
+            pioneer.setMovesLeft(0);
+            cycle.turnStarted(dutch);
+            assertEquals(List.of(), roadFrames(map, a));                        // held
+            assertEquals(List.of(ClassicTileArt.ROAD_HUB), roadFrames(map, b));
+            assertSame(other, mv.displayUnit(a));
+            mv.setFocus(a);
+            mv.visit(pioneer);
+            assertSame(pioneer, mv.displayUnit(a));      // on top from the jump on
+            assertEquals(List.of(), roadFrames(map, a)); // the completion comes next
+            cycle.visited(pioneer);
+            mv.visitShown(pioneer);
+            assertEquals(2, roadFrames(map, a).size());  // hub + the spoke to b
+            assertEquals(2, roadFrames(map, b).size());
+            assertEquals(ClassicTileArt.ROAD_HUB, (int) roadFrames(map, a).get(0));
+            mv.changeToMoveUnits(other);
+            assertSame(other, mv.displayUnit(a));
+            mv.changeToEndTurn();
+            assertSame(other, mv.displayUnit(a));
+        } finally {
+            ClassicUnitCycle.show(null);
+            mv.dispose();
+        }
+        // Without a game view's cycle: complete roads only, as FreeCol's map.
+        assertEquals(2, roadFrames(map, a).size());
+        ra.setTurnsToComplete(3);
+        assertEquals(List.of(ClassicTileArt.ROAD_HUB), roadFrames(map, b));
     }
 }

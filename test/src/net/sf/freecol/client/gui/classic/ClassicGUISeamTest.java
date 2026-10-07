@@ -1392,13 +1392,13 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             assertSame(ship, mv.getActiveUnit());
             assertEquals(net.sf.freecol.client.gui.GUI.ViewMode.MOVE_UNITS,
                          mv.getViewMode());
-            assertFalse(ClassicGUI.goneWithNothingLeft(ship));
+            assertFalse(ClassicGUI.goneWithNothingLeft(ship, gui.unitCycle));
 
             // It sails for Europe: off the map, nothing else to move.
             assertNotNull(dutch.getHighSeas());
             ship.setLocation(dutch.getHighSeas());
             assertFalse(ship.hasTile());
-            assertTrue(ClassicGUI.goneWithNothingLeft(ship));
+            assertTrue(ClassicGUI.goneWithNothingLeft(ship, gui.unitCycle));
             gui.changeView(ship, true);             // the controller's redisplay
             assertNull(mv.getActiveUnit());
             assertEquals(net.sf.freecol.client.gui.GUI.ViewMode.END_TURN,
@@ -1408,13 +1408,13 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             final Unit colonist = new ServerUnit(game, land, dutch,
                 spec().getUnitType("model.unit.freeColonist"));
             assertTrue(colonist.getMovesLeft() > 0);
-            assertFalse(ClassicGUI.goneWithNothingLeft(ship));
+            assertFalse(ClassicGUI.goneWithNothingLeft(ship, gui.unitCycle));
             gui.changeView(ship, true);
             assertSame(ship, mv.getActiveUnit());
             assertEquals(net.sf.freecol.client.gui.GUI.ViewMode.MOVE_UNITS,
                          mv.getViewMode());
-            assertFalse(ClassicGUI.goneWithNothingLeft(null));
-            assertFalse(ClassicGUI.goneWithNothingLeft(colonist));
+            assertFalse(ClassicGUI.goneWithNothingLeft(null, gui.unitCycle));
+            assertFalse(ClassicGUI.goneWithNothingLeft(colonist, gui.unitCycle));
         } finally {
             mv.dispose();
         }
@@ -1671,8 +1671,10 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             assertSame(a, mv.getActiveUnit());
             assertTrue(b.isActivePassenger());
             assertFalse(c.isActivePassenger());       // no moves
-            assertSame(b, dutch.getNextActiveUnit());
-            assertSame(ship, dutch.getNextActiveUnit());
+            // The unit cycle's hand-over (the turn flow's, W5f): b aboard,
+            // then (c without moves) the ship.
+            assertSame(b, gui.unitCycle.next(a, dutch));
+            assertSame(ship, gui.unitCycle.next(b, dutch));
             gui.changeView(b, false);                 // no turn flow: at once
             assertSame(b, mv.getActiveUnit());
             assertSame(b, mv.displayUnit(sea));       // drawn instead of the ship
@@ -1696,11 +1698,18 @@ public class ClassicGUISeamTest extends FreeColTestCase {
     }
 
     /**
-     * clip007 landing 2: the soldier boarded before the older pioneer, so
-     * it goes ashore; the next unit is the farmer on land, made after the
-     * soldier, not the pioneer aboard.  The farmer boards: the ship comes
-     * next, and the unit the controller chose is put back to come after
-     * it.  The cycle's order and a carrier ranked before its passengers.
+     * The landings of clip007 with FreeCol's real start ids (the start
+     * ship made after the pioneer and the soldier, c1-edge.fsg: 5885,
+     * 5886, 5887) and the unit cycle's hand-overs (master plan W5f): the
+     * ship first at the turn start (#1928); after the farmer lands, the
+     * scout aboard (#3107); after the scout lands, the EMPTY ship, though
+     * the pioneer and the soldier on land can move (#3697: F2's carrier
+     * rank put the pioneer first); after the ship's last move the pioneer
+     * (#4579).  Landing 2: the soldier boarded before the older pioneer,
+     * so it goes ashore; the next unit is the farmer on land, not the
+     * pioneer aboard (#5804).  The farmer boards: the ship comes next, and
+     * the unit the controller chose is put back to come next in FreeCol's
+     * cycle (#4281, #6188, #6989).
      */
     public void testLandingCycleAndBoarding() {
         final Game game = getStandardGame();
@@ -1708,35 +1717,72 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         game.changeMap(map);
         final Player dutch = game.getPlayerByNationId("model.nation.dutch");
         final Tile sea = map.getTile(10, 7), land = map.getTile(9, 7);
-        final Tile shore = map.getTile(9, 6);
+        final Tile shore = map.getTile(9, 6), shore2 = map.getTile(8, 7);
         final net.sf.freecol.common.model.UnitType colonist
             = spec().getUnitType("model.unit.freeColonist");
+        final Unit pioneer = new ServerUnit(game, shore, dutch, colonist);
+        final Unit soldier = new ServerUnit(game, shore2, dutch, colonist);
         final Unit ship = new ServerUnit(game, sea, dutch,
             spec().getUnitType("model.unit.merchantman"));
-        final Unit pioneer = new ServerUnit(game, shore, dutch, colonist);
-        final Unit soldier = new ServerUnit(game, ship, dutch, colonist);
-        pioneer.setLocation(ship);                       // boards after the soldier
-        final Unit farmer = new ServerUnit(game, shore, dutch, colonist);
-        assertEquals(List.of(soldier, pioneer), ship.getUnitList());
-        assertSame(soldier, ClassicGUI.firstLander(ship, land));
-        assertSame(ship, ClassicGUI.landingCarrier(ship, land));
-        assertNull(ClassicGUI.landingCarrier(ship, map.getTile(5, 7)));   // not next to it
-        assertNull(ClassicGUI.landingCarrier(farmer, land));               // no carrier
-
-        // The ship ranks before what it carries: ship, pioneer, soldier, farmer.
-        assertTrue(ClassicGUI.cycleRank(ship) < ClassicGUI.cycleRank(pioneer));
-        assertEquals(List.of(farmer, ship, pioneer),
-                     ClassicGUI.cycleAfter(soldier, List.of(farmer, soldier, pioneer, ship)));
+        final Unit farmer = new ServerUnit(game, ship, dutch, colonist);   // bought later
+        final Unit scout = new ServerUnit(game, ship, dutch, colonist);
+        assertTrue(ClassicUnitCycle.startCarrier(ship));
+        assertTrue(pioneer.getIdNumber() < soldier.getIdNumber()
+                   && soldier.getIdNumber() < ship.getIdNumber());
+        assertEquals(List.of(farmer, scout), ship.getUnitList());
+        final ClassicUnitCycle cycle;
 
         final LandingGUI gui = new LandingGUI();
+        cycle = gui.unitCycle;
         final FakePrompter fake = new FakePrompter();
         gui.prompter = fake;
         final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
         gui.mapViewer = mv;
         try {
+            // The turn start: the ship, the head of the list.
+            assertSame(ship, cycle.next(null, dutch));
             mv.setFocus(sea);
             mv.changeToMoveUnits(ship);
+            assertSame(ship, ClassicGUI.landingCarrier(ship, land));
+            assertNull(ClassicGUI.landingCarrier(ship, map.getTile(5, 7)));   // not next to it
+            assertNull(ClassicGUI.landingCarrier(farmer, land));               // no carrier
+
+            // Landing 1: the farmer (aboard longest) goes ashore, the scout
+            // is woken; after the farmer the scout aboard comes.
             fake.answer = 1;
+            assertSame(farmer, gui.modalChoiceDialog(sea, StringTemplate.key("disembark.text"),
+                (ImageIcon) null, "none", landingChoices(ship, land)));
+            assertEquals(List.of(scout), gui.woken);
+            farmer.setLocation(land);
+            farmer.setMovesLeft(0);
+            gui.changeView(ship, true);
+            assertSame(farmer, mv.getActiveUnit());   // the landed unit is done
+            assertSame(scout, cycle.next(farmer, dutch));
+            gui.changeView(scout, false);              // no turn flow: at once
+            // The scout lands too: the empty ship, not the pioneer (#3697).
+            scout.setLocation(land);
+            scout.setMovesLeft(0);
+            assertTrue(pioneer.getMovesLeft() > 0 && soldier.getMovesLeft() > 0);
+            assertTrue(ship.getUnitList().isEmpty());
+            assertSame(ship, cycle.next(scout, dutch));
+            // The ship's last move: the pioneer (#4579), then the soldier.
+            ship.setMovesLeft(0);
+            assertSame(pioneer, cycle.next(ship, dutch));
+            pioneer.setMovesLeft(0);
+            assertSame(soldier, cycle.next(pioneer, dutch));
+
+            // Landing 2: the soldier boarded before the pioneer.
+            ship.setMovesLeft(3);
+            farmer.setMovesLeft(1);
+            scout.setMovesLeft(0);
+            soldier.setLocation(ship);
+            pioneer.setLocation(ship);
+            pioneer.setMovesLeft(1);
+            soldier.setMovesLeft(1);
+            assertEquals(List.of(soldier, pioneer), ship.getUnitList());
+            assertSame(soldier, ClassicGUI.firstLander(ship, land));
+            gui.woken.clear();
+            mv.changeToMoveUnits(ship);
             assertSame(soldier, gui.modalChoiceDialog(sea, StringTemplate.key("disembark.text"),
                 (ImageIcon) null, "none", landingChoices(ship, land)));
             assertEquals(List.of(pioneer), gui.woken);
@@ -1744,14 +1790,14 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             soldier.setMovesLeft(0);
             gui.changeView(ship, true);
             assertSame(soldier, mv.getActiveUnit());
-            assertSame(farmer, dutch.getNextActiveUnit());   // not the pioneer aboard
+            assertSame(farmer, cycle.next(soldier, dutch));   // not the pioneer aboard
             gui.changeView(farmer, false);
             assertSame(farmer, mv.getActiveUnit());
 
             // The farmer boards (a movement key): the controller's
             // re-selection keeps it, then (say) it chooses the pioneer
             // aboard; the ship comes instead, and the pioneer is put back
-            // to come next, before the ship's turn in the cycle.
+            // to come next in FreeCol's cycle.
             gui.unitBoarding(farmer);
             farmer.setLocation(ship);
             farmer.setMovesLeft(0);
@@ -1762,7 +1808,6 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             gui.unitBoarding(null);
             assertSame(ship, mv.getActiveUnit());
             assertSame(pioneer, dutch.getNextActiveUnit());
-            assertSame(ship, dutch.getNextActiveUnit());
             // A carrier that cannot move: no boarding hand-over.
             gui.unitBoarding(farmer);
             ship.setMovesLeft(0);
@@ -1773,6 +1818,30 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         } finally {
             mv.dispose();
         }
+    }
+
+    /**
+     * W5f: FreeCol's colony screen on a goto arrival at a colony is
+     * dropped for a land unit while its run is under way (c6 U25 arrives
+     * at Base with moves left: "Keine Befehle", no screen); a ship's stays
+     * (the docking screen, clip008 01-shipcolony).  Without the turn flow
+     * nothing is dropped.  (The controller's batch flag: MoveTest.)
+     */
+    public void testColonyScreenOnGotoArrival() {
+        final ClassicGUI gui = new ClassicGUI(null);
+        assertFalse(gui.landGotoRunning());          // no turn flow
+
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Unit soldier = new ServerUnit(game, map.getTile(5, 7), dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        final Unit ship = new ServerUnit(game, map.getTile(15, 7), dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        assertTrue(ClassicGUI.dropsColonyScreen(soldier));    // c6 U25 at Base
+        assertFalse(ClassicGUI.dropsColonyScreen(ship));      // a docking: the screen
+        assertFalse(ClassicGUI.dropsColonyScreen(null));      // no goto run
     }
 
     /** Run on the event thread and wait: the seams answer there. */

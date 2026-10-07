@@ -384,4 +384,64 @@ public class ClassicUnitIconTest extends TestCase {
             ClassicGUI.SESSION_OPTIONS.get(ClientOptions.AUTO_END_TURN));
         assertEquals(2, ClassicGUI.SESSION_OPTIONS.size());
     }
+
+    /**
+     * W5f: a unit whose order FreeCol completed at the turn start keeps
+     * its letter until its visit, on the map and in the panel (the unit
+     * facts): the black F of a fortification, then the dark one (c6 #4555
+     * -&gt; #4556: palette index 0 -&gt; 5, #AA4900); the R of a road,
+     * then '-' (c6 #3447 -&gt; #3450).
+     */
+    public void testHeldLetterUntilTheVisit() {
+        final Game game = FreeColTestCase.getStandardGame();
+        final net.sf.freecol.common.model.Map map = FreeColTestCase.getTestMap(
+            FreeColTestCase.spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final net.sf.freecol.common.model.UnitType colonist
+            = FreeColTestCase.spec().getUnitType("model.unit.freeColonist");
+        final Unit soldier = new net.sf.freecol.server.model.ServerUnit(game,
+            map.getTile(4, 4), dutch, colonist);
+        final Unit pioneer = new net.sf.freecol.server.model.ServerUnit(game,
+            map.getTile(6, 6), dutch, colonist);
+        final net.sf.freecol.common.model.TileImprovement road
+            = map.getTile(6, 6).addRoad();
+        pioneer.setWorkImprovement(road);
+        pioneer.setState(Unit.UnitState.IMPROVING);
+        soldier.setState(Unit.UnitState.FORTIFYING);
+        final BufferedImage sp = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final ClassicUnitCycle cycle = new ClassicUnitCycle();
+        ClassicUnitCycle.show(cycle);
+        try {
+            cycle.snapshot(dutch);
+            // FreeCol's turn start.
+            soldier.setState(Unit.UnitState.FORTIFIED);
+            road.setTurnsToComplete(0);
+            pioneer.setState(Unit.UnitState.ACTIVE);
+            pioneer.setMovesLeft(0);
+            cycle.turnStarted(dutch);
+            assertEquals(ClassicHud.ORDERS_FORTIFY, ClassicUnitCycle.ordersRowShown(soldier));
+            assertEquals(ClassicHud.ORDERS_FORTIFY,
+                         ClassicHud.UnitFacts.of(soldier, sp).ordersRow);
+            assertEquals(0x000000, ClassicHud.letterInk(
+                ClassicUnitCycle.ordersRowShown(soldier), DUTCH_DARK));
+            assertEquals(ClassicHud.ORDERS_ROAD, ClassicHud.UnitFacts.of(pioneer, sp).ordersRow);
+            assertFalse(ClassicHud.UnitFacts.of(pioneer, sp).road);   // no road yet
+            if (t != null) {
+                assertEquals("R", ClassicHud.orderLetter(t, ClassicUnitCycle.ordersRowShown(pioneer)));
+            }
+            cycle.visited(soldier);
+            assertEquals(ClassicHud.ORDERS_FORTIFIED,
+                         ClassicHud.UnitFacts.of(soldier, sp).ordersRow);
+            assertEquals(DUTCH_DARK, ClassicHud.letterInk(
+                ClassicUnitCycle.ordersRowShown(soldier), DUTCH_DARK));
+            cycle.visited(pioneer);
+            assertEquals(ClassicHud.ORDERS_NONE, ClassicHud.UnitFacts.of(pioneer, sp).ordersRow);
+            assertTrue(ClassicHud.UnitFacts.of(pioneer, sp).road);    // "(Straße)" now
+            assertEquals("-", ClassicHud.orderLetter(t, ClassicUnitCycle.ordersRowShown(pioneer)));
+        } finally {
+            ClassicUnitCycle.show(null);
+        }
+    }
 }

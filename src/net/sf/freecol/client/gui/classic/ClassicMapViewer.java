@@ -194,6 +194,12 @@ final class ClassicMapViewer extends JPanel {
     private Tile selectedTile;
     private Unit activeUnit;
 
+    /**
+     * The unit of a silent visit (master plan W5f, {@link #visit}): drawn
+     * on top of its tile until the next activation; null when none.
+     */
+    private Unit visitedUnit = null;
+
     // In-progress unit slide (see animateMove): the unit drawn animOffset
     // native pixels from animFrom toward animTo, or null when idle.
     private Unit animUnit;
@@ -663,10 +669,16 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
-     * The classic W key: wait the active unit — cycle to the other units needing
-     * orders and return to this one afterwards ({@code InGameController.waitUnit}).
+     * The classic W key: wait the active unit — the next unit of the
+     * original's unit cycle comes, and this one again after the wrap
+     * ({@code ClassicGUI.waitUnit}, master plan W5f); without the GUI
+     * {@code InGameController.waitUnit}.
      */
     private void waitActiveUnit() {
+        if (this.gui != null) {
+            this.gui.waitUnit(this.activeUnit);
+            return;
+        }
         this.freeColClient.getInGameController().waitUnit();
     }
 
@@ -840,7 +852,7 @@ final class ClassicMapViewer extends JPanel {
             if (d != null) {
                 final Tile n = this.selectedTile.getNeighbourOrNull(d);
                 // The cursor stays on the drawn map, off the outer ring.
-                if (n != null && !n.isOuterRing()) this.gui.changeView(n);
+                if (n != null && !n.isOuterRing()) this.gui.selectTile(n);
             }
             return;
         }
@@ -948,6 +960,7 @@ final class ClassicMapViewer extends JPanel {
         this.viewMode = GUI.ViewMode.TERRAIN;
         this.selectedTile = tile;
         this.activeUnit = null;
+        this.visitedUnit = null;
         jumpIfNeeded(tile, "terrain");
         rearmBlink("terrain");
         repaint();
@@ -977,6 +990,7 @@ final class ClassicMapViewer extends JPanel {
         if (unit != null) clearPrompt("activate", true);
         this.viewMode = GUI.ViewMode.MOVE_UNITS;
         this.activeUnit = unit;
+        this.visitedUnit = null;
         if (unit != null) this.lastUnit = unit;
         boolean jumped = false;
         if (unit != null && unit.getTile() != null) {
@@ -2081,9 +2095,60 @@ final class ClassicMapViewer extends JPanel {
     void changeToEndTurn() {
         this.viewMode = GUI.ViewMode.END_TURN;
         this.activeUnit = null;
+        this.visitedUnit = null;
         this.selectedTile = null;
         rearmBlink("end-turn");
         repaint();
+    }
+
+    /**
+     * A silent visit (master plan W5f, c6 #3447, #4555, #4589): the view
+     * jumps to the unit if it needs to, the map and the minimap ring in one
+     * paint, the unit drawn on top of its tile (I); the active unit, the
+     * panel's block and the blink stay as they are.
+     *
+     * @param unit The unit visited.
+     */
+    void visit(Unit unit) {
+        if (unit == null || unit.getTile() == null) return;
+        this.visitedUnit = unit;
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("visit", "unit=" + unit.getId()
+                + " at=" + xy(unit.getTile()) + " row=" + ClassicUnitCycle.ordersRowShown(unit)
+                + " jump=" + wouldJump(unit.getTile()));
+        }
+        if (!jumpTo(unit.getTile(), "visit")) {
+            this.changeToShow = true;   // the unit on top of its tile
+            paintCellNow(unit.getTile());
+        }
+    }
+
+    /**
+     * The visit's completion (c6 #3450: the letter R becomes '-' and the
+     * new road's hub and spokes appear; #4556: the F's ink): the unit's
+     * cell and its neighbours, into which the spokes reach, painted now.
+     *
+     * @param unit The unit visited.
+     */
+    void visitShown(Unit unit) {
+        final Tile t = (unit == null) ? null : unit.getTile();
+        final int[] o = this.origin;
+        if (ClassicFrameRecorder.on() && unit != null) {
+            ClassicFrameRecorder.event("visit", "shown unit=" + unit.getId()
+                + " row=" + ClassicUnitCycle.ordersRowShown(unit)
+                + ((t == null) ? "" : " road=" + ClassicUnitCycle.roadShown(t)));
+        }
+        // The completion is the change the next pause runs from.
+        this.changeToShow = true;
+        if (this.finalDrawPending || t == null || o == null) {
+            repaint();
+            return;
+        }
+        final Rectangle r = new Rectangle(screenX(t.getX() - 1, o[0]),
+            screenY(t.getY() - 1, o[1]), 3 * tileW(), 3 * tileH());
+        final int m = ICON_MARGIN * scale();
+        r.grow(m, m);
+        paintNow(r);
     }
 
 
@@ -2336,7 +2401,7 @@ final class ClassicMapViewer extends JPanel {
             final Unit u = (tile.isExplored()) ? tile.getFirstUnit() : null;
             if (u != null && player != null && player.owns(u)
                 && u.getMovesLeft() > 0) {
-                this.gui.changeView(u, false);
+                this.gui.unitClicked(u);
             } else {
                 ClassicFrameRecorder.event("click-ignored", "prompt " + xy(tile));
             }
@@ -2363,11 +2428,12 @@ final class ClassicMapViewer extends JPanel {
         }
         final Unit unit = tile.getFirstUnit();
         if (unit != null && player != null && player.owns(unit)) {
-            this.gui.changeView(unit, false); // Make our unit active
+            // Our unit active; the unit cycle goes on after it (W5f).
+            this.gui.unitClicked(unit);
         } else if (unit != null) { // Someone else's unit: select the tile
             this.gui.setFocus(tile);
         } else { // Empty explored tile: terrain-select
-            this.gui.changeView(tile);
+            this.gui.selectTile(tile);
         }
     }
 
@@ -2540,6 +2606,9 @@ final class ClassicMapViewer extends JPanel {
         final Unit a = this.activeUnit;
         if (a != null && a != this.animUnit && a.getTile() == tile
             && !(a.isOnCarrier() && a.getState() == Unit.UnitState.SENTRY)) return a;
+        final Unit v = this.visitedUnit;
+        if (v != null && v != this.animUnit && v.getTile() == tile
+            && !v.isDisposed()) return v;
         for (Unit u : tile.getUnitList()) {
             if (u == this.animUnit) continue;
             final Tile from = queuedSource(u);
@@ -2591,7 +2660,8 @@ final class ClassicMapViewer extends JPanel {
         }
         final Player owner = unit.getOwner();
         final int s = scale();
-        final int orders = ClassicHud.ordersRow(unit);
+        // The held letter until a visit shows the completion (W5f).
+        final int orders = ClassicUnitCycle.ordersRowShown(unit);
         final Graphics2D gg = (Graphics2D) g.create();
         try {
             gg.translate(sx, sy);

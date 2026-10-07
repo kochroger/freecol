@@ -126,7 +126,7 @@ final class ClassicTileArt {
     private static final int FOREST = 64;
 
     /** Road centre-hub frame; the eight spokes follow at {@code ROAD_HUB+1..+8}. */
-    private static final int ROAD_HUB = 80;
+    static final int ROAD_HUB = 80;
 
     private static final int LOST_CITY = 103;
     private static final int PLOWED = 149;
@@ -253,8 +253,10 @@ final class ClassicTileArt {
             frames.accept(base + riverMask(map, x, y));
         }
 
-        // Road: centre hub plus a spoke toward each raw neighbour with a road.
-        if (tile.hasRoad()) {
+        // Road: centre hub plus a spoke toward each raw neighbour with a
+        // road; only complete roads, and a new one from its visit on
+        // (clip008 #45293, c6 #3450; ClassicUnitCycle.roadShown).
+        if (ClassicUnitCycle.roadShown(tile)) {
             frames.accept(ROAD_HUB);
             for (int[] spoke : ROAD_SPOKES) {
                 if (hasRoad(map, x + spoke[0], y + spoke[1])) frames.accept(spoke[2]);
@@ -392,7 +394,7 @@ final class ClassicTileArt {
 
     private static boolean hasRoad(Map map, int x, int y) {
         final Tile t = map.getTile(x, y);
-        return t != null && t.hasRoad();
+        return t != null && ClassicUnitCycle.roadShown(t);
     }
 
 

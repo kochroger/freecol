@@ -96,4 +96,20 @@ public class MoveTest extends FreeColTestCase {
             }
         }
     }
+
+    /**
+     * The goto batch flag (the Classic UI's unit cycle, master plan W5f):
+     * on by default, as FreeCol has it, so the standard GUI keeps its goto
+     * batch; only the Classic UI switches it off (and on again when its
+     * game view goes).  The single-unit goto refuses no unit.
+     */
+    public void testGotoBatchFlag() {
+        final InGameController igc = new InGameController(null);
+        assertTrue(igc.isGotoBatch());
+        igc.setGotoBatch(false);
+        assertFalse(igc.isGotoBatch());
+        igc.setGotoBatch(true);
+        assertTrue(igc.isGotoBatch());
+        assertFalse(igc.moveToDestination(null));
+    }
 }

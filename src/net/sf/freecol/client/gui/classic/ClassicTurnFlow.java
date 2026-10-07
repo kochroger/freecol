@@ -44,21 +44,31 @@ import net.sf.freecol.common.model.Unit;
  *   mode follows instead ({@link #PROMPT_MS}, W17): the host draws it, and
  *   it waits for Enter, Space or a press on the word; the end forces its
  *   look ON and the request follows {@link #PROMPT_END_MS} later.</li>
- *   <li><b>Hand-over</b> (W5e): when the controller brings a different
- *   unit after the previous one ran out of moves, its panel block comes
- *   {@link #HANDOVER_MS} after the last change, and a view jump it needs
- *   at {@link #HANDOVER_JUMP_MS}.  Until then the map and the panel show
- *   the previous unit, as it was before its last move (W5b).  A skipped
- *   unit counts as done; after a boarding the carrier comes
+ *   <li><b>Hand-over</b> (W5e): once the previous unit ran out of moves
+ *   (or was skipped), the next unit of the original's unit cycle comes
+ *   ({@link ClassicUnitCycle}, W5f; the controller's choice is put back),
+ *   its panel block {@link #HANDOVER_MS} after the last change, and a view
+ *   jump it needs at {@link #HANDOVER_JUMP_MS}.  Until then the map and
+ *   the panel show the previous unit, as it was before its last move
+ *   (W5b).  After a boarding the carrier comes
  *   {@link #BOARDING_HANDOVER_MS} after it ({@link #carrierChosen}, spec
  *   delta W18).</li>
+ *   <li><b>Goto units</b> (W5f) move when the cycle reaches them, not in a
+ *   batch first: the block, then the first step {@link #GOTO_HANDOVER_MS}
+ *   later ({@link #gotoStages}); arrived with moves left the unit stays
+ *   the active unit, blinking, with "Keine Befehle" (c6 #5123), else the
+ *   next unit comes as after a last move.  A unit whose road, plowing or
+ *   fortification was completed at the turn start gets a silent visit:
+ *   the jump at the hand-over's block time, the completion
+ *   {@link #VISIT_SHOW_MS} later, no block, no blink
+ *   ({@link #visitStages}).</li>
  *   <li><b>Turn start</b> (W5e): the panel is wiped and the year changes
  *   in one paint ({@link #wipe}), when the controller first shows our new
  *   turn and no box is up (so FreeCol's turn-start messages come before
- *   the year flips, W5g); the first unit's block follows
+ *   the year flips, W5g); the head of the cycle's block follows
  *   {@link #TURN_START_MS} later, or with a jump the jump at
- *   {@link #TURN_START_JUMP_MS} and the block one to two frames after it.
- *   Units with a destination move first (W5f).</li>
+ *   {@link #TURN_START_JUMP_MS} and the block one to two frames after it;
+ *   a goto unit's first step {@link #GOTO_START_MS} after its block.</li>
  *   <li><b>Indicator</b> (W5c): the colour of the player whose turn it is
  *   ({@link #indicatorRgb}); the panel paints it, a 50-ms poll
  *   ({@link #tick}) repaints it when the current player changes.  It
@@ -130,8 +140,23 @@ final class ClassicTurnFlow {
     /** Turn start with a jump: the block after the jump (1-2 frames). */
     static final double TURN_START_BLOCK_MS = 21.0;
 
-    /** Turn start: a goto unit's first step after its block (the goto gap, W2). */
+    /** Turn start: a goto unit's first step after its block (the goto gap, W2; LF #24166 -&gt; #24174: 114 ms). */
     static final double GOTO_START_MS = ClassicSlide.GOTO_GAP_MS;
+
+    /**
+     * Hand-over to a goto unit: its first step after its block (c6 U25
+     * #5095/#5096: the same frame; U26 #5224 -&gt; #5226; U22 #4716 -&gt;
+     * #4721: 0-71 ms).  Why it is shorter than at the turn start is not
+     * known (I).
+     */
+    static final double GOTO_HANDOVER_MS = 28.0;
+
+    /**
+     * A visit: the completed letter (and road) this long after its jump
+     * (c6 #4555 -&gt; #4556 and #4589 -&gt; #4590: 1 frame; #3447 -&gt;
+     * #3450: 3 frames).
+     */
+    static final double VISIT_SHOW_MS = 15.0;
 
     /**
      * How recent the last change must be to count as the one an idle or a
@@ -188,14 +213,35 @@ final class ClassicTurnFlow {
          */
         boolean blocked();
 
-        /** @return Whether a unit can still be made active. */
+        /** @return Whether the controller can still make a unit active. */
         boolean hasNextActiveUnit();
 
-        /** @return Whether a unit still goes to a destination. */
-        boolean hasNextGoingToUnit();
+        /**
+         * @param unit A unit.
+         * @return Why the unit cycle has it due now, or null
+         *     ({@link ClassicUnitCycle#kind}).
+         */
+        ClassicUnitCycle.Kind dueKind(Unit unit);
 
-        /** @return The first unit with a destination, or null. */
-        Unit firstGoingToUnit();
+        /**
+         * @param anchor The unit that has just finished, or null for the
+         *     head of the list (the turn start).
+         * @return The cycle's next due unit, or null
+         *     ({@link ClassicUnitCycle#next}).
+         */
+        Unit cycleNext(Unit anchor);
+
+        /** @return Whether any unit is due in the cycle. */
+        boolean anyDue();
+
+        /**
+         * The cycle brings another unit than the controller chose: its
+         * choice goes back to the front of FreeCol's cycle
+         * ({@code Player.putBackActiveUnit}).
+         *
+         * @param unit The controller's choice.
+         */
+        void putBack(Unit unit);
 
         /** @return The game's turn number, -1 without one. */
         int turnNumber();
@@ -247,8 +293,31 @@ final class ClassicTurnFlow {
          */
         boolean endTurn();
 
-        /** Run the goto orders ({@code executeGotoOrders}). */
-        void runGotoOrders();
+        /**
+         * Run one goto (or trade-route) unit's orders now, the unit the
+         * active one ({@code InGameController.moveToDestination(Unit)});
+         * the cycle counts it as run this turn.
+         *
+         * @param unit The unit.
+         */
+        void runGoto(Unit unit);
+
+        /**
+         * A silent visit (W5f): the view jumps to the unit if it needs to,
+         * the map and the minimap ring painted at once; the panel's block
+         * stays as it is, nothing blinks.
+         *
+         * @param unit The unit visited.
+         */
+        void visit(Unit unit);
+
+        /**
+         * The visit's completion: the unit's held letter and road go, its
+         * cell and the neighbours (the road's spokes) painted at once.
+         *
+         * @param unit The unit visited.
+         */
+        void visitShown(Unit unit);
 
         /** Ask the controller for the next active unit. */
         void nextActiveUnit();
@@ -298,13 +367,28 @@ final class ClassicTurnFlow {
         default boolean holdTurnStart() {
             return false;
         }
+
+        /**
+         * Our new turn begins, before its first unit is chosen: the unit
+         * cycle's turn (no goto has run, the visits found).
+         */
+        default void turnBegins() {
+        }
+
+        /** Our end-of-turn request goes out: the unit cycle's snapshot. */
+        default void turnEnding() {
+        }
+
+        /** Our end-of-turn request was refused: the turn goes on. */
+        default void endRefused() {
+        }
     }
 
     /** The pauses. */
     enum Kind { END_TURN, PROMPT, PROMPT_END, HANDOVER, TURN_START }
 
     /** What a pause does at one of its moments. */
-    enum Action { END, PROMPT, END_NOW, JUMP, ACTIVATE, GOTO }
+    enum Action { END, PROMPT, END_NOW, JUMP, ACTIVATE, GOTO, VISIT, SHOW }
 
     /** One moment of a pause: {@code ms} after its base. */
     static final class Stage {
@@ -436,15 +520,18 @@ final class ClassicTurnFlow {
     /** Goto orders run, the controller's view changes are dropped ({@link #ignoring}). */
     private int gotoRuns = 0;
 
+    /** The unit whose goto runs now, or null ({@link #gotoUnit}). */
+    private Unit gotoUnit = null;
+
     /**
      * How often the controller chose a unit or reported none
-     * ({@link #unitChosen}, {@link #noUnitLeft}): {@link #gotosDone} sees
-     * whether its call brought anything.
+     * ({@link #unitChosen}, {@link #noUnitLeft}, {@link #dueInstead}):
+     * {@link #nextUnitOrIdle} sees whether its call brought anything.
      */
     private int choices = 0;
 
-    /** After the goto orders the next unit is a hand-over. */
-    private boolean afterGoto = false;
+    /** The turn the unit cycle's turn was begun for ({@link #beginTurn}). */
+    private int cycleTurn;
 
     /** The indicator colour of the panel's last paint (-1 none). */
     private int shownIndicator = -1;
@@ -470,6 +557,7 @@ final class ClassicTurnFlow {
         this.clock = clock;
         this.timer = new ClassicOneShot(clock, poster, threaded, "ClassicTurnFlow");
         this.activatedTurn = host.turnNumber();
+        this.cycleTurn = this.activatedTurn;
     }
 
 
@@ -521,6 +609,46 @@ final class ClassicTurnFlow {
     }
 
     /**
+     * The stages of a hand-over to a goto unit (W5f, c6 U22, U25, U26).
+     *
+     * @param jump The unit needs a view jump.
+     * @return Jump at 280 ms (if needed), block at 500 ms, the first step
+     *     28 ms after the block.
+     */
+    static Stage[] gotoStages(boolean jump) {
+        final java.util.List<Stage> s = new java.util.ArrayList<>(3);
+        if (jump) s.add(new Stage(HANDOVER_JUMP_MS, Action.JUMP));
+        s.add(new Stage(HANDOVER_MS, Action.ACTIVATE));
+        s.add(new Stage(HANDOVER_MS + GOTO_HANDOVER_MS, Action.GOTO));
+        return s.toArray(new Stage[0]);
+    }
+
+    /**
+     * The stages of a silent visit (W5f, c6 #3447/#3450, #4555/#4556,
+     * #4589/#4590: the jump 471-542 ms after the last change).
+     *
+     * @return The jump (if needed) at 500 ms, the completion 15 ms later.
+     */
+    static Stage[] visitStages() {
+        return new Stage[] { new Stage(HANDOVER_MS, Action.VISIT),
+                             new Stage(HANDOVER_MS + VISIT_SHOW_MS, Action.SHOW) };
+    }
+
+    /**
+     * The stages of a hand-over to a unit the cycle has due.
+     *
+     * @param kind Why it is due (null as ORDERS).
+     * @param jump The unit needs a view jump.
+     * @return {@link #handOverStages}, {@link #gotoStages} or
+     *     {@link #visitStages}.
+     */
+    static Stage[] handOverStages(ClassicUnitCycle.Kind kind, boolean jump) {
+        if (kind == ClassicUnitCycle.Kind.GOTO) return gotoStages(jump);
+        if (kind == ClassicUnitCycle.Kind.VISIT) return visitStages();
+        return handOverStages(jump);
+    }
+
+    /**
      * The stages of a turn start.
      *
      * @param jump The first unit needs a view jump.
@@ -530,12 +658,33 @@ final class ClassicTurnFlow {
      *     then the goto orders 100 ms after the block.
      */
     static Stage[] turnStartStages(boolean jump, boolean gotos) {
+        return turnStartStages(jump, (gotos) ? ClassicUnitCycle.Kind.GOTO
+                               : ClassicUnitCycle.Kind.ORDERS);
+    }
+
+    /**
+     * The stages of a turn start for the head of the cycle.
+     *
+     * @param jump The first unit needs a view jump.
+     * @param kind Why it is due (null as ORDERS).
+     * @return Block at 300 ms, or jump at 500 ms and block 21 ms later; a
+     *     goto unit's first step 100 ms after the block (LF 1502); a visit
+     *     at the block's time (I), its completion 15 ms later.
+     */
+    static Stage[] turnStartStages(boolean jump, ClassicUnitCycle.Kind kind) {
+        if (kind == ClassicUnitCycle.Kind.VISIT) {
+            final double at = (jump) ? TURN_START_JUMP_MS : TURN_START_MS;
+            return new Stage[] { new Stage(at, Action.VISIT),
+                                 new Stage(at + VISIT_SHOW_MS, Action.SHOW) };
+        }
         final double block = (jump) ? TURN_START_JUMP_MS + TURN_START_BLOCK_MS
             : TURN_START_MS;
         final java.util.List<Stage> s = new java.util.ArrayList<>(3);
         if (jump) s.add(new Stage(TURN_START_JUMP_MS, Action.JUMP));
         s.add(new Stage(block, Action.ACTIVATE));
-        if (gotos) s.add(new Stage(block + GOTO_START_MS, Action.GOTO));
+        if (kind == ClassicUnitCycle.Kind.GOTO) {
+            s.add(new Stage(block + GOTO_START_MS, Action.GOTO));
+        }
         return s.toArray(new Stage[0]);
     }
 
@@ -606,14 +755,53 @@ final class ClassicTurnFlow {
         final Pending p = this.pending;
         if (p != null && p.kind == Kind.PROMPT_END) return;   // the end is out
         cancel("no-unit");
-        this.afterGoto = false;
         this.idleWanted = this.host.myTurn() && !this.ending;
         if (!this.idleWanted) return;   // our end's own view change
-        if (!this.turnStarted) {
+        if (!this.turnStarted || this.host.turnNumber() != this.activatedTurn) {
             this.activatedTurn = this.host.turnNumber();
+            beginTurn();
             if (!wipe()) return;   // a box is up: the poll wipes and arms later
         }
         armIdle(lastChangeBase());
+    }
+
+    /**
+     * The controller has no unit left to make active (its end view or its
+     * fallback tile), but the unit cycle has one due: a goto unit, a
+     * visit, or a goto unit that ran and is still active with moves.  It
+     * comes as a hand-over from the previous unit, or as the turn start's
+     * head of the list; the map keeps the previous unit meanwhile (W5b).
+     * FreeCol's controller no longer brings goto units in the Classic UI
+     * (its batch is off, W5f).
+     *
+     * @param previous The map's active unit now, or null.
+     * @return True if a due unit comes (the caller shows no end view);
+     *     false for the end view and {@link #noUnitLeft}.
+     */
+    boolean dueInstead(Unit previous) {
+        if (this.disposed) return false;
+        settleEnding();
+        final Pending p = this.pending;
+        if (!this.host.myTurn() || this.ending
+            || (p != null && p.kind == Kind.PROMPT_END)) return false;
+        final int turn = this.host.turnNumber();
+        final boolean newTurn = !this.turnStarted || turn != this.activatedTurn;
+        if (newTurn) beginTurn();
+        if (!this.host.anyDue()) return false;
+        this.choices++;
+        if (p != null && (p.kind == Kind.TURN_START || p.kind == Kind.HANDOVER)) {
+            return true;   // a due unit is on its way already
+        }
+        cancel("due");
+        leavePrompt();
+        this.idleWanted = false;
+        if (newTurn) {
+            this.activatedTurn = turn;
+            startTurn(cycleChoice(null, null, "turn start, no candidate"));
+            return true;
+        }
+        startHandOver(cycleChoice(null, previous, "no candidate"), lastChangeBase());
+        return true;
     }
 
     /**
@@ -626,7 +814,19 @@ final class ClassicTurnFlow {
      *     make it active at once.
      */
     boolean unitChosen(Unit unit, Unit previous) {
-        return unitChosen(unit, previous, false);
+        return unitChosen(unit, previous, false, false);
+    }
+
+    /**
+     * The player clicked an own unit: it is not replaced by the unit
+     * cycle's choice (as {@link #unitChosen(Unit, Unit)} otherwise).
+     *
+     * @param unit The unit.
+     * @param previous The map's active unit now, or null.
+     * @return As {@link #unitChosen(Unit, Unit)}.
+     */
+    boolean unitClicked(Unit unit, Unit previous) {
+        return unitChosen(unit, previous, false, true);
     }
 
     /**
@@ -639,18 +839,24 @@ final class ClassicTurnFlow {
      * @return As {@link #unitChosen(Unit, Unit)}.
      */
     boolean carrierChosen(Unit carrier, Unit boarded) {
-        return unitChosen(carrier, boarded, true);
+        return unitChosen(carrier, boarded, true, true);
     }
 
     /**
-     * {@link #unitChosen(Unit, Unit)}, after a boarding or not.
+     * {@link #unitChosen(Unit, Unit)}, after a boarding or not.  At the
+     * turn start and at a hand-over the unit cycle's choice comes instead
+     * of the controller's ({@link #cycleChoice}), unless the unit is the
+     * player's or the boarding's own choice.
      *
      * @param unit The unit, or null.
      * @param previous The map's active unit now, or null.
      * @param boarding The previous unit has just boarded {@code unit}.
+     * @param fixed The unit is not the controller's choice (a click, the
+     *     boarding's carrier): no cycle choice at a hand-over.
      * @return True if the flow takes it over.
      */
-    private boolean unitChosen(Unit unit, Unit previous, boolean boarding) {
+    private boolean unitChosen(Unit unit, Unit previous, boolean boarding,
+                               boolean fixed) {
         if (this.disposed) return false;
         this.choices++;
         // Our end may have gone through without the poll seeing another
@@ -673,10 +879,13 @@ final class ClassicTurnFlow {
         }
         if (p != null && (p.kind == Kind.TURN_START
                 || (p.kind == Kind.HANDOVER
-                    && (p.unit == unit || unit == previous)))) {
+                    && (p.unit == unit || unit == previous
+                        || (!fixed && ranOut(previous)))))) {
             // The turn start brings its unit (and then asks again); a
             // hand-over keeps its unit, also when the shown one is
-            // re-selected meanwhile.
+            // re-selected meanwhile, or when the controller chooses again
+            // (its choice goes back: the cycle chose already).
+            if (!fixed && unit != p.unit && unit != previous) this.host.putBack(unit);
             return true;
         }
         cancel("unit");
@@ -685,32 +894,150 @@ final class ClassicTurnFlow {
         final int turn = this.host.turnNumber();
         if (!this.turnStarted || turn != this.activatedTurn) {
             this.activatedTurn = turn;
-            this.afterGoto = false;
-            final Unit first = (this.host.hasNextGoingToUnit())
-                ? this.host.firstGoingToUnit() : null;
-            final Unit target = (first != null) ? first : unit;
-            final boolean wiped = wipe();
-            start(new Pending(Kind.TURN_START, target,
-                    (wiped) ? this.wipeNanos : 0L,
-                    turnStartStages(this.host.wouldJump(target), first != null)));
+            beginTurn();
+            startTurn(cycleChoice(unit, null, "turn start"));
             return true;
         }
-        if (unit == previous) {   // the re-selection after a move
-            this.afterGoto = false;
-            return false;
-        }
-        if (this.afterGoto || ranOut(previous)) {
-            this.afterGoto = false;
-            final boolean jump = this.host.wouldJump(unit);
+        if (unit == previous) return false;   // the re-selection after a move
+        if (ranOut(previous)) {
             if (boarding) {
                 ClassicFrameRecorder.event("handover", "after boarding: carrier "
                     + unit.getId() + " (boarded " + previous.getId() + ")");
+                start(new Pending(Kind.HANDOVER, unit, lastChangeBase(),
+                        boardingStages(this.host.wouldJump(unit))));
+                return true;
             }
-            start(new Pending(Kind.HANDOVER, unit, lastChangeBase(),
-                    (boarding) ? boardingStages(jump) : handOverStages(jump)));
+            if (fixed) {   // a click: that unit, as a plain hand-over
+                start(new Pending(Kind.HANDOVER, unit, lastChangeBase(),
+                        handOverStages(this.host.wouldJump(unit))));
+            } else {
+                startHandOver(cycleChoice(unit, previous, "hand-over"), lastChangeBase());
+            }
             return true;
         }
         return false;
+    }
+
+    /**
+     * W (wait, I: never recorded): the next unit of the cycle after the
+     * waiting one comes at once (a goto unit with its steps, a visit with
+     * its completion); the waiting unit comes again after the wrap.
+     * Instead of FreeCol's {@code waitUnit}, whose pick follows its tile
+     * order.
+     *
+     * @param waiting The active unit.
+     * @return True if the flow took the key (false while the input is
+     *     blocked).
+     */
+    boolean waited(Unit waiting) {
+        if (this.disposed || isInputBlocked()) return false;
+        final Unit next = this.host.cycleNext(waiting);
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("cycle", "wait " + id(waiting)
+                + " next=" + id(next) + " kind=" + this.host.dueKind(next));
+        }
+        if (next == null || next == waiting) return true;
+        leavePrompt();
+        final ClassicUnitCycle.Kind k = this.host.dueKind(next);
+        final long now = this.clock.now();
+        if (k == ClassicUnitCycle.Kind.GOTO) {
+            start(new Pending(Kind.HANDOVER, next, now, new Stage(0.0, Action.ACTIVATE),
+                              new Stage(GOTO_HANDOVER_MS, Action.GOTO)));
+        } else if (k == ClassicUnitCycle.Kind.VISIT) {
+            start(new Pending(Kind.HANDOVER, next, now, new Stage(0.0, Action.VISIT),
+                              new Stage(VISIT_SHOW_MS, Action.SHOW)));
+        } else {
+            this.host.activate(next);
+        }
+        return true;
+    }
+
+    /**
+     * The unit the cycle brings instead of the controller's choice
+     * {@code chosen}: the next due unit after {@code anchor} (the head at
+     * the turn start).  The controller's choice is put back to the front
+     * of FreeCol's cycle when another unit comes.
+     *
+     * @param chosen The controller's choice, or null.
+     * @param anchor The unit that has just finished, or null.
+     * @param why What hands over (for the recorder).
+     * @return The unit to bring.
+     */
+    private Unit cycleChoice(Unit chosen, Unit anchor, String why) {
+        Unit target = this.host.cycleNext(anchor);
+        if (target == null) {
+            target = chosen;
+        } else if (chosen != null && target != chosen) {
+            this.host.putBack(chosen);
+        }
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("cycle", "next=" + id(target)
+                + " kind=" + this.host.dueKind(target) + " anchor=" + id(anchor)
+                + " controller=" + id(chosen) + " (" + why + ")");
+        }
+        return target;
+    }
+
+    /**
+     * Start the turn start for the head of the cycle, with the wipe now if
+     * no box is up (else at the box's close).
+     *
+     * @param target The unit.
+     */
+    private void startTurn(Unit target) {
+        final boolean wiped = wipe();
+        start(new Pending(Kind.TURN_START, target, (wiped) ? this.wipeNanos : 0L,
+                turnStartStages(this.host.wouldJump(target), this.host.dueKind(target))));
+    }
+
+    /**
+     * Start the hand-over to a unit the cycle has due, by its kind.
+     *
+     * @param target The unit.
+     * @param base When the last change was.
+     */
+    private void startHandOver(Unit target, long base) {
+        start(new Pending(Kind.HANDOVER, target, base,
+                handOverStages(this.host.dueKind(target), this.host.wouldJump(target))));
+    }
+
+    /**
+     * After a goto run, a visit or a unit gone: the next due unit of the
+     * cycle as a hand-over from {@code anchor}, 500 ms after the last
+     * change; with none, the controller's end view and the idle end
+     * ({@link #nextUnitOrIdle}).
+     *
+     * @param anchor The unit that has just finished.
+     * @param why What hands over (for the recorder).
+     */
+    private void afterUnit(Unit anchor, String why) {
+        if (this.disposed || !this.host.myTurn() || this.ending || !this.turnStarted) return;
+        final Unit next = this.host.cycleNext(anchor);
+        if (next != null) {
+            if (ClassicFrameRecorder.on()) {
+                ClassicFrameRecorder.event("cycle", "next=" + id(next) + " kind="
+                    + this.host.dueKind(next) + " anchor=" + id(anchor) + " (" + why + ")");
+            }
+            startHandOver(next, lastChangeBase());
+            return;
+        }
+        nextUnitOrIdle(why);
+    }
+
+    /**
+     * Begin the unit cycle's turn once per turn: before the first unit of
+     * our new turn is chosen.
+     */
+    private void beginTurn() {
+        final int turn = this.host.turnNumber();
+        if (turn == this.cycleTurn) return;
+        this.cycleTurn = turn;
+        this.host.turnBegins();
+    }
+
+    /** A unit's id for the recorder ("-" for none). */
+    private static String id(Unit u) {
+        return (u == null) ? "-" : u.getId();
     }
 
     /**
@@ -739,11 +1066,12 @@ final class ClassicTurnFlow {
         cancel("end");
         this.prompt = false;
         this.idleWanted = false;
-        this.afterGoto = false;
         ClassicFrameRecorder.event("end-turn", why);
         this.ending = true;
         this.endingSince = this.clock.now();
         this.endingTurn = this.host.turnNumber();
+        // The state the visits of our next turn start compare with (W5f).
+        this.host.turnEnding();
         this.host.paintIndicator();
         final boolean sent = this.host.endTurn();
         // The wait for the player change runs from the server's answer: a
@@ -815,7 +1143,6 @@ final class ClassicTurnFlow {
             cancel("end-settled");
             leavePrompt();
             this.idleWanted = false;
-            this.afterGoto = false;
             waiting();
             if (!late) this.host.paintIndicator();   // the prediction ends
         } else if (this.ending && this.clock.now() - this.endingSince
@@ -835,6 +1162,7 @@ final class ClassicTurnFlow {
     private void refuseEnd(String why) {
         this.ending = false;
         ClassicFrameRecorder.event("end-turn", "refused " + why);
+        this.host.endRefused();
         this.host.paintIndicator();
         this.host.post(this::recoverRefused);
     }
@@ -951,14 +1279,23 @@ final class ClassicTurnFlow {
     }
 
     /**
-     * Whether the controller's view changes are dropped now: the goto
-     * orders run at the start of our turn (W5f) and FreeCol queues a view
-     * change for each unit it moves, which would arrive after the moves.
+     * Whether the controller's view changes are dropped now: a goto unit
+     * runs (W5f) and FreeCol asks for a view change after each of its
+     * steps and for the next unit after its run, which the cycle decides.
      *
      * @return True while they are dropped.
      */
     boolean ignoring() {
         return this.gotoRuns > 0;
+    }
+
+    /**
+     * @return The unit whose goto runs now ({@link #ignoring}), or null:
+     *     the colony screen FreeCol opens when a land unit arrives at its
+     *     destination colony is dropped (c6 U25: no screen).
+     */
+    Unit gotoUnit() {
+        return this.gotoUnit;
     }
 
     /**
@@ -1034,8 +1371,16 @@ final class ClassicTurnFlow {
      */
     private void armIdle(long base) {
         if (this.prompt || !this.host.myTurn()) return;
-        if (this.host.hasNextActiveUnit() || this.host.hasNextGoingToUnit()) {
+        if (this.host.hasNextActiveUnit()) {
             this.idleWanted = false;   // the controller brings a unit
+            return;
+        }
+        if (this.host.anyDue()) {
+            // A goto unit or a visit, which the controller does not bring
+            // (W5f): the cycle's next one comes.
+            this.idleWanted = false;
+            final Unit next = this.host.cycleNext(this.host.activeUnit());
+            if (next != null && this.pending == null) startHandOver(next, base);
             return;
         }
         final boolean village = this.villageCancel != 0L
@@ -1178,11 +1523,30 @@ final class ClassicTurnFlow {
                 } else {
                     this.pending = null;
                     this.timer.cancel();
-                    nextUnitOrIdle("unit gone");
+                    afterUnit(p.unit, "unit gone");
                 }
                 break;
             case GOTO:
-                runGotos();
+                if (usable(p.unit)) {
+                    runGoto(p.unit);
+                } else {
+                    afterUnit(p.unit, "unit gone");
+                }
+                break;
+            case VISIT:
+                if (usable(p.unit)) {
+                    this.host.visit(p.unit);
+                } else {
+                    this.pending = null;
+                    this.timer.cancel();
+                    this.host.visitShown(p.unit);   // nothing stays held
+                    afterUnit(p.unit, "unit gone");
+                }
+                break;
+            case SHOW:
+                // The next pause runs from the completion's paint.
+                this.host.visitShown(p.unit);
+                afterUnit(p.unit, "visit");
                 break;
             default:
                 break;
@@ -1212,12 +1576,13 @@ final class ClassicTurnFlow {
             ClassicFrameRecorder.event("endturn-timer-fire", "held: a box or screen is up");
             return;   // idleWanted stays: the close (or the poll) arms again
         }
-        if (this.host.hasNextActiveUnit() || this.host.hasNextGoingToUnit()) {
+        if (this.host.hasNextActiveUnit() || this.host.anyDue()) {
             // A unit can move again (one arrived meanwhile): the
-            // controller brings it up.
+            // controller brings it up, or the cycle a due goto unit or
+            // visit.
             ClassicFrameRecorder.event("endturn-timer-fire", "kept: a unit can move");
             this.idleWanted = false;
-            this.host.nextActiveUnit();
+            nextUnitOrIdle("kept");
             return;
         }
         if (promptMode) {
@@ -1239,56 +1604,69 @@ final class ClassicTurnFlow {
     }
 
     /**
-     * W5f: the goto orders of the turn start, then the next unit as a
-     * hand-over from the last goto step.  The view changes FreeCol queues
-     * meanwhile are dropped until a marker posted after them.
+     * W5f: one goto (or trade-route) unit moves when the cycle reaches it,
+     * after its block; the controller's view changes meanwhile are dropped
+     * until a marker posted after them ({@link #gotoDone}).
+     *
+     * @param unit The unit.
      */
-    private void runGotos() {
+    private void runGoto(Unit unit) {
         this.gotoRuns++;
-        ClassicFrameRecorder.event("handover", "goto orders");
+        this.gotoUnit = unit;
+        ClassicFrameRecorder.event("handover", "goto " + unit.getId());
         try {
-            this.host.runGotoOrders();
+            this.host.runGoto(unit);
         } finally {
-            this.host.post(this::gotosDone);
+            this.host.post(() -> gotoDone(unit));
         }
     }
 
     /**
-     * The marker behind the goto orders' queued view changes: the next
-     * unit comes as a hand-over from the last goto step.  FreeCol's
-     * controller leaves its goto mode on the first {@code nextActiveUnit}
-     * after the orders and brings no unit then when the orders stopped
-     * early (a goto unit with no path, which it skips): if that call chose
-     * nothing, it is asked once more, so a unit always comes up (FINAL
-     * "Open" item 8), or the idle end ({@link #nextUnitOrIdle}).  Nothing
-     * once the flow is disposed (item 11).
+     * The marker behind a goto run's queued view changes.  Arrived (or
+     * stopped) on the map with moves left, the unit stays the active unit:
+     * its block now ("Keine Befehle", the letter G gone), the blink timed
+     * from it (c6 #5123, first OFF #5146); else the next unit of the cycle
+     * comes as after a last move, 500 ms after its last change (c6 U22
+     * #4803 -&gt; #4839).  A unit stopped early keeps its place as an
+     * ORDERS unit and is not run again this turn
+     * ({@link ClassicUnitCycle#kind}).  Nothing once the flow is disposed
+     * (FINAL "Open" item 11).
+     *
+     * @param unit The unit that ran.
      */
-    private void gotosDone() {
+    private void gotoDone(Unit unit) {
         this.gotoRuns--;
+        if (this.gotoRuns <= 0) {
+            this.gotoRuns = 0;
+            this.gotoUnit = null;
+        }
         if (this.disposed) return;
-        this.afterGoto = true;
-        ClassicFrameRecorder.event("handover", "goto orders done");
-        final int before = this.choices;
-        this.host.nextActiveUnit();
-        if (this.choices == before && !this.disposed && this.pending == null
-            && this.turnStarted && !this.ending && this.host.myTurn()) {
-            // Once: a unit that can move, or the controller's end view
-            // (and so the automatic end).
-            ClassicFrameRecorder.event("handover", "goto orders: no unit came, next unit again");
-            nextUnitOrIdle("goto orders");
+        ClassicFrameRecorder.event("handover", "goto done " + unit.getId()
+            + " moves=" + unit.getMovesLeft() + " state=" + unit.getState()
+            + ((unit.hasTile()) ? " at=" + unit.getTile().getX() + ","
+               + unit.getTile().getY() : " off the map"));
+        if (this.pending != null || this.ending || !this.turnStarted
+            || !this.host.myTurn()) {
+            updateProbe();
+            return;
+        }
+        if (usable(unit) && unit.getMovesLeft() > 0 && !unit.isOnCarrier()
+            && unit.getState() == Unit.UnitState.ACTIVE) {
+            this.host.activate(unit);
+        } else {
+            afterUnit(unit, "goto");
         }
         updateProbe();
     }
 
     /**
      * Ask the controller for the next unit; if it chose none (neither a
-     * unit nor its end view) while our turn is shown and nothing can move
-     * or go to its destination, arm the idle end here, as its end view
-     * would ({@link #noUnitLeft}).  FreeCol's controller stays in its goto
-     * mode when goto orders took a unit off the map (a ship sailing for
-     * Europe) and no unit is active: its {@code nextActiveUnit} then
-     * changes nothing, and the turn never ended (D acceptance D1, the
-     * turn start's goto orders).
+     * unit nor its end view) while our turn is shown: the cycle's next due
+     * unit, or with nothing to move the idle end, as its end view would
+     * ({@link #noUnitLeft}).  FreeCol's controller stays in its goto or
+     * end mode after a refused end with no active unit: its
+     * {@code nextActiveUnit} then changes nothing, and the turn never
+     * ended (D acceptance D1).
      *
      * @param why What asks (for the recorder).
      */
@@ -1296,10 +1674,19 @@ final class ClassicTurnFlow {
         final int before = this.choices;
         this.host.nextActiveUnit();
         if (this.choices != before || this.disposed || this.pending != null
-            || !this.turnStarted || this.ending || !this.host.myTurn()
-            || this.host.hasNextActiveUnit() || this.host.hasNextGoingToUnit()) {
+            || !this.turnStarted || this.ending || !this.host.myTurn()) {
             return;
         }
+        if (this.host.anyDue()) {
+            final Unit next = this.host.cycleNext(this.host.activeUnit());
+            if (next != null) {
+                ClassicFrameRecorder.event("handover", why + ": no unit came, the cycle's "
+                    + next.getId());
+                startHandOver(next, lastChangeBase());
+                return;
+            }
+        }
+        if (this.host.hasNextActiveUnit()) return;
         ClassicFrameRecorder.event("handover", why + ": no unit came, idle end");
         noUnitLeft();
     }

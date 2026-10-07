@@ -600,7 +600,7 @@ final class ClassicHud {
             } catch (RuntimeException e) {
                 plain = type;
             }
-            final int orders = ordersRow(u);
+            final int orders = ClassicUnitCycle.ordersRowShown(u);   // held until a visit (W5f)
             final List<GoodsIcon> cargo = new ArrayList<>();
             if (u.isCarrier()) {
                 for (Goods g : u.getGoodsList()) {
@@ -622,7 +622,7 @@ final class ClassicHud {
                 (t == null) ? 0 : t.getX(), (t == null) ? 0 : t.getY(),
                 orders,
                 (t == null || t.getType() == null) ? null : t.getType().getId(),
-                t != null && t.hasRoad(),
+                ClassicUnitCycle.roadShown(t),
                 person ? jobRow(type) : -1, roleless,
                 qualifier(type, role), tools,
                 u.canCarryTreasure() ? u.getTreasureAmount() : -1,
@@ -769,8 +769,8 @@ final class ClassicHud {
             return new TileFacts(tile.getX(), tile.getY(), REGION_UNKNOWN,
                 tile.isLand(), (player == null) ? null : player.getNewLandName(),
                 nation, tribe, (tile.getType() == null) ? null : tile.getType().getId(),
-                riverOf(tile), tile.hasRoad(), plowed(tile), resourceRowOf(tile),
-                sf, units, colony);
+                riverOf(tile), ClassicUnitCycle.roadShown(tile), plowed(tile),
+                resourceRowOf(tile), sf, units, colony);
         }
     }
 

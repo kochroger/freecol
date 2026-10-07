@@ -170,6 +170,14 @@ public final class InGameController extends FreeColClientHolder {
     /** Current mode for moving units. */
     private MoveMode moveMode = MoveMode.NEXT_ACTIVE_UNIT;
 
+    /**
+     * Whether the goto orders run as a batch once no unit is left to make
+     * active ({@link #updateActiveUnit}).  On by default (FreeCol); the
+     * Classic UI switches it off for its game view and moves each goto
+     * unit when its unit cycle reaches it ({@link #moveToDestination(Unit)}).
+     */
+    private boolean gotoBatch = true;
+
     /** A map of messages to be ignored. */
     private final java.util.Map<String, Integer> messagesToIgnore
         = Collections.synchronizedMap(new HashMap<>());
@@ -540,8 +548,9 @@ public final class InGameController extends FreeColClientHolder {
             return true;
         }
 
-        // No active units left.  Do the goto orders.
-        if (!doExecuteGotoOrders()) return true;
+        // No active units left.  Do the goto orders (unless the GUI runs
+        // them itself, see setGotoBatch).
+        if (gotoBatch && !doExecuteGotoOrders()) return true;
 
         // Disable active unit display, using fallback tile if supplied
         changeView(tile);
@@ -1085,6 +1094,56 @@ public final class InGameController extends FreeColClientHolder {
         if (ret) { // If no unit issues, restore previously active unit 
             changeView(active, false);
         }
+        return ret;
+    }
+
+    /**
+     * Switch the goto batch of {@link #updateActiveUnit} on or off.  The
+     * Classic UI switches it off while its game view is up, and back on
+     * when it goes.  The end of turn's goto pass ({@link #doEndTurn}) stays
+     * either way.
+     *
+     * @param on True for FreeCol's batch (the default).
+     */
+    public void setGotoBatch(boolean on) {
+        this.gotoBatch = on;
+    }
+
+    /**
+     * Whether the goto batch is on ({@link #setGotoBatch}).
+     *
+     * @return True if it is.
+     */
+    public boolean isGotoBatch() {
+        return this.gotoBatch;
+    }
+
+    /**
+     * Move one unit towards its destination (or along its trade route)
+     * now: the Classic UI's unit cycle runs each goto unit when it reaches
+     * it, with the batch off ({@link #setGotoBatch}).  Unlike
+     * {@link #executeGotoOrders} the move mode and the active unit are
+     * left alone; the trade-route messages are kept as the batch keeps
+     * them, and pending messages (a rumour's result) are shown.
+     *
+     * @param unit The {@code Unit} to move.
+     * @return True if all is well with the unit, false if it should be
+     *     selected and examined by the user.
+     */
+    public boolean moveToDestination(Unit unit) {
+        if (unit == null || !requireOurTurn()) return false;
+        final Player player = getMyPlayer();
+        if (!player.owns(unit)) return false;
+        final UnitWas unitWas = new UnitWas(unit);
+        final List<ModelMessage> messages = new ArrayList<>();
+        boolean ret = moveToDestination(unit, messages);
+        fireChanges(unitWas);
+        if (!messages.isEmpty()) {
+            turnReportMessages.addAll(messages);
+            for (ModelMessage m : messages) player.addModelMessage(m);
+            ret = false;
+        }
+        nextModelMessage(); // Might have LCR messages to display
         return ret;
     }
 

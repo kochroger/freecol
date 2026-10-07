@@ -487,8 +487,10 @@ minimap box.
     active unit (or one off the map), Space ends the turn instead, under Enter's
     condition (as in the original, where Space advances the turn once every unit
     is done).
-  - **W** → wait: `InGameController.waitUnit()` — cycle to the other units needing
-    orders and return to this one.
+  - **W** → wait: the next unit of the original's unit cycle comes at once
+    (`ClassicGUI.waitUnit`, `ClassicTurnFlow.waited`, W5f), and this one again
+    after the wrap (I: never recorded); without the turn flow
+    `InGameController.waitUnit()`.
   - **B** → build colony: `InGameController.buildColony(activeUnit)`, mirroring
     `BuildColonyAction` (the original manual: "To build a colony, press the build
     key (B)"). Guarded by the same precondition as the action's `shouldBeEnabled`
@@ -977,12 +979,13 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   European dark sub-phase is left out (spec: optional, its trigger is I).
 - **Input (W5d).** `ClassicMapViewer.inputBlocked` also holds while it is not
   our turn, our new turn is not shown yet, a pause is pending, our end request
-  is out or the turn start's goto orders run (`ClassicTurnFlow.isInputBlocked`):
+  is out, a goto unit runs or a visit is pending (`ClassicTurnFlow.isInputBlocked`):
   arrows (logged `key-blocked`), Enter, Space, W, B and map clicks do nothing.
   The arrows with nothing selected never pan (`key-ignored`); the TERRAIN
   cursor still steps.
-- **Hand-over (W5e).** When the controller brings a different unit after the
-  previous one ran out of moves (or is gone), the flow keeps it: its block
+- **Hand-over (W5e).** When the previous unit ran out of moves (or is gone),
+  the next unit of the unit cycle comes (W5f, below; the controller's choice
+  is put back): its block
   comes **500 ms** after the last change, and a view jump it needs at
   **280 ms** (`wouldJump`, `jumpTo`: the map and the minimap ring in one cut,
   the old block still up). The controller's re-selection of the shown unit
@@ -1006,28 +1009,78 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   and the wipe comes with its close. The first unit's block follows **300 ms**
   after the wipe, or with a jump the jump at **500 ms** and the block 21 ms
   later.
-- **Goto first (W5f).** If a unit has a destination at the turn start, it is
-  the one that comes up, and its goto orders (`executeGotoOrders`) run 100 ms
-  after its block; the view changes FreeCol queues for the units it moves
-  arrive after the moves and are dropped until a marker posted behind them,
-  which then asks for the next unit -- a hand-over from the last goto step.
-  When the orders stopped early (a goto unit with no path, which FreeCol
-  skips), the controller's first `nextActiveUnit` only leaves its goto mode
-  and brings nothing; the marker then asks once more (`gotosDone`), so a unit,
-  or the end view and the automatic end, always comes (FINAL "Open" item 8).
-- **A unit gone, and no choice (D acceptance D1).** When goto orders took a
-  ship off the map (sailing for Europe) and no unit is active, FreeCol's
-  controller stays in its goto mode and its `nextActiveUnit` changes
-  nothing. Where the flow asks it -- a block whose unit is gone (`usable`:
-  off the map, disposed, not ours), the goto marker's second call -- and
-  nothing came (`nextUnitOrIdle`: no `unitChosen`, no `noUnitLeft`), the
-  flow arms the automatic end itself if nothing can move or go to its
-  destination. A unit off the map that the controller re-selects
-  (`moveDirection`'s redisplay of the ship after its last move,
-  `doExecuteGotoOrders`' restore of the active unit) is no unit to show
-  when nothing else can move (`ClassicGUI.goneWithNothingLeft`): the end
-  view and `noUnitLeft`, as `changeView()`; with a unit left to move it is
-  chosen as before, and the next unit comes as a hand-over from the ship.
+- **The unit cycle (W5f, `ClassicUnitCycle`).** One order for the whole turn,
+  the original's unit list, used at the turn start, at every hand-over
+  (after a last move, a skip, a landing, a goto run, a visit) and for W:
+  the units in the order they came into the game, which FreeCol's ids keep,
+  **the start ship first** (the original's unit 0; FreeCol makes it after
+  the land units of the start, c1-edge.fsg: pioneer 5885, soldier 5886,
+  merchantman 5887). The start ship is a naval carrier whose id is within
+  the nation type's start count of the owner's lowest unit id (I: a ship
+  made right after the lowest unit once all start units before it are gone
+  would count too). Each turn starts at the head; after that the first due
+  unit after the one that has just finished, wrapping, the finished unit
+  itself last. Fits every clip sample: landfall's turn starts (ship,
+  pioneer, soldier) and landing (#13118, #13649), clip007 #1928, #3107,
+  **#3697** (the empty ship after the last passenger landed, though the
+  pioneer and the soldier could move), #4579, #5804, #6643, clip008 #32963,
+  #35590, #40835; clip006 rules out "the nearest unit first" and FreeCol's
+  tile order (U2 -> U3 at (23,16), U3 -> U4). The flow takes the cycle's
+  unit instead of the controller's at the turn start and at a hand-over and
+  puts the controller's back (`Player.putBackActiveUnit`); a click and the
+  boarding's carrier are not replaced. Due units (`kind`): ORDERS
+  (`isCandidateForNextActiveUnit`, W18's woken passengers too), GOTO (a goto
+  or trade-route unit on the map that has not run this turn), VISIT (below).
+  A goto unit that ran and is still active with moves is ORDERS: never run
+  twice (FreeCol's end-of-turn goto pass must not find it, C FINAL "Open"
+  item 9).
+- **Goto units (W5f).** FreeCol's goto batch is off in the Classic UI
+  (`InGameController.setGotoBatch(false)` while the game view is up, on
+  again when it goes; default on, the standard GUI and the AI unchanged).
+  A goto unit moves when the cycle reaches it (c6 U22, U25, U26): its block
+  500 ms after the last change (a jump at 280 ms), its first step **28 ms**
+  after the block (0-71 ms measured; at the turn start 100 ms after the
+  block, LF 1502 #24166 -> #24174), through the controller's single-unit
+  `moveToDestination(Unit)`. The controller's view changes during the run
+  are dropped until a marker posted behind them (`gotoDone`). Arrived (or
+  stopped) with moves left the unit stays the active unit: its block at
+  once ("Keine Befehle", the letter G gone), the blink timed from it (c6
+  #5123, first OFF #5146), and FreeCol's colony screen for a land unit
+  arriving at its destination colony is dropped (`dropsColonyScreen`; a
+  ship's docking screen stays). With no moves left the next unit of the
+  cycle comes 500 ms after its last change (c6 U22 #4803 -> #4839); next
+  turn it moves again at its place (#9413). With no candidate left the
+  controller's end view brings the cycle's due unit instead
+  (`ClassicTurnFlow.dueInstead`), at the turn start as its head. A unit with
+  a destination in Europe is not due; FreeCol's end-of-turn goto pass sends
+  it (I).
+- **Visits (W5f).** A unit whose road, plowing or fortification FreeCol
+  completed at our turn start gets a silent visit at its place in the
+  cycle: the jump (if needed) at the hand-over's 500 ms, the completion
+  **15 ms** later (c6 #3447 -> #3450, #4555 -> #4556, #4589 -> #4590: 471-542
+  ms, 1-3 frames), no block, no blink, the next unit 500 ms after the
+  completion. FreeCol completes the work before our turn is shown, so the
+  cycle keeps a snapshot of our end of turn (`snapshot`, `turnStarted`):
+  until the visit the map and the panel show the old letter (R, P, the black
+  F; `ordersRowShown`) and the new road is neither drawn nor listed
+  (`roadShown`). A road under construction is never drawn or listed
+  (clip008 #45293, as FreeCol's own map). Plowing and clearing change only
+  the letter at the visit; the field shows from the turn start (I). Not
+  saved: after a load (an autosave at the turn start) that turn has no
+  visits.
+- **A unit gone, and no choice (D acceptance D1).** When a ship left the map
+  (sailing for Europe) and no unit is active, FreeCol's controller may change
+  nothing on `nextActiveUnit` (left in a mode after a refused end). Where the
+  flow asks it -- a block or a goto run whose unit is gone (`usable`: off the
+  map, disposed, not ours) and the cycle has nothing after it -- and nothing
+  came (`nextUnitOrIdle`: no `unitChosen`, no `noUnitLeft`), the flow brings
+  the cycle's next due unit, or arms the automatic end itself if nothing can
+  move. A unit off the map that the controller re-selects
+  (`moveDirection`'s redisplay of the ship after its last move) is no unit
+  to show when nothing else can move or is due
+  (`ClassicGUI.goneWithNothingLeft`): the end view and `noUnitLeft`, as
+  `changeView()`; with a unit left it is chosen as before, and the next unit
+  comes as a hand-over from the ship.
 - **Robust stages.** A stage's host call that throws no longer leaves the
   pause pending with no timer and the input blocked: the next stage is
   scheduled in a `finally` (`fire`, FINAL item 6). Once the game view goes
@@ -1611,17 +1664,15 @@ are woken and offered one by one; Space keeps a unit aboard.
 - **The next unit.** When the controller re-selects the ship after the move
   (`landingDone`), the landed unit becomes the unit that has just made its
   last move (`ClassicMapViewer.finishedUnit`: no blink, no paint), and the
-  controller's next unit comes as a hand-over from it, 500 ms after its final
-  draw. It is the next one in the original's cycle after the landed unit
-  (clip007 §3.6: ship, pioneer, soldier, farmer, scout fit all six
-  hand-overs): the units in the order they came into the game, which
-  FreeCol's ids keep, a carrier counting as made before what it carries (the
-  original's start ship is its unit 0, FreeCol makes it after its
-  passengers) (`cycleAfter`, `cycleRank`; `Player.restartActiveUnitCycle`).
-  Ranked when the box is answered; FreeCol's cycle carries on from there.
-  So a woken passenger made after the landed one comes next, aboard (clip007
-  #3107, landfall #13118), and a land unit made after it before an older
-  passenger aboard (clip007 landing 2: the farmer, #5804).
+  next unit comes as a hand-over from it, 500 ms after its final draw: the
+  next one of the unit cycle after the landed unit (W5f, above; clip007
+  §3.6: ship, pioneer, soldier, farmer, scout fit all six hand-overs). So a
+  woken passenger made after the landed one comes next, aboard (clip007
+  #3107, landfall #13118), a land unit made after it before an older
+  passenger aboard (clip007 landing 2: the farmer, #5804), and after the
+  last passenger the empty start ship, before the older pioneer and soldier
+  on land (#3697; F's rank "a carrier before what it carries" put the
+  pioneer first with FreeCol's real start ids).
 - **Passengers as active units.** `Unit.isActivePassenger` (common model):
   a passenger on a carrier on the map, active, with moves, no orders, is a
   candidate for the next active unit (`isCandidateForNextActiveUnit`), so

@@ -40,7 +40,8 @@ import net.sf.freecol.util.test.FreeColTestCase;
  * conditions it fires under, the 756-ms pause after a cancelled village
  * box, the Spielzugende hand-off, the 500-ms hand-over with its jump at
  * 280 ms, the turn start (wipe, block at 300 ms or jump at 500 ms), the
- * goto units first, the input block and the turn indicator's colours;
+ * goto units and the visits at their place in the unit cycle (W5f), W
+ * and a click, the input block and the turn indicator's colours;
  * an end settled by the new turn number, a refused end, and a screen
  * behind the map.
  */
@@ -70,9 +71,9 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     /** The game side, recording what the flow asks for. */
     private static final class FakeHost implements ClassicTurnFlow.Host {
         boolean myTurn = true, blocked = false, nextActive = false,
-            nextGoingTo = false, promptPref = false, jump = false;
+            promptPref = false, jump = false;
         int turn = 1;
-        Unit firstGoingTo = null, active = null;
+        Unit active = null;
         Player me, current, next;
         final List<String> calls = new ArrayList<>();
         final List<Runnable> posted = new ArrayList<>();
@@ -81,11 +82,84 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         /** What endTurn returns: whether the controller asked the server. */
         boolean endTurnSent = true;
 
+        /**
+         * The real unit cycle on {@link #me}'s units, or null for the
+         * scripted one ({@link #kinds}, {@link #cycle}, {@link #due}):
+         * nothing due, so the controller's choice comes.
+         */
+        ClassicUnitCycle real = null;
+        /** The scripted kinds (absent: not due). */
+        final java.util.Map<Unit, ClassicUnitCycle.Kind> kinds = new java.util.HashMap<>();
+        /** The scripted next unit after an anchor (null: none). */
+        java.util.function.UnaryOperator<Unit> cycle = a -> null;
+        /** The scripted "anything due". */
+        boolean due = false;
+
         @Override public boolean myTurn() { return this.myTurn; }
         @Override public boolean blocked() { return this.blocked; }
         @Override public boolean hasNextActiveUnit() { return this.nextActive; }
-        @Override public boolean hasNextGoingToUnit() { return this.nextGoingTo; }
-        @Override public Unit firstGoingToUnit() { return this.firstGoingTo; }
+
+        @Override
+        public ClassicUnitCycle.Kind dueKind(Unit unit) {
+            return (this.real != null) ? this.real.kind(unit) : this.kinds.get(unit);
+        }
+
+        @Override
+        public Unit cycleNext(Unit anchor) {
+            return (this.real != null) ? this.real.next(anchor, this.me)
+                : this.cycle.apply(anchor);
+        }
+
+        @Override
+        public boolean anyDue() {
+            return (this.real != null) ? this.real.anyDue(this.me) : this.due;
+        }
+
+        @Override
+        public void putBack(Unit unit) {
+            this.calls.add("putBack " + unit.getId());
+        }
+
+        @Override
+        public void turnBegins() {
+            this.calls.add("begins");
+            if (this.real != null) this.real.turnStarted(this.me);
+        }
+
+        @Override
+        public void turnEnding() {
+            this.calls.add("ending");
+            if (this.real != null) this.real.snapshot(this.me);
+        }
+
+        @Override
+        public void endRefused() {
+            this.calls.add("refused");
+            if (this.real != null) this.real.endRefused();
+        }
+
+        /** What a goto run does to the game (its steps), or null. */
+        java.util.function.Consumer<Unit> onGoto = null;
+
+        @Override
+        public void runGoto(Unit unit) {
+            this.calls.add("goto " + unit.getId());
+            if (this.real != null) this.real.ran(unit);
+            if (this.onGoto != null) this.onGoto.accept(unit);
+        }
+
+        @Override
+        public void visit(Unit unit) {
+            this.calls.add("visit " + unit.getId());
+        }
+
+        @Override
+        public void visitShown(Unit unit) {
+            this.calls.add("shown " + unit.getId());
+            if (this.real != null) this.real.visited(unit);
+            if (this.flow != null) this.flow.screenChanged();   // the map's paint
+        }
+
         @Override public int turnNumber() { return this.turn; }
         @Override public boolean promptPref() { return this.promptPref; }
         @Override public Unit activeUnit() { return this.active; }
@@ -133,11 +207,6 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
             this.calls.add("endTurn");
             if (this.onEndTurn != null) this.onEndTurn.run();
             return this.endTurnSent;
-        }
-
-        @Override
-        public void runGotoOrders() {
-            this.calls.add("gotos");
         }
 
         /** What the controller does on nextActiveUnit (its view change), or null. */
@@ -802,134 +871,500 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(2, r.count("endTurn"));
     }
 
-    /**
-     * Goto units first (W5f): the goto unit comes up at the turn start,
-     * its orders run 100 ms after its block, the controller's view changes
-     * meanwhile are dropped, then the next unit is a hand-over.
-     */
-    public void testGotoFirst() {
-        final Unit g = ship(5, 5), b = ship(7, 5);
-        final Rig r = new Rig(this.game);
+    /** Our end, the AI phase, and our turn {@code turn}, not shown yet. */
+    private static void nextTurn(Rig r, int turn) {
         r.flow.endTurnNow("key");
-        r.host.turn = 2;
+        r.host.turn = turn;
         r.host.myTurn = true;
         r.host.current = r.host.me;
-        r.host.nextGoingTo = true;
-        r.host.firstGoingTo = g;
-        assertTrue(r.flow.unitChosen(b, null));
-        r.advanceMs(300);
-        assertEquals(1, r.count("activate " + g.getId()));
-        assertEquals(0, r.count("gotos"));
-        r.clock.advanceMs(100);
-        r.flow.runDue();
+    }
+
+    /** Run the stage due {@code ms} from now on the event thread, not what it posts. */
+    private static void runStage(Rig r, double ms) {
+        r.clock.advanceMs(ms);
+        assertTrue(r.flow.runDue());
         assertEquals(1, r.edt.size());
         r.edt.remove(0).run();
-        assertEquals(1, r.count("gotos"));
-        assertTrue(r.flow.ignoring());
-        assertTrue(r.flow.isInputBlocked());
-        r.host.nextGoingTo = false;
-        r.flow.screenChanged();                 // the last goto step's final draw
-        // The marker after the queued changes: the controller brings b (g
-        // has moves, still a hand-over).
-        final boolean[] taken = new boolean[1];
-        r.host.onNext = () -> taken[0] = r.flow.unitChosen(b, g);
-        r.run();
-        assertFalse(r.flow.ignoring());
-        assertEquals(1, r.count("next"));
-        assertTrue(taken[0]);
-        assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
-        r.advanceMs(500);
-        assertEquals(1, r.count("activate " + b.getId()));
     }
 
     /**
-     * FINAL "Open" item 8: after the goto orders, FreeCol's first
-     * nextActiveUnit only leaves its goto mode when the orders stopped
-     * early (a goto unit with no path, skipped) and brings no unit; the
-     * flow asks once more, and that call's unit comes up as a hand-over.
-     * The flow never sits with no unit and nothing scheduled.
+     * W5f: a goto unit moves when the unit cycle reaches it, not in a
+     * batch first (c6 U25, U26, U22).  The controller's choice (by its
+     * tile order) goes back, also when it chooses again; the goto unit's
+     * block 500 ms after the last change, its first step 28 ms after the
+     * block; meanwhile the controller's view changes are dropped and the
+     * input is blocked.  Arrived with moves left it stays the active unit
+     * (its block again, the blink timed from it: c6 #5123); with none the
+     * next unit of the cycle comes 500 ms after its last change (c6 U22
+     * #4803 -&gt; #4839).
+     */
+    public void testGotoInTheCycle() {
+        assertEquals("[ACTIVATE@500, GOTO@528]",
+                     java.util.Arrays.toString(ClassicTurnFlow.gotoStages(false)));
+        assertEquals("[JUMP@280, ACTIVATE@500, GOTO@528]",
+                     java.util.Arrays.toString(ClassicTurnFlow.gotoStages(true)));
+        // Inside the measured window (0-71 ms mid-turn).
+        assertTrue(ClassicTurnFlow.GOTO_HANDOVER_MS >= 0
+                   && ClassicTurnFlow.GOTO_HANDOVER_MS <= 71);
+
+        final Unit a = ship(5, 5), b = ship(7, 5), g = ship(9, 5), c = ship(11, 5);
+        assertEquals(Unit.UnitState.ACTIVE, g.getState());
+        final Rig r = new Rig(this.game);
+        r.host.active = a;
+        r.host.kinds.put(b, ClassicUnitCycle.Kind.ORDERS);
+        r.host.kinds.put(c, ClassicUnitCycle.Kind.ORDERS);
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.cycle = x -> (x == a) ? g : null;
+        a.setMovesLeft(0);
+        r.flow.screenChanged();                    // a's last final draw
+        r.clock.advanceMs(2);
+        assertTrue(r.flow.unitChosen(b, a));       // the controller's: b
+        assertEquals(1, r.count("putBack " + b.getId()));
+        assertSame(g, r.flow.pending().unit);
+        assertTrue(r.flow.isInputBlocked());
+        assertTrue(r.flow.unitChosen(c, a));       // it chooses again: kept
+        assertEquals(1, r.count("putBack " + c.getId()));
+        assertSame(g, r.flow.pending().unit);
+        r.advanceMs(497.9);
+        assertEquals(0, r.count("activate " + g.getId()));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("activate " + g.getId()));
+        assertEquals(0, r.count("goto " + g.getId()));
+        r.host.active = g;
+        runStage(r, 28);
+        assertEquals(1, r.count("goto " + g.getId()));
+        assertTrue(r.flow.ignoring());
+        assertSame(g, r.flow.gotoUnit());
+        assertTrue(r.flow.isInputBlocked());
+        // The marker: arrived with moves left, it stays the active unit.
+        r.run();
+        assertFalse(r.flow.ignoring());
+        assertNull(r.flow.gotoUnit());
+        assertEquals(2, r.count("activate " + g.getId()));
+        assertNull(r.flow.pending());
+        assertFalse(r.flow.isInputBlocked());
+        assertEquals(0, r.count("next"));
+
+        // No moves left after its run: the next unit of the cycle 500 ms
+        // after its last step's final draw.
+        final Unit h = ship(13, 5);
+        r.host.kinds.put(h, ClassicUnitCycle.Kind.GOTO);
+        r.host.cycle = x -> (x == g) ? h : (x == h) ? b : null;
+        g.setMovesLeft(0);
+        r.flow.screenChanged();
+        assertTrue(r.flow.unitChosen(b, g));
+        assertSame(h, r.flow.pending().unit);
+        r.advanceMs(500);
+        assertEquals(1, r.count("activate " + h.getId()));
+        r.host.active = h;
+        r.host.onGoto = u -> {
+            u.setMovesLeft(0);
+            r.flow.screenChanged();                // the last step's final draw
+        };
+        runStage(r, 28);
+        r.run();                                   // the marker
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
+        assertSame(b, r.flow.pending().unit);
+        assertEquals(1, r.count("activate " + h.getId()));
+        r.advanceMs(499.9);
+        assertEquals(0, r.count("activate " + b.getId()));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertEquals(0, r.count("next"));
+    }
+
+    /**
+     * The head of the cycle at the turn start is a goto unit (LF 1502: the
+     * empty start ship with its destination, then the pioneer): the
+     * cycle's turn begins before the choice, the controller's unit goes
+     * back, the block 300 ms after the wipe and the first step 100 ms
+     * after the block.  With only goto units (or visits) and no
+     * candidate, the controller's end view starts the turn start too.
+     */
+    public void testGotoAtTheTurnStart() {
+        final Unit b = ship(5, 5), g = ship(7, 5);
+        final Rig r = new Rig(this.game);
+        nextTurn(r, 2);
+        r.host.kinds.put(b, ClassicUnitCycle.Kind.ORDERS);
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.cycle = x -> (x == null) ? g : (x == g) ? b : null;
+        assertTrue(r.flow.unitChosen(b, null));
+        assertTrue(r.host.calls.indexOf("begins") < r.host.calls.indexOf("wipe"));
+        assertEquals(1, r.count("putBack " + b.getId()));
+        assertEquals(ClassicTurnFlow.Kind.TURN_START, r.flow.pending().kind);
+        assertSame(g, r.flow.pending().unit);
+        assertEquals("TURN_START ACTIVATE@300 GOTO@400", r.flow.pending().toString());
+        r.advanceMs(300);
+        assertEquals(1, r.count("activate " + g.getId()));
+        r.host.active = g;
+        runStage(r, 100);
+        assertEquals(1, r.count("goto " + g.getId()));
+        g.setMovesLeft(0);
+        r.run();
+        assertSame(b, r.flow.pending().unit);
+        r.advanceMs(500);
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertEquals(1, r.count("begins"));
+
+        // No candidate, the head is a goto unit: the controller's end
+        // view gives the turn start.
+        final Rig n = new Rig(this.game);
+        nextTurn(n, 2);
+        g.setMovesLeft(3);
+        n.host.due = true;
+        n.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        n.host.cycle = x -> (x == null) ? g : null;
+        assertTrue(n.flow.dueInstead(null));
+        assertEquals(1, n.count("begins"));
+        assertEquals(1, n.count("wipe"));
+        assertEquals(ClassicTurnFlow.Kind.TURN_START, n.flow.pending().kind);
+        assertSame(g, n.flow.pending().unit);
+        assertTrue(n.flow.dueInstead(null));       // again: kept
+        n.advanceMs(300);
+        assertEquals(1, n.count("activate " + g.getId()));
+
+        // Nothing due: the end view, the wipe and the automatic end.
+        final Rig e = new Rig(this.game);
+        nextTurn(e, 2);
+        assertFalse(e.flow.dueInstead(null));
+        assertEquals(1, e.count("begins"));
+        e.flow.noUnitLeft();
+        assertEquals(1, e.count("begins"));        // once per turn
+        assertEquals(1, e.count("wipe"));
+        assertEquals(ClassicTurnFlow.Kind.END_TURN, e.flow.pending().kind);
+    }
+
+    /**
+     * W5f: a unit whose road, plowing or fortification was completed at
+     * the turn start gets a silent visit (c6 #3447/#3450, #4555/#4556,
+     * #4589/#4590): the jump at the hand-over's 500 ms, the completion 15
+     * ms later, never an activation, and the next unit 500 ms after the
+     * completion; a visit after a visit; a visit at the turn start; a box
+     * holds it.
+     */
+    public void testVisitStages() {
+        assertEquals("[VISIT@500, SHOW@515]",
+                     java.util.Arrays.toString(ClassicTurnFlow.visitStages()));
+        assertEquals("[VISIT@300, SHOW@315]", java.util.Arrays.toString(
+            ClassicTurnFlow.turnStartStages(false, ClassicUnitCycle.Kind.VISIT)));
+        assertEquals("[VISIT@500, SHOW@515]", java.util.Arrays.toString(
+            ClassicTurnFlow.turnStartStages(true, ClassicUnitCycle.Kind.VISIT)));
+        // The measured windows: the jump 471-542 ms after the last change,
+        // the completion 1-3 frames after it.
+        assertTrue(ClassicTurnFlow.HANDOVER_MS >= 471 && ClassicTurnFlow.HANDOVER_MS <= 542);
+        assertTrue(ClassicTurnFlow.VISIT_SHOW_MS >= 14 && ClassicTurnFlow.VISIT_SHOW_MS <= 43);
+
+        final Unit a = ship(5, 5), v = ship(7, 5), w = ship(9, 5), c = ship(11, 5);
+        final Rig r = new Rig(this.game);
+        r.host.active = a;
+        r.host.kinds.put(v, ClassicUnitCycle.Kind.VISIT);
+        r.host.kinds.put(w, ClassicUnitCycle.Kind.VISIT);
+        r.host.kinds.put(c, ClassicUnitCycle.Kind.ORDERS);
+        r.host.cycle = x -> (x == a) ? v : (x == v) ? w : (x == w) ? c : null;
+        a.setMovesLeft(0);
+        r.flow.screenChanged();
+        assertTrue(r.flow.unitChosen(c, a));
+        assertSame(v, r.flow.pending().unit);
+        r.advanceMs(499.9);
+        assertEquals(0, r.count("visit " + v.getId()));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("visit " + v.getId()));
+        assertTrue(r.flow.isInputBlocked());
+        r.advanceMs(14.8);
+        assertEquals(0, r.count("shown " + v.getId()));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("shown " + v.getId()));
+        // The next visit, 500 ms after the completion; a box holds it.
+        assertSame(w, r.flow.pending().unit);
+        r.host.blocked = true;
+        r.advanceMs(500);
+        assertEquals(0, r.count("visit " + w.getId()));
+        r.host.blocked = false;
+        r.flow.boxClosed();
+        assertEquals(1, r.count("visit " + w.getId()));
+        r.advanceMs(15);
+        assertEquals(1, r.count("shown " + w.getId()));
+        assertSame(c, r.flow.pending().unit);
+        r.advanceMs(499.9);
+        assertEquals(0, r.count("activate " + c.getId()));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("activate " + c.getId()));
+        assertEquals(0, r.count("activate " + v.getId()));
+        assertEquals(0, r.count("activate " + w.getId()));
+
+        // A visit at the turn start: at the block's time, no block.
+        final Rig t = new Rig(this.game);
+        nextTurn(t, 2);
+        t.host.kinds.put(v, ClassicUnitCycle.Kind.VISIT);
+        t.host.kinds.put(c, ClassicUnitCycle.Kind.ORDERS);
+        t.host.cycle = x -> (x == null) ? v : (x == v) ? c : null;
+        assertTrue(t.flow.unitChosen(c, null));
+        assertSame(v, t.flow.pending().unit);
+        t.advanceMs(300);
+        assertEquals(1, t.count("visit " + v.getId()));
+        t.advanceMs(15);
+        assertEquals(1, t.count("shown " + v.getId()));
+        t.advanceMs(500);
+        assertEquals(1, t.count("activate " + c.getId()));
+        assertEquals(0, t.count("activate " + v.getId()));
+
+        // The visited unit gone before its visit: nothing stays held, the
+        // cycle goes on.
+        final Rig g = new Rig(this.game);
+        g.host.active = a;
+        g.host.kinds.put(w, ClassicUnitCycle.Kind.VISIT);
+        g.host.cycle = x -> (x == a) ? w : (x == w) ? c : null;
+        assertTrue(g.flow.unitChosen(c, a));
+        w.setLocation(this.game.getPlayerByNationId("model.nation.dutch").getHighSeas());
+        g.advanceMs(500);
+        assertEquals(0, g.count("visit " + w.getId()));
+        assertEquals(1, g.count("shown " + w.getId()));
+        assertSame(c, g.flow.pending().unit);
+    }
+
+    /**
+     * The controller brings no goto unit and no visit (its batch is off):
+     * with none of its candidates left, a due one comes through the cycle
+     * instead of the end -- from its end view ({@link
+     * ClassicTurnFlow#dueInstead}), from a tile selection, and when an
+     * armed idle end finds one due.
+     */
+    public void testIdleWaitsForDueUnits() {
+        final Unit a = ship(5, 5), g = ship(7, 5);
+        final Rig r = new Rig(this.game);
+        r.host.active = a;
+        a.setMovesLeft(0);
+        r.host.due = true;
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.cycle = x -> (x == a || x == null) ? g : null;
+        r.flow.screenChanged();
+        assertTrue(r.flow.dueInstead(a));
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
+        assertSame(g, r.flow.pending().unit);
+        assertTrue(r.flow.dueInstead(a));          // again: kept
+        r.advanceMs(500);
+        assertEquals(1, r.count("activate " + g.getId()));
+        assertEquals(0, r.count("endTurn"));
+        r.host.due = false;
+        assertFalse(r.flow.dueInstead(g));
+
+        // A tile selection with a goto unit due and no candidate.
+        final Rig m = new Rig(this.game);
+        m.host.due = true;
+        m.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        m.host.cycle = x -> g;
+        m.flow.noUnitLeft();
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, m.flow.pending().kind);
+        assertSame(g, m.flow.pending().unit);
+
+        // The idle end armed; a visit becomes due before it fires: kept,
+        // the controller brings nothing, the cycle's unit comes.
+        final Rig n = new Rig(this.game);
+        n.flow.noUnitLeft();
+        assertEquals(ClassicTurnFlow.Kind.END_TURN, n.flow.pending().kind);
+        n.host.due = true;
+        n.host.kinds.put(g, ClassicUnitCycle.Kind.VISIT);
+        n.host.cycle = x -> g;
+        n.advanceMs(485);
+        assertEquals(0, n.count("endTurn"));
+        assertEquals(1, n.count("next"));
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, n.flow.pending().kind);
+        assertEquals("HANDOVER VISIT@500 SHOW@515", n.flow.pending().toString());
+    }
+
+    /**
+     * With the real unit cycle: a goto unit runs once per turn.  Its run
+     * took no step (a blocked path) and left it active with moves: it
+     * stays the player's, due as ORDERS, and is not run again (FreeCol's
+     * end-of-turn goto pass must not find it, C FINAL "Open" item 9);
+     * skipped, the cycle goes on after it; next turn it is a goto unit
+     * again, at its place (c6 #9413: the G of 1730).
+     */
+    public void testGotoRunsOncePerTurn() {
+        final Unit a = ship(5, 5), g = ship(7, 5), b = ship(9, 5);
+        g.setDestination(this.map.getTile(12, 12));
+        final Rig r = new Rig(this.game);
+        r.host.real = new ClassicUnitCycle();
+        assertSame(ClassicUnitCycle.Kind.GOTO, r.host.dueKind(g));
+        assertSame(ClassicUnitCycle.Kind.ORDERS, r.host.dueKind(b));
+        r.host.active = a;
+        a.setMovesLeft(0);
+        r.flow.screenChanged();
+        assertTrue(r.flow.unitChosen(b, a));       // the controller: b
+        assertSame(g, r.flow.pending().unit);
+        r.advanceMs(500);
+        r.host.active = g;
+        runStage(r, 28);
+        assertEquals(1, r.count("goto " + g.getId()));
+        r.run();
+        assertEquals(2, r.count("activate " + g.getId()));
+        assertNull(r.flow.pending());
+        assertSame(ClassicUnitCycle.Kind.ORDERS, r.host.dueKind(g));
+        // Space: the cycle goes on after it.
+        g.setState(Unit.UnitState.SKIPPED);
+        r.flow.screenChanged();
+        assertTrue(r.flow.unitChosen(b, g));
+        assertSame(b, r.flow.pending().unit);
+        assertEquals("HANDOVER ACTIVATE@500", r.flow.pending().toString());
+        r.advanceMs(500);
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertEquals(1, r.count("goto " + g.getId()));
+        // The next turn: a goto unit again, the head of the due units.
+        nextTurn(r, 2);
+        g.setState(Unit.UnitState.ACTIVE);         // the server's new turn
+        assertTrue(r.flow.unitChosen(b, null));
+        assertSame(g, r.flow.pending().unit);
+        assertEquals("TURN_START ACTIVATE@300 GOTO@400", r.flow.pending().toString());
+    }
+
+    /**
+     * W (I: never recorded): the cycle's next unit after the waiting one
+     * comes at once -- an ORDERS unit activated now, a goto unit with its
+     * steps, a visit with its completion; with only the waiting unit due
+     * nothing changes; blocked input takes no W.
+     */
+    public void testWaitTakesTheCycle() {
+        final Unit a = ship(5, 5), b = ship(7, 5), g = ship(9, 5), v = ship(11, 5);
+        final Rig r = new Rig(this.game);
+        r.host.active = a;
+        r.host.kinds.put(a, ClassicUnitCycle.Kind.ORDERS);
+        r.host.kinds.put(b, ClassicUnitCycle.Kind.ORDERS);
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.kinds.put(v, ClassicUnitCycle.Kind.VISIT);
+        r.host.cycle = x -> (x == a) ? b : (x == b) ? g : (x == g) ? v : a;
+        assertTrue(r.flow.waited(a));
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertNull(r.flow.pending());
+        r.host.active = b;
+        assertTrue(r.flow.waited(b));
+        assertNotNull(r.flow.pending());
+        assertFalse(r.flow.waited(b));             // blocked meanwhile
+        r.run();
+        assertEquals(1, r.count("activate " + g.getId()));
+        r.host.active = g;
+        r.advanceMs(28);                           // the step, then its marker
+        assertEquals(1, r.count("goto " + g.getId()));
+        assertEquals(2, r.count("activate " + g.getId()));   // stays: moves left
+        assertTrue(r.flow.waited(g));
+        r.run();
+        assertEquals(1, r.count("visit " + v.getId()));
+        r.advanceMs(15);
+        assertEquals(1, r.count("shown " + v.getId()));
+        r.advanceMs(1000);
+        // Only the waiting unit due: it stays.
+        final Rig s = new Rig(this.game);
+        s.host.kinds.put(a, ClassicUnitCycle.Kind.ORDERS);
+        s.host.cycle = x -> a;
+        assertTrue(s.flow.waited(a));
+        assertEquals("[]", s.host.calls.toString());
+    }
+
+    /**
+     * A click on an own unit is not replaced by the cycle's choice, also
+     * when the previous unit ran out (a plain hand-over to it); nothing is
+     * put back.  The boarding's carrier is not replaced either.
+     */
+    public void testClickIsNotReplaced() {
+        final Unit a = ship(5, 5), c = ship(7, 5), g = ship(9, 5);
+        final Rig r = new Rig(this.game);
+        r.host.active = a;
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.kinds.put(c, ClassicUnitCycle.Kind.GOTO);
+        r.host.cycle = x -> g;
+        assertFalse(r.flow.unitClicked(c, a));     // a still has moves: at once
+        a.setMovesLeft(0);
+        assertTrue(r.flow.unitClicked(c, a));
+        assertSame(c, r.flow.pending().unit);
+        assertEquals("HANDOVER ACTIVATE@500", r.flow.pending().toString());
+        assertEquals(0, r.count("putBack " + c.getId()));
+        r.flow.noUnitLeft();
+        assertTrue(r.flow.carrierChosen(c, a));
+        assertSame(c, r.flow.pending().unit);
+        assertEquals("HANDOVER ACTIVATE@128", r.flow.pending().toString());
+    }
+
+    /**
+     * FreeCol's goto unit with no path is skipped by its controller: after
+     * the run the cycle's next unit comes as a hand-over.  With nothing
+     * else due the controller's end view arms the automatic end, and when
+     * it chooses nothing at all (left in a mode) the flow arms it itself
+     * (FINAL "Open" item 8): it never sits with no unit and nothing
+     * scheduled.  Disposed meanwhile, the marker does nothing.
      */
     public void testGotoWithoutPathStillBringsAUnit() {
         final Unit g = ship(5, 5), b = ship(7, 5);
         final Rig r = new Rig(this.game);
-        r.flow.endTurnNow("key");
-        r.host.turn = 2;
-        r.host.myTurn = true;
-        r.host.current = r.host.me;
-        r.host.nextGoingTo = true;
-        r.host.firstGoingTo = g;
-        assertTrue(r.flow.unitChosen(b, null));
+        nextTurn(r, 2);
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.kinds.put(b, ClassicUnitCycle.Kind.ORDERS);
+        r.host.cycle = x -> (x == null) ? g : (x == g) ? b : null;
+        r.host.onGoto = u -> u.setState(Unit.UnitState.SKIPPED);   // no path
+        assertTrue(r.flow.unitChosen(g, null));
         r.advanceMs(300);
-        r.clock.advanceMs(100);
-        r.flow.runDue();
-        r.edt.remove(0).run();                  // the goto orders: g has no path
-        assertEquals(1, r.count("gotos"));
-        r.host.nextGoingTo = false;
-        r.host.nextActive = true;
-        // The controller: the first call brings nothing, the second b.
-        final int[] calls = new int[1];
-        r.host.onNext = () -> {
-            if (++calls[0] == 2) r.flow.unitChosen(b, g);
-        };
+        runStage(r, 100);
+        assertEquals(1, r.count("goto " + g.getId()));
         r.run();
-        assertEquals(2, r.count("next"));
         assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
+        assertSame(b, r.flow.pending().unit);
         r.advanceMs(500);
         assertEquals(1, r.count("activate " + b.getId()));
         assertFalse(r.flow.isInputBlocked());
+        assertEquals(0, r.count("next"));
 
-        // No unit left at all: the second call's end view arms the
-        // automatic end.
+        // Nothing else due: the controller's end view arms the end.
+        g.setState(Unit.UnitState.ACTIVE);
         final Rig n = new Rig(this.game);
-        n.flow.endTurnNow("key");
-        n.host.turn = 2;
-        n.host.myTurn = true;
-        n.host.current = n.host.me;
-        n.host.nextGoingTo = true;
-        n.host.firstGoingTo = g;
+        nextTurn(n, 2);
+        n.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        n.host.cycle = x -> (x == null) ? g : null;
+        n.host.onGoto = u -> u.setState(Unit.UnitState.SKIPPED);
+        n.host.onNext = () -> {
+            n.host.active = null;
+            n.flow.noUnitLeft();
+        };
         assertTrue(n.flow.unitChosen(g, null));
         n.advanceMs(300);
-        n.clock.advanceMs(100);
-        n.flow.runDue();
-        n.edt.remove(0).run();
-        n.host.nextGoingTo = false;
-        final int[] ncalls = new int[1];
-        n.host.onNext = () -> {
-            if (++ncalls[0] == 2) {
-                n.host.active = null;
-                n.flow.noUnitLeft();
-            }
-        };
+        runStage(n, 100);
         n.run();
-        assertEquals(2, n.count("next"));
+        assertEquals(1, n.count("next"));
         assertEquals(ClassicTurnFlow.Kind.END_TURN, n.flow.pending().kind);
 
+        // The controller chooses nothing: the flow arms the end itself.
+        g.setState(Unit.UnitState.ACTIVE);
+        final Rig q = new Rig(this.game);
+        nextTurn(q, 2);
+        q.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        q.host.cycle = x -> (x == null) ? g : null;
+        q.host.onGoto = u -> u.setState(Unit.UnitState.SKIPPED);
+        assertTrue(q.flow.unitChosen(g, null));
+        q.advanceMs(300);
+        runStage(q, 100);
+        q.run();
+        assertEquals(1, q.count("next"));
+        assertEquals(ClassicTurnFlow.Kind.END_TURN, q.flow.pending().kind);
+        q.advanceMs(485);
+        assertEquals(2, q.count("endTurn"));
+
         // Disposed meanwhile (the game view went): the marker does nothing.
+        g.setState(Unit.UnitState.ACTIVE);
         final Rig d = new Rig(this.game);
-        d.flow.endTurnNow("key");
-        d.host.turn = 2;
-        d.host.myTurn = true;
-        d.host.current = d.host.me;
-        d.host.nextGoingTo = true;
-        d.host.firstGoingTo = g;
+        nextTurn(d, 2);
+        d.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        d.host.cycle = x -> (x == null) ? g : null;
         assertTrue(d.flow.unitChosen(g, null));
         d.advanceMs(300);
-        d.clock.advanceMs(100);
-        d.flow.runDue();
-        d.edt.remove(0).run();
+        runStage(d, 100);
         d.flow.dispose();
         d.run();
         assertEquals(0, d.count("next"));
+        assertEquals(1, d.count("activate " + g.getId()));
     }
 
     /**
-     * D acceptance D1: goto orders took the goto ship off the map (a ship
-     * sailing for Europe).  At the turn start the controller ran them
-     * itself before the ship's block, and FreeCol's controller, left in
-     * its goto mode with no active unit, chooses nothing on
-     * nextActiveUnit: with nothing left to move the flow arms the
-     * automatic end itself, and the turn ends.  The same after the flow's
-     * own goto orders when both of its calls bring nothing.  With a unit
+     * D acceptance D1: the goto ship left the map (sailing for Europe)
+     * before its block, or by its own run: the cycle has nothing after it,
+     * the controller chooses nothing, and with nothing left to move the
+     * flow arms the automatic end itself, and the turn ends.  With a unit
      * left to move nothing is armed (the flow never ends a turn then).
      */
     public void testUnitGoneAndNoChoiceStillEnds() {
@@ -937,16 +1372,12 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertNotNull(dutch.getHighSeas());
         final Unit g = ship(5, 5);
         final Rig r = new Rig(this.game);
-        r.flow.endTurnNow("key");
-        r.host.turn = 2;
-        r.host.myTurn = true;
-        r.host.current = r.host.me;
-        r.host.nextGoingTo = true;
-        r.host.firstGoingTo = g;
+        nextTurn(r, 2);
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.cycle = x -> (x == null) ? g : null;
         assertTrue(r.flow.unitChosen(g, null));
         assertEquals(ClassicTurnFlow.Kind.TURN_START, r.flow.pending().kind);
         g.setLocation(dutch.getHighSeas());     // sailed off before its block
-        r.host.nextGoingTo = false;
         r.advanceMs(300);                       // the block: gone, nothing chosen
         assertEquals(0, r.count("activate " + g.getId()));
         assertEquals(1, r.count("next"));
@@ -957,26 +1388,20 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         r.advanceMs(0.2);
         assertEquals(2, r.count("endTurn"));
 
-        // The flow's own goto orders take it off; both calls bring nothing.
+        // Its own run takes it off; nothing comes.
         final Unit h = ship(7, 5);
         final Rig n = new Rig(this.game);
-        n.flow.endTurnNow("key");
-        n.host.turn = 2;
-        n.host.myTurn = true;
-        n.host.current = n.host.me;
-        n.host.nextGoingTo = true;
-        n.host.firstGoingTo = h;
+        nextTurn(n, 2);
+        n.host.kinds.put(h, ClassicUnitCycle.Kind.GOTO);
+        n.host.cycle = x -> (x == null) ? h : null;
+        n.host.onGoto = u -> u.setLocation(dutch.getHighSeas());
         assertTrue(n.flow.unitChosen(h, null));
         n.advanceMs(300);
         assertEquals(1, n.count("activate " + h.getId()));
-        n.clock.advanceMs(100);
-        n.flow.runDue();
-        h.setLocation(dutch.getHighSeas());
-        n.host.nextGoingTo = false;
-        n.edt.remove(0).run();                  // the goto orders
-        assertEquals(1, n.count("gotos"));
-        n.run();                                // their marker
-        assertEquals(2, n.count("next"));
+        runStage(n, 100);
+        assertEquals(1, n.count("goto " + h.getId()));
+        n.run();                                // the marker
+        assertEquals(1, n.count("next"));
         assertEquals(ClassicTurnFlow.Kind.END_TURN, n.flow.pending().kind);
         n.advanceMs(485);
         assertEquals(2, n.count("endTurn"));
@@ -984,15 +1409,11 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         // A unit left to move: no end armed.
         final Unit k = ship(9, 5);
         final Rig m = new Rig(this.game);
-        m.flow.endTurnNow("key");
-        m.host.turn = 2;
-        m.host.myTurn = true;
-        m.host.current = m.host.me;
-        m.host.nextGoingTo = true;
-        m.host.firstGoingTo = k;
+        nextTurn(m, 2);
+        m.host.kinds.put(k, ClassicUnitCycle.Kind.GOTO);
+        m.host.cycle = x -> (x == null) ? k : null;
         assertTrue(m.flow.unitChosen(k, null));
         k.setLocation(dutch.getHighSeas());
-        m.host.nextGoingTo = false;
         m.host.nextActive = true;
         m.advanceMs(300);
         assertEquals(1, m.count("next"));
@@ -1203,13 +1624,16 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         r.flow.dispose();
         r.host.calls.clear();
         r.host.turn = 2;                          // a unit now would start a turn
-        r.host.nextGoingTo = true;
-        r.host.firstGoingTo = a;
+        r.host.due = true;                        // and a goto unit come
+        r.host.kinds.put(a, ClassicUnitCycle.Kind.GOTO);
+        r.host.cycle = x -> a;
         r.flow.villageBoxCancelled(null);
         r.flow.boxClosed();
         r.flow.screenChanged();
         r.flow.tick();
         r.flow.noUnitLeft();
+        assertFalse(r.flow.dueInstead(a));
+        assertFalse(r.flow.waited(a));
         assertFalse(r.flow.unitChosen(a, null));   // made active at once
         r.flow.endTurnNow("key");
         r.run();
