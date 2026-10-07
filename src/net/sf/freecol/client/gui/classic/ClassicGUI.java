@@ -5644,8 +5644,9 @@ public class ClassicGUI extends GUI {
             if (mv.lastFinalNanos() != last) due = Math.max(due, afterFinalDraw());
         }
         if (ClassicFrameRecorder.on()) {
-            ClassicFrameRecorder.event("woodcut-ask", k + " black in " + String.format(
-                java.util.Locale.ROOT, "%.1fms", (due - waitClock().now()) / 1e6));
+            ClassicFrameRecorder.event("woodcut-ask", k + ((due == 0L) ? " black at once"
+                : " black in " + String.format(java.util.Locale.ROOT, "%.1fms",
+                                               (due - waitClock().now()) / 1e6)));
         }
         return layer.showWoodcut(s, ClassicWoodcut.palette(pack, this.woodcutArt, k),
                                  due, followMs);
