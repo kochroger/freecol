@@ -1028,7 +1028,11 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   tile order (U2 -> U3 at (23,16), U3 -> U4). The flow takes the cycle's
   unit instead of the controller's at the turn start and at a hand-over and
   puts the controller's back (`Player.putBackActiveUnit`); a click and the
-  boarding's carrier are not replaced. Due units (`kind`): ORDERS
+  boarding's carrier are not replaced. After a unit that got orders and
+  kept its moves (a goto order that stopped early, F, S) the cycle's next
+  unit comes at once, as the controller's always did (`bringNow`; a
+  500-ms pause would be re-based by every blink toggle of the unit still
+  up, and never come). Due units (`kind`): ORDERS
   (`isCandidateForNextActiveUnit`, W18's woken passengers too), GOTO (a goto
   or trade-route unit on the map that has not run this turn), VISIT (below).
   A goto unit that ran and is still active with moves is ORDERS: never run

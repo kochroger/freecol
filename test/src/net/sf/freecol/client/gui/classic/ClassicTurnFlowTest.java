@@ -1284,6 +1284,66 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     }
 
     /**
+     * A unit that got orders and kept its moves (a goto order that stopped
+     * early at a region to discover, F, S) is no longer a candidate: the
+     * cycle's next unit comes at once, as the controller's would (no
+     * pause), and the controller's choice goes back.  With no candidate
+     * left the same from its end view: a due unit at once, also the goto
+     * unit itself, whose goto runs again; the previous unit keeps blinking
+     * meanwhile, and its toggles (screen changes) must not hold the unit
+     * back (live run g3-g-sq1: the hand-over to a blinking unit was
+     * re-based by every toggle and never came, the turn never ended).
+     */
+    public void testOrdersGivenBringsTheCycleAtOnce() {
+        final Unit a = ship(5, 5), b = ship(7, 5), c = ship(9, 5), g = ship(11, 5);
+        final Rig r = new Rig(this.game);
+        r.host.active = a;
+        a.setState(Unit.UnitState.SENTRY);         // S: orders, moves kept
+        assertFalse(a.isCandidateForNextActiveUnit());
+        assertTrue(a.getMovesLeft() > 0);
+        r.host.kinds.put(b, ClassicUnitCycle.Kind.ORDERS);
+        r.host.kinds.put(c, ClassicUnitCycle.Kind.ORDERS);
+        r.host.cycle = x -> (x == a) ? c : null;
+        assertTrue(r.flow.unitChosen(b, a));       // the controller's: b
+        assertEquals(1, r.count("putBack " + b.getId()));
+        assertEquals(1, r.count("activate " + c.getId()));
+        assertNull(r.flow.pending());
+        // The cycle agrees with the controller: its unit at once.
+        r.host.active = c;
+        c.setState(Unit.UnitState.SENTRY);
+        r.host.cycle = x -> b;
+        assertFalse(r.flow.unitChosen(b, c));
+
+        // No candidate left; the previous unit (its goto stopped early,
+        // moves left) blinks on: the goto unit next comes at once.
+        a.setState(Unit.UnitState.ACTIVE);
+        a.setDestination(this.map.getTile(14, 14));
+        r.host.active = a;
+        r.host.due = true;
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.cycle = x -> g;
+        assertTrue(r.flow.dueInstead(a));
+        for (int i = 0; i < 5; i++) {
+            r.flow.screenChanged();                // the blink's toggles
+            r.clock.advanceMs(1);
+        }
+        r.run();
+        assertEquals(1, r.count("activate " + g.getId()));
+        r.advanceMs(28);
+        assertEquals(1, r.count("goto " + g.getId()));
+        // The goto unit itself is the next due: its goto runs again once.
+        r.host.active = g;
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.cycle = x -> g;
+        assertTrue(r.flow.dueInstead(g));
+        r.flow.screenChanged();
+        r.run();
+        r.advanceMs(28);
+        assertEquals(2, r.count("goto " + g.getId()));
+        assertEquals(0, r.count("endTurn"));
+    }
+
+    /**
      * FreeCol's goto unit with no path is skipped by its controller: after
      * the run the cycle's next unit comes as a hand-over.  With nothing
      * else due the controller's end view arms the automatic end, and when

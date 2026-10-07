@@ -800,7 +800,7 @@ final class ClassicTurnFlow {
             startTurn(cycleChoice(null, null, "turn start, no candidate"));
             return true;
         }
-        startHandOver(cycleChoice(null, previous, "no candidate"), lastChangeBase());
+        bring(cycleChoice(null, previous, "no candidate"), previous, lastChangeBase());
         return true;
     }
 
@@ -915,7 +915,61 @@ final class ClassicTurnFlow {
             }
             return true;
         }
+        if (!fixed && previous != null && previous.hasTile()
+            && !previous.isCandidateForNextActiveUnit()) {
+            // The previous unit got orders and kept its moves (a goto
+            // order that stopped early, F, S): the controller's choice
+            // comes at once, so the cycle's does.
+            final Unit target = cycleChoice(unit, previous, "orders given");
+            if (target == unit) return false;
+            bringNow(target);
+            return true;
+        }
         return false;
+    }
+
+    /**
+     * Bring the cycle's next unit: as a hand-over (its pause from the last
+     * change) after a unit that ran out, else at once ({@link #bringNow}):
+     * a previous unit that is still up keeps blinking, and every toggle
+     * would re-base the pause (a goto order that stopped early with moves
+     * left: the hand-over never came, the turn never ended).
+     *
+     * @param next The unit.
+     * @param previous The unit that has just finished, or null.
+     * @param base When the last change was.
+     */
+    private void bring(Unit next, Unit previous, long base) {
+        if (next == null) return;
+        if (previous != null && previous == this.host.activeUnit() && !ranOut(previous)) {
+            bringNow(next);
+            return;
+        }
+        startHandOver(next, base);
+    }
+
+    /**
+     * Bring a unit of the cycle at once, with no hand-over pause (W; a
+     * unit that got orders and kept its moves): an ORDERS unit is made
+     * active now, a goto unit runs {@link #GOTO_HANDOVER_MS} after its
+     * block, a visit shows its completion {@link #VISIT_SHOW_MS} after its
+     * jump.  A goto unit that is the previous unit itself (its goto order
+     * stopped early, at a region to discover) runs again once.
+     *
+     * @param next The unit.
+     */
+    private void bringNow(Unit next) {
+        final ClassicUnitCycle.Kind k = this.host.dueKind(next);
+        final long now = this.clock.now();
+        if (k == ClassicUnitCycle.Kind.GOTO) {
+            start(new Pending(Kind.HANDOVER, next, now, new Stage(0.0, Action.ACTIVATE),
+                              new Stage(GOTO_HANDOVER_MS, Action.GOTO)));
+        } else if (k == ClassicUnitCycle.Kind.VISIT) {
+            start(new Pending(Kind.HANDOVER, next, now, new Stage(0.0, Action.VISIT),
+                              new Stage(VISIT_SHOW_MS, Action.SHOW)));
+        } else {
+            this.host.activate(next);
+        }
     }
 
     /**
@@ -938,17 +992,7 @@ final class ClassicTurnFlow {
         }
         if (next == null || next == waiting) return true;
         leavePrompt();
-        final ClassicUnitCycle.Kind k = this.host.dueKind(next);
-        final long now = this.clock.now();
-        if (k == ClassicUnitCycle.Kind.GOTO) {
-            start(new Pending(Kind.HANDOVER, next, now, new Stage(0.0, Action.ACTIVATE),
-                              new Stage(GOTO_HANDOVER_MS, Action.GOTO)));
-        } else if (k == ClassicUnitCycle.Kind.VISIT) {
-            start(new Pending(Kind.HANDOVER, next, now, new Stage(0.0, Action.VISIT),
-                              new Stage(VISIT_SHOW_MS, Action.SHOW)));
-        } else {
-            this.host.activate(next);
-        }
+        bringNow(next);
         return true;
     }
 
@@ -1379,8 +1423,9 @@ final class ClassicTurnFlow {
             // A goto unit or a visit, which the controller does not bring
             // (W5f): the cycle's next one comes.
             this.idleWanted = false;
-            final Unit next = this.host.cycleNext(this.host.activeUnit());
-            if (next != null && this.pending == null) startHandOver(next, base);
+            final Unit active = this.host.activeUnit();
+            final Unit next = this.host.cycleNext(active);
+            if (next != null && this.pending == null) bring(next, active, base);
             return;
         }
         final boolean village = this.villageCancel != 0L
@@ -1678,11 +1723,12 @@ final class ClassicTurnFlow {
             return;
         }
         if (this.host.anyDue()) {
-            final Unit next = this.host.cycleNext(this.host.activeUnit());
+            final Unit active = this.host.activeUnit();
+            final Unit next = this.host.cycleNext(active);
             if (next != null) {
                 ClassicFrameRecorder.event("handover", why + ": no unit came, the cycle's "
                     + next.getId());
-                startHandOver(next, lastChangeBase());
+                bring(next, active, lastChangeBase());
                 return;
             }
         }
