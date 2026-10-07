@@ -214,10 +214,12 @@ public class ClassicHudTest extends TestCase {
         }
         n.append("\r\n@LEVELS\r\nLv0, a camp, camps\r\nLv1, a village, villages\r\n"
                  + "Lv2, a town, towns\r\nLv3, a town, towns\r\nAll, a capital, capitals\r\n\r\n");
-        final StringBuilder l = new StringBuilder("@INFO\r\nMv:\r\nAt:\r\n\r\n@MISC\r\n");
-        for (int i = 0; i < 90; i++) {
+        final StringBuilder l = new StringBuilder("@INFO\r\nMv:\r\nAt:\r\nWith:\r\nWith:\r\n"
+            + "\r\n@CTITLE\r\nPop:\r\nCoin:\r\n\r\n@MISC\r\n");
+        for (int i = 0; i < 106; i++) {
             l.append(i == 2 ? "AA" : i == 4 ? "Exp" : i == 18 ? "Land" : i == 31 ? "Path"
-                     : i == 64 ? "Vet" : i == 82 ? "Plow" : "m" + i).append("\r\n");
+                     : i == 64 ? "Vet" : i == 82 ? "Plow" : i == 104 ? "+ More +"
+                     : "m" + i).append("\r\n");
             if (i == 36) l.append("\r\n");     // a blank line inside, as in the file
         }
         final File g = new File(dir, "GAME.TXT"), nf = new File(dir, "NAMES.TXT"),
@@ -758,6 +760,720 @@ public class ClassicHudTest extends TestCase {
         assertEquals("Mine", f.landName);
         assertEquals(0, f.units.size());
         assertEquals(ClassicHud.REGION_UNKNOWN, f.region);
+    }
+
+    // The panel's completeness (build spec W21b), on synthetic texts.
+
+    /** Hand-built unit facts with the W21b fields. */
+    private static final class F {
+        private final String type, role;
+        private int w = 8, orders = ClassicHud.ORDERS_NONE, tools = -1, moves = 3,
+            x = 1, y = 1, treasure = -1, river = 0, resource = -1;
+        private String terrain = null, dest = null;
+        private boolean road = false, plowed = false;
+        private List<ClassicHud.GoodsIcon> cargo = null;
+        private BufferedImage sprite = null;
+
+        F(String type, String role) {
+            this.type = type;
+            this.role = role;
+        }
+
+        F w(int v) { this.w = v; return this; }
+        F moves(int v) { this.moves = v; return this; }
+        F sprite(BufferedImage v) { this.sprite = v; return this; }
+        F cargo(List<ClassicHud.GoodsIcon> v) { this.cargo = v; return this; }
+        F orders(int v) { this.orders = v; return this; }
+        F tools(int v) { this.tools = v; return this; }
+        F at(int px, int py) { this.x = px; this.y = py; return this; }
+        F treasure(int v) { this.treasure = v; return this; }
+        F terrain(String v) { this.terrain = v; return this; }
+        F dest(String v) { this.orders = ClassicHud.ORDERS_GOTO; this.dest = v; return this; }
+        F extras(int r, boolean rd, boolean pl, int res) {
+            this.river = r; this.road = rd; this.plowed = pl; this.resource = res;
+            return this;
+        }
+        F cargo(int... frames) {
+            this.cargo = new java.util.ArrayList<>();
+            for (int f : frames) {
+                final boolean full = f < ClassicHud.ICON_GOODS_GREY;
+                this.cargo.add(new ClassicHud.GoodsIcon(f - (full ? ClassicHud.ICON_GOODS
+                    : ClassicHud.ICON_GOODS_GREY), full, new BufferedImage(10, 10,
+                        BufferedImage.TYPE_INT_ARGB)));
+            }
+            return this;
+        }
+
+        ClassicHud.UnitFacts build() {
+            final int job = ClassicHud.jobRow(this.type);
+            return new ClassicHud.UnitFacts((this.sprite != null) ? this.sprite
+                : new BufferedImage(this.w, 16, BufferedImage.TYPE_INT_ARGB),
+                0xFF7100, 0xAA4900, 3,
+                ClassicHud.unitRow(this.type, this.role), this.type, this.moves, this.x,
+                this.y, this.orders, this.terrain, this.road, job,
+                job >= 0 && this.role == null, ClassicHud.qualifier(this.type, this.role),
+                this.tools, this.treasure, this.dest, this.river, this.plowed,
+                this.resource, this.cargo);
+        }
+    }
+
+    /** The detail lines after the name (y 93 on). */
+    private static String details(ClassicText t, ClassicHud.UnitFacts f) {
+        final List<ClassicHud.TextLine> out = new java.util.ArrayList<>();
+        for (ClassicHud.TextLine l : ClassicHud.activeLines(t, f)) {
+            if (l.y >= ClassicHud.DETAIL_Y) out.add(l);
+        }
+        return out.toString();
+    }
+
+    /**
+     * The block's second line: the qualifier when the unit has one and no
+     * tools (clip007 #3107 the scout "Experte", #1449 the veteran
+     * "Erfahren"), else the skill (clip006 #5351 the hardy pioneer with
+     * tools "Pionier", clip005 #14827 the free-colonist soldier
+     * "Siedler", clip007 #1306 the fur-trapper pioneer).
+     */
+    public void testActiveQualifierLine() throws IOException {
+        final File dir = Files.createTempDirectory("classic-hud-w").toFile();
+        try {
+            final ClassicText t = unitTexts(dir);
+            assertEquals("[(242,93,gold) Exp, (242,100,gold) O0]",
+                details(t, new F("seasonedScout", "scout").build()));
+            assertEquals("[(242,93,gold) Vet, (242,100,gold) O0]",
+                details(t, new F("veteranSoldier", "soldier").build()));
+            assertEquals("[(242,93,gold) J20, (242,100,gold) (100, (242,107,gold) Tools), "
+                + "(242,114,gold) O0]",
+                details(t, new F("hardyPioneer", "pioneer").tools(100).build()));
+            assertEquals("[(242,93,gold) J19, (242,100,gold) O0]",
+                details(t, new F("freeColonist", "soldier").build()));
+            assertEquals("[(242,93,gold) J4, (242,100,gold) (100, (242,107,gold) Tools), "
+                + "(242,114,gold) O0]",
+                details(t, new F("expertFurTrapper", "pioneer").tools(100).build()));
+            // A roleless veteran: its skill (no qualifier without the role).
+            assertEquals("[(242,93,gold) J21, (242,100,gold) O0]",
+                details(t, new F("veteranSoldier", null).build()));
+        } finally {
+            dir.delete();
+        }
+    }
+
+    /**
+     * After the terrain, one green line each for a river, a road, plowing
+     * and a resource, in the tile mode's order, 7 apart (clip005 #14481
+     * river and road, clip006 #5351 road and plowed, clip008 #4009 road
+     * and resource).
+     */
+    public void testActiveExtrasOrder() throws IOException {
+        final File dir = Files.createTempDirectory("classic-hud-w").toFile();
+        try {
+            final ClassicText t = unitTexts(dir);
+            assertEquals("[(242,93,gold) J19, (242,100,gold) O0, (242,107) (T3), "
+                + "(242,114) (SmallRiv), (242,121) (Path), (242,128) (Plow), (242,135) (R10)]",
+                details(t, new F("freeColonist", null).terrain("model.tile.prairie")
+                    .extras(1, true, true, 10).build()));
+            assertEquals("[(242,93,gold) O0, (242,100) (F2- Woods), (242,107) (BigRiv)]",
+                details(t, new F("artillery", null).w(14).terrain("model.tile.mixedForest")
+                    .extras(2, false, false, -1).build()));
+        } finally {
+            dir.delete();
+        }
+    }
+
+    /**
+     * A goto to a colony shows the colony's name in gold instead of the
+     * orders, the flag letter stays G (clip005 #14481: the artillery's
+     * "Fur Town" at 93, no skill line; #14827: the soldier's "Base" at
+     * 100 after its skill; the blacksmith's list entry "Schmied / Base");
+     * another goto keeps the orders' word ("Ziel", I).
+     */
+    public void testGotoDestination() throws IOException {
+        final File dir = Files.createTempDirectory("classic-hud-w").toFile();
+        try {
+            final ClassicText t = unitTexts(dir);
+            final ClassicHud.UnitFacts art = new F("artillery", null).w(14)
+                .dest("Fur Town").build();
+            assertEquals("[(242,93,gold) Fur Town]", details(t, art));
+            assertEquals("G", ClassicHud.orderLetter(t, art.ordersRow));
+            assertEquals("[(242,93,gold) J19, (242,100,gold) Base]",
+                details(t, new F("freeColonist", "soldier").dest("Base").build()));
+            assertEquals("[(260,128,gold) J14, (260,134,gold) Base]", lines(
+                ClassicHud.listLines(t, new F("masterBlacksmith", null).dest("Base").build(),
+                                     124)));
+            assertEquals("[(242,93,gold) O3]",
+                details(t, new F("artillery", null).w(14).orders(ClassicHud.ORDERS_GOTO)
+                    .build()));
+        } finally {
+            dir.delete();
+        }
+    }
+
+    /**
+     * A treasure: "(Gold: 10000)" in the block (clip005 #14594), "Gold:
+     * 10000" over the orders in the list (#13993), the gold label of the
+     * status line.
+     */
+    public void testTreasureLines() throws IOException {
+        final File dir = Files.createTempDirectory("classic-hud-w").toFile();
+        try {
+            final ClassicText t = unitTexts(dir);
+            final ClassicHud.UnitFacts gold = new F("treasureTrain", null).w(14)
+                .treasure(10000).build();
+            assertEquals("[(242,93,gold) (Coin: 10000), (242,100,gold) O0]",
+                         details(t, gold));
+            assertEquals("[(260,114,gold) Coin: 10000, (260,120,gold) O0]",
+                         lines(ClassicHud.listLines(t, gold, 110)));
+        } finally {
+            dir.delete();
+        }
+    }
+
+    /**
+     * The list's names: the artillery and the wagon train by their
+     * {@code @UNIT} name (clip005 #14364, #14481); a pioneer with tools and
+     * no qualifier shows its tools without its skill (clip007 #5093, #6884);
+     * a dragoon of another skill keeps its skill (clip006 #5135); a carrier
+     * with goods only its orders, 10 below its cell (clip006 #9345).
+     */
+    public void testListNamesAndPioneer() throws IOException {
+        final File dir = Files.createTempDirectory("classic-hud-w").toFile();
+        try {
+            final ClassicText t = unitTexts(dir);
+            assertEquals("[(260,164,gold) U11, (260,170,gold) O6]", lines(
+                ClassicHud.listLines(t, new F("artillery", null).w(14)
+                    .orders(ClassicHud.ORDERS_FORTIFIED).build(), 160)));
+            assertEquals("[(260,132,gold) U12, (260,138,gold) O0]", lines(
+                ClassicHud.listLines(t, new F("wagonTrain", null).w(14).build(), 128)));
+            assertEquals("[(260,114,gold) 100, (260,121,gold) Tools, (260,127,gold) O1]",
+                lines(ClassicHud.listLines(t, new F("expertFurTrapper", "pioneer").tools(100)
+                    .orders(ClassicHud.ORDERS_SENTRY).build(), 110)));
+            assertEquals("[(260,171,gold) J5, (260,177,gold) O0]", lines(
+                ClassicHud.listLines(t, new F("expertLumberJack", "dragoon").w(14).build(),
+                                     167)));
+            final List<ClassicHud.TextLine> wagon = ClassicHud.listLines(t,
+                new F("wagonTrain", null).w(14).cargo(25, 25).build(), 173);
+            assertEquals("[(260,183,gold) O0]", lines(wagon));
+            assertEquals(191, ClassicHud.nextListY(173, wagon));
+        } finally {
+            dir.delete();
+        }
+    }
+
+    /**
+     * The places under the lines (G2 spec 4.2): clip006 #9345 (the wagon's
+     * "Mit:" 126, icons from 259 at 124; the colony N 147, sprite 137,
+     * "Mit:" 162; the list 173; "+ Weiter +" 191), clip005 #14852 (N 141,
+     * list 167, Weiter 185), clip005 #14364 (N 134, list 160 and 178, no
+     * Weiter: nothing remains), clip008 #29463 ("Mit:" 119), clip008
+     * #35590 (cargo 126, N 147) and the tile mode of clip005 #15391 (N 116,
+     * list 142, 160, 178, Weiter 196, the word at 192).
+     */
+    public void testCargoAndColonyLayout() throws IOException {
+        final File dir = Files.createTempDirectory("classic-hud-w").toFile();
+        try {
+            final ClassicText t = unitTexts(dir);
+            final ClassicHud.UnitFacts wagon = new F("wagonTrain", null).w(14)
+                .terrain("model.tile.prairie").extras(0, true, true, -1).cargo(25).build();
+            int last = last(ClassicHud.activeLines(t, wagon));
+            assertEquals(114, last);
+            final ClassicHud.UnitFacts wagon2 = new F("wagonTrain", null).w(14)
+                .cargo(25, 25).build();
+            ClassicHud.BlockLayout l = ClassicHud.blockLayout(t, last, true, true, false,
+                Arrays.asList(wagon2, wagon2));
+            assertEquals(126, l.cargoY);
+            assertEquals(147, l.colonyY);
+            assertEquals(173, l.entryY[0]);
+            assertEquals(-1, l.entryY[1]);
+            assertEquals(191, l.moreY);
+            // clip005 #14852: the soldier on Base's road and plowed plains.
+            final ClassicHud.UnitFacts soldier = new F("freeColonist", "soldier")
+                .terrain("model.tile.plains").extras(0, true, true, -1).build();
+            last = last(ClassicHud.activeLines(t, soldier));
+            assertEquals(121, last);
+            final ClassicHud.UnitFacts dragoon = new F("expertLumberJack", "dragoon")
+                .w(14).build();
+            l = ClassicHud.blockLayout(t, last, false, true, false,
+                                       Arrays.asList(dragoon, dragoon));
+            assertEquals(-1, l.cargoY);
+            assertEquals(141, l.colonyY);
+            assertEquals(167, l.entryY[0]);
+            assertEquals(185, l.moreY);
+            // clip005 #14364: two entries that fit, nothing remains: no Weiter.
+            l = ClassicHud.blockLayout(t, 114, false, true, false, Arrays.asList(
+                new F("expertFarmer", null).build(),
+                new F("artillery", null).w(14).orders(ClassicHud.ORDERS_FORTIFIED).build()));
+            assertEquals(134, l.colonyY);
+            assertEquals(160, l.entryY[0]);
+            assertEquals(178, l.entryY[1]);
+            assertEquals(-1, l.moreY);
+            // clip008 #29463 / #35590: a ship's "Mit:", and the colony after it.
+            assertEquals(119, ClassicHud.blockLayout(t, 107, true, false, false,
+                new java.util.ArrayList<>()).cargoY);
+            l = ClassicHud.blockLayout(t, 114, true, true, false, new java.util.ArrayList<>());
+            assertEquals(126, l.cargoY);
+            assertEquals(147, l.colonyY);
+            // Without a colony the list follows the last line 10 below (032).
+            l = ClassicHud.blockLayout(t, 100, false, false, false, Arrays.asList(dragoon));
+            assertEquals(110, l.entryY[0]);
+            // The tile mode of clip005 #15391: Silver City under (Biber).
+            final ClassicHud.ColonyFacts silver = new ClassicHud.ColonyFacts(null,
+                "Silver City", null);
+            final ClassicHud.UnitFacts galleon = new F("galleon", null).w(14).cargo(36, 30)
+                .build();
+            final ClassicHud.UnitFacts art = new F("artillery", null).w(14).build();
+            final ClassicHud.TileFacts tile = new ClassicHud.TileFacts(17, 45,
+                ClassicHud.REGION_UNKNOWN, true, null, 3, -1, "model.tile.mixedForest", 0,
+                true, false, 9, null, new java.util.ArrayList<>(Arrays.asList(galleon, art,
+                    art, art)), silver);
+            assertEquals(96, last(ClassicHud.tileLines(t, tile)));
+            l = ClassicHud.tileBlockLayout(t, tile);
+            assertEquals(116, l.colonyY);
+            assertEquals(142, l.entryY[0]);
+            assertEquals(160, l.entryY[1]);
+            assertEquals(178, l.entryY[2]);
+            assertEquals(-1, l.entryY[3]);
+            assertEquals(196, l.moreY);
+            assertEquals(192, ClassicHud.tileLayout(t, tile)[0]);
+        } finally {
+            dir.delete();
+        }
+    }
+
+    private static int last(List<ClassicHud.TextLine> lines) {
+        int last = ClassicHud.NAME_Y;
+        for (ClassicHud.TextLine l : lines) last = Math.max(last, l.y);
+        return last;
+    }
+
+    /**
+     * The paint: "+ Weiter +" only when an entry remains; the colony's
+     * sprite at (242, N - 10) with its name over it; the goods icons from
+     * x 259 two rows above "Mit:", 1 px apart, and in a list entry from
+     * x 260 on the cell's top row.
+     */
+    public void testColonyAndCargoPaint() throws IOException {
+        final File dir = Files.createTempDirectory("classic-hud-w").toFile();
+        try {
+            final ClassicText t = unitTexts(dir);
+            final ClassicHud.UnitFacts ship = new F("merchantman", null).w(13)
+                .terrain("model.tile.ocean").build();
+            // Icons: solid 3x2 red, 4x2 green; a 21x16 sprite, solid blue.
+            final BufferedImage red = solid(3, 2, 0xFFFF0000), green = solid(4, 2, 0xFF00FF00);
+            final List<ClassicHud.GoodsIcon> goods = Arrays.asList(
+                new ClassicHud.GoodsIcon(0, true, red), new ClassicHud.GoodsIcon(4, false, green));
+            final ClassicHud.UnitFacts carrier = new ClassicHud.UnitFacts(ship.sprite,
+                ship.fill, ship.dark, 3, ship.unitRow, "s", 3, 1, 1, ClassicHud.ORDERS_NONE,
+                "model.tile.ocean", false, -1, false, ClassicHud.QUAL_NONE, -1, -1, null,
+                0, false, -1, goods);
+            final ClassicHud.ColonyFacts colony = new ClassicHud.ColonyFacts(
+                solid(21, 16, 0xFF0000FF), "", goods);
+            final BufferedImage img = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+            final Graphics2D g = img.createGraphics();
+            ClassicHud.paintUnits(g, null, t, carrier, new java.util.ArrayList<>(), colony);
+            g.dispose();
+            // The ship: name 86, orders 93, (Oce) 100 -> "Mit:" 112, icons at 110.
+            assertEquals(0xFF0000, rgb(img, 259, 110));
+            assertEquals(0xFF0000, rgb(img, 261, 111));
+            assertEquals(0x00FF00, rgb(img, 263, 110));   // 259 + 3 + 1
+            assertEquals(0x00FF00, rgb(img, 266, 111));
+            // The colony: N = 112 + 21 = 133, sprite at (242, 123), "Mit:" 148.
+            assertEquals(0x0000FF, rgb(img, 242, 123));
+            assertEquals(0x0000FF, rgb(img, 262, 138));
+            assertEquals(0xFF0000, rgb(img, 259, 146));
+            assertEquals(0x00FF00, rgb(img, 263, 146));
+            // A carrier in the list: icons from 260 on the cell's top row.
+            final BufferedImage li = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+            final Graphics2D lg = li.createGraphics();
+            ClassicHud.paintUnits(lg, null, t, ship, Arrays.asList(carrier), null);
+            lg.dispose();
+            assertEquals(0xFF0000, rgb(li, 260, 110));
+            assertEquals(0x00FF00, rgb(li, 264, 110));
+        } finally {
+            dir.delete();
+        }
+    }
+
+    private static BufferedImage solid(int w, int h, int argb) {
+        final BufferedImage b = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) b.setRGB(x, y, argb);
+        }
+        return b;
+    }
+
+    /**
+     * The flag of the treasure, the artillery and the wagon train sits at
+     * cell + (6,0) (fill x 249-253 for cell 242: clip005 #13993, #14364,
+     * #14481, #14594, clip006 #9345); galleon and frigate keep + (9,0),
+     * the merchantman the cell's top-left.
+     */
+    public void testFlagRingOfWagonArtilleryTreasure() {
+        for (int row : new int[] { ClassicHud.UNIT_TREASURE, ClassicHud.UNIT_ARTILLERY,
+                                   ClassicHud.UNIT_WAGON }) {
+            assertEquals(new Rectangle(248, 68, 7, 9), ClassicHud.flagRing(242, 68, 14, row));
+        }
+        assertEquals(new Rectangle(251, 68, 7, 9),
+                     ClassicHud.flagRing(242, 68, 14, ClassicHud.UNIT_GALLEON));
+        assertEquals(new Rectangle(251, 68, 7, 9),
+                     ClassicHud.flagRing(242, 68, 13, ClassicHud.UNIT_FRIGATE));
+        assertEquals(new Rectangle(242, 68, 7, 9), ClassicHud.flagRing(242, 68, 13, 14));
+        assertEquals(11, ClassicHud.unitRow("artillery", null));
+        assertEquals(12, ClassicHud.unitRow("wagonTrain", null));
+        assertEquals(10, ClassicHud.unitRow("treasureTrain", null));
+    }
+
+    /**
+     * The colony sprite's flag: its #4159A6 pixels take the nation's fill,
+     * its #34499E pixels the dark shade (Holland orange, V); France keeps
+     * the sprite's blue (V, Quebec); nothing else changes; cached.
+     */
+    public void testColonyFlagRecolour() {
+        final BufferedImage sp = new BufferedImage(21, 16, BufferedImage.TYPE_INT_ARGB);
+        for (int i = 0; i < 11; i++) sp.setRGB(i, 0, 0xFF000000 | ClassicHud.COLONY_FLAG_RGB);
+        for (int i = 0; i < 4; i++) sp.setRGB(i, 1, 0xFF000000 | ClassicHud.COLONY_FLAG_DARK_RGB);
+        sp.setRGB(5, 5, 0xFF123456);
+        final Game game = FreeColTestCase.getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        final BufferedImage nl = ClassicHud.colonyFlag(sp, dutch);
+        assertNotSame(sp, nl);
+        assertSame(nl, ClassicHud.colonyFlag(sp, dutch));
+        for (int i = 0; i < 11; i++) assertEquals(0xFF7100, rgb(nl, i, 0));
+        for (int i = 0; i < 4; i++) assertEquals(0xAA4900, rgb(nl, i, 1));
+        assertEquals(0x123456, rgb(nl, 5, 5));
+        assertEquals(0, nl.getRGB(20, 15) >>> 24);
+        assertSame(sp, ClassicHud.colonyFlag(sp, french));
+        assertNull(ClassicHud.colonyFlag(null, dutch));
+    }
+
+    /**
+     * The facts of live units: a treasure's amount, a goto to a colony
+     * names it, a wagon with 150 cotton and 40 furs has one icon per hold
+     * by goods type, the full hold first; a colony's "Mit:" row from its
+     * warehouse, coloured from 100, at most five.
+     */
+    public void testUnitAndColonyFactsOfLiveUnits() {
+        final Game game = FreeColTestCase.getStandardGame();
+        final net.sf.freecol.common.model.Specification spec = FreeColTestCase.spec();
+        final net.sf.freecol.common.model.Map map = FreeColTestCase.getTestMap(
+            spec.getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final net.sf.freecol.common.model.Colony colony
+            = net.sf.freecol.util.test.FreeColTestUtils.getColonyBuilder().player(dutch)
+                .colonyName("Base").colonyTile(map.getTile(5, 8)).build();
+        final java.util.function.IntFunction<BufferedImage> icons
+            = n -> new BufferedImage(n % 7 + 3, 9, BufferedImage.TYPE_INT_ARGB);
+        // A treasure train with 10000 gold.
+        final net.sf.freecol.common.model.Unit gold = new net.sf.freecol.server.model.ServerUnit(
+            game, map.getTile(6, 8), dutch, spec.getUnitType("model.unit.treasureTrain"));
+        gold.setTreasureAmount(10000);
+        ClassicHud.UnitFacts f = ClassicHud.UnitFacts.of(gold, null, icons);
+        assertEquals(10000, f.treasure);
+        assertEquals(ClassicHud.UNIT_TREASURE, f.unitRow);
+        // A wagon train going to Base, with 150 cotton: a full and a part hold.
+        final net.sf.freecol.common.model.Unit wagon = new net.sf.freecol.server.model.ServerUnit(
+            game, map.getTile(7, 8), dutch, spec.getUnitType("model.unit.wagonTrain"));
+        wagon.setDestination(colony);
+        wagon.addGoods(spec.getGoodsType("model.goods.cotton"), 150);
+        f = ClassicHud.UnitFacts.of(wagon, null, icons);
+        assertEquals(ClassicHud.ORDERS_GOTO, f.ordersRow);
+        assertEquals("Base", f.destination);
+        assertEquals("[025, 041]", f.cargo.toString());
+        assertNotNull(f.cargo.get(0).icon);
+        assertEquals(-1, f.treasure);
+        // Without a picture lookup: the icons' rows, no pictures.
+        assertNull(ClassicHud.UnitFacts.of(wagon, null).cargo.get(0).icon);
+        // A galleon's holds by goods type, a full hold before a part one.
+        final net.sf.freecol.common.model.Unit galleon
+            = new net.sf.freecol.server.model.ServerUnit(game, null, dutch,
+                spec.getUnitType("model.unit.galleon"));
+        galleon.addGoods(spec.getGoodsType("model.goods.ore"), 100);
+        galleon.addGoods(spec.getGoodsType("model.goods.furs"), 40);
+        galleon.addGoods(spec.getGoodsType("model.goods.cotton"), 150);
+        assertEquals("[025, 041, 042, 028]",
+                     ClassicHud.UnitFacts.of(galleon, null, icons).cargo.toString());
+        assertNull(ClassicHud.UnitFacts.of(galleon, null, icons).destination);
+        // The colony's row: 7 goods in store, the first five by row.
+        for (String[] g : new String[][] { { "food", "120" }, { "sugar", "5" },
+                { "furs", "100" }, { "lumber", "40" }, { "ore", "99" }, { "horses", "60" },
+                { "muskets", "200" } }) {
+            colony.addGoods(spec.getGoodsType("model.goods." + g[0]), Integer.parseInt(g[1]));
+        }
+        final ClassicHud.ColonyFacts c = ClassicHud.ColonyFacts.of(colony, null, icons);
+        assertEquals("Base", c.name);
+        assertEquals("[022, 039, 026, 043, 044]", c.goods.toString());
+        assertNull(c.sprite);
+    }
+
+    // The golden check of the unit block against the clips (build spec W21b).
+
+    /** One golden frame: the clip, the frame, its stored file, what the panel shows. */
+    private static final class Golden {
+        final String clip;
+        final int frame, stored;
+        ClassicHud.UnitFacts active;
+        List<ClassicHud.UnitFacts> list = new java.util.ArrayList<>();
+        ClassicHud.ColonyFacts colony;
+        ClassicHud.TileFacts tile;
+        int word = -1;
+
+        Golden(String clip, int frame, int stored) {
+            this.clip = clip;
+            this.frame = frame;
+            this.stored = stored;
+        }
+
+        Golden active(F f) { this.active = f.build(); return this; }
+        Golden list(F... fs) {
+            for (F f : fs) this.list.add(f.build());
+            return this;
+        }
+        Golden colony(ClassicHud.ColonyFacts c) { this.colony = c; return this; }
+    }
+
+    /** An ICONS.SS frame of the pack. */
+    private static BufferedImage icon(ClassicPackFiles pack, int n) {
+        return pack.image(ClassicPackFiles.ssKey(String.format("ICONS.SS.%03d", n)));
+    }
+
+    /** The goods icons of these ICONS.SS frames (022-037 coloured, 038-053 grey). */
+    private static List<ClassicHud.GoodsIcon> goods(ClassicPackFiles pack, int... frames) {
+        final List<ClassicHud.GoodsIcon> out = new java.util.ArrayList<>();
+        for (int n : frames) {
+            final boolean full = n < ClassicHud.ICON_GOODS_GREY;
+            out.add(new ClassicHud.GoodsIcon(n - (full ? ClassicHud.ICON_GOODS
+                : ClassicHud.ICON_GOODS_GREY), full, icon(pack, n)));
+        }
+        return out;
+    }
+
+    /** A Dutch colony as the panel shows it: ICONS.SS sprite, flag recoloured. */
+    private static ClassicHud.ColonyFacts colony(ClassicPackFiles pack, Game game, int sprite,
+                                                 String name, int... goods) {
+        return new ClassicHud.ColonyFacts(ClassicHud.colonyFlag(icon(pack, sprite),
+            game.getPlayerByNationId("model.nation.dutch")), name, goods(pack, goods));
+    }
+
+    /**
+     * The frames, their facts read off the frames (the panel's words,
+     * G2Rows/G2Goods/G2Best in the G2 spec), the sprites by number.
+     */
+    private static List<Golden> goldenFrames(ClassicPackFiles pack, Game game) {
+        final int none = ClassicHud.ORDERS_NONE, sentry = ClassicHud.ORDERS_SENTRY,
+            fortified = ClassicHud.ORDERS_FORTIFIED;
+        final java.util.function.IntFunction<BufferedImage> s = n -> icon(pack, n);
+        final java.util.function.Supplier<F> ship = () -> new F("merchantman", null)
+            .sprite(s.apply(6)).terrain("model.tile.ocean");
+        final java.util.function.Supplier<F> scout = () -> new F("seasonedScout", "scout")
+            .sprite(s.apply(103));
+        final java.util.function.Supplier<F> vet = () -> new F("veteranSoldier", "soldier")
+            .sprite(s.apply(102));
+        final java.util.function.Supplier<F> farmer = () -> new F("expertFarmer", null)
+            .sprite(s.apply(81));
+        final java.util.function.Supplier<F> art = () -> new F("artillery", null)
+            .sprite(s.apply(9));
+        final java.util.function.Supplier<F> wagon = () -> new F("wagonTrain", null)
+            .sprite(s.apply(8));
+        final java.util.function.Supplier<F> gold = () -> new F("treasureTrain", null)
+            .sprite(s.apply(16)).treasure(10000);
+        final java.util.function.Supplier<F> galleon = () -> new F("galleon", null)
+            .sprite(s.apply(7)).cargo(goods(pack, 36, 30, 30, 30, 26));
+        final java.util.function.Supplier<F> soldier = () -> new F("freeColonist", "soldier")
+            .sprite(s.apply(74));
+        final List<Golden> out = new java.util.ArrayList<>();
+        // clip007: the ship and its passengers, the scout and the farmer.
+        out.add(new Golden("clip007", 723, 723)
+            .active(ship.get().moves(15).at(44, 53).terrain("model.tile.highSeas"))
+            .list(scout.get().orders(sentry), farmer.get().orders(sentry)));
+        out.add(new Golden("clip007", 3107, 3107)
+            .active(scout.get().moves(12).at(48, 45).terrain("model.tile.ocean"))
+            .list(ship.get()));
+        out.add(new Golden("clip007", 4281, 4281)
+            .active(ship.get().moves(6).at(48, 45)).list(vet.get().orders(sentry)));
+        out.add(new Golden("clip007", 5093, 5093)
+            .active(ship.get().moves(15).at(50, 45))
+            .list(new F("expertFurTrapper", "pioneer").sprite(s.apply(73)).tools(100)
+                      .orders(sentry), vet.get().orders(sentry)));
+        out.add(new Golden("clip007", 6643, 6643)
+            .active(scout.get().moves(12).at(48, 44).terrain("model.tile.mixedForest")));
+        out.add(new Golden("clip007", 6989, 6989)
+            .active(ship.get().moves(15).at(50, 45))
+            .list(scout.get().orders(sentry), farmer.get()));
+        out.add(new Golden("clip007", 1306, 1306)
+            .active(new F("expertFurTrapper", "pioneer").sprite(s.apply(73)).tools(100)
+                    .at(50, 44).terrain("model.tile.rainForest")));
+        out.add(new Golden("clip007", 1449, 1449)
+            .active(vet.get().at(49, 45).terrain("model.tile.coniferForest")
+                    .extras(0, false, false, 10)));
+        out.add(new Golden("clip007", 5804, 5804)
+            .active(farmer.get().at(49, 44).terrain("model.tile.coniferForest")));
+        // clip005: the treasure, the artillery's goto, the colonies.
+        out.add(new Golden("clip005", 13993, 13993)
+            .active(vet.get().at(27, 19).terrain("model.tile.broadleafForest"))
+            .list(gold.get()));
+        out.add(new Golden("clip005", 14594, 14594)
+            .active(gold.get().at(27, 19).terrain("model.tile.broadleafForest"))
+            .list(vet.get()));
+        out.add(new Golden("clip005", 14481, 14481)
+            .active(art.get().at(14, 55).dest("Fur Town").terrain("model.tile.mixedForest")
+                    .extras(1, true, false, -1))
+            .list(wagon.get()));
+        out.add(new Golden("clip005", 14827, 14827)
+            .active(soldier.get().at(38, 56).dest("Base").terrain("model.tile.hills")
+                    .extras(0, true, false, -1))
+            .list(new F("masterBlacksmith", null).sprite(s.apply(95)).dest("Base")));
+        out.add(new Golden("clip005", 14364, 14364)
+            .active(new F("expertFurTrapper", null).sprite(s.apply(85)).at(30, 60)
+                    .terrain("model.tile.broadleafForest").extras(0, true, false, -1))
+            .colony(colony(pack, game, 3, "Fur City", 50, 30, 38, 43))
+            .list(farmer.get(), art.get().orders(fortified)));
+        out.add(new Golden("clip005", 14852, 14852)
+            .active(soldier.get().moves(2).at(37, 55).terrain("model.tile.plains")
+                    .extras(0, true, true, -1))
+            .colony(colony(pack, game, 2, "Base", 50, 48, 49, 25, 30))
+            .list(new F("expertLumberJack", "dragoon").sprite(s.apply(76)), farmer.get()));
+        // clip006: the same artillery, Base again, Cotton Town, Northern Sugar ...
+        out.add(new Golden("clip006", 4716, 4716)
+            .active(art.get().at(14, 55).dest("Fur Town").terrain("model.tile.mixedForest")
+                    .extras(1, true, false, -1))
+            .list(wagon.get()));
+        out.add(new Golden("clip006", 5135, 5127)
+            .active(soldier.get().moves(2).at(37, 55).terrain("model.tile.plains")
+                    .extras(0, true, true, -1))
+            .colony(colony(pack, game, 2, "Base", 50, 30, 48, 49, 25))
+            .list(new F("expertLumberJack", "dragoon").sprite(s.apply(76)), farmer.get()));
+        out.add(new Golden("clip006", 9345, 9343)
+            .active(wagon.get().moves(6).at(46, 57).terrain("model.tile.prairie")
+                    .extras(0, true, true, -1).cargo(goods(pack, 25)))
+            .colony(colony(pack, game, 1, "Cotton Town", 30, 49, 25, 38, 27))
+            .list(wagon.get().cargo(goods(pack, 25, 25)), farmer.get()));
+        out.add(new Golden("clip006", 5351, 5351)
+            .active(new F("hardyPioneer", "pioneer").sprite(s.apply(101)).tools(100)
+                    .at(18, 36).terrain("model.tile.grassland").extras(0, true, true, -1))
+            .colony(colony(pack, game, 3, "Northern Sugar", 47, 27, 40, 38))
+            .list(new F("masterFurTrader", "dragoon").sprite(s.apply(76))
+                      .orders(fortified)));
+        out.add(new Golden("clip006", 5517, 5517)
+            .active(new F("freeColonist", null).sprite(s.apply(100)).at(33, 55)
+                    .terrain("model.tile.grassland").extras(0, true, true, -1))
+            .colony(colony(pack, game, 0, "Horse Town", 30, 50, 38, 40, 37))
+            .list(art.get().orders(fortified), farmer.get()));
+        out.add(new Golden("clip006", 5597, 5597)
+            .active(art.get().at(17, 45).terrain("model.tile.mixedForest")
+                    .extras(0, true, false, 8))
+            .colony(colony(pack, game, 2, "Silver City", 50, 47, 30, 28, 26))
+            .list(galleon.get(), art.get().orders(fortified), farmer.get()));
+        // clip008: a ship's holds, a pioneer and a ship in Base.
+        out.add(new Golden("clip008", 29463, 29463)
+            .active(ship.get().moves(12).at(47, 47).extras(0, false, false, 7)
+                    .cargo(goods(pack, 36))));
+        out.add(new Golden("clip008", 32928, 32928)
+            .active(ship.get().moves(0).at(49, 46).cargo(goods(pack, 44, 42))));
+        out.add(new Golden("clip008", 35590, 35590)
+            .active(ship.get().moves(15).at(49, 45).terrain("model.tile.coniferForest")
+                    .extras(0, true, false, 10).cargo(goods(pack, 44, 42)))
+            .colony(colony(pack, game, 3, "Base", 42, 38, 36, 53)));
+        out.add(new Golden("clip008", 4009, 4009)
+            .active(new F("expertFurTrapper", "pioneer").sprite(s.apply(73)).tools(100)
+                    .moves(0).at(49, 45).terrain("model.tile.coniferForest")
+                    .extras(0, true, false, 10))
+            .colony(colony(pack, game, 3, "Base", 53)));
+        // The tile mode (Spielzugende) on Silver City, clip005 #15391.
+        final Golden c15391 = new Golden("clip005", 15391, 15391);
+        c15391.tile = new ClassicHud.TileFacts(17, 45, 2, true, null, 3, -1,
+            "model.tile.mixedForest", 0, true, false, 8, null,
+            new java.util.ArrayList<>(Arrays.asList(galleon.get().build(), art.get().build(),
+                art.get().orders(fortified).build(), farmer.get().build())),
+            colony(pack, game, 2, "Silver City", 47, 50, 45, 28, 26));
+        c15391.word = ClassicHud.PROMPT_ON_RGB;
+        out.add(c15391);
+        // The tile mode on Prov., dago-colony2 #4045 (no word).
+        final Golden prov = new Golden("dago-colony2", 4045, 4045);
+        prov.tile = new ClassicHud.TileFacts(28, 20, 2, true, null, 3, -1,
+            "model.tile.mixedForest", 0, true, false, -1, null, null,
+            colony(pack, game, 3, "Prov.", 42, 38, 49, 46));
+        out.add(prov);
+        return out;
+    }
+
+    /**
+     * The golden check (build spec W21b, G2 spec 4.7): each frame's panel
+     * below the status lines (x 241-319, y 64-199), drawn from hand-built
+     * facts with the pack's FONTTINY, texts, wood and sprites, must give
+     * the frame's pixels, 0 px off.  The original's mouse arrow (frame
+     * indices 0, 7, 15 where we differ, in one cluster at most 12x20) is
+     * counted and excused.  Skipped without -Dclassic.clips or the pack.
+     */
+    public void testPanelGoldenAgainstTheClips() throws Exception {
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        if (clips == null || !new File(clips).isDirectory()) {
+            System.err.println("testPanelGoldenAgainstTheClips skipped: no recordings (-D"
+                + ClassicTerrainGoldenTest.CLIPS_PROPERTY + ")");
+            return;
+        }
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicText t = (pack == null) ? null : ClassicText.load(pack);
+        final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
+        final BufferedImage wood = (pack == null) ? null : pack.image(ClassicMenuBar.WOOD_KEY);
+        if (t == null || tiny == null || wood == null || icon(pack, 6) == null) {
+            System.err.println("testPanelGoldenAgainstTheClips skipped: no pack (ant classic-assets)");
+            return;
+        }
+        final Game game = FreeColTestCase.getStandardGame();
+        final StringBuilder fails = new StringBuilder(), report = new StringBuilder();
+        int compared = 0;
+        for (Golden c : goldenFrames(pack, game)) {
+            final File f = new File(new File(clips, c.clip),
+                                    String.format("frame_%06d.png", c.stored));
+            final BufferedImage frame = javax.imageio.ImageIO.read(f);
+            assertNotNull(f.toString(), frame);
+            final BufferedImage canvas = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+            final Graphics2D g = canvas.createGraphics();
+            ClassicHud.paintChrome(g, wood);
+            if (c.tile != null) {
+                ClassicHud.paintTileMode(g, tiny, t, c.tile, c.word);
+            } else {
+                ClassicHud.paintUnits(g, tiny, t, c.active, c.list, c.colony);
+            }
+            g.dispose();
+            final java.awt.image.Raster idx
+                = (frame.getColorModel() instanceof java.awt.image.IndexColorModel)
+                ? frame.getRaster() : null;
+            int diff = 0, arrow = 0, ax0 = 999, ay0 = 999, ax1 = -1, ay1 = -1;
+            final StringBuilder where = new StringBuilder();
+            for (int y = 64; y < 200; y++) {
+                for (int x = 241; x < 320; x++) {
+                    compared++;
+                    final int want = frame.getRGB(x, y) & 0xFFFFFF;
+                    final int got = canvas.getRGB(x, y) & 0xFFFFFF;
+                    if (want == got) continue;
+                    final int i = (idx == null) ? -1 : idx.getSample(x, y, 0);
+                    if (i == 0 || i == 7 || i == 15) {
+                        arrow++;
+                        ax0 = Math.min(ax0, x);
+                        ay0 = Math.min(ay0, y);
+                        ax1 = Math.max(ax1, x);
+                        ay1 = Math.max(ay1, y);
+                    } else {
+                        if (diff < 6) {
+                            where.append(String.format(" (%d,%d) %06X/%06X", x, y, want, got));
+                        }
+                        diff++;
+                    }
+                }
+            }
+            final boolean cluster = arrow == 0 || (ax1 - ax0 < 12 && ay1 - ay0 < 20);
+            report.append(String.format("%s #%d: %d px off, arrow %d%s%n", c.clip, c.frame,
+                diff, arrow, (arrow == 0) ? ""
+                    : String.format(" in (%d,%d)-(%d,%d)", ax0, ay0, ax1, ay1)));
+            if (diff > 0 || !cluster) {
+                fails.append(c.clip).append(" #").append(c.frame).append(": ").append(diff)
+                    .append(" px off").append(where)
+                    .append(cluster ? "" : ", excused pixels spread").append('\n');
+            }
+        }
+        System.err.print("testPanelGoldenAgainstTheClips (" + compared + " px):\n" + report);
+        assertEquals(fails.toString(), "", fails.toString());
     }
 
     /** The HUD canvas at 1920x1080: scale 5, strip/map/panel on one grid. */

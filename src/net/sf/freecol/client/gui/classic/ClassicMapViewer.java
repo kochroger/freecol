@@ -2617,8 +2617,12 @@ final class ClassicMapViewer extends JPanel {
     private void paintSettlement(Graphics2D g, Settlement settlement,
                                  int sx, int sy) {
         if (this.lib == null) return;   // no art (tests)
-        final BufferedImage img = this.lib.getScaledSettlementImage(settlement);
-        if (img == null) return;
+        final BufferedImage art = this.lib.getScaledSettlementImage(settlement);
+        if (art == null) return;
+        // A colony's flag in its nation's colours, as on the panel (build
+        // spec W21b; clip008 #14868, clip006 #9345: the Dutch flag orange).
+        final BufferedImage img = (settlement instanceof Colony)
+            ? ClassicHud.colonyFlag(art, settlement.getOwner()) : art;
         if (this.fixedScale <= 0) {
             drawCentered(g, img, sx, sy);
             return;

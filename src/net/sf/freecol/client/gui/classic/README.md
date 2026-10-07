@@ -2010,40 +2010,97 @@ terrain copied from the capture).  Green `0x559634`, gold `0xC7A220`.
   colour and 2/3 of it, unmeasured), then the sprite at cell + 3 (widths
   6/7/13) or + 2 (8/14), others centred (unmeasured).  Flag at the cell's
   top-left for sprites ≥ 13 wide (ships, mounted), else at
-  `(sprite.x + w - 2, y + 7)`.
-  Lines: (260,70) `@INFO 0` + moves ("N k/3" for fractions: assumed);
-  (260,77) `@INFO 1` + " (x, y)" (FreeCol tile coordinates: assumed mapping);
-  (242,86) `@NATIONALITY` + `@UNIT` row (by role for colonists, by type
-  otherwise); then 7 apart from y 93: the colonist's skill `@JOB` (gold), the
-  tools "(" + n / tools word + ")" (gold, 007), the orders `@ORDERS` (gold),
-  "(" + terrain + ")" and "(" + road + ")" (green).
-- List (cargo of a carrier, newest first, else the tile's other units): first sprite 10
-  below the last active line, text at x 260 from sprite.y + 4, all gold:
-  the veteran word (misc 64) for a veteran in a military role, the expert word (misc 4)
-  + tool count for a unit in its own skill (hardy pioneer; scouts and
-  missionaries assumed alike), else the bare tool count, else the skill of a
-  colonist without a role or with a non-free-colonist skill; the tools word
-  on its own line after a count; lines 7 apart; the orders 6 below the last;
-  the next sprite 8 below the orders (at least 18 below the sprite:
-  assumed); entries that would cross y 199 are left out (overflow unknown).
+  `(sprite.x + w - 2, y + 7)`; galleon and frigate at cell + (9,0); the
+  treasure, the artillery and the wagon train at cell + (6,0) (fill x
+  249-253 for cell 242: clip005 #13993, #14364, #14481, #14594, clip006
+  #9345; also on the map, which draws the same icon).
+  Lines (build spec W21b): (260,70) `@INFO 0` + moves ("N k/3" for
+  fractions: clip005 #14852 "2/3"); (260,77) `@INFO 1` + " (x, y)"
+  (FreeCol tile coordinates: assumed mapping); (242,86) `@NATIONALITY` +
+  `@UNIT` row (by role for colonists, by type otherwise); then 7 apart from
+  y 93, gold: a treasure's "(" + `@CTITLE 1` + " " + amount + ")" (clip005
+  #14594 "(Gold: 10000)"); the qualifier word (misc 4 "Experte", misc 64
+  "Erfahren") when the unit has one and no tools (clip007 #3107, #6643,
+  #1449), else the colonist's skill `@JOB` (also the hardy pioneer with
+  tools: "Pionier", clip006 #5351); the tools "(" + n / tools word + ")"
+  (007); the orders `@ORDERS`, or for a goto to a colony the colony's name
+  (clip005 #14481 "Fur Town", the flag letter G); then green "(" + terrain
+  + ")" and one line each for a river, a road, plowing and a resource, in
+  the tile mode's order (clip005 #14481, clip006 #5351, clip007 #1449,
+  clip008 #4009).
+- A carrier with goods (W21b): "Mit:" (`@INFO 2`, green) 12 below the last
+  line, one goods icon per hold from x 259 two rows above it, 1 px apart:
+  ICONS.SS 022 + `@CARGO` row for a full hold, the grey 038 + row for a
+  part one (clip006 #9345, clip008 #29463, #32928); the screen's edge cuts
+  the last (clip005 #15391). FreeCol keeps no loading order: by goods
+  type, full holds first (the original: the loading order, I).
+- The colony on the tile (W21b, also in the tile mode): its name N green at
+  x 262, 20 below the last line or 21 below a carrier's "Mit:"; its sprite
+  at (242, N - 10) under the name, the flag recoloured (`colonyFlag`: the
+  sprite's 11 `#4159A6` pixels the nation's fill, 4 `#34499E` its dark
+  shade; France keeps the blue, V Quebec; the map's colonies the same);
+  "Mit:" N + 15 with the warehouse's goods: storable goods, by `@CARGO`
+  row, coloured from 100, at most five (I: which goods and in which order
+  the original shows is in no rule the clips give); the list N + 26
+  (clip005 #14364, #14852, #15391, clip006 #9345, clip008 #35590,
+  dago-colony2 #4045).
+- List (the passengers of a carrier, newest first, else the tile's other
+  units -- also under a carrier with goods only, clip006 #9345): first
+  sprite 10 below the last active line (or 11 below a "Mit:"), text at x
+  260 from sprite.y + 4, all gold: a carrier with goods its icons from x
+  260 on the cell's top row and only its orders 10 below the cell (clip006
+  #9345 wagon, clip005 #15391 galleon); a treasure "Gold: 10000" (clip005
+  #13993); a ship, the artillery or a wagon train its `@UNIT` name; else
+  the veteran word (misc 64) for a veteran in a military role, the expert
+  word (misc 4) + tool count for a unit in its own skill (hardy pioneer;
+  scouts and missionaries assumed alike), else the bare tool count without
+  the skill (clip007 #5093, #6884), else the skill of a colonist without a
+  role or with a non-free-colonist skill; the tools word on its own line
+  after a count; lines 7 apart; the orders (or a goto's colony, clip005
+  #14827 "Schmied / Base") 6 below the last; the next sprite 8 below the
+  orders (at least 18 below the sprite: assumed). An entry that would cross
+  y 199 is left out and "+ Weiter +" (`@MISC 104`, green, x 242) stands
+  where it would have gone, clipped at 199, only when an entry remains
+  (clip005 #14852 185, clip006 #9345 191, clip005 #15391 196 under the
+  Spielzugende word at 192). `ClassicHud.blockLayout` places all of it for
+  the painters, the tile mode's word and the tests.
+- Golden check (`ClassicHudTest.testPanelGoldenAgainstTheClips`, with
+  `-Dclassic.clips` and the pack): 27 frames of clips 005-008 and
+  dago-colony2 (the plan's twelve and fifteen more, two of them in the
+  tile mode), drawn from hand-built facts with the pack's font, texts, wood
+  and sprites, 0 px off in x 241-319, y 64-199 (the original's arrow
+  excused).
 - Removed: the order buttons, the Enter/Space/W footer, the Swing fonts, the
   `WOODPANL` chrome and the 240-px width.  `repaintInfo` hooks unchanged.
 
-`ClassicHud.UnitFacts.of(Unit, sprite)` turns a FreeCol unit into plain facts
-(`@UNIT`/`@JOB` rows, qualifier, tools from the role's required goods, orders
-from the unit state: sentry, fortify/fortified, improving → plough/road,
-trade route, destination → goto); the painter never touches the model, so the
-harness builds the captures' facts by hand.
+`ClassicHud.UnitFacts.of(Unit, sprite, icons)` turns a FreeCol unit into
+plain facts (`@UNIT`/`@JOB` rows, qualifier, tools from the role's required
+goods, orders from the unit state: sentry, fortify/fortified, improving →
+plough/road, trade route, destination → goto, a goto's colony, a treasure's
+gold, its tile's river, road, plowing and resource, the goods aboard one icon
+per hold), `ColonyFacts.of(Colony, sprite, icons)` a colony; the painter never
+touches the model, so the harness and the golden test build the captures'
+facts by hand.
 
 ### Sprite aliases (corrected)
 
 The panel draws `ICONS.SS` sprites 1:1, so the captures pin them down
-(`tools/classic_assets/aliases.properties`, re-run `ant classic-assets`):
-free colonist without a role 100 (was 058), free colonist pioneer 073 (was
-081), hardy pioneer as pioneer 101 (081), free colonist soldier 074 (089),
-veteran soldier 102 (089), veteran dragoon 104 (076).  These also change the
-map, colony and Europe screens — check them live.  Other colonist types keep
-the older guesses.
+(`tools/classic_assets/aliases.properties`, re-run `ant classic-assets`;
+`ClassicPackAliasesTest.testThePackHasTheseAliases` fails when the pack is
+older than the file): free colonist without a role 100 (was 058), free
+colonist pioneer 073 (was 081), hardy pioneer as pioneer 101 (081), free
+colonist soldier 074 (089), veteran soldier 102 (089), veteran dragoon 104
+(076).  Build spec W21b (0 px against the clips): every colonist without a
+role is 081 + its `@JOB` row (expert farmer 081, fur trapper 085, ore miner
+087, blacksmith 095 seen; the others by the sheet's order), every pioneer but
+the hardy pioneer 073 (was 081, the farmer's sprite), every soldier 074 and
+missionary 077 (by the role row 073-077; I), the jesuit as missionary 105,
+the artillery 009 (was 065). The units NAMES.TXT `@UNIT` gives an icon use
+that icon minus one: the brave 109 (was 098, the statesman's sprite; clip004
+#5090, 0 px), armed 110, mounted 111, armed and mounted 112, the king's
+regulars 125 and cavalry 126 (were 115/116, native leaders' faces), the
+continental army 128 and cavalry 129 (by the rule).  These also change the
+map, colony and Europe screens — check them live.
 
 ### Harness, tests, open
 
@@ -2067,7 +2124,8 @@ the older guesses.
   key, P/G/M/V rules, U/O context, Ctrl+N), `ClassicTextTest` (`menu`,
   `label`).
 - Open / assumed: the minimap's arctic, swamp and boreal colours and horizontal
-  scrolling; fractional moves; the position line's coordinate base; list overflow;
+  scrolling; the position line's coordinate base; scrolling the list (only
+  "+ Weiter +"); the colony's "Mit:" goods and order; the cargo's order;
   COLONIPÄDIE position and groups; the second fortify line; whether the
   keyboard bar skips greyed rows and Left/Right switch menus; the four
   Military/Production/Exploration/Cargo keys; the original's starting soldier

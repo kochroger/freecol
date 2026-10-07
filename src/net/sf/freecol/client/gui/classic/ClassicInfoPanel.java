@@ -36,6 +36,7 @@ import javax.swing.SwingUtilities;
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.gui.ImageLibrary;
 import net.sf.freecol.common.i18n.Messages;
+import net.sf.freecol.common.model.Colony;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Tile;
@@ -107,6 +108,7 @@ final class ClassicInfoPanel extends JComponent {
     private Unit staleUnit = null;
     private ClassicHud.UnitFacts staleActive = null;
     private List<ClassicHud.UnitFacts> staleList = new ArrayList<>();
+    private ClassicHud.ColonyFacts staleColony = null;
 
     /**
      * The landing (build spec W8b, master plan W18): from the landing box
@@ -153,6 +155,10 @@ final class ClassicInfoPanel extends JComponent {
     /** Logged once when painting fails. */
     private boolean failLogged = false;
 
+    /** The goods icons by ICONS.SS frame, empty where the pack has none ({@link #icon}). */
+    private final java.util.Map<Integer, java.util.Optional<BufferedImage>> icons
+        = new java.util.HashMap<>();
+
 
     ClassicInfoPanel(FreeColClient freeColClient, ClassicMapViewer mapViewer,
                      ImageLibrary lib, ClassicText text, ClassicFont font,
@@ -197,6 +203,7 @@ final class ClassicInfoPanel extends JComponent {
         this.staleUnit = null;
         this.staleActive = null;
         this.staleList = new ArrayList<>();
+        this.staleColony = null;
         this.promptFacts = null;
         this.promptFrozen = false;
         this.blockHeld = false;
@@ -271,7 +278,7 @@ final class ClassicInfoPanel extends JComponent {
             }
         }
         return ClassicHud.TileFacts.of(tile, this.freeColClient.getMyPlayer(),
-                                       sp, units);
+                                       sp, units, colonyFacts(tile));
     }
 
     /** Paint the whole panel at once (EDT), else ask for a repaint. */
@@ -387,11 +394,15 @@ final class ClassicInfoPanel extends JComponent {
         }
         ClassicHud.UnitFacts active = null;
         List<ClassicHud.UnitFacts> list = new ArrayList<>();
+        ClassicHud.ColonyFacts colony = null;
         final Unit unit = this.mapViewer.getActiveUnit();
         if (liveBlock(this.blockHeld, unit, this.staleUnit)) {
             active = facts(unit);
+            // The passengers, else the tile's other units -- also under a
+            // carrier with goods only (clip006 #9345: the active wagon's
+            // "Mit:", then the other wagon on its tile).
             final List<Unit> others = new ArrayList<>();
-            if (unit.isCarrier() && unit.hasCargo()) {
+            if (unit.isCarrier() && unit.getUnitCount() > 0) {
                 others.addAll(cargoNewestFirst(unit));
             } else {
                 final Tile t = unit.getTile();
@@ -400,15 +411,55 @@ final class ClassicInfoPanel extends JComponent {
                 }
             }
             for (Unit u : others) list.add(facts(u));
+            colony = colonyFacts(unit.getTile());
             this.staleUnit = unit;
             this.staleActive = active;
             this.staleList = list;
+            this.staleColony = colony;
         } else if (this.staleActive != null) {
             active = this.staleActive;
             list = new ArrayList<>(this.staleList);
+            colony = this.staleColony;
         }
         return new ClassicHud.PanelModel(mm, season, gold, this.scene, active,
-                                         list, indicator);
+                                         list, indicator, null, -1, colony);
+    }
+
+    /**
+     * The block of the colony on a tile (build spec W21b), or null.
+     *
+     * @param tile The tile, or null.
+     * @return The facts, or null without a colony.
+     */
+    private ClassicHud.ColonyFacts colonyFacts(Tile tile) {
+        final Colony c = (tile == null) ? null : tile.getColony();
+        if (c == null) return null;
+        BufferedImage sp;
+        try {
+            sp = this.lib.getScaledSettlementImage(c);
+        } catch (RuntimeException e) {
+            sp = null;
+        }
+        return ClassicHud.ColonyFacts.of(c, sp, this::icon);
+    }
+
+    /**
+     * An ICONS.SS frame of the pack (the goods icons), cached; null
+     * without the pack.
+     *
+     * @param frame The frame number.
+     * @return The picture, or null.
+     */
+    private BufferedImage icon(int frame) {
+        if (this.text == null) return null;
+        return this.icons.computeIfAbsent(frame, n -> {
+                try {
+                    return java.util.Optional.ofNullable(ImageLibrary.getUnscaledImage(
+                        ClassicPackFiles.ssKey(String.format("ICONS.SS.%03d", n))));
+                } catch (RuntimeException e) {
+                    return java.util.Optional.<BufferedImage>empty();
+                }
+            }).orElse(null);
     }
 
     /**
@@ -514,7 +565,7 @@ final class ClassicInfoPanel extends JComponent {
         } catch (RuntimeException e) {
             sprite = null;
         }
-        return ClassicHud.UnitFacts.of(u, sprite);
+        return ClassicHud.UnitFacts.of(u, sprite, this::icon);
     }
 
     @Override

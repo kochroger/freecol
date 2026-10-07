@@ -25,11 +25,17 @@ import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
+import java.util.function.IntFunction;
 
 import net.sf.freecol.common.i18n.Messages;
 import net.sf.freecol.common.model.AbstractGoods;
+import net.sf.freecol.common.model.Colony;
 import net.sf.freecol.common.model.Direction;
+import net.sf.freecol.common.model.Goods;
+import net.sf.freecol.common.model.GoodsContainer;
+import net.sf.freecol.common.model.Location;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.ResourceType;
 import net.sf.freecol.common.model.Role;
@@ -308,6 +314,9 @@ final class ClassicHud {
         /** The word "Spielzugende" under the tile mode in this colour, or -1 for none. */
         final int promptRgb;
 
+        /** The colony on the active unit's tile (build spec W21b), or null. */
+        final ColonyFacts colony;
+
         PanelModel(MinimapModel minimap, String season, String gold,
                    boolean scene) {
             this(minimap, season, gold, scene, null, null);
@@ -327,6 +336,14 @@ final class ClassicHud {
         PanelModel(MinimapModel minimap, String season, String gold,
                    boolean scene, UnitFacts active, List<UnitFacts> list,
                    int indicator, TileFacts tile, int promptRgb) {
+            this(minimap, season, gold, scene, active, list, indicator, tile,
+                 promptRgb, null);
+        }
+
+        PanelModel(MinimapModel minimap, String season, String gold,
+                   boolean scene, UnitFacts active, List<UnitFacts> list,
+                   int indicator, TileFacts tile, int promptRgb,
+                   ColonyFacts colony) {
             this.minimap = minimap;
             this.season = season;
             this.gold = gold;
@@ -336,6 +353,96 @@ final class ClassicHud {
             this.indicator = indicator;
             this.tile = tile;
             this.promptRgb = promptRgb;
+            this.colony = colony;
+        }
+    }
+
+    /**
+     * One goods icon of a "Mit:" row or of a carrier's list entry (build
+     * spec W21b): ICONS.SS {@link #ICON_GOODS} + the {@code @CARGO} row
+     * for a full hold (a colony: at least 100), the grey
+     * {@link #ICON_GOODS_GREY} + row otherwise (clip008 #32928: ore and
+     * furs grey in a ship's partly filled holds; dago-colony2 #4045: all
+     * grey in a warehouse under 100).
+     */
+    static final class GoodsIcon {
+
+        /** NAMES.TXT {@code @CARGO} row. */
+        final int cargoRow;
+
+        /** A full hold: the coloured icon. */
+        final boolean full;
+
+        /** The icon, or null without the pack (then only the place is kept). */
+        final BufferedImage icon;
+
+        GoodsIcon(int cargoRow, boolean full, BufferedImage icon) {
+            this.cargoRow = cargoRow;
+            this.full = full;
+            this.icon = icon;
+        }
+
+        /** @return The ICONS.SS frame of this icon. */
+        int frame() {
+            return (this.full ? ICON_GOODS : ICON_GOODS_GREY) + this.cargoRow;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("%03d", frame());
+        }
+    }
+
+    /**
+     * A colony as the unit block and the tile mode show it under the
+     * lines (build spec W21b; clip005 #14364, #14852, #15391, clip006
+     * #9345, clip008 #4009, #14868, #35590, dago-colony2 #4045): its sprite
+     * with the nation's flag, its name, and a "Mit:" row of goods icons.
+     */
+    static final class ColonyFacts {
+
+        /** The colony's sprite, the flag in the nation's colours, or null. */
+        final BufferedImage sprite;
+
+        /** The colony's name. */
+        final String name;
+
+        /** The "Mit:" row's icons. */
+        final List<GoodsIcon> goods;
+
+        ColonyFacts(BufferedImage sprite, String name, List<GoodsIcon> goods) {
+            this.sprite = sprite;
+            this.name = (name == null) ? "" : name;
+            this.goods = (goods == null) ? new ArrayList<>() : goods;
+        }
+
+        /**
+         * The facts of a live colony.  Its "Mit:" row (I: which goods, in
+         * which order and when coloured are in no rule the clips give; Base
+         * showed 5 of its 11 goods): the storable goods in the warehouse,
+         * by {@code @CARGO} row, coloured from 100, at most
+         * {@link #COLONY_GOODS_MAX}.
+         *
+         * @param c The colony.
+         * @param sprite Its sprite as the map draws it, or null.
+         * @param icons ICONS.SS frame to picture, or null without the pack.
+         * @return The facts.
+         */
+        static ColonyFacts of(Colony c, BufferedImage sprite,
+                              IntFunction<BufferedImage> icons) {
+            final List<GoodsIcon> goods = new ArrayList<>();
+            for (Goods g : c.getCompactGoodsList()) {
+                if (g.getType() == null || !g.getType().isStorable()
+                    || g.getAmount() <= 0) continue;
+                final int row = cargoRow(g.getType().getId());
+                if (row < 0) continue;
+                goods.add(goodsIcon(row, g.getAmount() >= GoodsContainer.CARGO_SIZE,
+                                    icons));
+            }
+            goods.sort(Comparator.comparingInt((GoodsIcon i) -> i.cargoRow));
+            return new ColonyFacts(colonyFlag(fitSettlement(sprite), c.getOwner()),
+                c.getName(), new ArrayList<>(goods.subList(0,
+                    Math.min(goods.size(), COLONY_GOODS_MAX))));
         }
     }
 
@@ -388,10 +495,35 @@ final class ClassicHud {
         /** Tools carried (pioneers), or -1. */
         final int tools;
 
+        /** The gold of a treasure train, or -1 (build spec W21b). */
+        final int treasure;
+
+        /** The colony a goto order leads to, or null (then the orders' name). */
+        final String destination;
+
+        /** Its tile's river (0 none, 1 minor, 2 major), plowing and {@code @RESOURCE} row (or -1). */
+        final int river;
+        final boolean plowed;
+        final int resourceRow;
+
+        /** The goods aboard, one icon per hold, or empty. */
+        final List<GoodsIcon> cargo;
+
         UnitFacts(BufferedImage sprite, int fill, int dark, int nation,
                   int unitRow, String plainName, int moves, int x, int y,
                   int ordersRow, String terrainId, boolean road, int jobRow,
                   boolean roleless, int qualifier, int tools) {
+            this(sprite, fill, dark, nation, unitRow, plainName, moves, x, y,
+                 ordersRow, terrainId, road, jobRow, roleless, qualifier, tools,
+                 -1, null, 0, false, -1, null);
+        }
+
+        UnitFacts(BufferedImage sprite, int fill, int dark, int nation,
+                  int unitRow, String plainName, int moves, int x, int y,
+                  int ordersRow, String terrainId, boolean road, int jobRow,
+                  boolean roleless, int qualifier, int tools, int treasure,
+                  String destination, int river, boolean plowed,
+                  int resourceRow, List<GoodsIcon> cargo) {
             this.sprite = sprite;
             this.fill = fill;
             this.dark = dark;
@@ -408,6 +540,24 @@ final class ClassicHud {
             this.roleless = roleless;
             this.qualifier = qualifier;
             this.tools = tools;
+            this.treasure = treasure;
+            this.destination = destination;
+            this.river = river;
+            this.plowed = plowed;
+            this.resourceRow = resourceRow;
+            this.cargo = (cargo == null) ? new ArrayList<>() : cargo;
+        }
+
+        /**
+         * The facts of a live unit, without goods icons.
+         *
+         * @param u The unit.
+         * @param sprite Its map sprite (any size; scaled down to 16x16 when
+         *     larger, i.e. without the pack).
+         * @return The facts.
+         */
+        static UnitFacts of(Unit u, BufferedImage sprite) {
+            return of(u, sprite, null);
         }
 
         /**
@@ -416,9 +566,12 @@ final class ClassicHud {
          * @param u The unit.
          * @param sprite Its map sprite (any size; scaled down to 16x16 when
          *     larger, i.e. without the pack).
+         * @param icons ICONS.SS frame to picture for the goods aboard, or
+         *     null (the icons' places only).
          * @return The facts.
          */
-        static UnitFacts of(Unit u, BufferedImage sprite) {
+        static UnitFacts of(Unit u, BufferedImage sprite,
+                            IntFunction<BufferedImage> icons) {
             final Player owner = u.getOwner();
             final int nation = (owner == null) ? -1
                 : Arrays.asList(ClassicNewWorldScreens.NATION_IDS)
@@ -447,15 +600,48 @@ final class ClassicHud {
             } catch (RuntimeException e) {
                 plain = type;
             }
+            final int orders = ordersRow(u);
+            final List<GoodsIcon> cargo = new ArrayList<>();
+            if (u.isCarrier()) {
+                for (Goods g : u.getGoodsList()) {
+                    final int row = (g.getType() == null) ? -1
+                        : cargoRow(g.getType().getId());
+                    if (row < 0 || g.getAmount() <= 0) continue;
+                    cargo.add(goodsIcon(row,
+                        g.getAmount() >= GoodsContainer.CARGO_SIZE, icons));
+                }
+                // FreeCol keeps no loading order (a hash map): by goods
+                // type, full holds first (the original's order is the
+                // loading order, clip008 01-shipcolony; I).
+                cargo.sort(Comparator.comparingInt((GoodsIcon i) -> i.cargoRow)
+                    .thenComparing(i -> !i.full));
+            }
             return new UnitFacts(fit16(sprite), nationRgb(owner),
                 nationDark(owner), nation, unitRow(type, role), plain,
                 Math.max(0, u.getMovesLeft()),
                 (t == null) ? 0 : t.getX(), (t == null) ? 0 : t.getY(),
-                ordersRow(u),
+                orders,
                 (t == null || t.getType() == null) ? null : t.getType().getId(),
                 t != null && t.hasRoad(),
                 person ? jobRow(type) : -1, roleless,
-                qualifier(type, role), tools);
+                qualifier(type, role), tools,
+                u.canCarryTreasure() ? u.getTreasureAmount() : -1,
+                destinationName(u, orders),
+                (t == null) ? 0 : riverOf(t), t != null && plowed(t),
+                (t == null) ? -1 : resourceRowOf(t), cargo);
+        }
+
+        /**
+         * The name of the colony a goto order leads to (clip005 #14481:
+         * the artillery's "Fur Town" in gold, letter G), or null for no
+         * goto or another destination (a tile, Europe, a village: the
+         * orders' "Ziel"; I).
+         */
+        static String destinationName(Unit u, int ordersRow) {
+            if (ordersRow != ORDERS_GOTO) return null;
+            final Location d = u.getDestination();
+            final Colony c = (d == null) ? null : d.getColony();
+            return (c == null) ? null : c.getName();
         }
     }
 
@@ -506,10 +692,22 @@ final class ClassicHud {
         /** The units on the tile, in the tile's order. */
         final List<UnitFacts> units;
 
+        /** The colony on the tile (build spec W21b; clip005 #15391), or null. */
+        final ColonyFacts colony;
+
         TileFacts(int x, int y, int region, boolean land, String landName,
                   int nation, int tribeRow, String terrainId, int river,
                   boolean road, boolean plowed, int resourceRow,
                   SettlementFacts settlement, List<UnitFacts> units) {
+            this(x, y, region, land, landName, nation, tribeRow, terrainId,
+                 river, road, plowed, resourceRow, settlement, units, null);
+        }
+
+        TileFacts(int x, int y, int region, boolean land, String landName,
+                  int nation, int tribeRow, String terrainId, int river,
+                  boolean road, boolean plowed, int resourceRow,
+                  SettlementFacts settlement, List<UnitFacts> units,
+                  ColonyFacts colony) {
             this.x = x;
             this.y = y;
             this.region = region;
@@ -524,10 +722,12 @@ final class ClassicHud {
             this.resourceRow = resourceRow;
             this.settlement = settlement;
             this.units = (units == null) ? new ArrayList<>() : units;
+            this.colony = colony;
         }
 
         /**
-         * The facts of a live tile, as the player knows it.
+         * The facts of a live tile, as the player knows it, without its
+         * colony's block.
          *
          * @param tile The tile.
          * @param player The player whose land name is shown, or null.
@@ -538,6 +738,22 @@ final class ClassicHud {
          */
         static TileFacts of(Tile tile, Player player, BufferedImage settlementSprite,
                             List<UnitFacts> units) {
+            return of(tile, player, settlementSprite, units, null);
+        }
+
+        /**
+         * The facts of a live tile, as the player knows it.
+         *
+         * @param tile The tile.
+         * @param player The player whose land name is shown, or null.
+         * @param settlementSprite The sprite of a native settlement on the
+         *     tile, or null.
+         * @param units The units' facts, in the tile's order.
+         * @param colony The block of the colony on the tile, or null.
+         * @return The facts.
+         */
+        static TileFacts of(Tile tile, Player player, BufferedImage settlementSprite,
+                            List<UnitFacts> units, ColonyFacts colony) {
             final int nation = (player == null) ? -1
                 : Arrays.asList(ClassicNewWorldScreens.NATION_IDS)
                     .indexOf(player.getNationId());
@@ -550,31 +766,37 @@ final class ClassicHud {
                 sf = new SettlementFacts(fitSettlement(settlementSprite), tribe,
                                          s.isCapital());
             }
-            int river = 0;
-            if (tile.hasRiver()) {
-                final TileImprovement r = tile.getRiver();
-                river = (r != null && r.getMagnitude() >= TileImprovement.LARGE_RIVER)
-                    ? 2 : 1;
-            }
-            final ResourceType rt = (tile.getResource() == null) ? null
-                : tile.getResource().getType();
             return new TileFacts(tile.getX(), tile.getY(), REGION_UNKNOWN,
                 tile.isLand(), (player == null) ? null : player.getNewLandName(),
                 nation, tribe, (tile.getType() == null) ? null : tile.getType().getId(),
-                river, tile.hasRoad(), plowed(tile),
-                (rt == null) ? -1 : resourceRow(rt.getId()), sf, units);
+                riverOf(tile), tile.hasRoad(), plowed(tile), resourceRowOf(tile),
+                sf, units, colony);
         }
+    }
 
-        /** Whether a tile has a completed plow improvement. */
-        private static boolean plowed(Tile tile) {
-            for (TileImprovement imp : tile.getCompleteTileImprovements()) {
-                if (imp.getType() != null
-                    && "model.improvement.plow".equals(imp.getType().getId())) {
-                    return true;
-                }
+    /** A tile's river: 0 none, 1 minor, 2 major. */
+    static int riverOf(Tile tile) {
+        if (!tile.hasRiver()) return 0;
+        final TileImprovement r = tile.getRiver();
+        return (r != null && r.getMagnitude() >= TileImprovement.LARGE_RIVER) ? 2 : 1;
+    }
+
+    /** Whether a tile has a completed plow improvement. */
+    static boolean plowed(Tile tile) {
+        for (TileImprovement imp : tile.getCompleteTileImprovements()) {
+            if (imp.getType() != null
+                && "model.improvement.plow".equals(imp.getType().getId())) {
+                return true;
             }
-            return false;
         }
+        return false;
+    }
+
+    /** NAMES.TXT {@code @RESOURCE} row of a tile's resource, or -1. */
+    static int resourceRowOf(Tile tile) {
+        final ResourceType rt = (tile.getResource() == null) ? null
+            : tile.getResource().getType();
+        return (rt == null) ? -1 : resourceRow(rt.getId());
     }
 
     /**
@@ -899,7 +1121,7 @@ final class ClassicHud {
             if (p.tile != null) {
                 paintTileMode(g, font, text, p.tile, p.promptRgb);
             } else {
-                paintUnits(g, font, text, p.active, p.list);
+                paintUnits(g, font, text, p.active, p.list, p.colony);
             }
         }
         paintIndicator(g, p.indicator);
@@ -1000,6 +1222,83 @@ final class ClassicHud {
     static final int JOB_FREE_COLONIST = 19;
 
     /**
+     * NAMES.TXT {@code @UNIT} rows of the treasure train (ICONS.SS.016),
+     * the artillery (009) and the wagon train (008), 14 wide each, whose
+     * flag sits at cell + ({@link #FLAG_DX_TRAIN}, 0): fill x 249-253 for
+     * cell 242 in clip005 #13993, #14364, #14481, #14594, clip006 #9345.
+     */
+    static final int UNIT_TREASURE = 10, UNIT_ARTILLERY = 11, UNIT_WAGON = 12;
+
+    /** The flag's x in the cell of the treasure, the artillery and the wagon train. */
+    static final int FLAG_DX_TRAIN = 6;
+
+    /** LABELS.TXT {@code @INFO} index of "Mit:" (:11, the carrier's and the colony's goods). */
+    static final int INFO_WITH = 2;
+
+    /**
+     * LABELS.TXT {@code @MISC} index of "+ Weiter +" (:120; {@code @MISC}
+     * skips the blank line 51), drawn green at x 242 where the next list
+     * entry would not fit (clip005 #14852 y 185, clip006 #9345 y 191).
+     */
+    static final int MISC_MORE = 104;
+
+    /** ICONS.SS frames of the goods: 022 + {@code @CARGO} row coloured, 038 + row grey. */
+    static final int ICON_GOODS = 22, ICON_GOODS_GREY = 38;
+
+    /**
+     * The "Mit:" rows (build spec W21b): the active carrier's
+     * {@link #CARGO_DY} below the block's last line (clip006 #9345 114 -&gt;
+     * 126, clip008 #29463 107 -&gt; 119, #32928 100 -&gt; 112); the goods
+     * icons from x {@link #GOODS_X}, {@link #GOODS_DY} above the label's
+     * glyph top, {@link #GOODS_GAP} px apart (V: clip006 #9345 259, 270
+     * ... at y 124 and 160).
+     */
+    static final int CARGO_DY = 12, GOODS_X = 259, GOODS_DY = -2, GOODS_GAP = 1;
+
+    /**
+     * The colony block: its name's glyph top N is {@link #COLONY_DY} below
+     * the block's last line (clip005 #14364 114 -&gt; 134, #14852 121 -&gt;
+     * 141, #15391 96 -&gt; 116; dago-colony2 #4045 89 -&gt; 109), or
+     * {@link #COLONY_AFTER_CARGO_DY} below a carrier's "Mit:" (clip006
+     * #9345, clip008 #35590 126 -&gt; 147); the sprite at (242, N -
+     * {@link #COLONY_SPRITE_DY}), the name at x {@link #COLONY_NAME_X}
+     * over it, "Mit:" {@link #COLONY_WITH_DY} below N; the list
+     * {@link #COLONY_LIST_DY} below that "Mit:" (clip005 #14364 160,
+     * #14852 167, #15391 142, clip006 #9345 173).
+     */
+    static final int COLONY_DY = 20, COLONY_AFTER_CARGO_DY = 21, COLONY_SPRITE_DY = 10,
+        COLONY_NAME_X = 262, COLONY_WITH_DY = 15, COLONY_LIST_DY = 11;
+
+    /**
+     * At most this many goods in a colony's "Mit:" row (I: five is the most
+     * any clip shows, in three colonies; Base showed 5 of its 11 goods
+     * where a sixth narrow icon would have fit).
+     */
+    static final int COLONY_GOODS_MAX = 5;
+
+    /**
+     * A carrier with goods in the list: its icons from x
+     * {@link #LIST_GOODS_X} on the cell's top row, no name line, the
+     * orders {@link #LIST_CARGO_ORDERS_DY} below (clip006 #9345 wagon:
+     * cotton at 260 and 271, y 173, orders 183; clip005 #15391 galleon).
+     */
+    static final int LIST_GOODS_X = 260, LIST_CARGO_ORDERS_DY = 10;
+
+    /** The colony sprite's two flag colours, replaced by the nation's fill and dark shade. */
+    static final int COLONY_FLAG_RGB = 0x4159A6, COLONY_FLAG_DARK_RGB = 0x34499E;
+
+    /** FreeCol goods-type suffixes by NAMES.TXT {@code @CARGO} row. */
+    private static final String[] CARGO_TYPES = {
+        "food", "sugar", "tobacco", "cotton", "furs", "lumber", "ore", "silver",
+        "horses", "rum", "cigars", "cloth", "coats", "tradeGoods", "tools",
+        "muskets"
+    };
+
+    /** Colony sprites with the flag recoloured, by sprite and nation (EDT and painters). */
+    private static final java.util.Map<BufferedImage, java.util.Map<Long, BufferedImage>>
+        COLONY_FLAGS = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    /**
      * NAMES.TXT {@code @UNIT} rows of the galleon (ICONS.SS.007) and the
      * frigate (ICONS.SS.015), whose icons have their own layout
      * ({@link #flagRing(int, int, int, int)}, {@link #spriteOffset(int,
@@ -1095,6 +1394,67 @@ final class ClassicHud {
         final String role = (u.getRole() == null) ? null
             : u.getRole().getRoleSuffix();
         return unitRow(Role.getRoleIdSuffix(u.getType().getId()), role);
+    }
+
+    /** NAMES.TXT {@code @CARGO} row of a FreeCol goods type, or -1 (bells, hammers ...). */
+    static int cargoRow(String goodsTypeId) {
+        if (goodsTypeId == null) return -1;
+        final String id = Role.getRoleIdSuffix(goodsTypeId);
+        for (int i = 0; i < CARGO_TYPES.length; i++) {
+            if (CARGO_TYPES[i].equals(id)) return i;
+        }
+        return -1;
+    }
+
+    /** A goods icon with its picture from {@code icons}, if any. */
+    static GoodsIcon goodsIcon(int row, boolean full, IntFunction<BufferedImage> icons) {
+        final int frame = (full ? ICON_GOODS : ICON_GOODS_GREY) + row;
+        return new GoodsIcon(row, full, (icons == null) ? null : icons.apply(frame));
+    }
+
+    /**
+     * A colony sprite with its flag in the owner's colours: the sprite's
+     * 11 pixels {@link #COLONY_FLAG_RGB} take the nation's fill, its 4
+     * pixels {@link #COLONY_FLAG_DARK_RGB} the dark shade (each of
+     * ICONS.SS 000-003 has exactly these; V: the Dutch flag orange on the
+     * panel, clip005 #14364/#14852, and on the map, clip008 #14868,
+     * clip006 #9345).  France keeps the sprite's blue (V: Quebec and
+     * Montreal, clip006 #9345); England and Spain like Holland (I).
+     * Cached per sprite and nation.
+     *
+     * @param sprite The colony's sprite, or null.
+     * @param owner Its owner, or null (unchanged).
+     * @return The sprite to draw.
+     */
+    static BufferedImage colonyFlag(BufferedImage sprite, Player owner) {
+        if (sprite == null || owner == null) return sprite;
+        final int n = Arrays.asList(ClassicNewWorldScreens.NATION_IDS)
+            .indexOf(owner.getNationId());
+        if (n == 1) return sprite;   // France: the sprite's own blue
+        final int fill = nationRgb(owner), dark = nationDark(owner);
+        final java.util.Map<Long, BufferedImage> byNation
+            = COLONY_FLAGS.computeIfAbsent(sprite, k -> new java.util.HashMap<>());
+        final long key = ((long) (fill & 0xFFFFFF) << 24) | (dark & 0xFFFFFF);
+        synchronized (byNation) {
+            return byNation.computeIfAbsent(key, k -> recolour(sprite, fill, dark));
+        }
+    }
+
+    /** {@code sprite} with the flag colours replaced (a copy). */
+    static BufferedImage recolour(BufferedImage sprite, int fill, int dark) {
+        final BufferedImage out = new BufferedImage(sprite.getWidth(), sprite.getHeight(),
+                                                    BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < sprite.getHeight(); y++) {
+            for (int x = 0; x < sprite.getWidth(); x++) {
+                final int p = sprite.getRGB(x, y);
+                final int c = p & 0xFFFFFF;
+                final int a = p & 0xFF000000;
+                out.setRGB(x, y, (a == 0) ? p
+                    : (c == COLONY_FLAG_RGB) ? (a | (fill & 0xFFFFFF))
+                    : (c == COLONY_FLAG_DARK_RGB) ? (a | (dark & 0xFFFFFF)) : p);
+            }
+        }
+        return out;
     }
 
     /** NAMES.TXT {@code @JOB} row of a colonist type, or -1. */
@@ -1211,12 +1571,20 @@ final class ClassicHud {
     }
 
     /**
-     * The active unit's lines (032, 052, 000, 007): moves label + N at (260,70),
-     * position label + ' (x, y)' at (260,77), the name at (242,86) -- nationality and
-     * {@code @UNIT} name, green -- then 7 px apart from y 93: the colonist's
-     * skill ({@code @JOB}, gold), the tools as '(' + number and, on its own
-     * line, the tools word + ')' (gold, 007), the orders (gold), the terrain
-     * in parentheses (green) and '(' + road + ')' (green) on a road.
+     * The active unit's lines (032, 052, 000, 007; build spec W21b): moves
+     * label + N at (260,70), position label + ' (x, y)' at (260,77), the
+     * name at (242,86) -- nationality and {@code @UNIT} name, green -- then
+     * 7 px apart from y 93, gold: a treasure's '(' + gold label + ' ' +
+     * amount + ')' (clip005 #14594); the qualifier word when the unit has
+     * one and no tools (clip007 #3107/#6643 "Experte", #1449 "Erfahren"),
+     * else the colonist's skill ({@code @JOB}; the hardy pioneer with tools
+     * "Pionier", clip006 #5351); the tools as '(' + number and, on its own
+     * line, the tools word + ')' (007); the orders, or for a goto to a
+     * colony that colony's name (clip005 #14481 "Fur Town"); then green
+     * the terrain in parentheses and one line each for a river, a road,
+     * plowing and a resource, in the tile mode's order (clip005 #14481
+     * river and road, clip006 #5351 road and plowed, clip007 #1449
+     * resource).
      */
     static List<TextLine> activeLines(ClassicText t, UnitFacts f) {
         final List<TextLine> out = new ArrayList<>();
@@ -1236,9 +1604,16 @@ final class ClassicHud {
         }
         out.add(new TextLine(name(t, f), CELL_X, NAME_Y, false));
         int y = DETAIL_Y;
-        final String job = (f.jobRow < 0) ? null : cell(t, "JOB", f.jobRow);
-        if (job != null) {
-            out.add(new TextLine(job, CELL_X, y, true));
+        final String gold = treasureText(t, f);
+        if (gold != null) {
+            out.add(new TextLine("(" + gold + ")", CELL_X, y, true));
+            y += LINE_PITCH;
+        }
+        final String second = (f.qualifier != QUAL_NONE && f.tools < 0)
+            ? qualifierWord(t, f.qualifier)
+            : (f.jobRow < 0) ? null : cell(t, "JOB", f.jobRow);
+        if (second != null) {
+            out.add(new TextLine(second, CELL_X, y, true));
             y += LINE_PITCH;
         }
         final String tools = cell(t, "CARGO", CARGO_TOOLS);
@@ -1248,21 +1623,71 @@ final class ClassicHud {
             out.add(new TextLine(tools + ")", CELL_X, y, true));
             y += LINE_PITCH;
         }
-        final String orders = cell(t, "ORDERS", f.ordersRow);
+        final String orders = ordersText(t, f);
         if (orders != null) {
             out.add(new TextLine(orders, CELL_X, y, true));
             y += LINE_PITCH;
         }
-        final String terrain = terrainName(t, f.terrainId);
-        if (terrain != null) {
-            out.add(new TextLine("(" + terrain + ")", CELL_X, y, false));
+        final List<String> where = new ArrayList<>();
+        where.add(terrainName(t, f.terrainId));
+        where.addAll(tileExtras(t, f.river, f.road, f.plowed, f.resourceRow));
+        for (String w : where) {
+            if (w == null) continue;
+            out.add(new TextLine("(" + w.trim() + ")", CELL_X, y, false));
             y += LINE_PITCH;
         }
-        final String road = t.misc(MISC_ROAD);
-        if (f.road && road != null) {
-            out.add(new TextLine("(" + road.trim() + ")", CELL_X, y, false));
-        }
         return out;
+    }
+
+    /** The veteran (misc 64) or expert (misc 4) word, or null. */
+    private static String qualifierWord(ClassicText t, int qualifier) {
+        final String w = (qualifier == QUAL_NONE) ? null
+            : t.misc(qualifier == QUAL_VETERAN ? MISC_VETERAN : MISC_EXPERT);
+        return (w == null) ? null : w.trim();
+    }
+
+    /**
+     * A treasure's gold: the gold label ({@code @CTITLE} 1) + ' ' +
+     * amount, "Gold: 10000" (clip005 #13993 in the list, #14594 in
+     * parentheses in the block; I: which label the original uses, the
+     * pixels are the same), or null for any other unit.
+     */
+    static String treasureText(ClassicText t, UnitFacts f) {
+        if (f.treasure < 0 || t == null) return null;
+        final String g = t.label("CTITLE", CTITLE_GOLD);
+        return (g == null) ? Integer.toString(f.treasure) : g.trim() + " " + f.treasure;
+    }
+
+    /**
+     * The orders line: the destination colony's name for a goto to a
+     * colony (clip005 #14481 active, #14827 "Schmied / Base" in the list),
+     * else the {@code @ORDERS} name.
+     */
+    static String ordersText(ClassicText t, UnitFacts f) {
+        if (f.destination != null && f.ordersRow == ORDERS_GOTO) return f.destination;
+        return cell(t, "ORDERS", f.ordersRow);
+    }
+
+    /**
+     * The words of a tile's extras in the order the panel lists them: the
+     * river ({@code @OTHER_NAMES} 3 minor, 2 major), the road
+     * ({@code @MISC} 31), plowing ({@code @MISC} 82) and the resource
+     * ({@code @RESOURCE}) -- the tile mode's and the active block's order
+     * (W21 item 2; clip005 #14481, clip006 #5351, clip008 #4009).
+     *
+     * @return The words without parentheses; an entry the pack lacks is null.
+     */
+    static List<String> tileExtras(ClassicText t, int river, boolean road,
+                                   boolean plowed, int resourceRow) {
+        final List<String> extra = new ArrayList<>();
+        if (river > 0) {
+            extra.add(cell(t, "OTHER_NAMES", (river > 1)
+                ? OTHER_NAMES_MAJOR_RIVER : OTHER_NAMES_MINOR_RIVER));
+        }
+        if (road) extra.add(t.misc(MISC_ROAD));
+        if (plowed) extra.add(t.misc(MISC_PLOWED));
+        if (resourceRow >= 0) extra.add(cell(t, "RESOURCE", resourceRow));
+        return extra;
     }
 
     /** Nationality and {@code @UNIT} name, or the plain name. */
@@ -1278,13 +1703,21 @@ final class ClassicHud {
 
     /**
      * A list entry's lines, all gold at x = 260 from {@code spriteY + 4}
-     * (032, 000, 007): for a ship its {@code @UNIT} name (clip007 #3107:
-     * "Handelsschiff" over the orders); else the qualifier -- the veteran word, the expert word
-     * plus the tool count for an expert pioneer, else the bare tool count,
-     * else the skill of a colonist without a role or with a skill that is not
-     * the free colonist's -- with the tools word on its own line after a
-     * count, 7 px apart; then the orders 6 px below the last of them (or at
-     * the first line when there is none).
+     * (032, 000, 007; build spec W21b): a carrier with goods only its
+     * orders, {@link #LIST_CARGO_ORDERS_DY} below the cell's top, under
+     * its goods icons ({@link #paintListCargo}; clip006 #9345, clip005
+     * #15391); a treasure its gold ("Gold: 10000", clip005 #13993); a
+     * ship, the artillery or a wagon train its {@code @UNIT} name
+     * (clip007 #3107 "Handelsschiff", clip005 #14364 "Artillerie", #14481
+     * "Wagenzug"); else the qualifier -- the veteran word, the expert word
+     * plus the tool count for an expert pioneer -- else a bare tool count
+     * without the skill (clip007 #5093, #6884: "100" / "Werkzeuge"), else
+     * the skill of a colonist without a role or with a skill that is not
+     * the free colonist's (clip005 #14827 "Schmied", clip006 #5135
+     * "Holzfäller" for a dragoon) -- with the tools word on its own line
+     * after a count, 7 px apart; then the orders, or a goto's colony
+     * (clip005 #14827 "Base"), 6 px below the last of them (or at the
+     * first line when there is none).
      */
     static List<TextLine> listLines(ClassicText t, UnitFacts f, int spriteY) {
         final List<TextLine> out = new ArrayList<>();
@@ -1293,20 +1726,30 @@ final class ClassicHud {
             out.add(new TextLine(f.plainName, INFO_X, y0, true));
             return out;
         }
+        if (!f.cargo.isEmpty()) {
+            final String orders = ordersText(t, f);
+            if (orders != null) {
+                out.add(new TextLine(orders, INFO_X, spriteY + LIST_CARGO_ORDERS_DY,
+                                     true));
+            }
+            return out;
+        }
         final List<String> q = new ArrayList<>();
         final String toolsWord = cell(t, "CARGO", CARGO_TOOLS);
         final String count = (f.tools >= 0) ? Integer.toString(f.tools) : null;
-        if (f.unitRow >= FIRST_SHIP_ROW && f.unitRow <= LAST_SHIP_ROW) {
-            // A ship: its type name, then the orders (clip007 #3107).
-            final String ship = cell(t, "UNIT", f.unitRow);
-            if (ship != null) q.add(ship);
+        if (f.unitRow == UNIT_TREASURE) {
+            final String gold = treasureText(t, f);
+            if (gold != null) q.add(gold);
+        } else if (f.unitRow >= UNIT_ARTILLERY && f.unitRow <= LAST_SHIP_ROW) {
+            // The artillery, a wagon train, a ship: the type's name.
+            final String name = cell(t, "UNIT", f.unitRow);
+            if (name != null) q.add(name);
         } else if (f.qualifier != QUAL_NONE) {
-            final String w = t.misc(f.qualifier == QUAL_VETERAN ? MISC_VETERAN
-                                    : MISC_EXPERT);
-            if (w != null) q.add((count == null) ? w.trim() : w.trim() + " " + count);
+            final String w = qualifierWord(t, f.qualifier);
+            if (w != null) q.add((count == null) ? w : w + " " + count);
             else if (count != null) q.add(count);
         } else {
-            final boolean showJob = f.jobRow >= 0
+            final boolean showJob = count == null && f.jobRow >= 0
                 && (f.roleless || f.jobRow != JOB_FREE_COLONIST);
             final String job = showJob ? cell(t, "JOB", f.jobRow) : null;
             if (job != null) q.add(job);
@@ -1318,7 +1761,7 @@ final class ClassicHud {
             out.add(new TextLine(q.get(i), INFO_X, y, true));
             if (i < q.size() - 1) y += LINE_PITCH;
         }
-        final String orders = cell(t, "ORDERS", f.ordersRow);
+        final String orders = ordersText(t, f);
         if (orders != null) {
             out.add(new TextLine(orders, INFO_X, q.isEmpty() ? y0 : y + LIST_ORDERS_DY,
                                  true));
@@ -1380,8 +1823,10 @@ final class ClassicHud {
      * spec W21 item 7, clip006 deep 4.2): the galleon (ICONS.SS.007, 14
      * wide) and the frigate (015, 13 wide) at cell + (9,0) (map #4471,
      * panel #9200, Europe; clip005 #20440: fill x 218-222 for cell 208),
-     * the merchantman (006) and the rest by {@link #flagRing(int, int,
-     * int)}.
+     * the treasure train, the artillery and the wagon train (016, 009,
+     * 008, 14 wide) at cell + (6,0) ({@link #FLAG_DX_TRAIN}, build spec
+     * W21b), the merchantman (006) and the rest by {@link #flagRing(int,
+     * int, int)}.
      *
      * @param cellX The cell's left edge.
      * @param cellY The cell's top edge.
@@ -1392,6 +1837,10 @@ final class ClassicHud {
     static Rectangle flagRing(int cellX, int cellY, int spriteW, int unitRow) {
         if (unitRow == UNIT_GALLEON || unitRow == UNIT_FRIGATE) {
             return new Rectangle(cellX + 9, cellY, FLAG_W, FLAG_H);
+        }
+        if (unitRow == UNIT_TREASURE || unitRow == UNIT_ARTILLERY
+            || unitRow == UNIT_WAGON) {
+            return new Rectangle(cellX + FLAG_DX_TRAIN, cellY, FLAG_W, FLAG_H);
         }
         return flagRing(cellX, cellY, spriteW);
     }
@@ -1527,14 +1976,123 @@ final class ClassicHud {
     }
 
     /**
-     * The active-unit block and the unit list, clipped to the panel.  The
-     * list's first sprite is {@link #LIST_GAP} below the block's last line
-     * (032: 100 -&gt; 110; 000: 114 -&gt; 124); an entry is skipped once its
-     * sprite would cross the screen's bottom (the original's overflow is
-     * unknown).
+     * Where the parts under a block's lines go (build spec W21b): the
+     * active carrier's "Mit:" line, the colony block, a native settlement's
+     * entry (tile mode), the list entries and "+ Weiter +".  One function
+     * for the painters, the tile mode's word and the tests.
+     */
+    static final class BlockLayout {
+
+        /** The carrier's "Mit:" glyph top, or -1. */
+        final int cargoY;
+
+        /** The colony's name glyph top N, or -1 (sprite N - 10, "Mit:" N + 15). */
+        final int colonyY;
+
+        /** The native settlement's cell top, or -1. */
+        final int settlementY;
+
+        /** Each list entry's cell top, -1 where it is not drawn. */
+        final int[] entryY;
+
+        /** "+ Weiter +"'s glyph top, or -1 when every entry is drawn. */
+        final int moreY;
+
+        /** Where an entry after the last one drawn would go, or -1 with none. */
+        final int nextY;
+
+        /** The lowest text line above the list (the Spielzugende word's base without one). */
+        final int lastLineY;
+
+        BlockLayout(int cargoY, int colonyY, int settlementY, int[] entryY,
+                    int moreY, int nextY, int lastLineY) {
+            this.cargoY = cargoY;
+            this.colonyY = colonyY;
+            this.settlementY = settlementY;
+            this.entryY = entryY;
+            this.moreY = moreY;
+            this.nextY = nextY;
+            this.lastLineY = lastLineY;
+        }
+    }
+
+    /**
+     * The block under the lines (build spec W21b): a carrier's "Mit:"
+     * {@link #CARGO_DY} below the last line; the colony's name N
+     * {@link #COLONY_DY} below the last line or
+     * {@link #COLONY_AFTER_CARGO_DY} below the carrier's "Mit:"; the list
+     * {@link #COLONY_LIST_DY} below the colony's "Mit:" (after a carrier's
+     * "Mit:" without a colony the same, I), else {@link #LIST_GAP} below
+     * the last line (032: 100 -&gt; 110; 000: 114 -&gt; 124); a native
+     * settlement's entry first, {@link #SETTLEMENT_STEP} tall.  An entry
+     * whose cell would cross the screen's bottom is not drawn, and
+     * "+ Weiter +" stands where the first of them would have gone (clip005
+     * #14852 185, clip006 #5135 185, #5517 185, #9345 191, clip005 #15391
+     * 196, clipped), only when an entry remains (I: clip005 #14364 has
+     * none at 196).
+     *
+     * @param t The texts (for the entries' lines), or null.
+     * @param last The lowest line drawn above.
+     * @param cargo Whether a carrier's goods line follows.
+     * @param colony Whether a colony block follows.
+     * @param settlement Whether a native settlement's entry comes first.
+     * @param list The entries.
+     * @return The layout.
+     */
+    static BlockLayout blockLayout(ClassicText t, int last, boolean cargo,
+                                   boolean colony, boolean settlement,
+                                   List<UnitFacts> list) {
+        final int cargoY = cargo ? last + CARGO_DY : -1;
+        int colonyY = -1, lastLine = (cargoY >= 0) ? cargoY : last, y;
+        if (colony) {
+            colonyY = (cargoY >= 0) ? cargoY + COLONY_AFTER_CARGO_DY : last + COLONY_DY;
+            lastLine = colonyY + COLONY_WITH_DY;
+            y = lastLine + COLONY_LIST_DY;
+        } else if (cargoY >= 0) {
+            y = cargoY + COLONY_LIST_DY;
+        } else {
+            y = last + LIST_GAP;
+        }
+        int settlementY = -1, next = -1, more = -1;
+        if (settlement) {
+            settlementY = y;
+            y += SETTLEMENT_STEP;
+            next = y;
+        }
+        final int[] entry = new int[list.size()];
+        for (int k = 0; k < list.size(); k++) {
+            if (y + 16 > PANEL_Y + PANEL_H) {
+                entry[k] = -1;
+                if (more < 0) more = y;
+                continue;
+            }
+            entry[k] = y;
+            y = nextListY(y, listLines(t, list.get(k), y));
+            next = y;
+        }
+        return new BlockLayout(cargoY, colonyY, settlementY, entry, more, next,
+                               lastLine);
+    }
+
+    /**
+     * The active-unit block and the unit list, clipped to the panel,
+     * without a colony block.
      */
     static void paintUnits(Graphics2D g, ClassicFont font, ClassicText t,
                            UnitFacts active, List<UnitFacts> list) {
+        paintUnits(g, font, t, active, list, null);
+    }
+
+    /**
+     * The active-unit block, a carrier's goods, the colony on its tile and
+     * the unit list, clipped to the panel, as {@link #blockLayout} places
+     * them.
+     *
+     * @param colony The colony on the active unit's tile, or null.
+     */
+    static void paintUnits(Graphics2D g, ClassicFont font, ClassicText t,
+                           UnitFacts active, List<UnitFacts> list,
+                           ColonyFacts colony) {
         if (active == null) return;
         final Graphics2D gg = (Graphics2D) g.create();
         try {
@@ -1544,17 +2102,74 @@ final class ClassicHud {
             drawLines(gg, font, lines);
             int last = NAME_Y;
             for (TextLine l : lines) last = Math.max(last, l.y);
-            int y = last + LIST_GAP;
-            for (UnitFacts f : list) {
-                if (y + 16 > PANEL_Y + PANEL_H) break;
-                paintIcon(gg, font, letter(t, f), f, CELL_X, y);
-                final List<TextLine> ls = listLines(t, f, y);
-                drawLines(gg, font, ls);
-                y = nextListY(y, ls);
-            }
+            final BlockLayout lay = blockLayout(t, last, !active.cargo.isEmpty(),
+                                                colony != null, false, list);
+            if (lay.cargoY >= 0) paintWith(gg, font, t, active.cargo, lay.cargoY);
+            if (lay.colonyY >= 0) paintColony(gg, font, t, colony, lay.colonyY);
+            paintEntries(gg, font, t, list, lay);
         } finally {
             gg.dispose();
         }
+    }
+
+    /** The list entries and "+ Weiter +" where {@code lay} puts them. */
+    private static void paintEntries(Graphics2D g, ClassicFont font, ClassicText t,
+                                     List<UnitFacts> list, BlockLayout lay) {
+        for (int k = 0; k < list.size(); k++) {
+            final int y = lay.entryY[k];
+            if (y < 0) continue;
+            final UnitFacts f = list.get(k);
+            paintIcon(g, font, letter(t, f), f, CELL_X, y);
+            paintGoods(g, f.cargo, LIST_GOODS_X, y);
+            drawLines(g, font, listLines(t, f, y));
+        }
+        final String more = (t == null || lay.moreY < 0) ? null : t.misc(MISC_MORE);
+        if (more != null) {
+            drawLines(g, font, List.of(new TextLine(more.trim(), CELL_X, lay.moreY, false)));
+        }
+    }
+
+    /**
+     * A "Mit:" line: the label ({@code @INFO} 2, green) at (242, y) and
+     * the goods icons from ({@link #GOODS_X}, y + {@link #GOODS_DY}).
+     */
+    private static void paintWith(Graphics2D g, ClassicFont font, ClassicText t,
+                                  List<GoodsIcon> goods, int y) {
+        final String with = (t == null) ? null : t.label("INFO", INFO_WITH);
+        if (with != null) {
+            drawLines(g, font, List.of(new TextLine(with.trim(), CELL_X, y, false)));
+        }
+        paintGoods(g, goods, GOODS_X, y + GOODS_DY);
+    }
+
+    /**
+     * Goods icons in a row from {@code (x, y)}, each {@link #GOODS_GAP}
+     * after the last one's right edge; the screen's edge cuts the last
+     * one (clip005 #15391: the galleon's fifth hold, furs at x 312, shows
+     * its first 8 columns).
+     */
+    static void paintGoods(Graphics2D g, List<GoodsIcon> goods, int x, int y) {
+        int gx = x;
+        for (GoodsIcon i : goods) {
+            if (i.icon == null) continue;
+            if (gx >= PANEL_X + PANEL_W) break;
+            g.drawImage(i.icon, gx, y, null);
+            gx += i.icon.getWidth() + GOODS_GAP;
+        }
+    }
+
+    /**
+     * The colony block (build spec W21b): the sprite at (242, N - 10),
+     * then the name green at (262, N) over it, then "Mit:" and its goods
+     * at N + 15.
+     *
+     * @param n The name's glyph top.
+     */
+    static void paintColony(Graphics2D g, ClassicFont font, ClassicText t,
+                            ColonyFacts c, int n) {
+        if (c.sprite != null) g.drawImage(c.sprite, CELL_X, n - COLONY_SPRITE_DY, null);
+        drawLines(g, font, List.of(new TextLine(c.name, COLONY_NAME_X, n, false)));
+        paintWith(g, font, t, c.goods, n + COLONY_WITH_DY);
     }
 
 
@@ -1678,13 +2293,7 @@ final class ClassicHud {
         if (t == null) return out;
         final List<String> extra = new ArrayList<>();
         extra.add(terrainName(t, f.terrainId));
-        if (f.river > 0) {
-            extra.add(cell(t, "OTHER_NAMES", (f.river > 1)
-                ? OTHER_NAMES_MAJOR_RIVER : OTHER_NAMES_MINOR_RIVER));
-        }
-        if (f.road) extra.add(t.misc(MISC_ROAD));
-        if (f.plowed) extra.add(t.misc(MISC_PLOWED));
-        if (f.resourceRow >= 0) extra.add(cell(t, "RESOURCE", f.resourceRow));
+        extra.addAll(tileExtras(t, f.river, f.road, f.plowed, f.resourceRow));
         for (String e : extra) {
             if (e == null) continue;
             out.add(new TextLine("(" + e.trim() + ")", TILE_X, y, false));
@@ -1719,36 +2328,36 @@ final class ClassicHud {
     }
 
     /**
+     * The tile mode's block under its lines ({@link #blockLayout}): the
+     * colony on the tile (clip005 #15391: N 116 under the last line 96;
+     * dago-colony2 #4045: 109 under 89), or the native settlement, then
+     * the units.
+     */
+    static BlockLayout tileBlockLayout(ClassicText t, TileFacts f) {
+        final List<TextLine> lines = tileLines(t, f);
+        int last = TILE_Y;
+        for (TextLine l : lines) last = Math.max(last, l.y);
+        return blockLayout(t, last, false, f.colony != null, f.settlement != null,
+                           f.units);
+    }
+
+    /**
      * The tile mode's layout: where each list entry's cell goes (the
      * settlement first, then the units, {@link #LIST_GAP} below the last
-     * line and stepped as the unit list) and where the word goes.
+     * line -- or below the colony block -- and stepped as the unit list)
+     * and where the word goes.
      *
      * @return {word y, entry cell y ...}; an entry that would cross the
      *     screen's bottom gets -1 (skipped, as in the unit list).
      */
     static int[] tileLayout(ClassicText t, TileFacts f) {
-        final List<TextLine> lines = tileLines(t, f);
-        int last = TILE_Y;
-        for (TextLine l : lines) last = Math.max(last, l.y);
-        final int n = ((f.settlement == null) ? 0 : 1) + f.units.size();
-        final int[] out = new int[1 + n];
-        int y = last + LIST_GAP, next = -1, k = 1;
-        if (f.settlement != null) {
-            out[k++] = y;
-            y += SETTLEMENT_STEP;
-            next = y;
-        }
-        for (UnitFacts u : f.units) {
-            if (y + 16 > PANEL_Y + PANEL_H) {
-                out[k++] = -1;
-                continue;
-            }
-            out[k++] = y;
-            y = nextListY(y, listLines(t, u, y));
-            next = y;
-        }
-        out[0] = Math.min(PROMPT_WORD_MAX_Y, (next < 0)
-            ? last + PROMPT_WORD_NO_LIST_DY : next + PROMPT_WORD_DY);
+        final BlockLayout lay = tileBlockLayout(t, f);
+        final int s = (f.settlement == null) ? 0 : 1;
+        final int[] out = new int[1 + s + f.units.size()];
+        if (s > 0) out[1] = lay.settlementY;
+        System.arraycopy(lay.entryY, 0, out, 1 + s, lay.entryY.length);
+        out[0] = Math.min(PROMPT_WORD_MAX_Y, (lay.nextY < 0)
+            ? lay.lastLineY + PROMPT_WORD_NO_LIST_DY : lay.nextY + PROMPT_WORD_DY);
         return out;
     }
 
@@ -1775,11 +2384,13 @@ final class ClassicHud {
 
     /**
      * The tile mode in place of the unit block (build spec W17; clip004
-     * section 1.3, landing-slow #2306/#4193/#6182): the tile's lines, the
+     * section 1.3, landing-slow #2306/#4193/#6182): the tile's lines, its
+     * colony's block (build spec W21b, clip005 #15391) or the native
      * settlement's entry (its sprite at the map's settlement offset, no
-     * shadow), the units' entries as in the unit list, and below them the
-     * word "Spielzugende" in {@code wordRgb}, drawn over whatever lies
-     * there.
+     * shadow), the units' entries as in the unit list with "+ Weiter +",
+     * and below them the word "Spielzugende" in {@code wordRgb}, drawn over
+     * whatever lies there (clip005 #15391: the word at 192 over the
+     * "+ Weiter +" at 196).
      *
      * @param wordRgb The word's colour, or -1 for no word (a tile mode
      *     without the Spielzugende mode, clip005 #18186).
@@ -1791,29 +2402,25 @@ final class ClassicHud {
         try {
             gg.clipRect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H);
             drawLines(gg, font, tileLines(t, f));
-            final int[] lay = tileLayout(t, f);
-            int k = 1;
+            final BlockLayout lay = tileBlockLayout(t, f);
+            if (lay.colonyY >= 0) paintColony(gg, font, t, f.colony, lay.colonyY);
             if (f.settlement != null) {
-                final int cy = lay[k++];
+                final int cy = lay.settlementY;
                 final BufferedImage sp = f.settlement.sprite;
                 if (sp != null) {
                     gg.drawImage(sp, CELL_X + settlementOffset(sp.getWidth()), cy, null);
                 }
                 drawLines(gg, font, settlementLines(t, f.settlement, cy));
             }
-            for (UnitFacts u : f.units) {
-                final int cy = lay[k++];
-                if (cy < 0) continue;
-                paintIcon(gg, font, letter(t, u), u, CELL_X, cy);
-                drawLines(gg, font, listLines(t, u, cy));
-            }
+            paintEntries(gg, font, t, f.units, lay);
             if (wordRgb >= 0) {
                 final String w = promptWord(t);
+                final int wy = tileLayout(t, f)[0];
                 if (font != null) {
-                    font.draw(gg, w, TILE_X, lay[0], ClassicFont.colours(wordRgb & 0xFFFFFF));
+                    font.draw(gg, w, TILE_X, wy, ClassicFont.colours(wordRgb & 0xFFFFFF));
                 } else {
                     gg.setColor(new Color(wordRgb & 0xFFFFFF));
-                    gg.drawString(w, TILE_X, lay[0] + 6);
+                    gg.drawString(w, TILE_X, wy + 6);
                 }
             }
         } finally {
