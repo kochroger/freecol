@@ -85,7 +85,7 @@ public class ClassicGUISeamTest extends FreeColTestCase {
     /**
      * Answers every box by pressing {@link #keys} on its real bar
      * ({@link ClassicAdvisorBox.Bar}): what the player's keys answer.
-     * Keys: UP, DOWN, ENTER, ESC, X (any other key), OUT (a click outside
+     * Keys: UP, DOWN, ENTER, ESC, SPACE, X (any other key), OUT (a click outside
      * the box: a press and a release in the letterbox).
      */
     static final class KeyPrompter implements ClassicGUI.Prompter {
@@ -117,6 +117,7 @@ public class ClassicGUISeamTest extends FreeColTestCase {
                 case "DOWN": a = bar.down(); break;
                 case "ENTER": a = bar.enter(); break;
                 case "ESC": a = bar.escape(); break;
+                case "SPACE": a = bar.space(); break;
                 case "OUT":
                     bar.press(-1, false);
                     a = bar.release(-1, false);
@@ -1193,6 +1194,118 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         } finally {
             mv.dispose();
         }
+    }
+
+    /**
+     * A classic GUI without a client, with prefs of its own (in memory, so
+     * no test writes the user's classic-options.properties) and a game.
+     */
+    private static final class PrefsGUI extends ClassicGUI {
+
+        final ClassicPrefs mine = new ClassicPrefs(null);
+        final Game game;
+
+        PrefsGUI(Game game) {
+            super(null);
+            this.game = game;
+        }
+
+        @Override
+        ClassicPrefs prefs() {
+            return this.mine;
+        }
+
+        @Override
+        protected Game getGame() {
+            return this.game;
+        }
+    }
+
+    /**
+     * SPIEL rows 0 and 1 (build spec W14): the strip's host gives their
+     * classic actions, and each opens its option box from the pack's
+     * GAME.TXT on the real bar: there Down x3 and Enter switch Spielzugende
+     * on at once, Escape closes; in the colony box Down and Space switch the
+     * numbers on the work tiles off.  Without the pack the row says that it
+     * follows later.
+     */
+    public void testTheOptionRowsOpenTheBoxes() {
+        final PrefsGUI gui = new PrefsGUI(null);
+        final javax.swing.Action ga = gui.classicAction(ClassicMenuModel.GAME_OPTIONS);
+        assertNotNull(ga);
+        assertTrue(ga.isEnabled());
+        assertSame(ga, gui.classicAction(ClassicMenuModel.GAME_OPTIONS));
+        assertNotNull(gui.classicAction(ClassicMenuModel.COLONY_OPTIONS));
+        assertNotSame(ga, gui.classicAction(ClassicMenuModel.COLONY_OPTIONS));
+        assertNull(gui.classicAction("saveAction"));
+        assertNull(gui.classicAction(null));
+        final KeyPrompter keys = new KeyPrompter()
+            .press("DOWN", "DOWN", "DOWN", "ENTER", "ESC");
+        gui.prompter = keys;
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t == null || t.message(ClassicOptionBoxes.GAME_SECTION) == null) {
+            System.err.println("testTheOptionRowsOpenTheBoxes: no pack texts,"
+                + " the notice only");
+            assertFalse(gui.showOptionBox(ClassicOptionBoxes.GAME_SECTION));
+            assertTrue(last(keys.boxes).isNotice());
+            return;
+        }
+        assertTrue(gui.showOptionBox(ClassicOptionBoxes.GAME_SECTION));
+        final ClassicAdvisorBox.Request r = last(keys.boxes);
+        assertTrue(r.isCheckbox());
+        assertEquals(8, r.rows.size());
+        assertEquals("XXooXXXX", ClassicAdvisorBox.checkString(r.checks));
+        assertTrue(gui.mine.is(ClassicPrefs.END_TURN_PROMPT));
+        assertFalse(gui.mine.is(ClassicPrefs.MOVE_ACCELERATOR));
+        // The next opening shows it, the bar again on row 1.
+        keys.press("ESC");
+        gui.classicAction(ClassicMenuModel.GAME_OPTIONS).actionPerformed(null);
+        assertEquals("XXoXXXXX", ClassicAdvisorBox.checkString(last(keys.boxes).checks));
+        assertEquals(0, last(keys.boxes).defaultRow);
+        // The colony box.
+        keys.press("DOWN", "SPACE", "ESC");
+        gui.classicAction(ClassicMenuModel.COLONY_OPTIONS).actionPerformed(null);
+        assertEquals(10, last(keys.boxes).rows.size());
+        assertFalse(gui.mine.is(ClassicPrefs.GOODS_TERRAIN_LABELS));
+        assertTrue(gui.mine.is(ClassicPrefs.BUILDING_LABELS));
+        assertEquals(3, keys.boxes.size());
+    }
+
+    /**
+     * The notices that come up (the funnel of both notice seams): FreeCol's
+     * start message never, a colony report only while its row of
+     * "Koloniebericht-Optionen" is on; a held-back notice asks no box.
+     */
+    public void testColonyReportsHeldBack() {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final PrefsGUI gui = new PrefsGUI(game);
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        final net.sf.freecol.common.model.ModelMessage famine
+            = new net.sf.freecol.common.model.ModelMessage(
+                net.sf.freecol.common.model.ModelMessage.MessageType.WARNING,
+                "model.colony.famineFeared", dutch, dutch);
+        final net.sf.freecol.common.model.ModelMessage father
+            = new net.sf.freecol.common.model.ModelMessage(
+                net.sf.freecol.common.model.ModelMessage.MessageType.SONS_OF_LIBERTY,
+                "model.player.foundingFatherJoinedCongress", dutch, dutch);
+        final net.sf.freecol.common.model.ModelMessage start
+            = new net.sf.freecol.common.model.ModelMessage(
+                net.sf.freecol.common.model.ModelMessage.MessageType.DEFAULT,
+                ClassicGUI.START_GAME_MESSAGE, dutch, dutch);
+        assertEquals(List.of(famine, father), gui.noticesShown(List.of(start, famine, father)));
+        gui.mine.set(ClassicPrefs.REPORT_FOOD, false);
+        assertEquals(List.of(father), gui.noticesShown(List.of(start, famine, father)));
+        gui.mine.set(ClassicPrefs.REPORT_FOOD, true);
+        gui.mine.set(ClassicPrefs.REPORT_SONS_OF_LIBERTY, false);
+        assertEquals(List.of(famine, father), gui.noticesShown(List.of(famine, father)));
+        assertTrue(gui.noticesShown(null).isEmpty());
+        // Held back in both seams: no box.
+        gui.mine.set(ClassicPrefs.REPORT_FOOD, false);
+        assertNull(gui.showModelMessages(List.of(famine)));
+        assertNull(gui.showReportTurnPanel(List.of(famine)));
+        assertTrue(fake.boxes.isEmpty());
     }
 
     private static <T> T last(List<T> l) {

@@ -117,10 +117,18 @@ public class ClassicMenuBarTest extends TestCase {
         final List<ClassicMenuModel.Slot> spiel = ClassicMenuModel.slots(
             ClassicMenuModel.SPIEL, c, id -> !id.equals("declareIndependenceAction"));
         assertEquals("", greyed(spiel));
-        // Row 0 (options, a no-op seam) is where Alt+G puts the bar (053).
+        // Row 0 (the options box, W14) is where Alt+G puts the bar (053).
         assertEquals(0, ClassicMenuStrip.nextSelectable(spiel, -1, 1));
-        assertFalse(spiel.get(0).enabled);
+        assertTrue(spiel.get(0).enabled);
+        assertTrue(spiel.get(1).enabled);   // the colony report options
+        assertFalse(spiel.get(6).enabled);  // save: a no-op seam, inert
+        assertFalse(spiel.get(6).greyed);
         assertTrue(spiel.get(12).enabled);  // quit
+        // Without the host's action (the preview) the option rows are inert.
+        final List<ClassicMenuModel.Slot> none = ClassicMenuModel.slots(
+            ClassicMenuModel.SPIEL, c, id -> false);
+        assertFalse(none.get(0).enabled);
+        assertFalse(none.get(0).greyed);
         for (int m : new int[] { ClassicMenuModel.ANSICHT, ClassicMenuModel.BERICHTE,
                                  ClassicMenuModel.HANDEL, ClassicMenuModel.PEDIA }) {
             assertEquals(Integer.toString(m), "",
@@ -200,7 +208,8 @@ public class ClassicMenuBarTest extends TestCase {
     /** The item -> action map (spec table), spot-checked per menu. */
     public void testActionMap() {
         final String[][] expect = {
-            { "0", "0", "preferencesAction" }, { "0", "1", null }, { "0", "4", "saveAction" },
+            { "0", "0", "classic.gameOptions" }, { "0", "1", "classic.colonyOptions" },
+            { "0", "2", null }, { "0", "4", "saveAction" },
             { "0", "5", "openAction" }, { "0", "6", "declareIndependenceAction" },
             { "0", "7", "retireAction" }, { "0", "8", "quitAction" },
             { "1", "0", "toggleViewModeAction" }, { "1", "1", "toggleViewModeAction" },

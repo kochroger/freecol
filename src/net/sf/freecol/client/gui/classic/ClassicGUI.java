@@ -1686,6 +1686,10 @@ public class ClassicGUI extends GUI {
             this.imageLibrary, text, tiny, wood);
         this.mapViewer.setIconArt(tiny, text);
         applySessionOptions();
+        // What the options box set last for Autom. Sichern, Kampfanalyse and
+        // Tutortips (FreeCol options) holds in this session too (W14).
+        ClassicOptionBoxes.applyRemembered(getFreeColClient().getClientOptions(),
+                                           ClassicPrefs.get());
         final ActionManager am = getFreeColClient().getActionManager();
         this.menuStrip = new ClassicMenuStrip(new ClassicMenuStrip.Host() {
                 @Override
@@ -1698,6 +1702,8 @@ public class ClassicGUI extends GUI {
 
                 @Override
                 public javax.swing.Action action(String id) {
+                    final javax.swing.Action own = classicAction(id);
+                    if (own != null) return own;
                     return (am == null || id == null) ? null
                         : am.getFreeColAction(id);
                 }
@@ -1891,6 +1897,103 @@ public class ClassicGUI extends GUI {
                                             java.awt.Image icon) {
         return ClassicAdvisorBox.Request.builder(id).freeColText(text)
             .stopgap(title, icon).build();
+    }
+
+    // The option boxes (build spec W14)
+
+    /** SPIEL rows 0 and 1, made on first use. */
+    private javax.swing.Action gameOptionsAction = null, colonyOptionsAction = null;
+
+    /**
+     * The Classic UI's own menu actions ({@link ClassicMenuModel#GAME_OPTIONS},
+     * {@link ClassicMenuModel#COLONY_OPTIONS}): the strip fires them as it
+     * fires an engine action, after the menu has closed.
+     *
+     * @param id An action id, or null.
+     * @return The action, or null for any other id.
+     */
+    javax.swing.Action classicAction(String id) {
+        if (ClassicMenuModel.GAME_OPTIONS.equals(id)) {
+            if (this.gameOptionsAction == null) {
+                this.gameOptionsAction = optionsAction(ClassicOptionBoxes.GAME_SECTION);
+            }
+            return this.gameOptionsAction;
+        }
+        if (ClassicMenuModel.COLONY_OPTIONS.equals(id)) {
+            if (this.colonyOptionsAction == null) {
+                this.colonyOptionsAction = optionsAction(ClassicOptionBoxes.COLONY_SECTION);
+            }
+            return this.colonyOptionsAction;
+        }
+        return null;
+    }
+
+    /** An action that opens an option box ({@link #showOptionBox}). */
+    private javax.swing.Action optionsAction(String section) {
+        return new javax.swing.AbstractAction(section) {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                showOptionBox(section);
+            }
+        };
+    }
+
+    /**
+     * SPIEL "Spieloptionen" or "Koloniebericht-Optionen": the original's
+     * option box ({@link ClassicOptionBoxes}), until it is closed; each
+     * flip acts at once.  Without GAME.TXT's box the "follows later"
+     * notice.  EDT only.
+     *
+     * @param section {@link ClassicOptionBoxes#GAME_SECTION} or
+     *     {@link ClassicOptionBoxes#COLONY_SECTION}.
+     * @return Whether the box was asked for.
+     */
+    boolean showOptionBox(String section) {
+        final ClassicAdvisorBox.Request r = optionBox(section);
+        if (r == null) {
+            showInformationNotice(Messages.message("classic.mainMenu.notYet"));
+            return false;
+        }
+        this.prompter.ask(r);
+        return true;
+    }
+
+    /**
+     * An option box of the pack's GAME.TXT on the game view's store: the
+     * classic prefs, the client's FreeCol options, and the water cycle
+     * switched at once ({@link #optionApplied}).
+     *
+     * @param section The box's section.
+     * @return The box, or null without the pack's text.
+     */
+    ClassicAdvisorBox.Request optionBox(String section) {
+        final FreeColClient fcc = getFreeColClient();
+        return ClassicOptionBoxes.request(ClassicText.load(ClassicPackFiles.runtime()),
+            section, ClassicOptionBoxes.store(prefs(),
+                (fcc == null) ? null : fcc.getClientOptions(), this::optionApplied),
+            null);
+    }
+
+    /**
+     * What an option row's change starts at once: the water stops or goes
+     * on cycling in the same step (W6c).  The other rows are read where
+     * they are used (the next slide, the next idle decision, the next
+     * attack, autosave or notice, the next colony screen).
+     */
+    private void optionApplied(String key, boolean on) {
+        if (ClassicPrefs.WATER_CYCLING.equals(key) && this.waterCycle != null) {
+            this.waterCycle.setEnabled(on);
+        }
+    }
+
+    /**
+     * The prefs the option boxes and the report filter use: the shared ones
+     * ({@code classic-options.properties}); a test puts in its own.
+     *
+     * @return The prefs.
+     */
+    ClassicPrefs prefs() {
+        return ClassicPrefs.get();
     }
 
     // View mode / focus — delegated to the map viewer.
@@ -3081,10 +3184,14 @@ public class ClassicGUI extends GUI {
      *       held and shown after it ({@link #flushHeldMessages}).  The
      *       callers are on the EDT already (invokeNowOrWait), so holding
      *       blocks nothing.</li>
+     *   <li>A colony report whose row of "Koloniebericht-Optionen" is off
+     *       is dropped ({@link ClassicOptionBoxes#reportsShown},
+     *       {@link ClassicPrefs#REPORTS}), on top of FreeCol's own message
+     *       options.</li>
      * </ul>
      */
     private void showMessagePopup(List<ModelMessage> messages, String titleKey) {
-        messages = withoutStartMessage(messages);
+        messages = noticesShown(messages);
         if (messages.isEmpty()) return;
         if (this.firstScenePending || this.sceneShowing) {
             this.heldMessages.add(new HeldMessages(messages, titleKey));
@@ -3111,6 +3218,18 @@ public class ClassicGUI extends GUI {
     }
 
     // First game scene (ClassicFirstScene)
+
+    /**
+     * The notices of {@link #showMessagePopup} that come up: without
+     * FreeCol's start message, and without the colony reports whose row of
+     * "Koloniebericht-Optionen" is off (W14).
+     *
+     * @param messages The messages, or null.
+     * @return A new list, possibly empty.
+     */
+    List<ModelMessage> noticesShown(List<ModelMessage> messages) {
+        return ClassicOptionBoxes.reportsShown(withoutStartMessage(messages), prefs());
+    }
 
     /** The id of FreeCol's start message (Player.java:2731). */
     static final String START_GAME_MESSAGE = "model.player.startGame";
@@ -3808,6 +3927,23 @@ public class ClassicGUI extends GUI {
         if (r.isNotice()) {
             ClassicDialog.showMessages(owner, r.title, List.of(page));
             return 0;
+        }
+        if (r.isCheckbox()) {
+            // The option boxes: a row flips and the popup comes back with
+            // the new states, until it is closed.
+            final ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+            final String[] plain = r.plainRows();
+            while (true) {
+                final String[] rows = new String[plain.length];
+                for (int i = 0; i < rows.length; i++) {
+                    rows[i] = (bar.checked(i) ? "[x] " : "[ ] ") + plain[i];
+                }
+                final int chosen = ClassicDialog.ask(owner, r.title, page, rows,
+                                                     Math.max(0, bar.row()));
+                if (chosen < 0 || chosen >= rows.length) return r.escapeAnswer();
+                bar.press(chosen, true);       // as a click on the row
+                bar.release(chosen, true);
+            }
         }
         final String[] rows = r.plainRows();
         if (r.list) {

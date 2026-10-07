@@ -88,11 +88,21 @@ final class ClassicMenuModel {
         HANDEL = 4, PEDIA = 5;
 
     /**
+     * The Classic UI's own rows: actions with no FreeCol equivalent, which
+     * the strip's host gives ({@code ClassicMenuStrip.Host#action}).  SPIEL
+     * row 0 opens "Spieloptionen festlegen", row 1
+     * "Koloniebericht-Optionen festlegen" ({@link ClassicOptionBoxes}, build
+     * spec W14); FreeCol's {@code preferencesAction}, the row's engine
+     * action before, opens a dialog the Classic UI has no seam for.
+     */
+    static final String GAME_OPTIONS = "classic.gameOptions",
+        COLONY_OPTIONS = "classic.colonyOptions";
+
+    /**
      * Actions whose classic GUI seam is still the base {@code GUI} no-op, so
      * firing them would do nothing visible: shown greyed until a classic
      * screen exists.  Remove an id when its seam is wired.
      * <ul>
-     *   <li>preferencesAction: {@code showClientOptionsDialog} (GUI.java:1966)</li>
      *   <li>saveAction: {@code showSaveDialog} returns null (GUI.java:2475)</li>
      *   <li>openAction: {@code showLoadSaveFileDialog} (not overridden)</li>
      *   <li>declareIndependenceAction: {@code showDeclarationPanel} (GUI.java:2039)</li>
@@ -105,7 +115,7 @@ final class ClassicMenuModel {
      * is false, GUI.java:1701.)
      */
     static final Set<String> NOOP_SEAMS = Collections.unmodifiableSet(new HashSet<>(
-        Arrays.asList("preferencesAction", "saveAction", "openAction",
+        Arrays.asList("saveAction", "openAction",
                       "declareIndependenceAction", "findSettlementAction",
                       "gotoAction", "assignTradeRouteAction", "tradeRouteAction",
                       pedia(ColopediaAction.PanelType.GOODS),
@@ -204,7 +214,10 @@ final class ClassicMenuModel {
         /** Separator group within the menu. */
         final int group;
 
-        /** The engine action, or null when there is no equivalent. */
+        /**
+         * The engine action, a Classic UI row's own ({@link #GAME_OPTIONS},
+         * {@link #COLONY_OPTIONS}), or null when there is no equivalent.
+         */
         final String actionId;
 
         /** The original's key for it (shown in the item's text), or null. */
@@ -272,8 +285,8 @@ final class ClassicMenuModel {
     /** Every item, menu by menu, in MENU.TXT order. */
     private static final List<Item> ITEMS = Collections.unmodifiableList(Arrays.asList(
         // SPIEL (@GAME, MENU.TXT:17-26).  Groups [0,1] [2,3] [4,5] [6] [7,8].
-        new Item(SPIEL, 0, 0, "preferencesAction", null, ALWAYS, ALWAYS),
-        new Item(SPIEL, 1, 0, null, null, ALWAYS, ALWAYS),     // colony report options
+        new Item(SPIEL, 0, 0, GAME_OPTIONS, null, ALWAYS, ALWAYS),
+        new Item(SPIEL, 1, 0, COLONY_OPTIONS, null, ALWAYS, ALWAYS),
         new Item(SPIEL, 2, 1, null, null, ALWAYS, ALWAYS),     // sound options
         new Item(SPIEL, 3, 1, null, null, ALWAYS, ALWAYS),     // choose music
         new Item(SPIEL, 4, 2, "saveAction", null, ALWAYS, ALWAYS),

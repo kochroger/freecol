@@ -485,4 +485,85 @@ public class ClassicAdvisorLayerTest extends TestCase {
         assertFalse(up());
         assertFalse(edt(() -> this.layer.isBusy()));
     }
+
+    /**
+     * A checkbox box (the option boxes, build spec W14): Enter, Space, a
+     * row's gold letter and a click (the press marks, the release flips)
+     * flip rows, each applied at once, and the box stays up; Escape closes
+     * it with no row, and so does a press and release outside.
+     */
+    public void testACheckboxBoxStaysUp() throws Exception {
+        final List<String> flips = new ArrayList<>();
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request.builder("opts")
+            .freeColText("a a").rows("a", "~b a", "a a")
+            .checks(new boolean[] { true, false, false },
+                    (row, on) -> flips.add(row + "=" + on))
+            .build();
+        final Answer a = ask(r);
+        flush();
+        assertTrue(up());
+        assertEquals(0, bar());
+        key(KeyEvent.VK_ENTER);
+        key(KeyEvent.VK_SPACE);
+        assertTrue(up());
+        key(KeyEvent.VK_B);
+        assertEquals(1, bar());
+        final ClassicAdvisorBox.Layout l = edt(() -> this.layer.currentLayout());
+        final java.awt.Rectangle hit = ClassicMenuBox.rowHitRect(l.box, l.promptLines(), 2);
+        mouse(MouseEvent.MOUSE_PRESSED, hit.x + 5, hit.y + 3);
+        assertEquals(2, bar());
+        assertEquals(3, flips.size());                 // the press only marks
+        mouse(MouseEvent.MOUSE_RELEASED, hit.x + 5, hit.y + 3);
+        assertEquals(java.util.Arrays.asList("0=false", "0=true", "1=true", "2=true"),
+                     flips);
+        assertFalse(a.isDone());
+        assertTrue(up());
+        assertEquals(1, this.host.opened);
+        assertEquals(0, this.host.closed);
+        key(KeyEvent.VK_ESCAPE);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, a.get());
+        assertFalse(up());
+        // Again: the bar on row 1, closed by a click outside.
+        this.clock.advanceMs(1000);
+        final Answer b = ask(r);
+        flush();
+        assertTrue(up());
+        assertEquals(0, bar());
+        mouse(MouseEvent.MOUSE_PRESSED, 2, 2);
+        assertEquals(-1, bar());
+        mouse(MouseEvent.MOUSE_RELEASED, 2, 2);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, b.get());
+        assertEquals(4, flips.size());
+        assertFalse(edt(() -> this.layer.isBusy()));
+    }
+
+    /**
+     * A box with an open delay (the option boxes: 2.5 frames after their
+     * menu row) is due at once, so the layer is busy and takes the input,
+     * but comes only when the delay has passed; a box without one comes at
+     * once.
+     */
+    public void testAnOpenDelay() throws Exception {
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request.builder("opts")
+            .freeColText("a a").rows("a", "a a")
+            .checks(new boolean[] { true, false }, null)
+            .openDelay(ClassicOptionBoxes.OPEN_DELAY_MS).build();
+        final Answer a = ask(r);
+        flush();
+        assertFalse(up());
+        assertTrue(edt(() -> this.layer.isBusy()));
+        assertEquals(1, this.host.opened);
+        runTimer();
+        assertFalse(up());                             // not yet due
+        this.clock.advanceMs(ClassicOptionBoxes.OPEN_DELAY_MS - 1.0);
+        runTimer();
+        assertFalse(up());
+        this.clock.advanceMs(2.0);
+        runTimer();
+        assertTrue(up());
+        assertEquals(0, bar());
+        key(KeyEvent.VK_ESCAPE);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, a.get());
+        assertEquals(0.0, question("q").openDelayMs, 0.0);
+    }
 }

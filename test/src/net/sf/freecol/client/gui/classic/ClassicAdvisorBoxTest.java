@@ -481,6 +481,118 @@ public class ClassicAdvisorBoxTest extends TestCase {
         assertEquals(1, clickLetterbox(bar));
     }
 
+    /**
+     * A checkbox box (GAME.TXT {@code @checkbox}, the option boxes of
+     * W14): a row flips on the release of a press on it, on Enter or Space
+     * while barred, or on its gold letter, and the box stays; each flip runs
+     * the request's toggles once and is reported once to the painter; a
+     * greyed row never flips; Escape, and a press and release outside,
+     * close it with no row.  Space and the letters stay any other key in
+     * every other box.
+     */
+    public void testCheckboxBar() {
+        final List<String> flips = new ArrayList<>();
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request.builder("opts")
+            .gameText(Arrays.asList("a a")).width(220)
+            .rows("a", "~b a", "a a").disabled(new boolean[] { false, false, true })
+            .checks(new boolean[] { true, false, false },
+                    (row, on) -> flips.add(row + "=" + on))
+            .build();
+        final int open = ClassicAdvisorBox.Bar.OPEN;
+        final int dismissed = ClassicAdvisorBox.Bar.DISMISSED;
+        assertTrue(r.isCheckbox());
+        assertFalse(r.isNotice());
+        assertEquals(0, r.defaultRow);               // row 1 at every open
+        assertEquals(-1, r.cancelRow);               // no "no" row
+        assertEquals(dismissed, r.escapeAnswer());
+        final ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+        assertEquals("Xoo", ClassicAdvisorBox.checkString(bar.checks()));
+        // Enter and Space flip the barred row; the box stays.
+        assertEquals(open, bar.enter());
+        assertEquals(0, bar.takeToggled());
+        assertEquals(-1, bar.takeToggled());          // reported once
+        assertEquals(open, bar.space());
+        assertTrue(bar.checked(0));
+        assertEquals(0, bar.takeToggled());
+        // A press marks the row (no flip yet), its release flips it.
+        bar.press(1, true);
+        assertEquals(1, bar.row());
+        assertEquals(-1, bar.takeToggled());
+        assertEquals(open, bar.release(1, true));
+        assertEquals(1, bar.takeToggled());
+        assertTrue(bar.checked(1));
+        // A release on another row flips nothing.
+        bar.press(0, true);
+        assertEquals(open, bar.release(1, true));
+        assertEquals(-1, bar.takeToggled());
+        // The gold letter: B is row 1's; it gets the bar and flips.
+        assertEquals(open, bar.letter('B'));
+        assertEquals(1, bar.row());
+        assertFalse(bar.checked(1));
+        assertEquals(1, bar.takeToggled());
+        assertEquals(open, bar.letter('Q'));          // no row's letter
+        assertEquals(1, bar.row());
+        // A greyed row: Enter and a click do nothing.
+        bar.down();
+        assertEquals(2, bar.row());
+        assertEquals(open, bar.enter());
+        bar.press(2, true);
+        assertEquals(open, bar.release(2, true));
+        assertFalse(bar.checked(2));
+        assertEquals(Arrays.asList("0=false", "0=true", "1=true", "1=false"), flips);
+        // The request keeps the opening states; the bar has the new ones.
+        assertEquals("Xoo", ClassicAdvisorBox.checkString(r.checks));
+        assertEquals("Xoo", ClassicAdvisorBox.checkString(bar.checks()));
+        // A press outside removes the bar; Enter then flips nothing; the
+        // release outside closes the box with no row.
+        bar.press(-1, false);
+        assertEquals(-1, bar.row());
+        assertEquals(open, bar.enter());
+        assertEquals(open, bar.space());
+        assertEquals(-1, bar.takeToggled());
+        assertEquals(dismissed, bar.release(-1, false));
+        assertEquals(dismissed, new ClassicAdvisorBox.Bar(r).escape());
+        // A press outside released on the box: nothing; Up brings the bar back.
+        final ClassicAdvisorBox.Bar b2 = new ClassicAdvisorBox.Bar(r);
+        b2.press(-1, false);
+        assertEquals(open, b2.release(-1, true));
+        assertEquals(open, b2.up());
+        assertEquals(0, b2.row());
+        assertEquals(4, flips.size());
+        // Other boxes: Space and a letter are any other key.
+        final ClassicAdvisorBox.Request q = ClassicAdvisorBox.Request.builder("q")
+            .rows("~a", "b").build();
+        assertFalse(q.isCheckbox());
+        final ClassicAdvisorBox.Bar qb = new ClassicAdvisorBox.Bar(q);
+        assertEquals(open, qb.space());
+        assertEquals(open, qb.letter('A'));
+        assertEquals(0, qb.row());
+        assertEquals(-1, qb.takeToggled());
+        assertNull(qb.checks());
+        assertEquals(0, qb.enter());                  // still answers
+        final ClassicAdvisorBox.Bar nb = new ClassicAdvisorBox.Bar(
+            ClassicAdvisorBox.Request.builder("n").freeColText("x").build());
+        assertEquals(0, nb.space());
+        assertEquals(0, nb.letter('X'));
+        // Checks without rows make no checkbox box (a notice).
+        assertFalse(ClassicAdvisorBox.Request.builder("n").freeColText("x")
+            .checks(new boolean[0], null).build().isCheckbox());
+    }
+
+    /** A checkbox row as drawn: the gold bullet, a space, the row. */
+    public void testCheckboxRowText() {
+        assertEquals("{]} ~Tutortips", ClassicAdvisorBox.checkRow("~Tutortips", true));
+        assertEquals("{[} an {Waren}", ClassicAdvisorBox.checkRow("an {Waren}", false));
+        assertEquals("XXooXXXX", ClassicAdvisorBox.checkString(new boolean[] {
+            true, true, false, false, true, true, true, true }));
+        assertEquals("", ClassicAdvisorBox.checkString(null));
+        // The plain row (the stopgap) keeps no bullet.
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request.builder("o")
+            .rows("~Aa", "{b}").checks(new boolean[] { true, false }, null).build();
+        assertEquals(Arrays.asList("Aa", "b"), Arrays.asList(r.plainRows()));
+        assertTrue(r.toString().contains("checks=Xo"));
+    }
+
     /** FreeCol's text as box text, GAME.TXT's markup dropped for the stopgap. */
     public void testText() {
         assertEquals("a (b) c-d e", ClassicAdvisorBox.literal("a {b} c~d^ e"));

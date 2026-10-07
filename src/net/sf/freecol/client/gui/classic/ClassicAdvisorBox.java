@@ -82,6 +82,16 @@ import java.util.Map;
  *       ignores a click outside: the notices teach "click anywhere to go
  *       on", and such a click must not answer it.  A box without rows is a
  *       notice: any key, or a click, dismisses it.</li>
+ *   <li><b>Checkbox boxes (V, landing-slow 01-options).</b>  GAME.TXT's
+ *       {@code @checkbox} messages (the two option boxes,
+ *       {@link ClassicOptionBoxes}) put FONTTINY {@code ]} (on) or
+ *       {@code [} (off) in gold before each row's text, a 2-px space
+ *       between; the bar starts on row 1 at every open.  A row does not
+ *       close the box: the release of a press on it flips it
+ *       ({@link Request#toggles} acts at once), and only the 3x3 inside of
+ *       its bullet changes; Enter and Space flip the barred row and the
+ *       row's gold letter flips its row (I, never seen); Escape, or a
+ *       press and release outside the box, closes it.</li>
  * </ul>
  */
 final class ClassicAdvisorBox {
@@ -216,6 +226,19 @@ final class ClassicAdvisorBox {
     }
 
 
+    /** What a checkbox box's row does when it flips ({@link Request#toggles}). */
+    interface Toggles {
+
+        /**
+         * A row was flipped: apply it now (the original's options act in
+         * the same turn).  EDT only.
+         *
+         * @param row The row (0-based).
+         * @param on Its new state.
+         */
+        void toggled(int row, boolean on);
+    }
+
     /** What a box says: its text, rows, bar and portrait. */
     static final class Request {
 
@@ -256,6 +279,23 @@ final class ClassicAdvisorBox {
          */
         final boolean outsideCancels;
 
+        /**
+         * A checkbox box's rows' states when it opens, or null for a box
+         * whose rows answer it (every box but GAME.TXT's {@code @checkbox}
+         * ones).
+         */
+        final boolean[] checks;
+
+        /** What a flipped row does, or null (checkbox boxes only). */
+        final Toggles toggles;
+
+        /**
+         * How long after it is asked for the box comes at the earliest (ms):
+         * 0, or the option boxes' lead after their menu row (the clip: 2-4
+         * frames after the menu goes).
+         */
+        final double openDelayMs;
+
         /** The stopgap's window title, when the box cannot be drawn. */
         final String title;
 
@@ -281,6 +321,10 @@ final class ClassicAdvisorBox {
             this.cancelRow = (b.cancelRow < 0 || b.cancelRow >= n) ? -1 : b.cancelRow;
             this.portrait = (b.portrait == null) ? Portrait.NONE : b.portrait;
             this.outsideCancels = b.outsideCancels;
+            this.checks = (b.checks == null || n == 0) ? null
+                : Arrays.copyOf(b.checks, n);
+            this.toggles = (this.checks == null) ? null : b.toggles;
+            this.openDelayMs = Math.max(0.0, b.openDelayMs);
             this.title = (b.title == null) ? "" : b.title;
             this.icon = b.icon;
             this.list = b.list;
@@ -289,6 +333,11 @@ final class ClassicAdvisorBox {
         /** @return Whether it is a notice (no rows). */
         boolean isNotice() {
             return this.rows.isEmpty();
+        }
+
+        /** @return Whether its rows are checkboxes (GAME.TXT {@code @checkbox}). */
+        boolean isCheckbox() {
+            return this.checks != null;
         }
 
         /** @return Whether row {@code i} can be taken. */
@@ -328,7 +377,8 @@ final class ClassicAdvisorBox {
         public String toString() {
             return this.id + " rows=" + this.rows.size() + " bar=" + this.defaultRow
                 + " esc=" + this.cancelRow + " portrait=" + this.portrait
-                + (this.outsideCancels ? "" : " outside=stays");
+                + (this.outsideCancels ? "" : " outside=stays")
+                + (isCheckbox() ? " checks=" + checkString(this.checks) : "");
         }
 
         /**
@@ -355,6 +405,9 @@ final class ClassicAdvisorBox {
         private int cancelRow = Integer.MIN_VALUE;
         private Portrait portrait = Portrait.NONE;
         private boolean outsideCancels = true;
+        private boolean[] checks = null;
+        private Toggles toggles = null;
+        private double openDelayMs = 0.0;
         private String title = null;
         private Image icon = null;
         private boolean list = false;
@@ -437,6 +490,26 @@ final class ClassicAdvisorBox {
             return this;
         }
 
+        /**
+         * A checkbox box: its rows' states when it opens (one per row), and
+         * what a flip does.  Escape then closes it with no row, unless a
+         * cancel row is given.
+         *
+         * @param states The states.
+         * @param t What a flipped row does, or null.
+         */
+        Builder checks(boolean[] states, Toggles t) {
+            this.checks = (states == null) ? null : states.clone();
+            this.toggles = t;
+            return this;
+        }
+
+        /** @param ms The box comes no earlier than this after it is asked for. */
+        Builder openDelay(double ms) {
+            this.openDelayMs = ms;
+            return this;
+        }
+
         /** The stopgap's window title and illustration. */
         Builder stopgap(String t, Image i) {
             this.title = t;
@@ -452,7 +525,9 @@ final class ClassicAdvisorBox {
 
         /** @return The request. */
         Request build() {
-            if (this.cancelRow == Integer.MIN_VALUE) this.cancelRow = this.rows.size() - 1;
+            if (this.cancelRow == Integer.MIN_VALUE) {
+                this.cancelRow = (this.checks != null) ? -1 : this.rows.size() - 1;
+            }
             if (this.disabled.length < this.rows.size()) {
                 this.disabled = Arrays.copyOf(this.disabled, this.rows.size());
             }
@@ -589,6 +664,35 @@ final class ClassicAdvisorBox {
         return out;
     }
 
+    /** FONTTINY's bullets of a checkbox row: a dot (on), a ring (off). */
+    static final char CHECK_ON = ']', CHECK_OFF = '[';
+
+    /**
+     * A checkbox row as drawn: the bullet in gold, a space (2 px), the row
+     * (landing-slow 01-options section 2.3: the text at box + 17).
+     *
+     * @param marked The row, markup kept.
+     * @param on Its state.
+     * @return The marked text.
+     */
+    static String checkRow(String marked, boolean on) {
+        return "{" + (on ? CHECK_ON : CHECK_OFF) + "} " + ((marked == null) ? "" : marked);
+    }
+
+    /**
+     * Checkbox states as the analysis writes them, X on and o off
+     * ({@code XXooXXXX} is state A).
+     *
+     * @param checks The states, or null.
+     * @return The letters, or "" for none.
+     */
+    static String checkString(boolean[] checks) {
+        if (checks == null) return "";
+        final StringBuilder sb = new StringBuilder(checks.length);
+        for (boolean c : checks) sb.append(c ? 'X' : 'o');
+        return sb.toString();
+    }
+
     /**
      * A GAME.TXT line without its markup: braces and the '~' dropped,
      * blanks collapsed.
@@ -706,9 +810,11 @@ final class ClassicAdvisorBox {
         }
         final List<ClassicTextLayout.Line> rowLines = new ArrayList<>(rows);
         final int max = ClassicMenuBox.rowTextMaxWidth(box);
+        final int bullet = r.isCheckbox()
+            ? tiny.markedWidth(checkRow("", true)) : 0;
         for (int i = 0; i < rows; i++) {
             String s = r.rows.get(i);
-            if (tiny.markedWidth(s) > max) s = tiny.fit(plain(s), max);
+            if (tiny.markedWidth(s) > max - bullet) s = tiny.fit(plain(s), max - bullet);
             rowLines.add(new ClassicTextLayout.Line(ClassicMenuBox.rowX(box),
                 ClassicMenuBox.rowTop(box, p, i), s));
         }
@@ -743,6 +849,22 @@ final class ClassicAdvisorBox {
      */
     static void paint(Graphics2D g, Layout l, int bar, BufferedImage wood,
                       ClassicFont tiny) {
+        paint(g, l, bar, l.request.checks, wood, tiny);
+    }
+
+    /**
+     * Paint a box with its checkbox rows in given states.
+     *
+     * @param g The graphics, in 320x200 pixels.
+     * @param l The layout.
+     * @param bar The barred row, or -1 for none.
+     * @param checks The rows' states ({@link Bar#checks}), or null for a
+     *     box without checkboxes.
+     * @param wood {@code WOODTILE.SS.000}, or null (flat colour).
+     * @param tiny FONTTINY.
+     */
+    static void paint(Graphics2D g, Layout l, int bar, boolean[] checks,
+                      BufferedImage wood, ClassicFont tiny) {
         if (l.under && l.portrait != null) {
             g.drawImage(l.portrait, l.portraitAt.x, l.portraitAt.y, null);
         }
@@ -758,11 +880,13 @@ final class ClassicAdvisorBox {
         }
         for (int i = 0; i < l.rows.size(); i++) {
             final ClassicTextLayout.Line line = l.rows.get(i);
+            final String s = (checks != null && i < checks.length)
+                ? checkRow(line.marked, checks[i]) : line.marked;
             if (l.request.enabled(i)) {
-                ClassicMenuBox.text(g, tiny, line.marked, line.x, line.y, t, true);
+                ClassicMenuBox.text(g, tiny, s, line.x, line.y, t, true);
             } else {
                 final int[] grey = ClassicFont.colours(DISABLED);
-                tiny.draw(g, plain(line.marked), line.x, line.y, grey);
+                tiny.draw(g, plain(s), line.x, line.y, grey);
             }
         }
         if (!l.under && l.portrait != null) {
@@ -782,11 +906,26 @@ final class ClassicAdvisorBox {
      */
     static BufferedImage render(Layout l, int bar, BufferedImage wood,
                                 ClassicFont tiny) {
+        return render(l, bar, l.request.checks, wood, tiny);
+    }
+
+    /**
+     * A box as a 320x200 ARGB picture, its checkbox rows in given states.
+     *
+     * @param l The layout.
+     * @param bar The barred row, or -1.
+     * @param checks The rows' states, or null.
+     * @param wood {@code WOODTILE.SS.000}, or null.
+     * @param tiny FONTTINY.
+     * @return The picture.
+     */
+    static BufferedImage render(Layout l, int bar, boolean[] checks,
+                                BufferedImage wood, ClassicFont tiny) {
         final BufferedImage img = new BufferedImage(VW, VH,
             BufferedImage.TYPE_INT_ARGB);
         final Graphics2D g = img.createGraphics();
         try {
-            paint(g, l, bar, wood, tiny);
+            paint(g, l, bar, checks, wood, tiny);
         } finally {
             g.dispose();
         }
@@ -842,7 +981,11 @@ final class ClassicAdvisorBox {
      * The selection bar of one open box: where it is, and what a key or the
      * mouse answers (class comment).  Every input method returns
      * {@link #OPEN} while the box stays, else the answer: a row, or
-     * {@link #DISMISSED}; a notice answers 0.  EDT only.
+     * {@link #DISMISSED}; a notice answers 0.  In a checkbox box
+     * ({@link Request#isCheckbox}) a row flips instead of answering, and
+     * the box stays open: the bar keeps the rows' states, runs
+     * {@link Request#toggles} and remembers the flip for the painter
+     * ({@link #takeToggled}).  EDT only.
      */
     static final class Bar {
 
@@ -864,17 +1007,63 @@ final class ClassicAdvisorBox {
         /** What the press being held is on. */
         private int pressed = NO_PRESS;
 
+        /** A checkbox box's rows' states now, or null. */
+        private final boolean[] checks;
+
+        /** The row flipped by the last input, or -1. */
+        private int toggled = -1;
+
         /**
          * @param request The box's request.
          */
         Bar(Request request) {
             this.request = request;
             this.row = request.defaultRow;
+            this.checks = (request.checks == null) ? null : request.checks.clone();
         }
 
         /** @return The barred row, or -1. */
         int row() {
             return this.row;
+        }
+
+        /** @return A checkbox box's rows' states now (a copy), or null. */
+        boolean[] checks() {
+            return (this.checks == null) ? null : this.checks.clone();
+        }
+
+        /** @return Whether checkbox row {@code i} is on (false out of range). */
+        boolean checked(int i) {
+            return this.checks != null && i >= 0 && i < this.checks.length
+                && this.checks[i];
+        }
+
+        /**
+         * The row the last input flipped, once: the painter redraws the box.
+         *
+         * @return The row, or -1 if none was flipped since the last call.
+         */
+        int takeToggled() {
+            final int t = this.toggled;
+            this.toggled = -1;
+            return t;
+        }
+
+        /**
+         * Flip a checkbox row and apply it ({@link Request#toggles}); the
+         * box stays open.
+         *
+         * @param i The row.
+         * @return {@link #OPEN}.
+         */
+        int toggle(int i) {
+            if (this.checks == null || !this.request.enabled(i)) return OPEN;
+            this.checks[i] = !this.checks[i];
+            this.toggled = i;
+            if (this.request.toggles != null) {
+                this.request.toggles.toggled(i, this.checks[i]);
+            }
+            return OPEN;
         }
 
         /** @return Up one row (none past the first); a notice is dismissed. */
@@ -899,9 +1088,13 @@ final class ClassicAdvisorBox {
             return OPEN;
         }
 
-        /** @return Enter: the barred row if it can be taken; a notice's 0. */
+        /**
+         * @return Enter: the barred row if it can be taken (a checkbox box
+         *     flips it and stays); a notice's 0.
+         */
         int enter() {
             if (this.request.isNotice()) return 0;
+            if (this.checks != null) return toggle(this.row);
             return this.request.enabled(this.row) ? this.row : OPEN;
         }
 
@@ -913,6 +1106,36 @@ final class ClassicAdvisorBox {
         /** @return Any other key: dismisses a notice, nothing in a question. */
         int otherKey() {
             return this.request.isNotice() ? 0 : OPEN;
+        }
+
+        /**
+         * @return Space: in a checkbox box it flips the barred row (I, as
+         *     Enter); elsewhere {@link #otherKey}.
+         */
+        int space() {
+            if (this.checks == null) return otherKey();
+            return toggle(this.row);
+        }
+
+        /**
+         * A letter key: in a checkbox box the row whose gold {@code ~} letter
+         * it is gets the bar and flips (I, never seen; @GAMEOPTIONS marks
+         * I F S E A C Y T, @COLONYOPTIONS marks none); elsewhere
+         * {@link #otherKey}.
+         *
+         * @param letter The letter, upper case.
+         * @return The answer.
+         */
+        int letter(char letter) {
+            if (this.checks == null) return otherKey();
+            for (int i = 0; i < this.request.rows.size(); i++) {
+                if (ClassicMenuModel.hotkey(this.request.rows.get(i)) == letter
+                    && this.request.enabled(i)) {
+                    this.row = i;
+                    return toggle(i);
+                }
+            }
+            return OPEN;
         }
 
         /**
@@ -938,10 +1161,12 @@ final class ClassicAdvisorBox {
         }
 
         /**
-         * The release of a press: on the row it was pressed on it takes it;
-         * after a press outside the box, outside it, it closes as Escape
-         * where {@link Request#outsideCancels} (else nothing happens); a
-         * notice closes on any release after a press.
+         * The release of a press: on the row it was pressed on it takes it
+         * (a checkbox box flips it and stays open: landing-slow, the dot
+         * flips 0.14-0.20 s after the bar moved); after a press outside the
+         * box, outside it, it closes as Escape where
+         * {@link Request#outsideCancels} (else nothing happens); a notice
+         * closes on any release after a press.
          *
          * @param hitRow The row under the release, or -1.
          * @param inBox Whether the release is on the box ({@link Layout#inBox}).
@@ -952,7 +1177,9 @@ final class ClassicAdvisorBox {
             this.pressed = NO_PRESS;
             if (p == NO_PRESS) return OPEN;
             if (this.request.isNotice()) return 0;
-            if (p >= 0 && hitRow == p && this.request.enabled(p)) return p;
+            if (p >= 0 && hitRow == p && this.request.enabled(p)) {
+                return (this.checks != null) ? toggle(p) : p;
+            }
             if (p == PRESS_OUTSIDE && !inBox && this.request.outsideCancels) {
                 return escape();
             }

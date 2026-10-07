@@ -69,7 +69,10 @@ import javax.swing.JComponent;
  *   <li>A box comes in one paint.  A box after another comes no earlier
  *       than {@link #CHAIN_MS} after its close: the original restores the
  *       screen for 0.13-0.27 s between chained boxes (WELCOME, PEACE,
- *       COME; LEARNSTAY, LEARNDONE).</li>
+ *       COME; LEARNSTAY, LEARNDONE).  A box with an
+ *       {@link ClassicAdvisorBox.Request#openDelayMs} comes no earlier than
+ *       that after it is asked for (the option boxes, 2-4 frames after
+ *       their menu goes).</li>
  *   <li>A box whose portrait is not the last one shown loads that
  *       portrait's palette first, {@link #PALETTE_LEAD_FRAMES} frames before
  *       it appears (2-8 frames in the clip); the recorder's frames get the
@@ -83,12 +86,14 @@ import javax.swing.JComponent;
  * the map's keys, the key map nor the strip can act behind the box; the
  * HUD's gates ask {@link #isBusy} as a backstop.  Keys: Up/Down (also the
  * keypad's 8/2) move the bar, also when held (auto-repeat); Enter takes the
- * barred row, Escape the cancel row; a notice goes on any key.  Enter,
- * Escape and the other keys are taken only as fresh presses made while the
- * box is on screen: an auto-repeat of a key held from before, or a key
- * pressed before the box was drawn, does nothing.  The mouse:
+ * barred row, Escape the cancel row; a notice goes on any key.  In a
+ * checkbox box (the option boxes) Enter and Space flip the barred row and a
+ * row's gold letter flips that row, and the box stays.  Enter, Escape and
+ * the other keys are taken only as fresh presses made while the box is on
+ * screen: an auto-repeat of a key held from before, or a key pressed before
+ * the box was drawn, does nothing.  The mouse:
  * {@link ClassicAdvisorBox.Bar}.  Recorder events: {@code box-palette},
- * {@code box-open}, {@code box-bar}, {@code box-close}.
+ * {@code box-open}, {@code box-bar}, {@code box-toggle}, {@code box-close}.
  */
 final class ClassicAdvisorLayer extends JComponent {
 
@@ -373,7 +378,7 @@ final class ClassicAdvisorLayer extends JComponent {
         if (p.scheduled) return;
         p.scheduled = true;
         final long now = this.clock.now();
-        long due = now;
+        long due = now + Math.round(p.request.openDelayMs * 1e6);
         if (this.lastClose != Long.MIN_VALUE) {
             due = Math.max(due, this.lastClose + Math.round(CHAIN_MS * 1e6));
         }
@@ -420,6 +425,8 @@ final class ClassicAdvisorLayer extends JComponent {
                 + ((p.layout.portraitAt == null) ? ""
                     : "@" + p.layout.portraitAt.x + "," + p.layout.portraitAt.y)
                 + " rows=" + p.request.rows.size() + " bar=" + p.bar.row()
+                + (p.request.isCheckbox()
+                    ? " checks=" + ClassicAdvisorBox.checkString(p.bar.checks()) : "")
                 + " text=" + text.substring(0, Math.min(80, text.length())));
         }
     }
@@ -492,9 +499,14 @@ final class ClassicAdvisorLayer extends JComponent {
             if (predates(e.getWhen()) || repeat) return;
             answer = p.bar.escape();
             break;
+        case KeyEvent.VK_SPACE:
+            if (predates(e.getWhen()) || repeat) return;
+            answer = p.bar.space();
+            break;
         default:
             if (predates(e.getWhen()) || repeat) return;
-            answer = p.bar.otherKey();
+            answer = (code >= KeyEvent.VK_A && code <= KeyEvent.VK_Z)
+                ? p.bar.letter((char) code) : p.bar.otherKey();
             break;
         }
         settle(p, answer);
@@ -543,13 +555,35 @@ final class ClassicAdvisorLayer extends JComponent {
         settle(p, p.bar.release(row, in));
     }
 
-    /** After a key: repaint a moved bar, or close with the answer. */
+    /**
+     * After a key or a release: repaint a moved bar or a flipped checkbox,
+     * or close with the answer.
+     */
     private void settle(Pending p, int answer) {
         if (answer != ClassicAdvisorBox.Bar.OPEN) {
             finish(p, answer);
             return;
         }
+        final int flipped = p.bar.takeToggled();
+        if (flipped >= 0) {
+            toggled(p, flipped);
+            return;
+        }
         barMoved(p);
+    }
+
+    /**
+     * A checkbox row flipped (its option already applied by the bar): redraw
+     * the box in one paint, where only the bullet's 3x3 inside (and a moved
+     * bar) changes (landing-slow #1784 -> #1785: 9 px).
+     */
+    private void toggled(Pending p, int row) {
+        if (p != this.current) return;
+        render();
+        paintNow(scaled(p.layout.box));
+        ClassicFrameRecorder.event("box-toggle", p.request.id + " row=" + row
+            + " on=" + p.bar.checked(row) + " bar=" + p.bar.row()
+            + " checks=" + ClassicAdvisorBox.checkString(p.bar.checks()));
     }
 
     /** The bar may have moved: redraw the box in one paint. */
@@ -588,7 +622,7 @@ final class ClassicAdvisorLayer extends JComponent {
     private void render() {
         final Pending p = this.current;
         this.picture = (p == null) ? null : ClassicAdvisorBox.render(p.layout,
-            p.bar.row(), this.host.wood(), this.host.font());
+            p.bar.row(), p.bar.checks(), this.host.wood(), this.host.font());
     }
 
     /** A 320x200 rectangle in layer coordinates (one pixel of slack). */

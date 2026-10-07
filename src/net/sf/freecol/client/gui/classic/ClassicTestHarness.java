@@ -40,14 +40,11 @@ import javax.swing.JFrame;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
-import net.sf.freecol.client.ClientOptions;
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Unit;
-import net.sf.freecol.common.option.BooleanOption;
-import net.sf.freecol.common.option.IntegerOption;
 
 
 /**
@@ -374,12 +371,7 @@ final class ClassicTestHarness {
             }
             final String id = ClassicPrefs.CLIENT_OPTIONS.get(name);
             if (id == null) throw new IllegalArgumentException("No pref " + name);
-            final ClientOptions co = fcc.getClientOptions();
-            if (ClientOptions.AUTOSAVE_PERIOD.equals(id)) {
-                co.getOption(id, IntegerOption.class).setValue(value ? 1 : 0);
-            } else {
-                co.getOption(id, BooleanOption.class).setValue(value);
-            }
+            ClassicOptionBoxes.setClientValue(fcc.getClientOptions(), name, value);
             ClassicFrameRecorder.event("pref", name + "=" + value + " (" + id + ")");
         }
 

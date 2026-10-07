@@ -1342,6 +1342,77 @@ outside on the real bar: `testConfirmBoxKeys`, `testChoiceBoxKeys`,
 `testSailHomeBoxKeys`, `testKingsBoxEnterKissesTheRing`,
 `testNativeDemandEnterRefuses`, `testNoticesOneBoxEach`).
 
+### Option boxes (`ClassicOptionBoxes`; build spec W14)
+
+SPIEL row 0 opens "Spieloptionen festlegen" (GAME.TXT `@GAMEOPTIONS`, 8
+rows), row 1 "Koloniebericht-Optionen festlegen" (`@COLONYOPTIONS`, 10
+rows): checkbox advisor boxes (`Request.checks`, the `@checkbox` rule of
+`ClassicAdvisorBox`). Measured on the landing-slow clip
+(`01-options.md`, V) and confirmed by clips 006/007; no clip shows the
+colony box, which follows the same rules (I).
+
+- **Look (V).** @width 220: the box (47,56,226,88), the colony box
+  (47,48,226,104). The title, then per row FONTTINY `]` (on) or `[` (off)
+  in gold 149 at box + 9, a 2-px space, the text at box + 17 with its `~`
+  letter or `{..}` words in gold. The bar on row 1 at every open. No OK row,
+  no button.
+- **Input.** A press on a row (bullet or text) puts the bar there, the
+  release flips it: only the bullet's 3x3 inside changes (9 px, #1784 →
+  #1785). The box stays. Escape, or a press outside (it removes the bar)
+  and the release outside, closes it; the screen under it comes back exactly.
+  Keys (I, never seen): Up/Down move the bar, Enter and Space flip the
+  barred row, a row's gold letter (I F S E A C Y T; the colony rows mark
+  none) flips that row.
+- **Live (V).** Each flip acts at once, mid-turn: the classic prefs are read
+  where they are used (the next slide, the next Spielzugende decision), the
+  water cycle is switched in the same step (`ClassicWaterCycle.setEnabled`),
+  the three FreeCol options (Autom. Sichern = `autosavePeriod` 0/1, or the
+  period already set; Kampfanalyse = `guiShowPreCombat`; Tutortips =
+  `guiShowTutorial`) are set in the client's options.
+- **Kept (V for the next opening).** In `classic-options.properties`
+  (`ClassicPrefs`): the classic prefs, and what the box set for the three
+  FreeCol rows (`remember`), put back into the client's options at the next
+  game view (`applyRemembered`), since FreeCol writes its own option file
+  only from its own dialog.
+- **The colony rows.** "Beschriftung an Gebäuden" (`buildingLabels`) shows
+  the colony screen's production numbers on the buildings, "... an Waren
+  und Terrain" (`goodsTerrainLabels`) those on the work tiles and under the
+  net production (Roger: the original switches its numbers with them; ours
+  are FreeCol's, which are right). The warehouse's amounts always show (I).
+  The eight report rows hold back FreeCol's matching notices
+  (`ClassicPrefs.REPORTS`, read off the server's messages and the
+  original's texts of the same matter, I): trained (`unitEducated`,
+  `noStudent`), food (`famineFeared`; a colonist who starves is always
+  reported), raw materials (`noInput`, `notEnoughInput`), tools
+  (`buildableNeedsGoods`), government (`badGovernment`,
+  `veryBadGovernment`, `governmentImproved1/2`), new goods
+  (`warehouseFull`, `warehouseOverfull`), Sons of Liberty (the colony's
+  `soLIncrease`/`soLDecrease`), rebel majorities (`goodGovernment`,
+  `veryGoodGovernment`, `lostGoodGovernment`, `lostVeryGoodGovernment`).
+  Every other notice comes as FreeCol's own options say, the founding
+  fathers among them. The filter is in `ClassicGUI.noticesShown`, the
+  funnel of both notice seams.
+- **Defaults.** The game box: Roger's state A (V). The colony box: all on
+  (I).
+- **Without the pack's GAME.TXT** the rows cannot be named: the row shows
+  the "follows later" notice. Over a colony, Europe or report screen the
+  stopgap popup lists the rows as `[x]`/`[ ]` and comes back after each
+  flip.
+- **Recorder events:** `box-open ... checks=XXooXXXX`, `box-toggle <id>
+  row= on= bar= checks=`, `pref <key>=<value>`, `report-off <id>
+  <key>=false`.
+
+Tests: `ClassicOptionBoxesTest` (both boxes from a synthetic GAME.TXT: rows,
+states, places, a flip setting its own key; the store, the file and the next
+session; the FreeCol rows; the reports; with the pack: the gold letters,
+the 9-px flip, and `testGoldenAgainstTheClips`, the box drawn from the
+pack in each frame's states against 11 frames of landing-slow, clip006 and
+clip007, 0 px off on the whole box apart from the original's arrow),
+`ClassicAdvisorBoxTest.testCheckboxBar`, `testCheckboxRowText`,
+`ClassicAdvisorLayerTest.testACheckboxBoxStaysUp`,
+`ClassicGUISeamTest.testTheOptionRowsOpenTheBoxes`,
+`testColonyReportsHeldBack`, `ClassicPrefsTest`, `ClassicMenuBarTest`.
+
 ## In-game HUD (menu strip, dropdowns, right panel)
 
 (`ClassicHudPane`, `ClassicMenuStrip`, `ClassicMenuBar`, `ClassicMenuModel`,
@@ -1445,7 +1516,7 @@ M4) and gets 0 px.
 
 | menu | item → action |
 | --- | --- |
-| SPIEL | 0 `preferencesAction`ⁿ, 1 —, 2 —, 3 —, 4 `saveAction`ⁿ, 5 `openAction`ⁿ, 6 `declareIndependenceAction`ⁿ, 7 `retireAction`, 8 `quitAction` |
+| SPIEL | 0 `classic.gameOptions`ᶜ, 1 `classic.colonyOptions`ᶜ, 2 —, 3 —, 4 `saveAction`ⁿ, 5 `openAction`ⁿ, 6 `declareIndependenceAction`ⁿ, 7 `retireAction`, 8 `quitAction` |
 | ANSICHT | 0 `toggleViewModeAction` (fires only in TERRAIN mode, key M), 1 `toggleViewModeAction` (fires only outside it, key V), 2 `europeAction`, 3 `findSettlementAction`ⁿ, 4 `zoomInAction`, 5 `zoomOutAction` (both disable themselves: `GUI.canZoomInMap` is false), 6-9 —, 10 —, 11 `centerAction` |
 | BEFEHLE | 0 `clearOrdersAction`, 1 `waitAction`, 2 `fortifyAction`, 3 (second fortify line: hidden, context unknown), 4 `sentryAction`, 5/6 `buildColonyAction` (no colony / colony on the tile), 7 `clearForestAction` (forest), 8 `plowAction` (no forest), 9 `roadAction`, 10 `loadAction` (carriers), 11 `unloadAction` (carrier in a colony), 12 — (armed land units), 13/14 `gotoAction`ⁿ (ship / land), 15 `assignTradeRouteAction`ⁿ (carriers), 16 `returnToEuropeAction` (ships, key R), 17 `skipUnitAction`, 18 `unloadAction` (ship at sea: dumps cargo), 19 `disbandUnitAction` |
 | BERICHTE | 0 —, 1 `reportReligionAction`, 2 `reportCongressAction`, 3 `reportLabourAction`, 4 `reportTradeAction`, 5 `reportColonyAction`, 6 `reportNavalAction`, 7 `reportForeignAction`, 8 `reportIndianAction`, 9 `reportHighScoresAction` (the hall of fame, not the live score: earlier README decision) |
@@ -1453,14 +1524,20 @@ M4) and gets 0 px.
 | COLONIPÄDIE | 0 `colopediaAction.goods`ⁿ, 1 `.units`ⁿ, 2 `.terrain`ⁿ, 3 —, 4 `.buildings`ⁿ, 5 `.fathers`ⁿ, 6 `.concepts`ⁿ, 7 — |
 
 ⁿ = in `NOOP_SEAMS`: drawn in normal ink but **inert** until a classic screen
-exists (`showClientOptionsDialog`, `showSaveDialog`, `showLoadSaveFileDialog`,
+exists (`showSaveDialog`, `showLoadSaveFileDialog`,
 `showDeclarationPanel`, `showFindSettlementPanel`, `showSelectDestinationDialog`,
 `showTradeRoutePanel`, `showColopediaPanel` are still the base `GUI` no-ops).
 — = **no engine equivalent**, drawn like the original (normal ink) and always
-inert: colony-report options, sound options, choose music, the four
+inert: sound options, choose music, the four
 zoom-level presets, show hidden terrain, F1 terrain information, pillage,
 colonist skills, complete Colonipädie.  Zoom in/out are wired
 but disable themselves; outside BEFEHLE that only makes them inert, not grey.
+ᶜ = the Classic UI's own row (`ClassicMenuModel.GAME_OPTIONS`,
+`COLONY_OPTIONS`): no FreeCol action; the strip's host gives it
+(`ClassicGUI.classicAction`), and it opens the original's option box
+("Option boxes" under "Advisor boxes"). FreeCol's `preferencesAction`, the
+row's engine action before, opens a dialog the Classic UI has no seam for.
+The preview harness, which has no such host, shows both rows inert.
 
 **Visibility** (manual + 001): BEFEHLE lists only the orders that apply to
 the active unit's kind and tile (`ClassicMenuModel.Context`: unit, naval,
@@ -1495,6 +1572,11 @@ The other menus list every item (004 shows both view-mode items green).
   (`Host.unavailable`).  `ClassicGUI.closeMenus` (a base no-op) closes it;
   `updateActions`/`updateMenuBar` repaint strip, dropdown and panel.
 - While the first scene is up the strip ignores input (`Host.inputBlocked`).
+- A menu's open, close and bar moves are painted at once (`paintNow`:
+  `paintImmediately` of the strip and the dropdown's area), as the boxes,
+  the slide and the blink paint: a minimized window holds back
+  `repaint()`, and the F1 recording showed the SPIEL menu 38 frames late
+  and still beside the options box its row had opened.
 
 ### Keys (`ClassicKeyMap`) — why a table is needed
 
@@ -1694,6 +1776,12 @@ one with **B**; hosted in its own `JFrame` (no `Canvas`). Layout, top to bottom:
   production (right), and the 16-slot **warehouse** row of goods icons + amounts
   along the very bottom. The red **"E"** at the bottom-right (part of the
   `COLONY.PIK` art) and **Escape** both close the screen.
+- **The numbers** follow SPIEL "Koloniebericht-Optionen" (W14, read at each
+  paint): "Beschriftung an Gebäuden" the production tags on the buildings,
+  "Beschriftung an Waren und Terrain" those on the work tiles and the
+  figures under the net production. The warehouse amounts always show.
+  The figures are FreeCol's, a house improvement on the original's icon
+  rows (Regeln-Auswahl).
 
 **`BUILDING.SS` frame map (`BUILDING_FRAMES`, plan D0e).** The seven buildings
 a new colony starts with are matched on the original's colony screen (clip008,
@@ -2907,7 +2995,7 @@ differing pixels.
 - **Open / not yet:**
   - The in-game "Öffnen" still gets `null` from the un-overridden
     `showLoadDialog`.
-  - The in-game SPIEL items save, load and options are drawn as in the original but stay inert (they show the "follows later" notice): their classic seams (`showSaveDialog`, `showLoadSaveFileDialog`, `showClientOptionsDialog`) are still no-ops (see "In-game HUD", `NOOP_SEAMS`).
+  - The in-game SPIEL items save and load are drawn as in the original but stay inert (they show the "follows later" notice): their classic seams (`showSaveDialog`, `showLoadSaveFileDialog`) are still no-ops (see "In-game HUD", `NOOP_SEAMS`). The two option rows open the original's boxes (W14, "Option boxes").
   - Notice height for multi-line prompts now follows the measured
     `6P+8R+18` rule (with R = 0: `6P+18`); no multi-line title-screen notice
     was captured itself.
@@ -4095,10 +4183,15 @@ config directory, build spec section 2): `showNativeMoves` on,
 `showEuropeanMoves` on, `moveAccelerator` off, `endTurnPrompt` off,
 `waterCycling` on (the original's state A). Autom. Sichern, Kampfanalyse and
 Tutortips are FreeCol options (`autosavePeriod`, `guiShowPreCombat`,
-`guiShowTutorial`). Read a pref where it is used, not once at start. Read so
-far: `moveAccelerator` (each slide start), `showNativeMoves` and
+`guiShowTutorial`); what the options box set for them is remembered in the
+same file. The ten colony report rows (`buildingLabels` ...
+`reportRebelMajority`) default on. Read a pref where it is used, not once at
+start. Read: `moveAccelerator` (each slide start), `showNativeMoves` and
 `showEuropeanMoves` (each foreign move, W2), `waterCycling` (each due step of
-the water cycle, W6c); W5/W14/W17 add the rest.
+the water cycle, W6c; the box also switches it at once), `endTurnPrompt` (the
+idle decision, W5/W17), the two label rows (each colony screen paint), the
+report rows (each notice). The SPIEL option boxes set them all (W14, "Option
+boxes"); the script's `pref` command does too.
 
 The sandbox launcher, the copied tools and today's baseline are outside the
 repo, in `C:\Users\koch_\freecol-spike-results\m1` (`W1.md`).

@@ -276,6 +276,16 @@ final class ClassicColonyPanel extends JPanel {
     private int hovered = -1;
 
     /**
+     * Whether the production numbers are drawn, read at each paint: on the
+     * buildings ("Beschriftung an Gebäuden"), and on the work tiles and
+     * under the net production ("Beschriftung an Waren und Terrain";
+     * {@link ClassicPrefs#BUILDING_LABELS},
+     * {@link ClassicPrefs#GOODS_TERRAIN_LABELS}).  The warehouse's amounts
+     * stay (I: they are the store itself, not a label).
+     */
+    private boolean buildingNumbers = true, goodsTerrainNumbers = true;
+
+    /**
      * Work-assignment interaction: select a colonist — standing in the colony,
      * or already working a building/tile — then click a building or work tile
      * to move it there via {@link InGameController#work}. Click-to-select,
@@ -475,6 +485,12 @@ final class ClassicColonyPanel extends JPanel {
         // which only one method populates).
         this.unitBounds.clear();
         this.unitTargets.clear();
+        // The numbers, as SPIEL "Koloniebericht-Optionen" switches them
+        // (W14): FreeCol's own figures, a house improvement on the
+        // original's icon rows (Regeln-Auswahl).
+        final ClassicPrefs prefs = ClassicPrefs.get();
+        this.buildingNumbers = prefs.is(ClassicPrefs.BUILDING_LABELS);
+        this.goodsTerrainNumbers = prefs.is(ClassicPrefs.GOODS_TERRAIN_LABELS);
 
         paintTitle(g);
         paintBuildings(g);
@@ -608,7 +624,9 @@ final class ClassicColonyPanel extends JPanel {
                 g.fillRect(x, y + h - 6, w, 6);
             }
             paintWorkers(g, b.getUnitList(), x + 2, y + h - 2);
-            paintProductionTag(g, b.getProductionInfo(), x, y - 1);
+            if (this.buildingNumbers) {
+                paintProductionTag(g, b.getProductionInfo(), x, y - 1);
+            }
             // The name is drawn only for the hovered building (see paintHover),
             // as in the original — so record the target instead of drawing now.
             this.buildingBounds.add(new java.awt.Rectangle(x, y, w, h));
@@ -687,7 +705,9 @@ final class ClassicColonyPanel extends JPanel {
                 g.drawRect(sx, sy, GRID_CELL - 1, GRID_CELL - 1);
                 paintWorkers(g, workers, sx + GRID_CELL / 2 - 6,
                              sy + GRID_CELL - 4);
-                paintProductionTag(g, ct.getProductionInfo(), sx + 1, sy + 1);
+                if (this.goodsTerrainNumbers) {
+                    paintProductionTag(g, ct.getProductionInfo(), sx + 1, sy + 1);
+                }
             }
         }
     }
@@ -796,7 +816,9 @@ final class ClassicColonyPanel extends JPanel {
             if (n >= 8) break;
             final BufferedImage img = this.lib.getScaledGoodsTypeImage(gt);
             if (img != null) drawFitted(g, img, x, y, 12);
-            tag(g, (net > 0 ? "+" : "") + net, x, y + 12);
+            if (this.goodsTerrainNumbers) {
+                tag(g, (net > 0 ? "+" : "") + net, x, y + 12);
+            }
             x += 22;
             n++;
         }

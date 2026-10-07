@@ -400,6 +400,7 @@ final class ClassicMenuStrip extends JComponent {
         this.drop.setVisible(true);
         repaint();
         this.drop.repaint();
+        paintNow(box(slots(m)));
         if (!wasOpen) this.host.menuOpened();
     }
 
@@ -411,12 +412,38 @@ final class ClassicMenuStrip extends JComponent {
             this.dispatcher = null;
         }
         if (this.openIndex < 0) return;
+        final Rectangle was = box(slots(this.openIndex));
         this.openIndex = -1;
         this.selSlot = -1;
         this.drop.setVisible(false);
         repaint();
         this.drop.repaint();
+        paintNow(was);
         this.host.menuClosed();
+    }
+
+    /**
+     * Paint the strip and a dropdown's area now, as the boxes, the slide and
+     * the blink paint: a minimized window holds back {@code repaint()}, and
+     * a recording then showed the SPIEL menu 0.5 s late and still showed it
+     * beside the options box the row had opened (F1).  The repaints stay for
+     * a window that is not showing.
+     *
+     * @param box The dropdown's box in 320x200 pixels, or null.
+     */
+    private void paintNow(Rectangle box) {
+        if (isShowing()) paintImmediately(0, 0, getWidth(), getHeight());
+        if (box == null) return;
+        final int s = Math.max(1, this.drop.getWidth() / ClassicMenuBox.VW);
+        final Rectangle r = new Rectangle(box.x * s, box.y * s,
+                                          box.width * s, box.height * s);
+        if (this.drop.isShowing()) {
+            this.drop.paintImmediately(r);
+        } else if (this.drop.getParent() instanceof JComponent
+                   && this.drop.getParent().isShowing()) {
+            r.translate(this.drop.getX(), this.drop.getY());
+            ((JComponent) this.drop.getParent()).paintImmediately(r);
+        }
     }
 
     /**
@@ -525,10 +552,12 @@ final class ClassicMenuStrip extends JComponent {
         case KeyEvent.VK_UP: case KeyEvent.VK_KP_UP:
             this.selSlot = nextSelectable(slots, this.selSlot, -1);
             this.drop.repaint();
+            paintNow(box(slots));
             return true;
         case KeyEvent.VK_DOWN: case KeyEvent.VK_KP_DOWN:
             this.selSlot = nextSelectable(slots, this.selSlot, 1);
             this.drop.repaint();
+            paintNow(box(slots));
             return true;
         case KeyEvent.VK_LEFT: case KeyEvent.VK_KP_LEFT:
             openMenu(Math.floorMod(this.openIndex - 1, this.menus.size()), true);
@@ -673,6 +702,7 @@ final class ClassicMenuStrip extends JComponent {
             if (sel != selSlot) {
                 selSlot = sel;
                 repaint();
+                paintNow(box(slots));
             }
         }
 
