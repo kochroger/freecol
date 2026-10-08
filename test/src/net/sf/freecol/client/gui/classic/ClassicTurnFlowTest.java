@@ -1147,6 +1147,52 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     }
 
     /**
+     * A load with nothing to move (J3, the review of part I): the game
+     * view opens with no unit ({@code ClassicGUI.firstUnit} drops FreeCol's
+     * saved unit when it is sentried, fortified or spent) and
+     * {@code reconnectGUI} tells the flow, a session's first, whose loaded
+     * turn counts as shown; the Spielzugende mode comes 485 ms after the
+     * last change (no wipe at a load, J2's Unsichtbarkeit 11) and waits,
+     * no longer a silent wait for a key (G acceptance A5); Enter ends the
+     * turn.  A goto unit due at the load is brought by the cycle instead,
+     * with no mode.
+     */
+    public void testLoadWithNothingToMove() {
+        final Rig r = new Rig(this.game);
+        r.flow.noUnitLeft();                        // reconnectGUI: no first unit
+        assertEquals(0, r.count("wipe"));
+        assertFalse(r.flow.cameUpThisTurn());
+        assertEquals(ClassicTurnFlow.Kind.PROMPT, r.flow.pending().kind);
+        r.advanceMs(484.9);
+        assertEquals(0, r.count("prompt"));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("prompt"));
+        assertTrue(r.flow.isPrompt());
+        r.advanceMs(60000);
+        r.flow.tick();
+        assertEquals(0, r.count("endTurn"));        // it waits
+        r.flow.endTurnNow("key");
+        r.advanceMs(15.1);
+        assertEquals(1, r.count("endTurn"));
+
+        final Unit g = ship(7, 5);
+        final Rig q = new Rig(this.game);
+        q.host.due = true;
+        q.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        q.host.cycle = x -> (x == null) ? g : null;
+        q.host.onGoto = u -> {
+            q.host.due = false;
+            q.host.kinds.clear();
+        };
+        q.flow.noUnitLeft();
+        for (int ms = 0; ms < 1000 && q.count("goto " + g.getId()) == 0; ms += 10) {
+            q.advanceMs(10);
+        }
+        assertEquals(1, q.count("goto " + g.getId()));
+        assertEquals(0, q.count("prompt"));         // the goto first, no mode before it
+    }
+
+    /**
      * The mode with the pref off at a later change (J2): after a visit's
      * completion at the end's own time, 485 ms (opening_014 1510 #2178
      * -&gt; #2211/#2212: 33/34 frames), not the pref's 500; and nothing

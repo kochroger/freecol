@@ -20,12 +20,20 @@
 package net.sf.freecol.client.gui.classic;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 import java.util.function.BiPredicate;
 
+import javax.swing.SwingUtilities;
+
 import net.sf.freecol.FreeCol;
+import net.sf.freecol.client.FreeColClient;
+import net.sf.freecol.client.gui.GUI;
+import net.sf.freecol.client.gui.panel.FreeColPanel;
 import net.sf.freecol.common.io.FreeColRules;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Map;
@@ -39,9 +47,15 @@ import net.sf.freecol.common.model.TileType;
 import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.networking.ChangeSet;
+import net.sf.freecol.common.networking.Connection;
+import net.sf.freecol.common.networking.Message;
+import net.sf.freecol.common.networking.MultipleMessage;
 import net.sf.freecol.common.networking.NewRegionNameMessage;
+import net.sf.freecol.common.networking.ServerAPI;
 import net.sf.freecol.common.option.MapGeneratorOptions;
 import net.sf.freecol.common.util.LogBuilder;
+import net.sf.freecol.server.FreeColServer;
+import net.sf.freecol.server.ServerTestHelper;
 import net.sf.freecol.server.generator.SimpleMapGenerator;
 import net.sf.freecol.server.model.ServerGame;
 import net.sf.freecol.server.model.ServerPlayer;
@@ -442,5 +456,345 @@ public class ClassicPacificTest extends FreeColTestCase {
         } finally {
             Topology.setCurrent(saved);
         }
+    }
+
+
+    // The answer: one per discovery (J review of part I, play lens; J3)
+
+    /**
+     * The client's GUI in the naming tests, as the Classic UI's on the
+     * event thread: what it is handed runs at once
+     * ({@code ClassicGUI.invokeNowOrLater}, pinned by
+     * {@link #testInvokeNowOrLaterOnTheEventThread}); the Pacific's event
+     * panel (woodcut 6) and the error panels are noted, and the panel can
+     * run something while it is up (woodcut 6 waits for the player in a
+     * secondary loop, which runs what was queued meanwhile).
+     */
+    private static final class NamingGUI extends GUI {
+
+        private final List<String> log;
+
+        /** Run while the next event panel is up, or null. */
+        Runnable whileUp = null;
+
+        NamingGUI(FreeColClient fcc, List<String> log) {
+            super(fcc);
+            this.log = log;
+        }
+
+        @Override
+        public void invokeNowOrLater(Runnable runnable) {
+            runnable.run();
+        }
+
+        @Override
+        public FreeColPanel showEventPanel(String header, String image,
+                                           String footer) {
+            this.log.add("panel " + image);
+            final Runnable r = this.whileUp;
+            this.whileUp = null;
+            if (r != null) r.run();
+            this.log.add("panel closed");
+            return null;
+        }
+
+        @Override
+        public FreeColPanel showErrorPanel(String message, Runnable callback) {
+            this.log.add("error " + message);
+            return null;
+        }
+    }
+
+    /**
+     * The client's server API in the naming tests: an answer goes to the
+     * real server's handler ({@code NewRegionNameMessage.serverHandler})
+     * and is noted as "answered x,y", or "rejected x,y" when the server
+     * refuses it (the reply the Classic UI shows as an error notice, "Der
+     * Server kann das nicht ausführen.").  Client and server share the
+     * game, so a discovery is at once what the reply's update would bring
+     * the client.
+     */
+    private static final class NamingServer extends ServerAPI {
+
+        private final FreeColServer server;
+        private final ServerPlayer player;
+        private final List<String> log;
+
+        NamingServer(FreeColServer server, ServerPlayer player,
+                     List<String> log) {
+            this.server = server;
+            this.player = player;
+            this.log = log;
+        }
+
+        @Override
+        public boolean newRegionName(Region region, Tile tile, Unit unit,
+                                     String name) {
+            final ChangeSet cs = new NewRegionNameMessage(region, tile, unit,
+                name).serverHandler(this.server, this.player);
+            final String s = (cs == null) ? "" : cs.toString();
+            this.log.add((s.contains("server.reject") ? "rejected " : "answered ")
+                + tile.getX() + "," + tile.getY());
+            return true;
+        }
+
+        @Override
+        public Connection connect(String name, String host, int port) {
+            return null;
+        }
+
+        @Override
+        public boolean disconnect() {
+            return true;
+        }
+
+        @Override
+        public Connection reconnect() {
+            return null;
+        }
+
+        @Override
+        public Connection getConnection() {
+            return null;
+        }
+    }
+
+    private static void set(FreeColClient fcc, String name, Object value)
+        throws Exception {
+        final Field f = FreeColClient.class.getDeclaredField(name);
+        f.setAccessible(true);
+        f.set(fcc, value);
+    }
+
+    /**
+     * A client of the server's game for the naming handler: FreeCol's
+     * constructor would start a game of its own (a test client with a
+     * specification), so the object is made without it and given the
+     * test's GUI and server API and a controller of its own.
+     */
+    private static FreeColClient namingClient(Game game, ServerPlayer me,
+                                              List<String> log)
+        throws Exception {
+        final Class<?> uc = Class.forName("sun.misc.Unsafe");
+        final Field theUnsafe = uc.getDeclaredField("theUnsafe");
+        theUnsafe.setAccessible(true);
+        final FreeColClient fcc = (FreeColClient)uc
+            .getMethod("allocateInstance", Class.class)
+            .invoke(theUnsafe.get(null), FreeColClient.class);
+        set(fcc, "gui", new NamingGUI(fcc, log));
+        set(fcc, "serverAPI", new NamingServer(ServerTestHelper.getServer(), me, log));
+        set(fcc, "inGameController",
+            new net.sf.freecol.client.control.InGameController(fcc));
+        fcc.setGame(game);
+        fcc.setMyPlayer(me);
+        return fcc;
+    }
+
+    private static void collect(Message m, List<NewRegionNameMessage> out)
+        throws Exception {
+        if (m instanceof NewRegionNameMessage) {
+            out.add((NewRegionNameMessage)m);
+        } else if (m instanceof MultipleMessage) {
+            final Field f = MultipleMessage.class.getDeclaredField("messages");
+            f.setAccessible(true);
+            for (Object o : (List<?>)f.get(m)) collect((Message)o, out);
+        }
+    }
+
+    /** The naming requests a move's reply carries to the player. */
+    private static List<NewRegionNameMessage> requests(ChangeSet cs,
+                                                       ServerPlayer p)
+        throws Exception {
+        final List<NewRegionNameMessage> out = new ArrayList<>();
+        collect(cs.build(p), out);
+        return out;
+    }
+
+    /** The log's answers and refusals, without the panels. */
+    private static List<String> answers(List<String> log) {
+        final List<String> out = new ArrayList<>();
+        for (String s : log) {
+            if (s.startsWith("answered") || s.startsWith("rejected")
+                || s.startsWith("error")) out.add(s);
+        }
+        return out;
+    }
+
+    /**
+     * A goto run of the Dutch ship from (31,67) on Roger's map in a real
+     * server game, as the Classic UI's client runs it: each step's reply,
+     * and with it a naming request, is handled on the event thread inside
+     * the step ({@code InGameController.movePath}), so its handler runs
+     * there and then.  The client's log gets "step x,y: n" per step.
+     */
+    private List<String> gotoRun(Topology topology, int[][] steps)
+        throws Exception {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(topology);
+            final Game game = ServerTestHelper.startServerGame(
+                rogersMap(getStandardGame(), topology));
+            final Map map = game.getMap();
+            assertEquals(topology == Topology.SQUARE,
+                         ServerRegion.hasClassicPacific(map));
+            final ServerUnit ship = ship(game, map);
+            final ServerPlayer dutch = (ServerPlayer)ship.getOwner();
+            final List<String> log = new ArrayList<>();
+            final FreeColClient fcc = namingClient(game, dutch, log);
+            final Region p = map.getRegionByKey("model.region.pacific");
+            assertTrue(p.getDiscoverable());
+            List<NewRegionNameMessage> last = List.of();
+            for (int[] s : steps) {
+                final List<NewRegionNameMessage> reqs
+                    = requests(move(ship, s[0], s[1]), dutch);
+                log.add("step " + s[0] + "," + s[1] + ": " + reqs.size());
+                for (NewRegionNameMessage m : reqs) m.clientHandler(fcc);
+                if (!reqs.isEmpty()) last = reqs;
+            }
+            assertFalse("discovered", p.getDiscoverable());
+            assertEquals(ship.getId(), p.getDiscoverer());
+            // A request that comes after the answer (one queued off the
+            // event thread) is dropped: no panel, no answer.
+            final int n = log.size();
+            for (NewRegionNameMessage m : last) m.clientHandler(fcc);
+            assertEquals(n, log.size());
+            return log;
+        } finally {
+            ServerTestHelper.stopServerGame();
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
+     * The review's failure scenario ("a goto run that first sees the
+     * Pacific shows 'Der Server kann das nicht ausführen.'") does not
+     * happen: the run's step that brings the request (square: the
+     * sighting, F2; isometric: FreeCol's entered tile) shows woodcut 6 and
+     * answers inside the step, before the next one, so the next steps
+     * (which the server would answer with the request again for the same
+     * ship, Region.checkDiscover's work-around) find the Pacific
+     * discovered and send nothing.  One panel, one answer, no refusal.
+     * Live: j-revIr-pac-goto2 and J3's run, the woodcut between the
+     * sighting step and the next step of the same run.
+     */
+    public void testOneAnswerInAGotoRun() throws Exception {
+        final String panel = "panel image.flavor.event.discoverPacific";
+        assertEquals(List.of("step 30,68: 0", "step 29,68: 1",
+                             panel, "panel closed", "answered 28,68",
+                             "step 28,68: 0", "step 27,68: 0"),
+            gotoRun(Topology.SQUARE,
+                    new int[][] { {30, 68}, {29, 68}, {28, 68}, {27, 68} }));
+        assertEquals(List.of("step 30,67: 0", "step 29,67: 0",
+                             "step 28,67: 1",
+                             panel, "panel closed", "answered 28,67",
+                             "step 27,67: 0", "step 26,67: 0"),
+            gotoRun(Topology.ISOMETRIC, new int[][] {
+                    {30, 67}, {29, 67}, {28, 67}, {27, 67}, {26, 67} }));
+    }
+
+    /**
+     * Should a second request for the same ship come before the answer
+     * after all (the server sends one per such step until it is answered)
+     * and its handler run while the first one's woodcut 6 is up (its
+     * secondary loop runs what is queued), the client still answers once:
+     * the later handler answers inside the woodcut, and the first one,
+     * after the woodcut, finds the Pacific discovered and sends nothing
+     * (before J3 it sent its answer, which the server refuses: "No
+     * discoverable region", the Classic UI's error notice).  Both
+     * topologies; the server half is the review's
+     * RevIPacificDoubleAnswerTest.
+     */
+    public void testARepeatDuringTheWoodcutIsNotAnsweredTwice()
+        throws Exception {
+        repeatDuringTheWoodcut(Topology.SQUARE,
+            new int[][] { {30, 68}, {29, 68}, {28, 68} },
+            List.of(0, 1, 1), "28,68", "27,68");
+        repeatDuringTheWoodcut(Topology.ISOMETRIC,
+            new int[][] { {30, 67}, {29, 67}, {28, 67}, {27, 67} },
+            List.of(0, 0, 1, 1), "28,67", "27,67");
+    }
+
+    private void repeatDuringTheWoodcut(Topology topology, int[][] steps,
+                                        List<Integer> expected,
+                                        String first, String second)
+        throws Exception {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(topology);
+            final Game game = ServerTestHelper.startServerGame(
+                rogersMap(getStandardGame(), topology));
+            final Map map = game.getMap();
+            final ServerUnit ship = ship(game, map);
+            final ServerPlayer dutch = (ServerPlayer)ship.getOwner();
+            final Region p = map.getRegionByKey("model.region.pacific");
+            // The server: one request per such step until the answer.
+            final List<Integer> counts = new ArrayList<>();
+            final List<NewRegionNameMessage> all = new ArrayList<>();
+            for (int[] s : steps) {
+                final List<NewRegionNameMessage> reqs
+                    = requests(move(ship, s[0], s[1]), dutch);
+                counts.add(reqs.size());
+                all.addAll(reqs);
+            }
+            assertEquals(expected, counts);
+            assertEquals(2, all.size());
+            final NewRegionNameMessage a = all.get(0), b = all.get(1);
+            assertEquals(first, a.getTile(game).getX() + "," + a.getTile(game).getY());
+            assertEquals(second, b.getTile(game).getX() + "," + b.getTile(game).getY());
+
+            // The client: b's handler runs while a's woodcut is up.
+            final List<String> log = new ArrayList<>();
+            final FreeColClient fcc = namingClient(game, dutch, log);
+            ((NamingGUI)fcc.getGUI()).whileUp = () -> b.clientHandler(fcc);
+            a.clientHandler(fcc);
+            assertEquals(log.toString(), List.of("answered " + second),
+                         answers(log));
+            assertEquals("panel closed", log.get(log.size() - 1));
+            assertFalse(p.getDiscoverable());
+            assertEquals(ship.getId(), p.getDiscoverer());
+
+            // What a's answer would have met: the server's refusal.
+            final List<String> stale = new ArrayList<>();
+            new NamingServer(ServerTestHelper.getServer(), dutch, stale)
+                .newRegionName(p, a.getTile(game), ship, a.getNewRegionName());
+            assertEquals(List.of("rejected " + first), stale);
+        } finally {
+            ServerTestHelper.stopServerGame();
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
+     * What the single answer rests on: the Classic UI's
+     * {@code invokeNowOrLater} runs a task at once on the event thread,
+     * where a move's reply (and with it the naming request) is handled,
+     * and only queues it off the event thread.
+     */
+    public void testInvokeNowOrLaterOnTheEventThread() throws Exception {
+        final ClassicGUI gui = new ClassicGUI(null);
+        final List<String> order
+            = java.util.Collections.synchronizedList(new ArrayList<>());
+        SwingUtilities.invokeAndWait(() -> {
+                order.add("before");
+                gui.invokeNowOrLater(() -> order.add("run"));
+                order.add("after");
+            });
+        assertEquals(List.of("before", "run", "after"), order);
+
+        order.clear();
+        final java.util.concurrent.CountDownLatch busy
+            = new java.util.concurrent.CountDownLatch(1);
+        SwingUtilities.invokeLater(() -> {
+                try {
+                    busy.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+        gui.invokeNowOrLater(() -> order.add("run"));
+        order.add("after");
+        busy.countDown();
+        SwingUtilities.invokeAndWait(() -> { });
+        assertEquals(List.of("after", "run"), order);
     }
 }

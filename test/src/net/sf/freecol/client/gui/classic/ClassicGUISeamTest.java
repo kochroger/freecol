@@ -3281,6 +3281,73 @@ public class ClassicGUISeamTest extends FreeColTestCase {
     }
 
     /**
+     * J3 (the review of part I, regress lens): the view opens with no unit
+     * that cannot move.  FreeCol's saved active unit
+     * ({@code Player.restoreActiveUnit} returns it whatever its state) is
+     * the first unit only if the cycle would bring it up: sentried,
+     * fortifying or without moves it is not (the review's load: the
+     * sentried ship blinked, Enter was ignored, Space could not skip it),
+     * with or without a cycle cursor, so a load with nothing to move
+     * opens with no unit and the Spielzugende mode.  A unit that can move
+     * and the cursor's unit open it as before; with FreeCol's unit unable
+     * to move, the cycle's first unit that takes orders; a goto unit due
+     * there leaves the choice to the turn flow's cycle.
+     */
+    public void testLoadOpensWithNoUnitThatCannotMove() throws Exception {
+        final Game game = ServerTestHelper.startServerGame(getTestMap(true));
+        try {
+            final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+            final net.sf.freecol.common.model.UnitType colonist
+                = spec().getUnitType("model.unit.freeColonist");
+            final Map map = game.getMap();
+            final Unit a = new ServerUnit(game, map.getTile(5, 5), dutch, colonist);
+            final Unit b = new ServerUnit(game, map.getTile(6, 5), dutch, colonist);
+            final WoodcutGUI gui = new WoodcutGUI(game, dutch);
+            final long onA = ClassicUnitCycle.cursorOn(a);
+            for (long cursor : new long[] { -1L, onA }) {
+                dutch.setClassicCycleCursor(cursor);
+                a.setState(Unit.UnitState.ACTIVE);
+                b.setState(Unit.UnitState.SENTRY);
+                assertSame("cursor " + cursor, a, gui.firstUnit(a));
+                a.setState(Unit.UnitState.SENTRY);
+                assertNull("cursor " + cursor, gui.firstUnit(a));
+                assertNull(gui.firstUnit(null));
+                a.setState(Unit.UnitState.ACTIVE);
+                a.setState(Unit.UnitState.FORTIFYING);
+                assertNull("cursor " + cursor, gui.firstUnit(a));
+                a.setState(Unit.UnitState.ACTIVE);
+                a.setMovesLeft(0);
+                assertNull("cursor " + cursor, gui.firstUnit(a));
+                a.setMovesLeft(a.getInitialMovesLeft());
+                // A unit that can move elsewhere: the cycle's first one
+                // that takes orders (from the cursor, else the head).
+                a.setState(Unit.UnitState.SENTRY);
+                b.setState(Unit.UnitState.ACTIVE);
+                assertSame("cursor " + cursor, b, gui.firstUnit(a));
+                assertSame(b, gui.firstUnit(b));
+                // A goto unit due: not the view's first unit unless it is
+                // FreeCol's own choice (as before); the flow's cycle runs it.
+                b.setDestination(map.getTile(9, 9));
+                assertNull("cursor " + cursor, gui.firstUnit(a));
+                b.setDestination(null);
+            }
+            // reconnectGUI hands a view with no first unit to the turn
+            // flow (its noUnitLeft: the due unit or the mode), before the
+            // view's focus.
+            final String src = new String(Files.readAllBytes(new File(
+                "src/net/sf/freecol/client/gui/classic/ClassicGUI.java").toPath()),
+                StandardCharsets.UTF_8);
+            final int at = src.indexOf("final Unit first = firstUnit(active);");
+            final int none = src.indexOf("} else {", at);
+            final int call = src.indexOf("this.turnFlow.noUnitLeft();", none);
+            final int focus = src.indexOf("final Unit viewerActive", at);
+            assertTrue(at > 0 && none > at && call > none && call < focus);
+        } finally {
+            ServerTestHelper.stopServerGame();
+        }
+    }
+
+    /**
      * W9: the land sighted at a final draw posts woodcut 1, due at once
      * (the turn flow waits: busy), 57 ms after the final draw, then the
      * New World's naming seam (W10) with the map's return; once per game,

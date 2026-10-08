@@ -897,9 +897,17 @@ public class ServerUnit extends Unit implements TurnTaker {
      * Only the tiles newly in sight count: {@link Region#checkDiscover}
      * answers true again for the same unit until the region is named (its
      * desynch work-around), so a check of all the tiles in sight would
-     * send the naming again on every move until the answer came.  The
-     * client drops a repeat ({@code newRegionNameHandler}: no longer
-     * discoverable; the Classic UI's woodcut once per game).
+     * send the naming again on every move until the answer came.  A move
+     * that brings a new Pacific tile into sight before the answer still
+     * sends it again (one per such move), and the server refuses a second
+     * answer ("No discoverable region").  The client answers once: a
+     * move's reply is handled on its event thread, where
+     * {@code newRegionNameHandler} runs at once, so woodcut 6 and the
+     * answer come inside the move that brought the request and a goto
+     * run's next step finds the Pacific discovered; a request handled
+     * after the answer is dropped there (no longer discoverable), also
+     * the first one after its woodcut 6 when a repeat run while the
+     * woodcut was up has answered.
      *
      * @param newTiles The tiles newly in this unit's sight (explored now,
      *     or not visible before), or null.

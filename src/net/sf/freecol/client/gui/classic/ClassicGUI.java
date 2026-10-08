@@ -1744,8 +1744,15 @@ public class ClassicGUI extends GUI {
                     this.turnFlow.unitShown(first);
                     if (fromCursor(first)) this.turnFlow.cycleUnitUp(first);
                 }
-            } else if (tile != null) {
-                this.mapViewer.changeToTerrain(tile);
+            } else {
+                if (tile != null) this.mapViewer.changeToTerrain(tile);
+                // Nothing up at the load (every unit fortified, sentried or
+                // done, FreeCol's saved active unit among them): the turn
+                // flow brings a due goto unit or visit, else the
+                // Spielzugende mode comes by itself and waits (Roger
+                // 2026-10-08; the review of part I, J3).  It used to wait
+                // for a key with no mode (G acceptance A5).
+                if (this.turnFlow != null) this.turnFlow.noUnitLeft();
             }
             // Prefer an active unit for the initial view: the original
             // always opens looking at the piece that is up, centred and
@@ -2549,18 +2556,29 @@ public class ClassicGUI extends GUI {
      * began at U1), or where a turn-start autosave's new turn starts; a
      * goto unit or a visit there, or no cursor (a new game, an older
      * save), FreeCol's unit as before (the save's active unit, else its
-     * first one).
+     * first one), but only one the cycle would bring up: FreeCol's saved
+     * unit sentried, fortified or with no moves left is never up (the
+     * review of part I: the saved sentried ship blinked, Enter was ignored
+     * and Space could not skip it; J3).  Then the cycle's first unit that
+     * takes orders (from the cursor, else from the head), or none, so a
+     * load with nothing to move opens with no unit and the turn flow
+     * brings a due goto unit or visit, or the Spielzugende mode.
      *
      * @param active FreeCol's unit, or null.
      * @return The unit to open with, or null.
      */
     Unit firstUnit(Unit active) {
         final Player me = myPlayer();
-        if (me == null || ClassicUnitCycle.cursor(me) < 0
-            || (active != null && active.getOwner() != me)) return active;
+        if (me == null || (active != null && active.getOwner() != me)) return active;
+        final boolean canComeUp = active != null && this.unitCycle.kind(active) != null;
+        if (ClassicUnitCycle.cursor(me) < 0 && (active == null || canComeUp)) {
+            return active;
+        }
         final Unit next = this.unitCycle.next(null, me);
-        return (next != null && this.unitCycle.kind(next) == ClassicUnitCycle.Kind.ORDERS)
-            ? next : active;
+        if (next != null && this.unitCycle.kind(next) == ClassicUnitCycle.Kind.ORDERS) {
+            return next;
+        }
+        return (canComeUp) ? active : null;
     }
 
     /**

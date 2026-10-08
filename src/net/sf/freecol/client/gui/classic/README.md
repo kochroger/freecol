@@ -1222,6 +1222,15 @@ still ends by itself 485 ms after the last change (#691, #1834, #4680).
   unit with no moves left takes no click in the mode (it keeps its orders).
   The same freeing on a click outside the mode (`ClassicMapViewer.clickOn`,
   both branches).
+- **A load with nothing to move** (J3; the review of part I): the view opens
+  with no unit when FreeCol's saved active unit (`restoreActiveUnit`, any
+  state) is sentried, fortified or out of moves (`ClassicGUI.firstUnit`:
+  then the cycle's first unit that takes orders, else none; before, the
+  saved sentried ship blinked, Enter was ignored and Space could not skip
+  it), and `reconnectGUI` tells the turn flow (`noUnitLeft`): a due goto
+  unit or visit comes, else the mode **485 ms** after the last change (no
+  wipe at a load, I) and waits. Before, a load with no unit waited for a
+  key with no mode (G acceptance A5).
 - **The levi rules keep the moves of a completed fortification**
   (`model.option.fortifyKeepsMoves`, "The rules"): FreeCol takes the turn's
   moves when FORTIFYING becomes FORTIFIED at the turn start; the original's
@@ -1894,6 +1903,17 @@ sleep`).
   original's goto runs on (clip006 U22: three road steps in one run).
   FreeCol's history then records the discoveries (and, with the game
   option `explorationPoints`, their score), as with FreeCol's own dialog.
+  The server asks again for the same unit until it has the answer and
+  refuses a second answer ("No discoverable region", shown as an error
+  notice), so the client answers once (J3): a move's reply comes on the
+  event thread, where `newRegionNameHandler` runs at once
+  (`invokeNowOrLater`), so the Pacific's woodcut 6 and the answer come
+  inside the step that brought the request and a goto run's next step
+  finds the Pacific discovered; a request handled after the answer sends
+  nothing, also the first one after its woodcut 6 when a repeat ran while
+  the woodcut was up (`ClassicPacificTest.testOneAnswerInAGotoRun`,
+  `testARepeatDuringTheWoodcutIsNotAnsweredTwice`,
+  `testInvokeNowOrLaterOnTheEventThread`).
 - **A village, a tile** (`showIndianSettlementPanel`, `showTilePanel`):
   notices in FreeCol's words. A click on a native village centres the view
   and then shows its notice (`ClassicMapViewer.clickOn`; an invention, the

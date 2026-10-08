@@ -4500,14 +4500,24 @@ public final class InGameController extends FreeColClientHolder {
     public void newRegionNameHandler(Region region, Tile tile, Unit unit,
                                      String name) {
         invokeLater(() -> {
-                // Discovered meanwhile: a second step into the region came
-                // before the answer (no goto stop, setRegionStops), and
-                // the server would refuse a second name.
+                // Discovered meanwhile: the server asks again for the same
+                // unit until it has the answer (Region.checkDiscover), and
+                // it would refuse a second name ("No discoverable region",
+                // an error box).  A move's reply is handled on the event
+                // thread, where this runs at once, so a goto run (no goto
+                // stop, setRegionStops) answers inside the step that
+                // brought the request; a request queued from another
+                // thread can still come after the answer.
                 if (!region.getDiscoverable()) return;
                 if (region.hasName()) {
                     if (region.isPacific()) {
                         showEventPanel(Messages.message("event.discoverPacific"),
                             "image.flavor.event.discoverPacific", null);
+                        // The panel can wait for the player (the Classic
+                        // UI's woodcut 6, a secondary loop that runs what
+                        // is queued): a second request run meanwhile has
+                        // answered already (J review of part I).
+                        if (!region.getDiscoverable()) return;
                     }
                     newRegionName(region, tile, unit, name);
                 } else {
