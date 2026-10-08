@@ -108,6 +108,11 @@ import java.util.Map;
  *       ({@link Request#escapes}), come a set time after the box before
  *       ({@link Request#chainMs}), or be a full-screen page
  *       ({@link Request#picture}: the Colonopedia page).</li>
+ *   <li><b>Name boxes (V, landfall #2664; clip008 #2789; W10, D4).</b>
+ *       @LANDHO and @COLONY: GAME.TXT's option row is the label of a name
+ *       field ({@link Field}) with the default name selected; no rows, no
+ *       bar; typed characters edit it, Enter takes it, Escape keeps the
+ *       default.</li>
  * </ul>
  */
 final class ClassicAdvisorBox {
@@ -271,6 +276,99 @@ final class ClassicAdvisorBox {
         void toggled(int row, boolean on);
     }
 
+    /**
+     * A box's name field ({@link Request#field}, build spec W10, D4): the
+     * original's @LANDHO and @COLONY prompts.  It holds the name the box
+     * was answered with ({@link #answer}), written by the bar that closed
+     * the box ({@link Bar#enter}, {@link Bar#escape}), so every prompter
+     * (the canvas, the stopgap, a test's keys) answers it the same way.
+     *
+     * <p>Measured (V): a 1-px rectangle in the ink (index 68), 144 x 10 at
+     * box + (29, 12 + 6P) (landfall #2664: x 93-236, y 138-147 in the
+     * box (64,114,196,43); clip008 #2789: x 100-243, y 131-140); the
+     * text at field + (3, 3) in the ink; the default name on an index-138
+     * block from field + 2, 6 rows tall, so it is selected; no caret, in
+     * 7.4 s nothing changes (#2665-#3184).  The label (GAME.TXT's option
+     * row, "Name:") at box + 5, glyph top field + 3.  The first key
+     * replaces the selected name (V clip008 #3134 "B", then "Ba", "Bas",
+     * "Base"); Backspace and the length limits are I.
+     */
+    static final class Field {
+
+        /** The field's size (V: 144 x 10 in both clips). */
+        static final int W = 144, H = 10;
+
+        /** The field's left edge from the box's (V: + 29 in both clips). */
+        static final int X = 29;
+
+        /** The text's offset in the field (V: + 3, + 3). */
+        static final int TEXT_DX = 3, TEXT_DY = 3;
+
+        /**
+         * The longest name (I: COLONY.TXT's names are at most 23
+         * characters, SRC); the text also stays inside the field.
+         */
+        static final int MAX_CHARS = 23;
+
+        /** The name the field opens with, selected. */
+        final String initial;
+
+        /** The name taken (Enter), or null: then {@link #initial}. */
+        private volatile String entered = null;
+
+        /** Whether Enter closed the box (else Escape, or not answered). */
+        private volatile boolean typed = false;
+
+        /**
+         * @param initial The default name, selected when the box opens.
+         */
+        Field(String initial) {
+            this.initial = (initial == null) ? "" : initial;
+        }
+
+        /**
+         * @return The name the box was answered with: the text taken by
+         *     Enter, trimmed; the default for an empty text, for Escape
+         *     (Roger: Escape keeps the default name) and before an answer.
+         */
+        String answer() {
+            final String e = this.entered;
+            final String s = (e == null) ? "" : e.trim();
+            return (s.isEmpty()) ? this.initial : s;
+        }
+
+        /** @return Whether Enter answered it (false: Escape, or none yet). */
+        boolean taken() {
+            return this.typed;
+        }
+
+        /** Enter: the text in the field. */
+        void take(String text) {
+            this.entered = text;
+            this.typed = true;
+        }
+
+        /** Escape: the default name. */
+        void keepDefault() {
+            this.entered = null;
+            this.typed = false;
+        }
+
+        /**
+         * Whether a typed character goes into a name (I): letters (the
+         * umlauts and ß too), digits, the space and {@code - . '}.
+         *
+         * @param c The character.
+         * @return True if it can be typed.
+         */
+        static boolean typable(char c) {
+            if (c == ' ' || c == '-' || c == '.' || c == '\'') return true;
+            if (!Character.isLetterOrDigit(c)) return false;
+            // A letter the font cannot draw (it would show '?') is refused.
+            return ClassicFont.toCode(c) != '?';
+        }
+    }
+
     /** What a box says: its text, rows, bar and portrait. */
     static final class Request {
 
@@ -395,6 +493,16 @@ final class ClassicAdvisorBox {
         /** Whether the stopgap is the selection list (a choice). */
         final boolean list;
 
+        /**
+         * The name field ({@link Field}), or null.  A box with a field has
+         * no rows: GAME.TXT's option row is its label ({@link #fieldLabel});
+         * Enter takes the name, Escape keeps the default.
+         */
+        final Field field;
+
+        /** The field's label ("Name:"), markup kept; "" without a field. */
+        final String fieldLabel;
+
         private Request(Builder b) {
             this.id = b.id;
             final List<List<String>> ps = new ArrayList<>();
@@ -436,6 +544,13 @@ final class ClassicAdvisorBox {
             this.title = (b.title == null) ? "" : b.title;
             this.icon = b.icon;
             this.list = b.list;
+            this.field = b.field;
+            this.fieldLabel = (b.fieldLabel == null) ? "" : b.fieldLabel;
+        }
+
+        /** @return Whether it has a name field ({@link #field}). */
+        boolean hasField() {
+            return this.field != null;
         }
 
         /** @return Whether row {@code i} is the yellow "current" entry. */
@@ -449,9 +564,9 @@ final class ClassicAdvisorBox {
                 : this.right.get(i);
         }
 
-        /** @return Whether it is a notice (no rows). */
+        /** @return Whether it is a notice (no rows, no name field). */
         boolean isNotice() {
-            return this.rows.isEmpty();
+            return this.rows.isEmpty() && this.field == null;
         }
 
         /** @return Whether its rows are checkboxes (GAME.TXT {@code @checkbox}). */
@@ -500,7 +615,8 @@ final class ClassicAdvisorBox {
                 + " esc=" + this.cancelRow + " portrait=" + this.portrait
                 + (this.outsideCancels ? "" : " outside=stays")
                 + (this.escapes ? "" : " esc=stays")
-                + (isCheckbox() ? " checks=" + checkString(this.checks) : "");
+                + (isCheckbox() ? " checks=" + checkString(this.checks) : "")
+                + (hasField() ? " field=" + this.field.initial : "");
         }
 
         /**
@@ -543,6 +659,8 @@ final class ClassicAdvisorBox {
         private String title = null;
         private Image icon = null;
         private boolean list = false;
+        private Field field = null;
+        private String fieldLabel = null;
 
         private Builder(String id) {
             this.id = (id == null) ? "box" : id;
@@ -738,8 +856,28 @@ final class ClassicAdvisorBox {
             return this;
         }
 
+        /**
+         * A name field ({@link Field}) with its default name selected: the
+         * rows given so far become its label (GAME.TXT's "Name:"), and the
+         * box has no rows and no bar.  Escape keeps the default; a click
+         * outside does nothing (I).
+         *
+         * @param initial The default name.
+         */
+        Builder field(String initial) {
+            this.field = new Field(initial);
+            this.outsideCancels = false;
+            return this;
+        }
+
         /** @return The request. */
         Request build() {
+            if (this.field != null) {
+                // GAME.TXT's option row is the field's label.
+                this.fieldLabel = (this.rows.isEmpty()) ? "" : this.rows.get(0);
+                this.rows.clear();
+                this.cancelRow = -1;
+            }
             if (this.cancelRow == Integer.MIN_VALUE) {
                 this.cancelRow = (this.checks != null) ? -1 : this.rows.size() - 1;
             }
@@ -784,6 +922,12 @@ final class ClassicAdvisorBox {
         /** The footer line (screen coordinates), or null. */
         final ClassicTextLayout.Line footer;
 
+        /** The name field's rectangle (its 1-px frame's outer bounds), or null. */
+        final Rectangle field;
+
+        /** The field's label line ("Name:"), or null. */
+        final ClassicTextLayout.Line fieldLabel;
+
         Layout(Request request, Rectangle box, List<ClassicTextLayout.Line> prompt,
                List<ClassicTextLayout.Line> rows, BufferedImage portrait,
                Point portraitAt, boolean under) {
@@ -795,6 +939,17 @@ final class ClassicAdvisorBox {
                List<ClassicTextLayout.Line> rows, BufferedImage portrait,
                Point portraitAt, boolean under,
                List<ClassicTextLayout.Line> right, ClassicTextLayout.Line footer) {
+            this(request, box, prompt, rows, portrait, portraitAt, under, right,
+                 footer, null, null);
+        }
+
+        Layout(Request request, Rectangle box, List<ClassicTextLayout.Line> prompt,
+               List<ClassicTextLayout.Line> rows, BufferedImage portrait,
+               Point portraitAt, boolean under,
+               List<ClassicTextLayout.Line> right, ClassicTextLayout.Line footer,
+               Rectangle field, ClassicTextLayout.Line fieldLabel) {
+            this.field = field;
+            this.fieldLabel = fieldLabel;
             this.request = request;
             this.box = box;
             this.prompt = Collections.unmodifiableList(new ArrayList<>(prompt));
@@ -814,6 +969,12 @@ final class ClassicAdvisorBox {
         /** @return The prompt's line count P. */
         int promptLines() {
             return this.prompt.size();
+        }
+
+        /** @return Where the field's text starts (x, glyph top), or null without a field. */
+        Point fieldText() {
+            return (this.field == null) ? null
+                : new Point(this.field.x + Field.TEXT_DX, this.field.y + Field.TEXT_DY);
         }
 
         /**
@@ -1004,7 +1165,8 @@ final class ClassicAdvisorBox {
                 Collections.<ClassicTextLayout.Line>emptyList(), null, null, false);
         }
         final int rows = r.rows.size();
-        final int foot = (r.footer == null) ? 0 : ClassicMenuBox.FOOTER_HEIGHT;
+        final int foot = ((r.footer == null) ? 0 : ClassicMenuBox.FOOTER_HEIGHT)
+            + (r.hasField() ? FIELD_HEIGHT : 0);
         int width = Math.max(10, r.width);
         List<ClassicTextLayout.Line> probe = lines(r, tiny, width, 0, 0);
         // A FreeCol text too long for the screen gets the widest box.
@@ -1075,9 +1237,28 @@ final class ClassicAdvisorBox {
         final ClassicTextLayout.Line footer = (r.footer == null) ? null
             : new ClassicTextLayout.Line(ClassicMenuBox.footerX(box,
                 tiny.stringWidth(r.footer)), ClassicMenuBox.footerTop(box), r.footer);
+        Rectangle field = null;
+        ClassicTextLayout.Line label = null;
+        if (r.hasField()) {
+            // V (landfall #2664, clip008 #2789): the field at box + (29,
+            // 12 + 6P), the label at box + 5 on the field's text line.
+            field = new Rectangle(box.x + Field.X,
+                box.y + FIELD_TOP + ClassicMenuBox.PROMPT_PITCH * p, Field.W, Field.H);
+            label = new ClassicTextLayout.Line(ClassicMenuBox.promptX(box),
+                field.y + Field.TEXT_DY, r.fieldLabel);
+        }
         return new Layout(r, box, prompt, rowLines, sprite, picAt, under,
-                          rightLines, footer);
+                          rightLines, footer, field, label);
     }
+
+    /**
+     * What a name field adds to a box without rows (V: @LANDHO's box is 43
+     * high with two prompt lines, {@code 6P + 18 + 13}).
+     */
+    static final int FIELD_HEIGHT = 13;
+
+    /** The field's top from the box's, before the prompt lines (V: + 24 with P = 2). */
+    static final int FIELD_TOP = 12;
 
     /** The prompt laid out at a width, its first line at (left, top). */
     private static List<ClassicTextLayout.Line> lines(Request r, ClassicFont tiny,
@@ -1123,6 +1304,27 @@ final class ClassicAdvisorBox {
      */
     static void paint(Graphics2D g, Layout l, int bar, boolean[] checks,
                       BufferedImage wood, ClassicFont tiny) {
+        final Field f = l.request.field;
+        paint(g, l, bar, checks, (f == null) ? null : f.initial, true, wood, tiny);
+    }
+
+    /**
+     * Paint a box with its checkbox rows in given states and its name field
+     * holding a text.
+     *
+     * @param g The graphics, in 320x200 pixels.
+     * @param l The layout.
+     * @param bar The barred row, or -1 for none.
+     * @param checks The rows' states ({@link Bar#checks}), or null.
+     * @param fieldText The field's text ({@link Bar#fieldText}), or null.
+     * @param selected Whether the text is selected (the default name before
+     *     the first key: on the dark block).
+     * @param wood {@code WOODTILE.SS.000}, or null (flat colour).
+     * @param tiny FONTTINY.
+     */
+    static void paint(Graphics2D g, Layout l, int bar, boolean[] checks,
+                      String fieldText, boolean selected,
+                      BufferedImage wood, ClassicFont tiny) {
         if (l.request.picture != null) {
             g.drawImage(l.request.picture, 0, 0, null);
             return;
@@ -1166,9 +1368,46 @@ final class ClassicAdvisorBox {
         if (l.footer != null) {
             tiny.draw(g, l.footer.marked, l.footer.x, l.footer.y, t.highlightColours);
         }
+        if (l.field != null) paintField(g, l, fieldText, selected, t, tiny);
         if (!l.under && l.portrait != null) {
             g.drawImage(l.portrait, l.portraitAt.x, l.portraitAt.y, null);
         }
+    }
+
+    /**
+     * The name field ({@link Field}): its 1-px frame in the ink, the label,
+     * the text in the ink, a selected text on the dark block from field + 2,
+     * 6 rows tall, one pixel left of the text to the end of its advance
+     * (V: "Neuholland" x 95-134, "New Amsterdam" x 102-158).  No caret.
+     */
+    private static void paintField(Graphics2D g, Layout l, String text,
+                                   boolean selected, ClassicMenuBox.Theme t,
+                                   ClassicFont tiny) {
+        final Rectangle f = l.field;
+        g.setColor(t.ink);
+        g.drawRect(f.x, f.y, f.width - 1, f.height - 1);
+        if (l.fieldLabel != null) {
+            ClassicMenuBox.text(g, tiny, l.fieldLabel.marked, l.fieldLabel.x,
+                                l.fieldLabel.y, t, true);
+        }
+        if (text == null || text.isEmpty()) return;
+        final Point at = l.fieldText();
+        if (selected) {
+            g.setColor(t.dark);
+            g.fillRect(at.x - 1, f.y + 2, selectionWidth(tiny, text), 6);
+        }
+        tiny.draw(g, text, at.x, at.y, t.inkColours);
+    }
+
+    /**
+     * @param tiny FONTTINY.
+     * @param text A field's text.
+     * @return The width of its selection block: the pixel before the text,
+     *     its advance and one more (V: "Neuholland" 40 px at x 95-134, the
+     *     text at 96; "New Amsterdam" 57 px at x 102-158, the text at 103).
+     */
+    static int selectionWidth(ClassicFont tiny, String text) {
+        return tiny.stringWidth(text) + 2;
     }
 
     /**
@@ -1198,11 +1437,35 @@ final class ClassicAdvisorBox {
      */
     static BufferedImage render(Layout l, int bar, boolean[] checks,
                                 BufferedImage wood, ClassicFont tiny) {
+        final Field f = l.request.field;
+        return render(l, bar, checks, (f == null) ? null : f.initial, true,
+                      wood, tiny);
+    }
+
+    /**
+     * A box as a 320x200 ARGB picture as its bar has it now: the barred
+     * row, the checkbox states, the name field's text.
+     *
+     * @param l The layout.
+     * @param b The bar.
+     * @param wood {@code WOODTILE.SS.000}, or null.
+     * @param tiny FONTTINY.
+     * @return The picture.
+     */
+    static BufferedImage render(Layout l, Bar b, BufferedImage wood,
+                                ClassicFont tiny) {
+        return render(l, b.row(), b.checks(), b.fieldText(), b.fieldSelected(),
+                      wood, tiny);
+    }
+
+    private static BufferedImage render(Layout l, int bar, boolean[] checks,
+                                        String fieldText, boolean selected,
+                                        BufferedImage wood, ClassicFont tiny) {
         final BufferedImage img = new BufferedImage(VW, VH,
             BufferedImage.TYPE_INT_ARGB);
         final Graphics2D g = img.createGraphics();
         try {
-            paint(g, l, bar, checks, wood, tiny);
+            paint(g, l, bar, checks, fieldText, selected, wood, tiny);
         } finally {
             g.dispose();
         }
@@ -1308,6 +1571,12 @@ final class ClassicAdvisorBox {
         /** The row flipped by the last input, or -1. */
         private int toggled = -1;
 
+        /** The name field's text now, or null without a field. */
+        private final StringBuilder text;
+
+        /** Whether the field's text is still the selected default. */
+        private boolean selected;
+
         /**
          * @param request The box's request.
          */
@@ -1315,6 +1584,60 @@ final class ClassicAdvisorBox {
             this.request = request;
             this.row = request.defaultRow;
             this.checks = (request.checks == null) ? null : request.checks.clone();
+            this.text = (request.field == null) ? null
+                : new StringBuilder(request.field.initial);
+            this.selected = request.field != null;
+        }
+
+        /** @return The name field's text now, or null without a field. */
+        String fieldText() {
+            return (this.text == null) ? null : this.text.toString();
+        }
+
+        /** @return Whether the field's text is the selected default name. */
+        boolean fieldSelected() {
+            return this.text != null && this.selected;
+        }
+
+        /**
+         * A typed character in a box with a name field: the first replaces
+         * the selected default (V clip008 #3134), the others are added at
+         * the end (no caret).  Refused (I): a character that is not
+         * {@link Field#typable}, one past {@link Field#MAX_CHARS}, or one
+         * that would leave the field ({@code tiny}'s advance wider than the
+         * field's inside, when the font is known).
+         *
+         * @param c The character.
+         * @param tiny FONTTINY, or null (then only the count limits).
+         * @return Whether the text changed.
+         */
+        boolean type(char c, ClassicFont tiny) {
+            if (this.text == null || !Field.typable(c)) return false;
+            final String next = (this.selected ? "" : this.text.toString()) + c;
+            if (next.length() > Field.MAX_CHARS) return false;
+            if (tiny != null && tiny.stringWidth(next)
+                > Field.W - 2 * Field.TEXT_DX) return false;
+            this.text.setLength(0);
+            this.text.append(next);
+            this.selected = false;
+            return true;
+        }
+
+        /**
+         * Backspace in a box with a name field (I): the selected default
+         * goes as a whole, else the last character.
+         *
+         * @return Whether the text changed.
+         */
+        boolean backspace() {
+            if (this.text == null || this.text.length() == 0) return false;
+            if (this.selected) {
+                this.text.setLength(0);
+                this.selected = false;
+            } else {
+                this.text.setLength(this.text.length() - 1);
+            }
+            return true;
         }
 
         /** @return The barred row, or -1. */
@@ -1389,16 +1712,25 @@ final class ClassicAdvisorBox {
          */
         int enter() {
             if (this.request.isNotice()) return 0;
+            if (this.text != null) {
+                // The name field: the text as it is (empty: the default).
+                this.request.field.take(this.text.toString());
+                return 0;
+            }
             if (this.checks != null) return toggle(this.row);
             return this.request.enabled(this.row) ? this.row : OPEN;
         }
 
         /**
          * @return Escape: the cancel row ({@link Request#escapeAnswer});
-         *     {@link #OPEN} in a box where Escape does nothing.
+         *     {@link #OPEN} in a box where Escape does nothing.  A name
+         *     field keeps its default name (Roger) and closes with
+         *     {@link #DISMISSED}.
          */
         int escape() {
-            return this.request.escapeAnswer();
+            final int a = this.request.escapeAnswer();
+            if (this.text != null && a != OPEN) this.request.field.keepDefault();
+            return a;
         }
 
         /**

@@ -4439,8 +4439,9 @@ public class ClassicGUI extends GUI {
 
     /**
      * The notices of {@link #showMessagePopup} that come up: without
-     * FreeCol's start message, and without the colony reports whose row of
-     * "Koloniebericht-Optionen" is off (W14).
+     * FreeCol's start message and its tip after the first landing (W10),
+     * and without the colony reports whose row of "Koloniebericht-Optionen"
+     * is off (W14).
      *
      * @param messages The messages, or null.
      * @return A new list, possibly empty.
@@ -4479,8 +4480,9 @@ public class ClassicGUI extends GUI {
     static final String START_GAME_MESSAGE = "model.player.startGame";
 
     /**
-     * {@code messages} without FreeCol's start message (and without nulls),
-     * in their order.
+     * {@code messages} without FreeCol's start message, without its tip
+     * after the first landing ({@link #BUILD_COLONY_TUTORIAL}) and without
+     * nulls, in their order.
      *
      * @param messages The messages, or null.
      * @return A new list, possibly empty.
@@ -4489,10 +4491,17 @@ public class ClassicGUI extends GUI {
         final List<ModelMessage> rest = new ArrayList<>();
         if (messages == null) return rest;
         for (ModelMessage m : messages) {
-            if (m != null && !START_GAME_MESSAGE.equals(m.getId())) rest.add(m);
+            if (m != null && !START_GAME_MESSAGE.equals(m.getId())
+                && !BUILD_COLONY_TUTORIAL.equals(m.getId())) rest.add(m);
         }
         return rest;
     }
+
+    /**
+     * FreeCol's tip after the first landing ({@code InGameController.newLandName}):
+     * always dropped, the original has none there (W10; its tips are W11's).
+     */
+    static final String BUILD_COLONY_TUTORIAL = "buildColony.tutorial";
 
     /** Notices held while the first scene is pending or up. */
     private static final class HeldMessages {
@@ -5166,13 +5175,26 @@ public class ClassicGUI extends GUI {
      * <p>A region's name ({@link ClassicSeams#namesRegion}): the default
      * name at once, no box (the original names no region).  Unanswered,
      * the server never counted a land region discovered, and FreeCol's
-     * goto stopped after every land step that left moves (G review).  The
-     * new land's name is still silent (W10).
+     * goto stopped after every land step that left moves (G review).
+     *
+     * <p>The New World's name ({@link ClassicSeams#namesNewLand}, master
+     * plan W10): the server asks at the first landing, the original at the
+     * first sighting (@LANDHO after woodcut 1, {@link #discoveryShown}).
+     * The name taken then is sent now, without a box.  If none was taken
+     * (a save from before W10 between the sighting and the landing, or
+     * woodcut 1 not shown yet), the @LANDHO box comes now
+     * ({@link #askLandName}).  The server's answer sets our player's
+     * {@code newLandName}, which {@code declareIndependence} needs.
      */
     @Override
     public void showNamingDialog(StringTemplate template, final String defaultName,
                                  final Unit unit, DialogHandler<String> handler) {
-        if (handler == null || !ClassicSeams.namesRegion(template)) return;
+        if (handler == null) return;
+        if (ClassicSeams.namesNewLand(template)) {
+            landingAsksTheName(defaultName, unit, handler);
+            return;
+        }
+        if (!ClassicSeams.namesRegion(template)) return;
         ClassicFrameRecorder.event("region-named", defaultName
             + ((unit == null) ? "" : " unit=" + unit.getId()));
         handler.handle(defaultName);
@@ -5522,6 +5544,14 @@ public class ClassicGUI extends GUI {
         if (r.isNotice()) {
             ClassicDialog.showMessages(owner, r.title, List.of(page));
             return 0;
+        }
+        if (r.hasField()) {
+            // A name box off the map (I: no screen asks one there): its
+            // text, then the default name, as Enter on the untouched field.
+            ClassicDialog.showMessages(owner, r.title, List.of(new ClassicDialog.Page(
+                r.plainText() + "\n" + ClassicAdvisorBox.plain(r.fieldLabel) + " "
+                + r.field.initial, r.icon)));
+            return new ClassicAdvisorBox.Bar(r).enter();
         }
         if (r.isCheckbox()) {
             // The option boxes: a row flips and the popup comes back with
@@ -6651,14 +6681,163 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * The seam of the New World's name (master plan W10): called after
-     * woodcut 1's map is back; the original asks @LANDHO 71 ms later
-     * ({@link ClassicWoodcut#FOLLOW_DISCOVERY_MS}).  Nothing yet.
+     * The New World's name at its first sighting (master plan W10): called
+     * after woodcut 1's map is back.  The original asks @LANDHO 71 ms
+     * later (V: landfall #2658 the map, #2663 the box): the box layer holds
+     * it to the woodcut's follow-up ({@link ClassicWoodcut#FOLLOW_DISCOVERY_MS}),
+     * the admiral's palette in the lead.  The name is kept
+     * ({@code Player.classicLandName}) and sent when the server asks at
+     * the first landing ({@link #showNamingDialog}).  Then the tip seam
+     * ({@link #landNamed}).  Nothing when the land has a name already.
+     * EDT only.
      *
      * @param mapBackNanos When the map came back ({@link #waitClock}).
      */
     void discoveryShown(long mapBackNanos) {
-        // W10 (Part H): @LANDHO here.
+        final Player me = myPlayer();
+        if (me == null || ClassicBands.landName(me) != null) return;
+        askLandName(me, null, "sighting");
+        landNamed(lastBoxClose());
+    }
+
+    /**
+     * The seam of @TUTORIAL2 (master plan W11, I4): called when the
+     * @LANDHO box has closed; the original shows the admiral's tip
+     * 0.457 s later, with Tutortips on (V: landfall #3185 -&gt; #3217).
+     * Nothing yet.  EDT only.
+     *
+     * @param closedNanos When the box closed ({@link #waitClock}).
+     */
+    void landNamed(long closedNanos) {
+        // I4 (W11): @TUTORIAL2 here, LANDHO_TIP_MS after closedNanos.
+    }
+
+    /** @TUTORIAL2's distance from the @LANDHO box's close (V: 32 frames, landfall #3185 -&gt; #3217). */
+    static final double LANDHO_TIP_MS = 457.0;
+
+    /** @return When the last box closed on the box layer's clock, else now. */
+    private long lastBoxClose() {
+        final ClassicAdvisorLayer layer = this.boxLayer;
+        final long t = (layer == null) ? Long.MIN_VALUE : layer.lastCloseNanos();
+        return (t == Long.MIN_VALUE) ? waitClock().now() : t;
+    }
+
+    /** GAME.TXT's naming box of the New World. */
+    static final String LANDHO_SECTION = "LANDHO";
+
+    /**
+     * Ask the New World's name in the @LANDHO box and keep it on our
+     * player and the server's copy ({@link #storeLandName}).  Enter takes
+     * the field's text (empty: the default), Escape keeps the default
+     * (Roger), and so does a box that cannot be drawn or the missing
+     * pack.  EDT only.
+     *
+     * @param me Our player.
+     * @param fallback FreeCol's default name (the server's), or null.
+     * @param when "sighting" or "landing", for the recorder.
+     * @return The name.
+     */
+    String askLandName(Player me, String fallback, String when) {
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        String dflt = ClassicBands.defaultLandName(t, me);
+        if (dflt == null) dflt = (fallback != null) ? fallback : me.getNameForNewLand();
+        final ClassicAdvisorBox.Request r = landHoRequest(t, dflt);
+        String name = dflt;
+        boolean typed = false;
+        if (r != null) {
+            final int got = this.prompter.ask(r);
+            name = r.field.answer();
+            typed = r.field.taken();
+            ClassicFrameRecorder.event("land-named", name + " at=" + when
+                + " answer=" + got + (typed ? " (enter)" : " (default)"));
+        } else {
+            ClassicFrameRecorder.event("land-named", name + " at=" + when + " (no box)");
+        }
+        storeLandName(me, name);
+        return name;
+    }
+
+    /**
+     * The @LANDHO box (V: landfall #2664): GAME.TXT's text, the admiral at
+     * box + (-4, -71), the name field with the default name selected, its
+     * label GAME.TXT's option row "Name:".  GAME.TXT's
+     * {@code @default=America} is not the default (the field shows NAMES.TXT
+     * {@code @COLONYNAME}).
+     *
+     * @param t The original texts, or null.
+     * @param dflt The default name.
+     * @return The box, or null without the text.
+     */
+    static ClassicAdvisorBox.Request landHoRequest(ClassicText t, String dflt) {
+        final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText(
+            LANDHO_SECTION, (t == null) ? null : t.message(LANDHO_SECTION), null);
+        return (b == null) ? null : b.portrait(ClassicAdvisorBox.Portrait.ADMIRAL)
+            .field(dflt).stopgap(Messages.message("classic.dialog.messages"), null)
+            .build();
+    }
+
+    /**
+     * Keep the New World's name on our player and, in a single player game,
+     * on the server's copy, whose state every save writes (as
+     * {@link #markTip}).
+     *
+     * @param me Our player.
+     * @param name The name.
+     */
+    void storeLandName(Player me, String name) {
+        me.setClassicLandName(name);
+        final FreeColClient fcc = getFreeColClient();
+        final FreeColServer server = (fcc == null) ? null : fcc.getFreeColServer();
+        final Game sg = (server == null) ? null : server.getGame();
+        final Player sp = (sg == null) ? null
+            : sg.getFreeColGameObject(me.getId(), Player.class);
+        if (sp != null) sp.setClassicLandName(name);
+    }
+
+    /**
+     * The server asks the New World's name at the first landing
+     * ({@link #showNamingDialog}): the name taken at the sighting goes at
+     * once; without one the @LANDHO box comes now, then its name goes.
+     *
+     * @param defaultName The server's default name.
+     * @param unit The unit that landed.
+     * @param handler FreeCol's answer ({@code InGameController.newLandName}).
+     */
+    private void landingAsksTheName(String defaultName, Unit unit,
+                                    DialogHandler<String> handler) {
+        final Player me = myPlayer();
+        final String kept = (me == null) ? null : me.getClassicLandName();
+        if (me == null || kept != null) {
+            final String name = (kept != null) ? kept : defaultName;
+            ClassicFrameRecorder.event("land-name-sent", name
+                + ((unit == null) ? "" : " unit=" + unit.getId()));
+            handler.handle(name);
+            noteClientLandName(me);
+            return;
+        }
+        invokeNowOrLater(() -> {
+                final String name = askLandName(me, defaultName, "landing");
+                ClassicFrameRecorder.event("land-name-sent", name
+                    + ((unit == null) ? "" : " unit=" + unit.getId()));
+                handler.handle(name);
+                noteClientLandName(me);
+            });
+    }
+
+    /**
+     * For the recorder only: our player's {@code newLandName} 1.5 s after
+     * the answer, when the server's update has come
+     * ({@code declareIndependence} needs it).
+     *
+     * @param me Our player, or null.
+     */
+    private static void noteClientLandName(Player me) {
+        if (me == null || !ClassicFrameRecorder.on()) return;
+        final javax.swing.Timer t = new javax.swing.Timer(1500, e ->
+            ClassicFrameRecorder.event("land-name-client", "newLandName="
+                + me.getNewLandName() + " classicLandName=" + me.getClassicLandName()));
+        t.setRepeats(false);
+        t.start();
     }
 
     /**

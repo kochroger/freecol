@@ -898,12 +898,166 @@ public class ClassicAdvisorBoxTest extends TestCase {
     }
 
 
+    // The name field (W10, D4)
+
+    /** A name box: two prompt lines, the label, the field. */
+    private static ClassicAdvisorBox.Request nameBox(String initial) {
+        return ClassicAdvisorBox.Request.builder("name")
+            .gameText(Arrays.asList("^a a", "^a a")).width(190).rows("a.")
+            .portrait(ClassicAdvisorBox.Portrait.ADMIRAL).field(initial).build();
+    }
+
+    /**
+     * W10: a box with a name field has no rows (GAME.TXT's "Name:" is its
+     * label), is no notice, and is laid out as @LANDHO was measured
+     * (landfall #2664): the box 6P + 31 high, (64,114,196,43) with two
+     * prompt lines, the field 144 x 10 at box + (29, 24), its text at
+     * field + (3, 3), the label at box + 5 on that line; the admiral at
+     * (60,43).  Painted: the field's frame in the ink, the selected
+     * default on the dark block from text - 1 over its advance, 6 rows;
+     * the typed text without the block.  A click outside does nothing.
+     */
+    public void testNameFieldBox() {
+        final ClassicFont f = font();
+        final ClassicAdvisorBox.Request r = nameBox("ab");
+        assertTrue(r.hasField());
+        assertFalse(r.isNotice());
+        assertTrue(r.rows.isEmpty());
+        assertEquals("a.", r.fieldLabel);
+        assertEquals(-1, r.cancelRow);
+        assertFalse(r.outsideCancels);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, r.escapeAnswer());
+        final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(r, f, sprite(75, 91));
+        assertEquals(2, l.promptLines());
+        assertEquals(new Rectangle(64, 114, 196, 43), l.box);
+        assertEquals(new Point(60, 43), l.portraitAt);
+        assertEquals(new Rectangle(93, 138, 144, 10), l.field);
+        assertEquals(new Point(96, 141), l.fieldText());
+        assertEquals(69, l.fieldLabel.x);
+        assertEquals(141, l.fieldLabel.y);
+        final int ink = ClassicMenuBox.GAME.ink.getRGB(), dark = ClassicMenuBox.GAME.dark.getRGB();
+        final BufferedImage img = ClassicAdvisorBox.render(l, -1, null, f);
+        assertEquals(ink, img.getRGB(93, 138));
+        assertEquals(ink, img.getRGB(236, 138));
+        assertEquals(ink, img.getRGB(93, 147));
+        assertEquals(ink, img.getRGB(236, 147));
+        assertEquals(ink, img.getRGB(150, 147));
+        // "ab" is 3 + 5 wide: the block x 95..104, y 140..145.
+        assertEquals(10, ClassicAdvisorBox.selectionWidth(f, "ab"));
+        assertEquals(dark, img.getRGB(95, 140));
+        assertEquals(dark, img.getRGB(104, 145));
+        assertTrue(dark != img.getRGB(105, 142));
+        assertTrue(dark != img.getRGB(95, 146));
+        assertTrue(dark != img.getRGB(95, 139));
+        // Typed: no block, no caret.
+        final ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+        assertTrue(bar.type('b', f));
+        final BufferedImage typed = ClassicAdvisorBox.render(l, bar, null, f);
+        assertTrue(dark != typed.getRGB(95, 140));
+        int changed = 0;
+        for (int y = 138; y <= 147; y++) {
+            for (int x = 101; x <= 236; x++) {
+                if (typed.getRGB(x, y) != img.getRGB(x, y)) changed++;
+            }
+        }
+        assertTrue("only the old text's end and block change: " + changed, changed > 0);
+        assertEquals(img.getRGB(200, 142), typed.getRGB(200, 142));
+        // A click outside, inside, on the field: the box stays.
+        final ClassicAdvisorBox.Bar b2 = new ClassicAdvisorBox.Bar(r);
+        b2.press(-1, false);
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, b2.release(-1, false));
+        b2.press(-1, true);
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, b2.release(-1, true));
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, b2.up());
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, b2.down());
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, b2.space());
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, b2.otherKey());
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, b2.letter('A'));
+        assertEquals("ab", b2.fieldText());
+        assertTrue(b2.fieldSelected());
+    }
+
+    /**
+     * W10: the field's keys.  The first character replaces the selected
+     * default (V clip008 #3134), the next ones are added; Backspace takes
+     * the selected default as a whole, else the last character; Enter
+     * takes the text (empty, or only blanks: the default); Escape keeps
+     * the default (Roger) whatever was typed.  Refused: characters that
+     * are no name's, the 24th, one that would leave the field.
+     */
+    public void testNameFieldKeys() {
+        final ClassicAdvisorBox.Request r = nameBox("Neuholland");
+        ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+        assertEquals("Neuholland", bar.fieldText());
+        assertTrue(bar.fieldSelected());
+        assertEquals("Neuholland", r.field.answer());   // not answered yet
+        assertTrue(bar.type('L', null));
+        assertEquals("L", bar.fieldText());
+        assertFalse(bar.fieldSelected());
+        assertTrue(bar.type('e', null));
+        assertTrue(bar.type('v', null));
+        assertTrue(bar.type('i', null));
+        assertFalse(bar.type('\n', null));
+        assertFalse(bar.type('{', null));
+        assertFalse(bar.type('*', null));
+        assertEquals("Levi", bar.fieldText());
+        assertTrue(bar.backspace());
+        assertEquals("Lev", bar.fieldText());
+        assertEquals(0, bar.enter());
+        assertEquals("Lev", r.field.answer());
+        assertTrue(r.field.taken());
+        // Escape keeps the default, whatever was typed.
+        bar = new ClassicAdvisorBox.Bar(r);
+        bar.type('X', null);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, bar.escape());
+        assertEquals("Neuholland", r.field.answer());
+        assertFalse(r.field.taken());
+        // Backspace on the selection empties the field; Enter on it: the default.
+        bar = new ClassicAdvisorBox.Bar(r);
+        assertTrue(bar.backspace());
+        assertEquals("", bar.fieldText());
+        assertFalse(bar.backspace());
+        assertTrue(bar.type(' ', null));
+        assertEquals(0, bar.enter());
+        assertEquals("Neuholland", r.field.answer());
+        // Enter on the untouched field: the default.
+        bar = new ClassicAdvisorBox.Bar(r);
+        assertEquals(0, bar.enter());
+        assertEquals("Neuholland", r.field.answer());
+        // Umlauts, digits, '-', '.', '\'' are names' characters.
+        bar = new ClassicAdvisorBox.Bar(r);
+        for (char c : "Neu-Österreich 2.'ß".toCharArray()) assertTrue(bar.type(c, null));
+        assertEquals("Neu-Österreich 2.'ß", bar.fieldText());
+        // At most 23 characters.
+        bar = new ClassicAdvisorBox.Bar(r);
+        for (int i = 0; i < 23; i++) assertTrue(bar.type('a', null));
+        assertFalse(bar.type('a', null));
+        assertEquals(23, bar.fieldText().length());
+        // Never wider than the field's inside (144 - 6): 'W' is 9 wide.
+        final FfDecoder.Font wide = FfDecoder.decodePart(ClassicAssetDecoderTest.ffPart(1, 9,
+            new int[][] { glyph('W', 9) }));
+        final ClassicFont f = ClassicFont.fromAtlas(FfDecoder.toAtlas(wide),
+                                                    FfDecoder.metrics(wide));
+        bar = new ClassicAdvisorBox.Bar(r);
+        for (int i = 0; i < 23; i++) bar.type('W', f);
+        assertEquals(138 / 9, bar.fieldText().length());
+        // A box without a field types nothing.
+        final ClassicAdvisorBox.Bar plain = new ClassicAdvisorBox.Bar(
+            ClassicAdvisorBox.Request.builder("q").rows("a").build());
+        assertFalse(plain.type('a', null));
+        assertFalse(plain.backspace());
+        assertNull(plain.fieldText());
+    }
+
+
     // The golden check against the landfall clip
 
     /** One crop: its file, section, values, portrait, bar, place, rows. */
     private static final Object[][] CROPS = {
         // crop, section, values, portrait, bar, crop x, y, NAMES @ACTIONS rows
         { "01_TUTORIAL1_admiral", "TUTORIAL1", "STRING0=Handelsschiff", "ADMIRAL", -1, 40, 41, null },
+        // The naming box as the game asks for it (W10), "Neuholland" selected.
+        { "03_LANDHO_naming", "LANDHO", "", "ADMIRAL", -1, 60, 43, null },
         { "04_TUTORIAL2_admiral", "TUTORIAL2", "", "ADMIRAL", -1, 40, 47, null },
         { "05a_SAILHOME_bar_Jawohl", "SAILHOME", "", "ADMIRAL", 0, 40, 42, null },
         { "05b_SAILHOME_bar_Nein", "SAILHOME", "", "ADMIRAL", 1, 40, 42, null },
@@ -1025,6 +1179,8 @@ public class ClassicAdvisorBoxTest extends TestCase {
             // The landing box as the game asks for it (build spec W8b).
             final ClassicAdvisorBox.Request req = ClassicGUI.LANDFALL_SECTION.equals(c[1])
                 ? ClassicGUI.landfallRequest(t, 0L)
+                : ClassicGUI.LANDHO_SECTION.equals(c[1])
+                ? ClassicGUI.landHoRequest(t, "Neuholland")
                 : ClassicDestinations.SAIL_PORT_SECTION.equals(c[1])
                 ? ClassicDestinations.request(t, true, List.of(new ClassicDestinations.Row(
                     ClassicDestinations.homePortLabel(t, 3), null)))
@@ -1068,6 +1224,10 @@ public class ClassicAdvisorBoxTest extends TestCase {
             }
             if (diff > 0) fails.append(' ').append(name).append('=').append(diff);
         }
+        // The name field's selected default (W10, D4): landfall #2664
+        // x 95-134, clip008 #2789 "New Amsterdam" x 102-158.
+        assertEquals(40, ClassicAdvisorBox.selectionWidth(tiny, "Neuholland"));
+        assertEquals(57, ClassicAdvisorBox.selectionWidth(tiny, "New Amsterdam"));
         System.out.println(getClass().getSimpleName() + ": golden check, "
             + CROPS.length + " crops, " + compared + " px compared, off:"
             + ((fails.length() == 0) ? " none" : fails.toString())

@@ -347,7 +347,7 @@ final class ClassicAdvisorLayer extends JComponent {
 
                 @Override
                 public void keyTyped(KeyEvent e) {
-                    e.consume();
+                    onTyped(e);
                 }
             });
         final MouseAdapter mouse = new MouseAdapter() {
@@ -696,6 +696,7 @@ final class ClassicAdvisorLayer extends JComponent {
                 + " rows=" + p.request.rows.size() + " bar=" + p.bar.row()
                 + (p.request.isCheckbox()
                     ? " checks=" + ClassicAdvisorBox.checkString(p.bar.checks()) : "")
+                + (p.request.hasField() ? " field=" + p.bar.fieldText() : "")
                 + " text=" + text.substring(0, Math.min(80, text.length())));
         }
     }
@@ -897,6 +898,10 @@ final class ClassicAdvisorLayer extends JComponent {
             if (predates(e.getWhen()) || repeat) return;
             answer = p.bar.help();
             break;
+        case KeyEvent.VK_BACK_SPACE:
+            if (predates(e.getWhen()) || !p.request.hasField()) return;
+            if (p.bar.backspace()) fieldChanged(p);
+            return;
         default:
             if (predates(e.getWhen()) || repeat) return;
             answer = (code >= KeyEvent.VK_A && code <= KeyEvent.VK_Z)
@@ -904,6 +909,42 @@ final class ClassicAdvisorLayer extends JComponent {
             break;
         }
         settle(p, answer);
+    }
+
+    /**
+     * A typed character while busy: it goes into the name field of the box
+     * on screen ({@link ClassicAdvisorBox.Bar#type}); any other box ignores
+     * it (its key press answered already).  A held key types again, as
+     * any text field does (I).  Package-private for the tests.
+     *
+     * @param e The event.
+     */
+    void onTyped(KeyEvent e) {
+        e.consume();
+        final Pending p = this.current;
+        if (p == null || p.woodcut != null || !p.request.hasField()
+            || e.getID() != KeyEvent.KEY_TYPED) return;
+        if (e.isControlDown() || e.isMetaDown()
+            || (e.isAltDown() && !e.isAltGraphDown())) return;
+        final char c = e.getKeyChar();
+        if (c == KeyEvent.CHAR_UNDEFINED || c < 32 || c == 127
+            || predates(e.getWhen())) return;
+        if (p.bar.type(c, this.host.font())) fieldChanged(p);
+    }
+
+    /** The name field's text changed: redraw the box in one paint (I). */
+    private void fieldChanged(Pending p) {
+        if (p != this.current) return;
+        render();
+        paintNow(scaled(p.layout.box));
+        ClassicFrameRecorder.event("box-field", p.request.id + " text="
+            + p.bar.fieldText());
+    }
+
+    /** @return The name field's text of the box on screen, or null (tests). */
+    String currentFieldText() {
+        final Pending p = this.current;
+        return (p == null || p.bar == null) ? null : p.bar.fieldText();
     }
 
     /** @return Whether a key code is a bare modifier or a lock. */
@@ -1028,8 +1069,8 @@ final class ClassicAdvisorLayer extends JComponent {
         final Pending p = this.current;
         this.picture = (p == null) ? null
             : (p.woodcut != null) ? p.woodcut.image
-            : ClassicAdvisorBox.render(p.layout, p.bar.row(), p.bar.checks(),
-                                       this.host.wood(), this.host.font());
+            : ClassicAdvisorBox.render(p.layout, p.bar, this.host.wood(),
+                                       this.host.font());
     }
 
     /** A 320x200 rectangle in layer coordinates (one pixel of slack). */

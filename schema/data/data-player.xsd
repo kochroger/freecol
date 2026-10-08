@@ -143,6 +143,11 @@
       <xs:attribute name="classicWoodcuts" type="xs:int" use="optional"/>
       <!-- The Classic UI's tutorial tips seen in this game (a bit set, W13). -->
       <xs:attribute name="classicTips" type="xs:int" use="optional"/>
+      <!-- The Classic UI's unit cycle cursor (I2). -->
+      <xs:attribute name="classicCycleCursor" type="xs:long" use="optional"/>
+      <!-- The Classic UI's name for the New World, taken at its first
+           sighting and sent at the first landing (W10). -->
+      <xs:attribute name="classicLandName" type="xs:string" use="optional"/>
 
       <!-- @compat 0.11.0 Briefly existed by mistake in this release only -->
       <xs:attribute name="index.land" type="xs:string" use="optional"/>

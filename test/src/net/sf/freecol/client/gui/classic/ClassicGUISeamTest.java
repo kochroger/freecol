@@ -2346,14 +2346,160 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         gui.showNamingDialog(region, "Neu-Holland", null, names::add);
         assertEquals(List.of("Neu-Holland"), names);
         assertTrue(fake.boxes.isEmpty());
-        // The new land's name is W10's; nothing without a handler.
+        // The new land's name is W10's (without a player: the server's
+        // default at once); nothing without a handler.
         final StringTemplate land = StringTemplate.key("newLand.text");
         assertFalse(ClassicSeams.namesRegion(land));
+        assertTrue(ClassicSeams.namesNewLand(land));
+        assertFalse(ClassicSeams.namesNewLand(region));
+        assertFalse(ClassicSeams.namesNewLand(null));
         gui.showNamingDialog(land, "Neuholland", null, names::add);
         gui.showNamingDialog(region, "x", null, null);
+        gui.showNamingDialog(land, "x", null, null);
+        gui.showNamingDialog(StringTemplate.key("other"), "x", null, names::add);
         assertFalse(ClassicSeams.namesRegion(null));
-        assertEquals(1, names.size());
+        assertEquals(List.of("Neu-Holland", "Neuholland"), names);
         assertTrue(fake.boxes.isEmpty());
+    }
+
+    /** A prompter that types into a name box ({@link ClassicAdvisorBox.Bar#type}), then Enter or Escape. */
+    private static final class TypingPrompter implements ClassicGUI.Prompter {
+
+        /** What to type; null: Escape at once. */
+        String text = null;
+        final List<ClassicAdvisorBox.Request> boxes = new ArrayList<>();
+        final List<String> ids = new ArrayList<>();
+
+        @Override
+        public int ask(ClassicAdvisorBox.Request r) {
+            this.boxes.add(r);
+            this.ids.add(r.id);
+            final ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+            if (this.text == null) return bar.escape();
+            for (char c : this.text.toCharArray()) bar.type(c, null);
+            return bar.enter();
+        }
+    }
+
+    /**
+     * W10: after woodcut 1 (its map back), @LANDHO: GAME.TXT's box with the
+     * admiral, its row "Name:" the field's label, "Neuholland" (NAMES.TXT
+     * @COLONYNAME, not GAME.TXT's @default=America) selected; the name
+     * typed is kept on our player ({@code classicLandName}), the panel and
+     * the tips use it before the landing; then the tip seam (W11) with the
+     * box's close.  Escape keeps "Neuholland".  No box once a name is kept
+     * or FreeCol's is set (a save after the landing), nor a second time.
+     * Through {@code landSighted}: the woodcut, then the box.
+     */
+    public void testLandHoAtTheSighting() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final TypingPrompter typing = new TypingPrompter();
+        final List<Long> tips = new ArrayList<>();
+        final WoodcutGUI gui = new WoodcutGUI(game, dutch) {
+                @Override
+                void landNamed(long closedNanos) {
+                    tips.add(closedNanos);
+                }
+            };
+        gui.prompter = r -> {
+            gui.order.add(r.id);
+            return typing.ask(r);
+        };
+        typing.text = "Levi";
+        assertNull(dutch.getClassicLandName());
+        onEdt(() -> gui.landSighted(1_000_000_000L));
+        onEdt(() -> { });
+        if (t == null) {
+            System.err.println("testLandHoAtTheSighting: no pack texts, the box part skipped");
+            assertEquals(List.of("woodcut 1"), gui.order);
+            assertEquals(dutch.getNameForNewLand(), dutch.getClassicLandName());
+            return;
+        }
+        assertEquals(List.of("woodcut 1", ClassicGUI.LANDHO_SECTION), gui.order);
+        final ClassicAdvisorBox.Request r = typing.boxes.get(0);
+        assertSame(ClassicAdvisorBox.Portrait.ADMIRAL, r.portrait);
+        assertTrue(r.hasField());
+        assertEquals("Neuholland", r.field.initial);
+        assertEquals("Name:", ClassicAdvisorBox.plain(r.fieldLabel));
+        assertTrue(r.rows.isEmpty());
+        assertTrue(r.plainText().startsWith("Land ahoi!"));
+        assertEquals("Levi", dutch.getClassicLandName());
+        assertNull(dutch.getNewLandName());            // FreeCol's: at the landing
+        assertEquals(1, tips.size());
+        // The panel's land line and the tips' %STRING2 use it already.
+        assertEquals("Levi", ClassicBands.landName(dutch));
+        assertEquals("Levi", ClassicBands.tutorialValues(t, dutch).get("STRING2"));
+        // Kept: no box again, no tip.
+        onEdt(() -> gui.discoveryShown(5L));
+        assertEquals(1, typing.boxes.size());
+        assertEquals(1, tips.size());
+        // Escape keeps the default.
+        dutch.setClassicLandName(null);
+        typing.text = null;
+        onEdt(() -> gui.discoveryShown(6L));
+        assertEquals(2, typing.boxes.size());
+        assertEquals("Neuholland", dutch.getClassicLandName());
+        // FreeCol's name set (landed already): no box.
+        dutch.setClassicLandName(null);
+        dutch.setNewLandName("Neu-Holland");
+        onEdt(() -> gui.discoveryShown(7L));
+        assertEquals(2, typing.boxes.size());
+        assertNull(dutch.getClassicLandName());
+        assertEquals("Neu-Holland", ClassicBands.landName(dutch));
+        assertEquals("Neuholland", ClassicBands.defaultLandName(t, dutch));
+        assertNull(ClassicBands.landName(null));
+    }
+
+    /**
+     * W10: the server's question at the first landing ({@code newLand.text})
+     * gets the name kept at the sighting, at once and without a box (the
+     * client's {@code newLandName} comes with the server's answer).
+     * Without one (a save from before W10), the @LANDHO box comes then,
+     * and its name is sent and kept.  Regions stay silent.  FreeCol's tip
+     * after the landing ({@code buildColony.tutorial}) is never shown.
+     */
+    public void testTheLandingSendsTheName() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final TypingPrompter typing = new TypingPrompter();
+        final WoodcutGUI gui = new WoodcutGUI(game, dutch);
+        gui.prompter = typing;
+        final StringTemplate land = StringTemplate.key(ClassicSeams.NAME_NEW_LAND);
+        final List<String> sent = new ArrayList<>();
+        dutch.setClassicLandName("Levi");
+        gui.showNamingDialog(land, "Neu-Holland", null, sent::add);
+        assertEquals(List.of("Levi"), sent);
+        assertTrue(typing.boxes.isEmpty());
+        // None kept: the box at the landing (on the event thread).
+        dutch.setClassicLandName(null);
+        typing.text = "Roger";
+        onEdt(() -> gui.showNamingDialog(land, "Neu-Holland", null, sent::add));
+        if (t == null) {
+            assertEquals(List.of("Levi", "Neu-Holland"), sent);
+        } else {
+            assertEquals(List.of(ClassicGUI.LANDHO_SECTION), typing.ids);
+            assertEquals(List.of("Levi", "Roger"), sent);
+            assertEquals("Roger", dutch.getClassicLandName());
+        }
+        // A region: its default, no box.
+        gui.showNamingDialog(StringTemplate.template(ClassicSeams.NAME_REGION),
+                             "Breuckelen", null, sent::add);
+        assertEquals("Breuckelen", sent.get(sent.size() - 1));
+        assertTrue(typing.boxes.size() <= 1);
+        // FreeCol's tip after the landing is dropped, the others stay.
+        final net.sf.freecol.common.model.ModelMessage tip
+            = new net.sf.freecol.common.model.ModelMessage(
+                net.sf.freecol.common.model.ModelMessage.MessageType.TUTORIAL,
+                ClassicGUI.BUILD_COLONY_TUTORIAL, dutch);
+        final net.sf.freecol.common.model.ModelMessage other
+            = new net.sf.freecol.common.model.ModelMessage(
+                net.sf.freecol.common.model.ModelMessage.MessageType.DEFAULT,
+                "model.some.notice", dutch);
+        assertEquals(List.of(other),
+                     ClassicGUI.withoutStartMessage(Arrays.asList(tip, other, null)));
     }
 
     /**

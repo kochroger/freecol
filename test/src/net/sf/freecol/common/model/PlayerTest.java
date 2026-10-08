@@ -379,6 +379,40 @@ public class PlayerTest extends FreeColTestCase {
         assertEquals(-1L, dutch.getClassicCycleCursor());
     }
 
+    /**
+     * W10: the Classic UI's name for the New World, taken at the first
+     * sighting, is in the save (owner and save scope only; none without
+     * one, an older save reads null) and survives an update without it;
+     * an empty name is none.  FreeCol's {@code newLandName} is apart.
+     */
+    public void testClassicLandName() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        assertNull(dutch.getClassicLandName());
+        assertFalse(dutch.serialize(net.sf.freecol.common.io.FreeColXMLWriter
+                .WriteScope.toSave()).contains("classicLandName"));
+        dutch.setClassicLandName("Neu-Österreich");
+        final String save = dutch.serialize(
+            net.sf.freecol.common.io.FreeColXMLWriter.WriteScope.toSave());
+        assertTrue(save.contains("classicLandName=\"Neu-Österreich\""));
+        assertTrue(dutch.serialize(dutch).contains("classicLandName"));
+        assertFalse(dutch.serialize(french).contains("classicLandName"));
+        final Player read = readPlayer(game, save);
+        assertEquals("Neu-Österreich", read.getClassicLandName());
+        assertNull(read.getNewLandName());
+        assertNull(readPlayer(game, save.replace("classicLandName=\"Neu-Österreich\"",
+            "")).getClassicLandName());
+        read.setClassicLandName(null);
+        assertTrue(dutch.copyIn(read));
+        assertEquals("Neu-Österreich", dutch.getClassicLandName());
+        read.setClassicLandName("Levi");
+        assertTrue(dutch.copyIn(read));
+        assertEquals("Levi", dutch.getClassicLandName());
+        dutch.setClassicLandName("");
+        assertNull(dutch.getClassicLandName());
+    }
+
     /** A player read from XML, outside the game. */
     private static Player readPlayer(Game game, String xml) throws Exception {
         try (net.sf.freecol.common.io.FreeColXMLReader xr

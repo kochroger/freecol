@@ -168,10 +168,37 @@ final class ClassicBands {
         final int nation = ClassicDestinations.nation(p);
         put(v, "STRING0", cell(t, "HOMEPORT", nation));
         put(v, "STRING1", cell(t, "COUNTRY", nation));
-        final String land = (p == null) ? null : p.getNewLandName();
-        put(v, "STRING2", (land != null && !land.isEmpty()) ? land
-            : cell(t, "COLONYNAME", nation));
+        final String land = landName(p);
+        put(v, "STRING2", (land != null) ? land : defaultLandName(t, p));
         return v;
+    }
+
+    /**
+     * The player's name for the New World (W10): FreeCol's, set at the
+     * first landing, else the one taken at the first sighting
+     * ({@code Player.classicLandName}) that the first landing will send.
+     *
+     * @param p The player, or null.
+     * @return The name, or null (not named yet: the nation's default).
+     */
+    static String landName(Player p) {
+        if (p == null) return null;
+        final String n = p.getNewLandName();
+        if (n != null && !n.isEmpty()) return n;
+        return p.getClassicLandName();
+    }
+
+    /**
+     * The nation's default name for the New World: NAMES.TXT
+     * {@code @COLONYNAME} ("Neuholland" for the Dutch; landfall #2664,
+     * GAME.TXT's {@code @default=America} is not used).
+     *
+     * @param t The original texts, or null.
+     * @param p The player, or null.
+     * @return The name, or null.
+     */
+    static String defaultLandName(ClassicText t, Player p) {
+        return cell(t, "COLONYNAME", ClassicDestinations.nation(p));
     }
 
     private static void put(Map<String, String> v, String k, String s) {

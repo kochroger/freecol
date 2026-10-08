@@ -86,7 +86,8 @@ import net.sf.freecol.common.model.UnitType;
  *       FreeCol's goto stopped after every land step that left moves
  *       (BR#2707).  The default name is answered at once, no box
  *       ({@link #namesRegion}; the original names no region).  The new
- *       land's name ({@code newLand.text}) is W10's.</li>
+ *       land's name ({@code newLand.text}, {@link #namesNewLand}) is the
+ *       name taken at the first sighting (W10, {@code ClassicGUI}).</li>
  * </ul>
  */
 final class ClassicSeams {
@@ -320,6 +321,21 @@ final class ClassicSeams {
      */
     static boolean namesRegion(StringTemplate template) {
         return template != null && NAME_REGION.equals(template.getId());
+    }
+
+    /** FreeCol's template of the New World's naming at the first landing ({@code newLandNameHandler}). */
+    static final String NAME_NEW_LAND = "newLand.text";
+
+    /**
+     * Whether a naming request is the New World's (W10): the server asks
+     * at the first landing; the Classic UI answers with the name taken at
+     * the first sighting.
+     *
+     * @param template The request's template, or null.
+     * @return True for the New World.
+     */
+    static boolean namesNewLand(StringTemplate template) {
+        return template != null && NAME_NEW_LAND.equals(template.getId());
     }
 
 

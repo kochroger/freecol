@@ -2104,6 +2104,48 @@ appearance: its "woodcut 2" is k = 3, its "woodcut 3" k = 7). Spec:
   `ClassicFrameRecorderTest.testTheWoodcutPaletteAndItsReturn`,
   `PlayerTest.testClassicWoodcuts`.
 
+### The New World's name (master plan W10; I3)
+
+- **At the first sighting** (`ClassicGUI.discoveryShown`, after woodcut 1's
+  map is back): the @LANDHO box (`landHoRequest`), the admiral, GAME.TXT's
+  text, its option row "Name:" as the label of a **name field**
+  (`ClassicAdvisorBox.Field`) holding the nation's default from NAMES.TXT
+  @COLONYNAME ("Neuholland"; GAME.TXT's `@default=America` is not used),
+  selected. The box layer holds it to the woodcut's follow-up (71 ms, V
+  landfall #2658 -> #2663), the admiral's palette in the lead. Nothing when
+  the land has a name already (FreeCol's or a kept one).
+- **The field** (V landfall #2664, clip008 #2789): 144 x 10, frame in the ink
+  at box + (29, 12 + 6P), text at field + (3, 3), the selected default on the
+  index-138 block from text - 1 over its advance + 1, 6 rows; the box is
+  `6P + 31` high (43); no caret. Typed characters (`KEY_TYPED`,
+  `ClassicAdvisorLayer.onTyped`, `Bar.type`): the first replaces the default
+  (V clip008 #3134), the others are added; Backspace (I); letters with
+  umlauts and ß, digits, space, `- . '` (I); at most 23 characters and never
+  wider than the field (I). Enter takes the text (empty: the default),
+  **Escape keeps the default** (Roger), a click does nothing (I). The answer
+  is in `Request.field.answer()` (the bar that closed the box wrote it). The
+  stopgap off the map shows the text and takes the default. D4's @COLONY
+  prompt uses the same field.
+- **Kept** in `Player.classicLandName` (save and owner scope only, written
+  only when set; an update never removes it; on the server's copy in single
+  player, as the woodcuts). The panel's land line and the tips' `%STRING2`
+  use it before the landing (`ClassicBands.landName`).
+- **At the first landing** the server asks (`newLand.text` through
+  `showNamingDialog`, `ClassicSeams.namesNewLand`): the kept name is sent at
+  once, no box; the server's answer sets our player's `newLandName`
+  (`declareIndependence` needs it; recorder `land-name-client` 1.5 s later).
+  Without a kept name (a save from before I3 between sighting and landing)
+  the @LANDHO box comes then. FreeCol's `buildColony.tutorial` is dropped
+  (`withoutStartMessage`). Regions stay silent with their default names.
+- **@TUTORIAL2** comes 0.457 s after the box's close with Tutortips on
+  (V #3185 -> #3217): the seam `landNamed` for W11 (I4), empty here.
+- Recorder: `box-open LANDHO ... field=Neuholland`, `box-field`, `land-named`,
+  `land-name-sent`, `land-name-client`.
+- Tests: `ClassicAdvisorBoxTest.testNameField*` and its golden crop
+  `03_LANDHO_naming` (0 px), `ClassicAdvisorLayerTest.testANameField`,
+  `ClassicGUISeamTest.testLandHoAtTheSighting`, `testTheLandingSendsTheName`,
+  `testRegionNamedAtOnce`, `PlayerTest.testClassicLandName`.
+
 ## In-game HUD (menu strip, dropdowns, right panel)
 
 (`ClassicHudPane`, `ClassicMenuStrip`, `ClassicMenuBar`, `ClassicMenuModel`,

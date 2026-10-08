@@ -371,6 +371,96 @@ public class ClassicAdvisorLayerTest extends TestCase {
         assertEquals(2, b.get());
     }
 
+    /** A typed character, as the key's KEY_TYPED. */
+    private void typed(char c) throws Exception {
+        final long when = System.currentTimeMillis() + 5;
+        edt(() -> {
+                this.layer.onTyped(new KeyEvent(this.layer, KeyEvent.KEY_TYPED, when,
+                    0, KeyEvent.VK_UNDEFINED, c));
+                return null;
+            });
+    }
+
+    private String fieldText() throws Exception {
+        return edt(() -> this.layer.currentFieldText());
+    }
+
+    /**
+     * W10: a name box on the layer.  Its key presses do not answer it
+     * (letters, arrows, Space, F1), the typed characters go into the
+     * field (the first one replaces the default), Backspace takes one
+     * back, the box is redrawn; a character typed before the box was
+     * drawn, a control character or one with Ctrl does nothing; a click
+     * outside does nothing.  Enter answers 0 with the text taken, Escape
+     * dismisses it with the default kept.  Typing in a box without a
+     * field does nothing.
+     */
+    public void testANameField() throws Exception {
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request.builder("name")
+            .freeColText("a a").rows("a").field("a a").build();
+        final Answer a = ask(r);
+        flush();
+        assertTrue(up());
+        assertEquals("name:-1", probe());
+        assertEquals("a a", fieldText());
+        key(KeyEvent.VK_A);
+        key(KeyEvent.VK_DOWN);
+        key(KeyEvent.VK_SPACE);
+        key(KeyEvent.VK_F1);
+        mouse(MouseEvent.MOUSE_PRESSED, 2, 2);
+        mouse(MouseEvent.MOUSE_RELEASED, 2, 2);
+        assertTrue(up());
+        assertEquals("a a", fieldText());
+        typed('a');
+        assertEquals("a", fieldText());
+        typed('\n');
+        typed((char) 8);
+        typed('*');
+        assertEquals("a", fieldText());
+        edt(() -> {
+                this.layer.onTyped(new KeyEvent(this.layer, KeyEvent.KEY_TYPED,
+                    System.currentTimeMillis() - 5000, 0, KeyEvent.VK_UNDEFINED, 'a'));
+                this.layer.onTyped(new KeyEvent(this.layer, KeyEvent.KEY_TYPED,
+                    System.currentTimeMillis() + 5, KeyEvent.CTRL_DOWN_MASK,
+                    KeyEvent.VK_UNDEFINED, 'a'));
+                return null;
+            });
+        assertEquals("a", fieldText());
+        typed(' ');
+        typed('a');
+        typed('a');
+        assertEquals("a aa", fieldText());
+        key(KeyEvent.VK_BACK_SPACE);
+        assertEquals("a a", fieldText());
+        assertFalse(a.isDone());
+        key(KeyEvent.VK_ENTER);
+        assertEquals(0, a.get());
+        assertEquals("a a", r.field.answer());
+        assertTrue(r.field.taken());
+        assertFalse(up());
+        // Escape: the default, whatever was typed.
+        this.clock.advanceMs(1000);
+        final ClassicAdvisorBox.Request r2 = ClassicAdvisorBox.Request.builder("name2")
+            .freeColText("a a").rows("a").field("aaa").build();
+        final Answer b = ask(r2);
+        flush();
+        typed('a');
+        assertEquals("a", fieldText());
+        key(KeyEvent.VK_ESCAPE);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, b.get());
+        assertEquals("aaa", r2.field.answer());
+        assertFalse(r2.field.taken());
+        // A box without a field: typing does nothing, its key answers.
+        this.clock.advanceMs(1000);
+        final Answer c = ask(question("q"));
+        flush();
+        typed('a');
+        assertNull(fieldText());
+        assertTrue(up());
+        key(KeyEvent.VK_ENTER);
+        assertEquals(0, c.get());
+    }
+
     /**
      * Enter, Escape and the other keys count only as fresh presses: an
      * auto-repeat of a key held from before does nothing, an arrow's

@@ -792,7 +792,7 @@ final class ClassicHud {
                                          s.isCapital());
             }
             return new TileFacts(tile.getX(), tile.getY(), REGION_UNKNOWN,
-                tile.isLand(), (player == null) ? null : player.getNewLandName(),
+                tile.isLand(), ClassicBands.landName(player),
                 nation, tribe, (tile.getType() == null) ? null : tile.getType().getId(),
                 riverOf(tile), ClassicUnitCycle.roadShown(tile), plowed(tile),
                 resourceRowOf(tile), sf, units, colony);

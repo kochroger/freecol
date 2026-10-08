@@ -224,6 +224,15 @@ public class Player extends FreeColGameObject implements Nameable {
      */
     protected volatile long classicCycleCursor = -1L;
 
+    /**
+     * The name the player gave the New World in the Classic UI at its first
+     * sighting (the original's @LANDHO), or null.  FreeCol takes the name
+     * only at the first landing (the server asks then); until then it is
+     * kept here, also in the save.  Written by the client's view on the
+     * event thread, read by the server's save.
+     */
+    protected volatile String classicLandName = null;
+
     /** Is this player an admin? */
     protected boolean admin;
 
@@ -549,6 +558,28 @@ public class Player extends FreeColGameObject implements Nameable {
      */
     public void setClassicCycleCursor(long classicCycleCursor) {
         this.classicCycleCursor = (classicCycleCursor < 0) ? -1L : classicCycleCursor;
+    }
+
+    /**
+     * Gets the name the Classic UI took for the New World at its first
+     * sighting.
+     *
+     * @return The name, or null (none yet, and in a save without the
+     *     attribute).
+     */
+    public String getClassicLandName() {
+        return classicLandName;
+    }
+
+    /**
+     * Sets the name the Classic UI took for the New World at its first
+     * sighting.
+     *
+     * @param classicLandName The name; null or empty for none.
+     */
+    public void setClassicLandName(String classicLandName) {
+        this.classicLandName = (classicLandName == null || classicLandName.isEmpty())
+            ? null : classicLandName;
     }
 
     /**
@@ -4238,6 +4269,8 @@ public class Player extends FreeColGameObject implements Nameable {
         // Never forgets one: a woodcut seen stays seen.
         this.classicWoodcuts |= o.getClassicWoodcuts();
         this.classicTips |= o.getClassicTips();
+        // Nor the name taken at the first sighting (W10).
+        if (o.getClassicLandName() != null) this.classicLandName = o.getClassicLandName();
         // The unit cycle cursor is the client's own (the server's copy only
         // mirrors it for the save): an update in flight never moves it.
         this.admin = o.isAdmin();
@@ -4294,6 +4327,7 @@ public class Player extends FreeColGameObject implements Nameable {
     private static final String BANKRUPT_TAG = "bankrupt";
     private static final String BAN_MISSIONS_TAG = "banMissions";
     private static final String CLASSIC_CYCLE_CURSOR_TAG = "classicCycleCursor";
+    private static final String CLASSIC_LAND_NAME_TAG = "classicLandName";
     private static final String CLASSIC_TIPS_TAG = "classicTips";
     private static final String CLASSIC_WOODCUTS_TAG = "classicWoodcuts";
     private static final String CURRENT_FATHER_TAG = "currentFather";
@@ -4386,6 +4420,10 @@ public class Player extends FreeColGameObject implements Nameable {
 
             if (classicCycleCursor >= 0) {
                 xw.writeAttribute(CLASSIC_CYCLE_CURSOR_TAG, classicCycleCursor);
+            }
+
+            if (classicLandName != null) {
+                xw.writeAttribute(CLASSIC_LAND_NAME_TAG, classicLandName);
             }
         }
 
@@ -4571,6 +4609,8 @@ public class Player extends FreeColGameObject implements Nameable {
         classicTips = xr.getAttribute(CLASSIC_TIPS_TAG, 0);
 
         setClassicCycleCursor(xr.getAttribute(CLASSIC_CYCLE_CURSOR_TAG, -1L));
+
+        setClassicLandName(xr.getAttribute(CLASSIC_LAND_NAME_TAG, (String)null));
 
         independentNationName = xr.getAttribute(INDEPENDENT_NATION_NAME_TAG,
                                                 (String)null);
