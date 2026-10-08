@@ -403,26 +403,6 @@ final class ClassicTurnFlow {
         }
 
         /**
-         * @return Whether a band is on the top strip (W13): the automatic
-         *     end waits for it ({@link #bandEnded}).
-         */
-        default boolean bandUp() {
-            return false;
-        }
-
-        /**
-         * Asked at the automatic end when nothing can move (W13 guard,
-         * spec R4 section 5.7): open Europe instead of ending the turn,
-         * when nothing of ours is in the New World or at sea and Europe
-         * was not shown in this turn yet.  The end comes after its close.
-         *
-         * @return True if Europe opens instead.
-         */
-        default boolean openEuropeInstead() {
-            return false;
-        }
-
-        /**
          * Our new turn begins, before its first unit is chosen: the unit
          * cycle's turn (no goto has run, the visits found).
          */
@@ -788,10 +768,13 @@ final class ClassicTurnFlow {
     }
 
     /**
-     * A band on the top strip ended (W13): the idle end it held is armed
-     * from now.  Unlike a box's close it does not re-base a pending
-     * hand-over: the next unit comes under the band as usual (clip008
-     * #44199 and #44215, R4 verifier item 5).
+     * A band on the top strip ended (W13): a change the player saw.  A band
+     * holds nothing: the automatic end after a departure comes 485 ms after
+     * the band appeared, and the band stays through the AI phase until our
+     * next turn's first unit (opening_013 #1536 -&gt; #1570 -&gt; #1856,
+     * europe-voyage D1).  Unlike a box's close it does not re-base a
+     * pending hand-over: the next unit comes under the band as usual
+     * (clip008 #44199 and #44215, R4 verifier item 5).
      */
     void bandEnded() {
         if (this.disposed) return;
@@ -1384,14 +1367,14 @@ final class ClassicTurnFlow {
     }
 
     /**
-     * Whether a band or the Europe screen holds the automatic end now
-     * (W13); the band's end ({@link #bandEnded}) or Europe's close
-     * ({@link #boxClosed}) arms it again.
+     * Whether the Europe screen holds the automatic end now (W13);
+     * Europe's close ({@link #boxClosed}) arms it again.  A band does not
+     * (europe-voyage D1, {@link #bandEnded}).
      *
      * @return True if held.
      */
     private boolean endHeld() {
-        return this.host.bandUp() || this.host.europeOpen();
+        return this.host.europeOpen();
     }
 
     /**
@@ -1511,6 +1494,35 @@ final class ClassicTurnFlow {
      */
     boolean isWaiting() {
         return !this.turnStarted;
+    }
+
+    /**
+     * Whether the player has the turn: ours, shown (wiped), and our end
+     * not going out.  A timed band's time is up only then; one that runs
+     * out in the AI phase stays until our next turn's first unit
+     * (europe-voyage D1: opening_013 #1536 -&gt; #1856, 320 frames; I: the
+     * original checks the band's expiry only while the player has the
+     * turn).
+     *
+     * @return True if so.
+     */
+    boolean playerHasTurn() {
+        return !this.disposed && this.turnStarted && !this.ending
+            && this.host.myTurn();
+    }
+
+    /**
+     * Whether a unit of ours is on its way up: a turn start or a hand-over
+     * pending, or goto orders running.  An expired band waits for it
+     * ({@link ClassicVoyages.BandEnd}); with only the idle pause pending,
+     * or nothing, no unit comes.
+     *
+     * @return True if so.
+     */
+    boolean unitComingUp() {
+        final Pending p = this.pending;
+        return this.gotoRuns > 0 || (p != null
+            && (p.kind == Kind.TURN_START || p.kind == Kind.HANDOVER));
     }
 
     /** @return Whether the Spielzugende mode is on (W17). */
@@ -1798,14 +1810,9 @@ final class ClassicTurnFlow {
             return;
         }
         if (!promptMode && endHeld()) {
-            // W13: a band runs out first, Europe is closed first.
-            ClassicFrameRecorder.event("endturn-timer-fire", "held: "
-                + ((this.host.bandUp()) ? "band" : "Europe"));
-            return;   // idleWanted stays: bandEnded or the close arms again
-        }
-        if (!promptMode && this.host.openEuropeInstead()) {
-            ClassicFrameRecorder.event("endturn-timer-fire",
-                "held: Europe instead of the end (guard)");
+            // W13: Europe is closed first.  Never opened instead of the
+            // end (Part H's guard is gone: no reminder, Roger 2026-10-08).
+            ClassicFrameRecorder.event("endturn-timer-fire", "held: Europe");
             return;   // idleWanted stays: the close arms again
         }
         if (promptMode) {

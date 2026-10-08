@@ -174,9 +174,6 @@ public class ClassicGUI extends GUI {
     /** When Europe was last asked for and is not open yet (0: not), clock ns. */
     private long europeAskedAt = 0L;
 
-    /** The turn Europe was last asked for in (W13 guard; -1: none). */
-    private int europeShownTurn = -1;
-
     /** Our voyages: the ships at sea and the arrivals (W13). */
     final ClassicVoyages voyages = new ClassicVoyages();
 
@@ -185,6 +182,19 @@ public class ClassicGUI extends GUI {
 
     /** The arrival chain's next step, the timed band's end, the Europe tip. */
     private ClassicOneShot voyageTimer = null, bandTimer = null, tipTimer = null;
+
+    /** Europe's close after its last ship sailed ({@link #europeShipSailed}). */
+    private ClassicOneShot europeCloseTimer = null;
+
+    /** When Europe was last brought up ({@link #raiseEurope}), clock ns. */
+    private long europeRaisedAt = 0L;
+
+    /**
+     * A timed band's end: one whose time ran out while the player did not
+     * have the turn stays until our next turn's first unit
+     * ({@link #bandTimeUp}, europe-voyage D1).  EDT only.
+     */
+    private final ClassicVoyages.BandEnd bandEnd = new ClassicVoyages.BandEnd();
 
     /** The tutorial tips' timer (W11), and the tips on their way (EDT). */
     private ClassicOneShot adviceTimer = null;
@@ -1243,10 +1253,13 @@ public class ClassicGUI extends GUI {
         // No band, chain or tip of this game outlives it (W13).
         this.voyageChain = null;
         for (ClassicOneShot t : new ClassicOneShot[] {
-                this.voyageTimer, this.bandTimer, this.tipTimer, this.adviceTimer }) {
+                this.voyageTimer, this.bandTimer, this.tipTimer, this.adviceTimer,
+                this.europeCloseTimer }) {
             if (t != null) t.close();
         }
         this.voyageTimer = this.bandTimer = this.tipTimer = this.adviceTimer = null;
+        this.europeCloseTimer = null;
+        this.bandEnd.reset();
         this.pendingTips.clear();
         this.colonyShown = null;
         this.voyages.clear();
@@ -1758,13 +1771,12 @@ public class ClassicGUI extends GUI {
             // start message and any other notice that arrived before this
             // point were held by showMessagePopup (startGameInternal reaches
             // it before this queued build runs).
+            // A load shows no arrival and opens no Europe (W13: Europe
+            // opens by itself only at an arrival at a turn start; Part H's
+            // load fallback and guard are gone, Roger 2026-10-08).
             if (this.firstScenePending) {
                 this.firstScenePending = false;
                 if (!showFirstScene()) flushHeldMessages();
-            } else if (built) {
-                // A loaded save of an arrival turn (W13), after the
-                // controller's first view.
-                SwingUtilities.invokeLater(this::loadedArrivals);
             }
         });
     }
@@ -1883,8 +1895,8 @@ public class ClassicGUI extends GUI {
         // The voyages of this game (W13): the bands, the arrival chain.
         this.voyages.clear();
         this.voyageChain = null;
-        this.europeShownTurn = -1;
         this.europeAskedAt = 0L;
+        this.bandEnd.reset();
         this.voyageTimer = new ClassicOneShot(waitClock(),
             SwingUtilities::invokeLater, true, "ClassicVoyages");
         this.bandTimer = new ClassicOneShot(waitClock(),
@@ -1893,11 +1905,14 @@ public class ClassicGUI extends GUI {
             SwingUtilities::invokeLater, true, "ClassicEuropeTip");
         this.adviceTimer = new ClassicOneShot(waitClock(),
             SwingUtilities::invokeLater, true, "ClassicTips");
+        this.europeCloseTimer = new ClassicOneShot(waitClock(),
+            SwingUtilities::invokeLater, true, "ClassicEuropeClose");
         this.pendingTips.clear();
         this.turnPoll = new javax.swing.Timer(ClassicTurnFlow.POLL_MS, e -> {
                 if (turnFlow != null) {
                     turnFlow.tick();
                     noteVoyages();
+                    expiredBandCheck();
                 }
             });
         this.turnPoll.start();
@@ -1926,7 +1941,7 @@ public class ClassicGUI extends GUI {
                                               mapViewer.getViewMode()),
             () -> sceneShowing || boxBusy()
                 || (menuStrip != null && menuStrip.isMenuOpen()),
-            this::turnInputBlocked, this::orderRefused);
+            this::turnInputBlocked, this::orderRefused, this::chainWaitsForEurope);
         // The advisor boxes on the same canvas (build spec W7).
         this.boxLayer = new ClassicAdvisorLayer(new BoxHost(pack, tiny, wood),
             waitClock(), SwingUtilities::invokeLater, true);
@@ -2611,6 +2626,19 @@ public class ClassicGUI extends GUI {
     }
 
     /**
+     * Whether the arrival chain holds our turn start for the Europe screen
+     * (asked for, or open until its close): every game key is dead then,
+     * but E brings Europe up again (H REVIEW2 M1, {@link #showEuropePanel}).
+     * EDT only.
+     *
+     * @return True while it waits.
+     */
+    boolean chainWaitsForEurope() {
+        final ClassicVoyages.Chain c = this.voyageChain;
+        return c != null && c.waitsForEurope();
+    }
+
+    /**
      * The true terrain of the fog ring (M1c design 10 §5, W6d), for the
      * terrain composer alone: the minimap and every other consumer keep
      * using {@code Tile.isExplored} (least knowledge).
@@ -3047,16 +3075,6 @@ public class ClassicGUI extends GUI {
         public boolean europeOpen() {
             return europeHoldsTheEnd();
         }
-
-        @Override
-        public boolean bandUp() {
-            return menuStrip != null && menuStrip.band() != null;
-        }
-
-        @Override
-        public boolean openEuropeInstead() {
-            return ClassicGUI.this.openEuropeInstead();
-        }
     }
 
     /**
@@ -3405,13 +3423,16 @@ public class ClassicGUI extends GUI {
      * (the classic UI has no {@code Canvas} to host panels in).  Reached by the
      * {@code Europe} menu action (accelerator {@code E}), and by the Classic
      * UI itself when a ship of ours arrives in Europe (W13, the arrival
-     * chain; FreeCol's controller never opens it) and by the guard
-     * ({@link #openEuropeInstead}).
+     * chain; FreeCol's controller never opens it).  Never as a reminder of
+     * ships left in port (Roger, 2026-10-08: Part H's guard is gone).
      *
-     * <p>Only one Europe screen is open at a time; opening another replaces it
-     * (not a close for the turn flow).  The player's close, by the screen's
-     * own exit or by the window's close box / Alt+F4, is
-     * {@link #europeClosed}.  The game's first Europe screen brings
+     * <p>Only one Europe screen is open at a time: one that is open already
+     * (behind the map or minimized) is brought up to date and up
+     * ({@link #raiseEurope}), not opened again (H REVIEW2 M1: E brings it
+     * back with its state).  The player's close, by the screen's own exit
+     * or by the window's close box / Alt+F4, is {@link #europeClosed}; so is
+     * its close by itself after the last ship in port sailed
+     * ({@link #europeShipSailed}).  The game's first Europe screen brings
      * {@code @TUTORIAL17} ({@link #europeTip}).  Guarded so a failure
      * degrades to a log line rather than breaking the map; the turn flow
      * then waits no longer than {@link ClassicVoyages#EUROPE_TIMEOUT_MS}.
@@ -3420,14 +3441,20 @@ public class ClassicGUI extends GUI {
     public FreeColPanel showEuropePanel() {
         final Player player = getMyPlayer();
         if (player == null || player.getEurope() == null) return null;
-        this.europeShownTurn = turnNumber();
         this.europeAskedAt = waitClock().now();
         SwingUtilities.invokeLater(() -> {
             try {
+                if (isOpen(this.europeFrame) && this.europePanel != null
+                    && this.europePanel.europe() == player.getEurope()) {
+                    this.europeAskedAt = 0L;
+                    this.europePanel.refresh();
+                    raiseEurope("asked again");
+                    return;
+                }
                 closeEuropePanel();
                 final ClassicEuropePanel panel = new ClassicEuropePanel(
                     getFreeColClient(), this.imageLibrary, player.getEurope(),
-                    this::europeClosed);
+                    this::europeClosed, this::europeShipSailed);
                 final JFrame f = new JFrame(Messages.message(player.getEurope()
                         .getNameKey()));
                 this.europeFrame = f;
@@ -3460,6 +3487,58 @@ public class ClassicGUI extends GUI {
     }
 
     /**
+     * Bring the open Europe screen up: restored if minimized, in front of
+     * the map, the keys to it (H REVIEW2 M1: at an arrival a Europe behind
+     * the map or minimized held the turn start with every game key dead).
+     * Not while the game's own window is minimized: Europe then comes up
+     * when the map's window is active again
+     * ({@link VoyageHost#keepEuropeUp}), and a minimized scripted run keeps
+     * its windows off the desktop.  EDT only.
+     *
+     * @param why What brings it up (for the recorder).
+     * @return True if it was brought up.
+     */
+    private boolean raiseEurope(String why) {
+        final JFrame f = this.europeFrame;
+        if (!isOpen(f)) return false;
+        if (this.frame != null
+            && (this.frame.getExtendedState() & Frame.ICONIFIED) != 0) return false;
+        final int state = f.getExtendedState();
+        final boolean minimized = (state & Frame.ICONIFIED) != 0;
+        if (minimized) f.setExtendedState(state & ~Frame.ICONIFIED);
+        if (!f.isVisible()) f.setVisible(true);
+        f.toFront();
+        if (this.europePanel != null) this.europePanel.requestFocusInWindow();
+        // One line per raise, not one per poll while Windows refuses it.
+        final long now = waitClock().now();
+        if (minimized || now - this.europeRaisedAt
+            >= ClassicVoyages.nanos(ClassicVoyages.EUROPE_TIMEOUT_MS)) {
+            ClassicFrameRecorder.event("europe-raise", why
+                + ((minimized) ? " (restored)" : ""));
+        }
+        this.europeRaisedAt = now;
+        return true;
+    }
+
+    /**
+     * The rule of {@link VoyageHost#keepEuropeUp}: while the arrival chain
+     * waits for Europe's close, a Europe screen that is open while the
+     * player is at the map (the map's window active: Europe behind it or
+     * minimized) comes up again; not over a box or an open menu of the map
+     * (the box or the menu first).
+     *
+     * @param europeOpen The Europe screen is open.
+     * @param mapActive The map's window is the active window.
+     * @param boxUp A box, the first scene or a modal dialog is up.
+     * @param menuOpen A menu of the map's strip is open.
+     * @return True to bring Europe up.
+     */
+    static boolean raisesEurope(boolean europeOpen, boolean mapActive,
+                                boolean boxUp, boolean menuOpen) {
+        return europeOpen && mapActive && !boxUp && !menuOpen;
+    }
+
+    /**
      * Dismiss the Europe screen if one is open, without telling anyone (a
      * replacement, the game view's end); the player's close is
      * {@link #europeClosed}.
@@ -3468,25 +3547,84 @@ public class ClassicGUI extends GUI {
         final JFrame f = this.europeFrame;
         this.europeFrame = null;
         this.europePanel = null;
+        if (this.europeCloseTimer != null) this.europeCloseTimer.cancel();
         if (f != null) f.dispose();
     }
 
     /**
      * The player closed the Europe screen: its own "Abb" or Escape, the
      * window's close box or Alt+F4 ({@code WINDOW_CLOSING}; Alt+Enter's
-     * re-framing disposes it too, but fires only {@code windowClosed}, and
-     * a replacement in {@link #showEuropePanel} is not a close).  A box's
-     * close for the turn flow (W13): the end it held comes
-     * {@link ClassicTurnFlow#END_TURN_MS} after it, the turn start it held
-     * goes on at once (the arrival chain's next step).  EDT only.
+     * re-framing disposes it too, but fires only {@code windowClosed}), or
+     * it closed by itself after the last ship in port sailed
+     * ({@link #europeAutoClose}).  A box's close for the turn flow (W13):
+     * the end it held comes {@link ClassicTurnFlow#END_TURN_MS} after it,
+     * the turn start it held goes on at once (the arrival chain's next
+     * step), and the unit whose turn it is comes through the unit cycle.
+     * The turn flow hears the close also when the chain's step fails
+     * (H REVIEW2 L1).  EDT only.
      */
     private void europeClosed() {
         if (this.europeFrame == null) return;
         closeEuropePanel();
         this.europeAskedAt = 0L;
         ClassicFrameRecorder.event("europe-close", "");
-        if (this.voyageChain != null) runVoyageChain();
-        if (this.turnFlow != null) this.turnFlow.boxClosed();
+        try {
+            if (this.voyageChain != null) runVoyageChain();
+        } finally {
+            if (this.turnFlow != null) this.turnFlow.boxClosed();
+        }
+    }
+
+    /**
+     * A ship sailed from the Europe screen for the New World (its Set
+     * Sail): when no ship is left in port
+     * ({@link ClassicVoyages#closesAfterSailing}; colonists on the dock do
+     * not count), the screen closes by itself
+     * {@link ClassicVoyages#EUROPE_CLOSE_MS} later (Roger, 2026-10-08;
+     * opening_013 #3958 -&gt; #3983, opening_014 #3669 -&gt; #3695), and the
+     * map shows the unit whose turn it is, or the turn's end
+     * ({@link #europeClosed}).  EDT only.
+     *
+     * @param ship The ship that sailed.
+     */
+    void europeShipSailed(Unit ship) {
+        final Player me = myPlayer();
+        if (ship == null || me == null || ship.isInEurope()) return;   // it did not sail
+        final boolean last = ClassicVoyages.closesAfterSailing(me.getEurope());
+        ClassicFrameRecorder.event("europe-sail", "unit=" + ship.getId()
+            + ((last) ? " the last ship: Europe closes" : ""));
+        final JFrame f = this.europeFrame;
+        if (!last || !isOpen(f) || this.europeCloseTimer == null) return;
+        this.europeCloseTimer.schedule(waitClock().now()
+            + ClassicVoyages.nanos(ClassicVoyages.EUROPE_CLOSE_MS),
+            () -> europeAutoClose(f));
+    }
+
+    /**
+     * Europe's close by itself ({@link #europeShipSailed}), unless it was
+     * closed or replaced meanwhile or a ship is in port again (one bought
+     * within the 357 ms); a modal list or a box up then: the close after
+     * it.  EDT only.
+     *
+     * @param f The Europe window the last ship sailed from.
+     */
+    private void europeAutoClose(JFrame f) {
+        if (this.europeFrame != f || !isOpen(f)) return;
+        final Player me = myPlayer();
+        if (me == null || !ClassicVoyages.closesAfterSailing(me.getEurope())) {
+            ClassicFrameRecorder.event("europe-close", "auto: dropped, a ship is in port");
+            return;
+        }
+        if (modalDialogShowing() || boxBusy()) {
+            if (this.europeCloseTimer != null) {
+                this.europeCloseTimer.schedule(waitClock().now()
+                    + ClassicVoyages.nanos(ClassicVoyages.POLL_MS),
+                    () -> europeAutoClose(f));
+            }
+            return;
+        }
+        ClassicFrameRecorder.event("europe-close", "auto: the last ship sailed");
+        europeClosed();
     }
 
     /**
@@ -3508,7 +3646,7 @@ public class ClassicGUI extends GUI {
         return (g == null || g.getTurn() == null) ? -1 : g.getTurn().getNumber();
     }
 
-    // Voyages: the bands, the arrival chain, the guard (master plan W13,
+    // Voyages: the bands, the arrival chain, Europe's close (master plan W13,
     // spec R4, ClassicVoyages)
 
     /**
@@ -3516,23 +3654,35 @@ public class ClassicGUI extends GUI {
      *
      * <p>Our ship left the map for Europe: the band "Holl. Handelsschiff
      * Ziel: Amsterdam" for 137 frames (landfall #25735, clip008 #44180), in
-     * the paint the ship goes or the next; play goes on under it, and the
-     * automatic end waits for its end ({@link ClassicTurnFlow#bandEnded}).
-     * Not for a ship at sea that turned around (no tile; R4 verifier item
-     * 4).  Any thread.
+     * the paint the ship goes or the next; play goes on under it.  The band
+     * is the last change: the next unit comes 500 ms after it, or, with
+     * nothing left to move, the automatic end 485 ms after it, under the
+     * band, which then stays through the AI phase until our next turn's
+     * first unit (opening_013 #1536 -&gt; #1570 -&gt; #1856, europe-voyage
+     * D1; {@link #bandTimeUp}).  Not for a ship at sea that turned around
+     * (no tile; R4 verifier item 4).  Guarded: it runs inside FreeCol's
+     * {@code moveTowardEurope} before its {@code fireChanges} and
+     * {@code updateGUI}, which a throw would skip for a move the server
+     * has made (H REVIEW2 L2).  Any thread.
      */
     @Override
     public void unitSailedForEurope(Unit unit, Tile from) {
         if (!showsDeparture(unit, from, myPlayer())) return;
         final Runnable band = () -> {
-            if (this.menuStrip == null) return;
-            final String text = ClassicBands.departure(
-                ClassicText.load(ClassicPackFiles.runtime()), unit);
-            // The ship gone first, the band with it or a frame later.
-            if (this.mapViewer != null) this.mapViewer.paintDeparture();
-            showBand(text, ClassicVoyages.BAND_MS);
-            ClassicFrameRecorder.event("band", "depart unit=" + unit.getId()
-                + " at=" + from.getX() + "," + from.getY() + " text=" + text);
+            try {
+                if (this.menuStrip == null) return;
+                final String text = ClassicBands.departure(
+                    ClassicText.load(ClassicPackFiles.runtime()), unit);
+                // The ship gone first, the band with it or a frame later.
+                if (this.mapViewer != null) this.mapViewer.paintDeparture();
+                showBand(text, ClassicVoyages.BAND_MS);
+                screenChanged();   // the pauses run from the band
+                ClassicFrameRecorder.event("band", "depart unit=" + unit.getId()
+                    + " at=" + from.getX() + "," + from.getY() + " text=" + text);
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "ClassicGUI: departure band failed for "
+                    + unit.getId(), e);
+            }
         };
         if (SwingUtilities.isEventDispatchThread()) {
             band.run();
@@ -3556,7 +3706,8 @@ public class ClassicGUI extends GUI {
 
     /**
      * Show a band on the top strip instead of the menu (it takes no input
-     * meanwhile), replacing one that is up.  EDT only.
+     * meanwhile), replacing one that is up.  A timed band's time is up at
+     * {@link #bandTimeUp}.  EDT only.
      *
      * @param text The band.
      * @param ms How long, or 0 until {@link #clearBand}.
@@ -3564,12 +3715,60 @@ public class ClassicGUI extends GUI {
     void showBand(String text, double ms) {
         if (this.menuStrip == null) return;
         if (this.bandTimer != null) this.bandTimer.cancel();
+        this.bandEnd.reset();
         this.menuStrip.setBand(text);
         this.menuStrip.paintImmediately(0, 0, this.menuStrip.getWidth(),
                                         this.menuStrip.getHeight());
         if (ms > 0 && this.bandTimer != null) {
             this.bandTimer.schedule(waitClock().now() + ClassicVoyages.nanos(ms),
-                                    this::clearBand);
+                                    this::bandTimeUp);
+        }
+    }
+
+    /**
+     * A timed band's 137 frames are over: it goes now while the player has
+     * the turn ({@link ClassicTurnFlow#playerHasTurn}); else (our end went
+     * out, the AI phase, our next turn not shown yet) it stays until our
+     * next turn's first unit comes up and goes
+     * {@link ClassicVoyages#BAND_AFTER_UNIT_MS} after it
+     * ({@link #bandAfterUnit}), or, with no unit up, once our turn is
+     * shown and no unit is coming up ({@link #expiredBandCheck}).
+     * Europe-voyage D1: opening_013 #1536 -&gt; #1856 (320 frames, the
+     * pioneer's block #1854); I: the original checks the band's expiry
+     * only while the player has the turn.  EDT only.
+     */
+    private void bandTimeUp() {
+        if (this.menuStrip == null || this.menuStrip.band() == null) return;
+        final ClassicTurnFlow f = this.turnFlow;
+        if (this.bandEnd.timeUp(f == null || f.playerHasTurn())) {
+            clearBand();
+            return;
+        }
+        ClassicFrameRecorder.event("band", "time up: kept until our next unit");
+    }
+
+    /**
+     * A unit came up ({@link #unitUp}): an expired band goes
+     * {@link ClassicVoyages#BAND_AFTER_UNIT_MS} later (opening_013 #1854
+     * -&gt; #1856).  EDT only.
+     */
+    private void bandAfterUnit() {
+        final ClassicTurnFlow f = this.turnFlow;
+        if (this.bandTimer == null || f == null
+            || !this.bandEnd.unitUp(f.playerHasTurn())) return;
+        this.bandTimer.schedule(waitClock().now()
+            + ClassicVoyages.nanos(ClassicVoyages.BAND_AFTER_UNIT_MS), this::clearBand);
+    }
+
+    /**
+     * The poll: an expired band whose turn is shown with no unit coming up
+     * (a turn with nothing to move: its idle pause, the Spielzugende mode)
+     * goes now (I: never recorded).  EDT only.
+     */
+    private void expiredBandCheck() {
+        final ClassicTurnFlow f = this.turnFlow;
+        if (f != null && this.bandEnd.poll(f.playerHasTurn(), f.unitComingUp())) {
+            clearBand();
         }
     }
 
@@ -3581,6 +3780,7 @@ public class ClassicGUI extends GUI {
      */
     void clearBand() {
         if (this.bandTimer != null) this.bandTimer.cancel();
+        this.bandEnd.reset();
         if (this.menuStrip == null || this.menuStrip.band() == null) return;
         this.menuStrip.setBand(null);
         this.menuStrip.paintImmediately(0, 0, this.menuStrip.getWidth(),
@@ -3618,29 +3818,6 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * A loaded save of an arrival turn (W13): its ships in port that
-     * arrived at this turn's start ({@link ClassicVoyages#loaded}) get the
-     * band and Europe as at the turn start, outside the hold (a load shows
-     * no turn start).  Once per game view, after its build.
-     */
-    private void loadedArrivals() {
-        final Player me = myPlayer();
-        final int turn = turnNumber();
-        if (me == null || turn < 0 || this.voyageChain != null
-            || this.turnFlow == null) return;
-        final ClassicVoyages.Arrivals a = ClassicVoyages.loaded(me);
-        this.voyages.take(me, turn);   // nothing else this turn
-        if (!a.isEmpty()) {
-            startVoyageChain(a, "loaded");
-        } else if (guardWants()) {
-            // A load shows no automatic end while nothing can move (G
-            // acceptance A5: it waits for a key), so the guard comes here.
-            ClassicFrameRecorder.event("voyage", "guard: Europe at the load");
-            showEuropePanel();
-        }
-    }
-
-    /**
      * Start the arrival chain; its first step is posted, so the band comes
      * with the next paint after the box that closed last (A5).
      *
@@ -3656,12 +3833,34 @@ public class ClassicGUI extends GUI {
         SwingUtilities.invokeLater(this::runVoyageChain);
     }
 
-    /** Run the arrival chain's due step and schedule the next.  EDT only. */
+    /**
+     * Run the arrival chain's due step and schedule the next.  A throw that
+     * passed the chain's own guard ({@link ClassicVoyages.Chain#step}: its
+     * host's {@code done} itself) drops the chain, so the turn start goes
+     * on: a chain left with no next step held it for good, with every game
+     * key dead (H REVIEW2 L1).  EDT only.
+     */
     private void runVoyageChain() {
         final ClassicVoyages.Chain c = this.voyageChain;
         if (c == null) return;
         final ClassicSlide.Clock clock = waitClock();
-        final long due = c.step(clock.now());
+        final long due;
+        try {
+            due = c.step(clock.now());
+        } catch (RuntimeException e) {
+            logger.log(Level.WARNING, "ClassicGUI: the arrival chain failed;"
+                + " the turn start goes on.", e);
+            if (this.voyageChain == c) {
+                this.voyageChain = null;
+                if (this.voyageTimer != null) this.voyageTimer.cancel();
+                try {
+                    clearBand();
+                } finally {
+                    if (this.turnFlow != null) this.turnFlow.boxClosed();
+                }
+            }
+            return;
+        }
         if (this.voyageChain != c || this.voyageTimer == null) return;
         if (due < 0L) {
             this.voyageChain = null;
@@ -3699,11 +3898,10 @@ public class ClassicGUI extends GUI {
             final Player me = myPlayer();
             if (me == null || me.getEurope() == null) return false;
             if (isOpen(europeFrame)) {
-                // Open already (windowed, behind the map; U5): brought up
-                // to date and to the front, not opened again.
-                europeShownTurn = turnNumber();
+                // Open already (windowed, behind the map or minimized; U5):
+                // brought up to date and up, not opened again (M1).
                 if (europePanel != null) europePanel.refresh();
-                europeFrame.toFront();
+                raiseEurope("arrival");
                 return true;
             }
             showEuropePanel();
@@ -3713,6 +3911,14 @@ public class ClassicGUI extends GUI {
         @Override
         public boolean europeOpen() {
             return isOpen(europeFrame);
+        }
+
+        @Override
+        public void keepEuropeUp() {
+            if (raisesEurope(isOpen(europeFrame), frame != null && frame.isActive(),
+                    boxUp(), menuStrip != null && menuStrip.isMenuOpen())) {
+                raiseEurope("hold");
+            }
         }
 
         @Override
@@ -3732,40 +3938,6 @@ public class ClassicGUI extends GUI {
         public void event(String what) {
             ClassicFrameRecorder.event("voyage", what);
         }
-    }
-
-    /**
-     * The guard (W13, spec R4 section 5.7), asked at the automatic end when
-     * nothing can move: with nothing of ours in the New World or at sea
-     * ({@link ClassicVoyages#nothingOut}), a Europe and no Europe screen in
-     * this turn yet, Europe opens instead of the end, once per turn; the
-     * end comes after its close.  So the turns never run on unseen while
-     * everything waits in Europe (Roger, 1504-1545).  The automatic end
-     * only (Spielzugende off); not while a band is up.
-     *
-     * @return True if Europe opens.
-     */
-    boolean openEuropeInstead() {
-        if (!guardWants()) return false;
-        ClassicFrameRecorder.event("voyage", "guard: Europe instead of the end");
-        showEuropePanel();
-        return true;
-    }
-
-    /**
-     * The guard's conditions ({@link #openEuropeInstead}): a player with a
-     * Europe, no arrival chain or band, no Europe screen in this turn yet,
-     * nothing out ({@link ClassicVoyages#nothingOut}).  Also asked right
-     * after a load ({@link #loadedArrivals}).
-     *
-     * @return True if Europe is to open.
-     */
-    boolean guardWants() {
-        final Player me = myPlayer();
-        return me != null && me.getEurope() != null && this.voyageChain == null
-            && (this.menuStrip == null || this.menuStrip.band() == null)
-            && this.europeShownTurn != turnNumber()
-            && ClassicVoyages.nothingOut(me);
     }
 
     /**
@@ -7351,6 +7523,7 @@ public class ClassicGUI extends GUI {
      * @param nowNanos Now ({@link #waitClock}).
      */
     void unitUp(Unit unit, long nowNanos) {
+        bandAfterUnit();   // an expired departure band goes now (D1)
         // Its tip came at its switch already: none at its activation.
         final boolean tipped = unit != null && unit == this.switchTipUnit;
         this.switchTipUnit = null;

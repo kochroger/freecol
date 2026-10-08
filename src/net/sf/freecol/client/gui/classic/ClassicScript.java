@@ -48,6 +48,10 @@ import javax.swing.KeyStroke;
  *       point of the 320x200 canvas.</li>
  *   <li>{@code move <x> <y>}: move the pointer there, no button (build
  *       spec W20: what reacts to hover).</li>
+ *   <li>{@code sclick <x> <y>}: a left click at a point of the open
+ *       classic screen's own 320x200 canvas (the Europe screen: its ship
+ *       in port, its Set Sail; also in a minimized run, whose screen never
+ *       painted).</li>
  *   <li>{@code waitGame [timeoutMs]}: until the in-game HUD is up.</li>
  *   <li>{@code waitIdle [timeoutMs]}: until our player has the controls
  *       (our turn, no dialog or scene, no slide running) for a moment.</li>
@@ -77,7 +81,7 @@ final class ClassicScript {
 
     /** The commands. */
     enum Op { WAIT, KEY, CLICK, MOVE, WAIT_GAME, WAIT_IDLE, WAIT_TURN, PREF, LOG,
-        QUIT, GOTO, WAIT_BOX }
+        QUIT, GOTO, WAIT_BOX, SCREEN_CLICK }
 
     /** Default timeouts (ms) of the waits. */
     static final long WAIT_GAME_TIMEOUT = 180_000L;
@@ -182,6 +186,13 @@ final class ClassicScript {
             final int y = integer(xy[1], ClassicFrameRecorder.H);
             return new Command("click".equals(cmd) ? Op.CLICK : Op.MOVE, n, s, x, y,
                                null, null, false);
+        }
+        case "sclick": {
+            final String[] xy = rest.split("\\s+");
+            if (xy.length != 2) throw new IllegalArgumentException(cmd + " needs x and y");
+            final int x = integer(xy[0], ClassicFrameRecorder.W);
+            final int y = integer(xy[1], ClassicFrameRecorder.H);
+            return new Command(Op.SCREEN_CLICK, n, s, x, y, null, null, false);
         }
         case "waitgame":
             return new Command(Op.WAIT_GAME, n, s, millis(rest, WAIT_GAME_TIMEOUT),

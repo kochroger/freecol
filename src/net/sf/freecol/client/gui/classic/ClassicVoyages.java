@@ -45,8 +45,10 @@ import net.sf.freecol.common.model.Unit;
  *   Taken once per turn ({@link #take}), which forgets the notes and the
  *   messages, so a chain never starts twice (R4 verifier, hang 1).  A
  *   ship on a trade route is left out (FreeCol sends it no message; U8).
- *   After a load nothing is noted: the arrival turn's save is caught by
- *   {@link #arrivedThisTurn} (a ship in port with no work left).</li>
+ *   After a load nothing is noted, so a load shows no arrival: Europe opens
+ *   by itself only when a ship has just arrived at a turn start, never as
+ *   a reminder of ships left in port (Roger, 2026-10-08; Part H's guard
+ *   and its load fallback are gone).</li>
  *   <li><b>The chain</b> ({@link Chain}), inside the turn flow's hold
  *   before the year flips: one band "... Trifft jetzt ein in Amsterdam"
  *   per ship {@link #BAND_TO_EUROPE_MS} apart, Europe opens that long
@@ -59,7 +61,14 @@ import net.sf.freecol.common.model.Unit;
  *   (clip008 #26208/#26209), and the hold ends
  *   {@link #NEW_WORLD_RELEASE_MS} after the last band (the wipe #26218).
  *   Europe that does not open within {@link #EUROPE_TIMEOUT_MS} counts as
- *   closed (R4 verifier, hang 3).</li>
+ *   closed (R4 verifier, hang 3).  While the hold waits for Europe's close
+ *   the host keeps the screen up ({@link Chain.Host#keepEuropeUp}: one
+ *   behind the map or minimized comes back, H REVIEW2 M1), and a host
+ *   call that throws ends the chain, so the turn start goes on (L1).</li>
+ *   <li><b>Europe closes by itself</b> {@link #EUROPE_CLOSE_MS} after the
+ *   last ship in its port sailed ({@link #closesAfterSailing}; colonists
+ *   on the dock do not keep it open; Roger, 2026-10-08, opening_013
+ *   #3958 -&gt; #3983 and opening_014 #3669 -&gt; #3695).</li>
  * </ul>
  */
 final class ClassicVoyages {
@@ -69,6 +78,14 @@ final class ClassicVoyages {
 
     /** A band's time on the strip: 137 frames (LF #25735-#25872, c8 #44180-#44317, #26209-#26346). */
     static final double BAND_MS = 137 * ClassicAdvisorLayer.FRAME_MS;
+
+    /**
+     * A band whose time ran out while the player did not have the turn
+     * goes this long after our next turn's first unit came up (opening_013:
+     * the departure band #1536 stays through the AI phase, the pioneer's
+     * block #1854, the band gone #1856; europe-voyage D1).
+     */
+    static final double BAND_AFTER_UNIT_MS = 2 * ClassicAdvisorLayer.FRAME_MS;
 
     /** The arrival band to Europe drawn (38 frames: LF, c6, c5 0.542-0.556 s). */
     static final double BAND_TO_EUROPE_MS = 542.0;
@@ -84,6 +101,13 @@ final class ClassicVoyages {
 
     /** Europe asked for and not open after this long: it counts as closed. */
     static final double EUROPE_TIMEOUT_MS = 1000.0;
+
+    /**
+     * The last ship in port sailed, to the map back (opening_013 "Jawohl,
+     * setzt alle Segel" #3958 -&gt; #3983: 25 frames, 0.357 s; opening_014
+     * #3669 -&gt; #3695: 26 frames; the pointer still both times).
+     */
+    static final double EUROPE_CLOSE_MS = 357.0;
 
     /** How often the chain looks again while it waits for a box or Europe. */
     static final double POLL_MS = 50.0;
@@ -213,54 +237,87 @@ final class ClassicVoyages {
     }
 
     /**
-     * Whether a ship in port arrived at this turn's start, from the model
-     * alone (a loaded save of the arrival turn, whose message is gone):
-     * the server's arrival leaves its work at 0 ({@code setState(ACTIVE)}
-     * changes nothing for an active ship), and our next end sets it to -1
-     * (spec R4 section 4, Roger's saves 1506 and 1507).
+     * Whether the Europe screen closes by itself after a ship sailed from
+     * it (Roger, 2026-10-08): no ship is left in its port.  The colonists
+     * on the dock do not keep it open, nor do the ships on the high seas
+     * (both clips: "Keine Schiffe im Hafen", the map back 0.357 s later).
+     * A ship under repair is in port as the screen shows it and keeps it
+     * open (I: never recorded).
      *
-     * @param u A unit.
-     * @param me Our player.
-     * @return True for such a ship.
+     * @param europe Our Europe, or null.
+     * @return True if no ship is in its port (false without a Europe).
      */
-    static boolean arrivedThisTurn(Unit u, Player me) {
-        return u != null && u.isNaval() && u.isInEurope() && shown(u, me)
-            && u.getWorkLeft() == 0 && u.getState() == Unit.UnitState.ACTIVE
-            && !u.isDamaged();
-    }
-
-    /**
-     * The ships of a loaded save that arrived at this turn's start
-     * ({@link #arrivedThisTurn}), in the port's order.
-     *
-     * @param me Our player, or null.
-     * @return The arrivals (none on the map).
-     */
-    static Arrivals loaded(Player me) {
-        final Europe europe = (me == null) ? null : me.getEurope();
-        if (europe == null) return NONE;
-        final List<Unit> ships = new ArrayList<>();
+    static boolean closesAfterSailing(Europe europe) {
+        if (europe == null) return false;
         for (Unit u : europe.getUnitList()) {
-            if (arrivedThisTurn(u, me)) ships.add(u);
-        }
-        return new Arrivals(ships, List.of());
-    }
-
-    /**
-     * Whether nothing of ours is in the New World or on the way there or
-     * back: no colony, no unit on the map, no ship at sea (the guard,
-     * spec R4 section 5.7, conditions 3 and 4).
-     *
-     * @param me Our player, or null.
-     * @return True if so (false without a player).
-     */
-    static boolean nothingOut(Player me) {
-        if (me == null || me.hasSettlements()) return false;
-        for (Unit u : me.getUnitSet()) {
-            if (u.isDisposed()) continue;
-            if (u.hasTile() || u.isAtSea()) return false;
+            if (u.isNaval() && !u.isDisposed()) return false;
         }
         return true;
+    }
+
+    /**
+     * A timed band's end (europe-voyage D1): its time is up only while the
+     * player has the turn; one that runs out after our end went out stays
+     * through the AI phase until our next turn's first unit came up, and
+     * goes {@link #BAND_AFTER_UNIT_MS} after it (opening_013 #1536 -&gt;
+     * #1854 -&gt; #1856; I: the original checks the band's expiry only
+     * while the player has the turn); with no unit up, once our turn is
+     * shown and no unit is coming up.  The GUI asks; EDT only.
+     */
+    static final class BandEnd {
+
+        /** The band's time ran out while the player did not have the turn. */
+        private boolean expired = false;
+
+        /** Its end after a unit came up is scheduled. */
+        private boolean afterUnit = false;
+
+        /** A band was shown or taken away: nothing pending. */
+        void reset() {
+            this.expired = this.afterUnit = false;
+        }
+
+        /**
+         * The band's 137 frames are over.
+         *
+         * @param playerHasTurn Whether the player has the turn now.
+         * @return True to take the band away now; false: it stays.
+         */
+        boolean timeUp(boolean playerHasTurn) {
+            if (playerHasTurn) return true;
+            this.expired = true;
+            return false;
+        }
+
+        /**
+         * A unit of ours came up.
+         *
+         * @param playerHasTurn Whether the player has the turn now.
+         * @return True to take an expired band away
+         *     {@link #BAND_AFTER_UNIT_MS} from now (once).
+         */
+        boolean unitUp(boolean playerHasTurn) {
+            if (!this.expired || this.afterUnit || !playerHasTurn) return false;
+            this.afterUnit = true;
+            return true;
+        }
+
+        /**
+         * The poll, for a turn with no unit up.
+         *
+         * @param playerHasTurn Whether the player has the turn now.
+         * @param unitComing Whether a unit is on its way up (a turn start
+         *     or a hand-over pending).
+         * @return True to take an expired band away now.
+         */
+        boolean poll(boolean playerHasTurn, boolean unitComing) {
+            return this.expired && !this.afterUnit && playerHasTurn && !unitComing;
+        }
+
+        /** @return Whether a band is kept past its time (tests, the recorder). */
+        boolean expired() {
+            return this.expired;
+        }
     }
 
     private static String ids(List<Unit> us) {
@@ -311,7 +368,9 @@ final class ClassicVoyages {
             boolean boxUp();
 
             /**
-             * Open the Europe screen, or bring an open one up to date.
+             * Open the Europe screen, or bring an open one up to date and
+             * up (restored if minimized, in front of the map; H REVIEW2
+             * M1).
              *
              * @return False if there is no Europe to open.
              */
@@ -319,6 +378,15 @@ final class ClassicVoyages {
 
             /** @return Whether the Europe screen is open. */
             boolean europeOpen();
+
+            /**
+             * The hold waits for Europe's close (polled while it is open):
+             * a Europe screen behind the map or minimized while the player
+             * is at the map comes up again, since every game key is dead
+             * until it closes (H REVIEW2 M1).
+             */
+            default void keepEuropeUp() {
+            }
 
             /**
              * Jump the view to a ship back in the New World.
@@ -384,17 +452,56 @@ final class ClassicVoyages {
         }
 
         /**
-         * Do what is due now.
+         * @return Whether the chain waits for the Europe screen (asked for,
+         *     or open until its close): the E key brings it up then.
+         */
+        boolean waitsForEurope() {
+            return this.state == State.EUROPE_WAIT || this.state == State.EUROPE_CLOSE;
+        }
+
+        /**
+         * Do what is due now.  A host call that throws ends the chain (the
+         * band goes, the turn start goes on, H REVIEW2 L1), as the turn
+         * flow's own stages do: a chain left with nothing scheduled would
+         * hold the turn start for good.
          *
          * @param now The clock now (ns).
          * @return When to step again (ns), or -1 when the chain is over.
          */
         long step(long now) {
-            for (int guard = 0; guard < 32; guard++) {
-                final long due = stepOnce(now);
-                if (due != now) return due;
+            try {
+                for (int guard = 0; guard < 32; guard++) {
+                    final long due = stepOnce(now);
+                    if (due != now) return due;
+                }
+                return now + nanos(POLL_MS);
+            } catch (RuntimeException e) {
+                abort(e);
+                return -1L;
             }
-            return now + nanos(POLL_MS);
+        }
+
+        /**
+         * A step threw: the chain is over, the band goes and the host hears
+         * the end, each in its own guard.
+         *
+         * @param e What was thrown.
+         */
+        private void abort(RuntimeException e) {
+            final boolean over = this.state == State.DONE;
+            this.state = State.DONE;
+            try {
+                this.host.event("arrival-failed " + e);
+            } catch (RuntimeException ignored) {
+                // the recorder line is the least of it
+            }
+            if (over) return;   // its own done() threw: it was told already
+            try {
+                this.host.clearBand();
+            } catch (RuntimeException ignored) {
+                // the band stays; the turn start must still go on
+            }
+            this.host.done();
         }
 
         /** One state's work; returns {@code now} to go on at once. */
@@ -437,7 +544,10 @@ final class ClassicVoyages {
                 }
                 return now + nanos(POLL_MS);
             case EUROPE_CLOSE:
-                if (this.host.europeOpen()) return now + nanos(POLL_MS);
+                if (this.host.europeOpen()) {
+                    this.host.keepEuropeUp();
+                    return now + nanos(POLL_MS);
+                }
                 this.host.event("arrival-europe closed");
                 return toNewWorld(now);
             case NEW_WORLD_JUMP: {

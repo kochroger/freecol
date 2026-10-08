@@ -124,6 +124,36 @@ public class ClassicScriptTest extends TestCase {
         assertEquals("ok", result(r));
     }
 
+    /**
+     * {@code sclick x y} (J1, the Europe screen's own canvas): parsed like
+     * {@code click}, handed to the host as a screen click; a host without
+     * a classic screen fails the script there.
+     */
+    public void testScreenClick() throws IOException {
+        final ClassicScript s = parse("sclick 17 133", "SClick 299 61");
+        assertEquals(ClassicScript.Op.SCREEN_CLICK, s.commands.get(0).op);
+        assertEquals(17L, s.commands.get(0).number);
+        assertEquals(133, s.commands.get(0).y);
+        assertEquals(61, s.commands.get(1).y);
+        assertBad("sclick 5", "sclick needs x and y");
+        assertBad("sclick 320 0", "outside 0..319");
+        final FakeHost h = new FakeHost() {
+                @Override
+                public void screenClick(int x, int y) {
+                    this.calls.add("sclick " + x + "," + y);
+                }
+            };
+        File r = resultFile();
+        new ClassicScriptDriver(parse("sclick 17 133", "quit"), h, r).run();
+        assertEquals(Arrays.asList("sclick 17,133", "quit"), h.calls);
+        assertEquals("ok", result(r));
+        final FakeHost none = new FakeHost();   // the default: no screen
+        r = resultFile();
+        new ClassicScriptDriver(parse("sclick 17 133", "log never"), none, r).run();
+        assertTrue(result(r), result(r).startsWith("error line 1"));
+        assertTrue(result(r), result(r).contains("no classic screen"));
+    }
+
     public void testMalformedLinesAreRejectedWithTheirLine() {
         assertBad("wait", "milliseconds expected");
         assertBad("wait -5", "negative");

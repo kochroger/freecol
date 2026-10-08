@@ -40,9 +40,10 @@ import net.sf.freecol.util.test.FreeColTestCase;
 
 
 /**
- * Our voyages (master plan W13, spec R4): the arrivals at a turn start, the
- * guard's "nothing out", the load fallback, and the arrival chain's
- * schedule on a test clock.
+ * Our voyages (master plan W13, spec R4): the arrivals at a turn start (and
+ * none otherwise: no reminder, no load fallback), Europe's close after its
+ * last ship sailed, a timed band's end, and the arrival chain's schedule on
+ * a test clock, with a Europe behind the map and a failing host.
  */
 public class ClassicVoyagesTest extends FreeColTestCase {
 
@@ -159,60 +160,109 @@ public class ClassicVoyagesTest extends FreeColTestCase {
     }
 
     /**
-     * The guard's condition (R4 section 5.7): nothing of ours on the map,
-     * in a colony or at sea; units in Europe do not count.
+     * Europe opens by itself only at an arrival (Roger, 2026-10-08; Part
+     * H's guard and its load fallback are gone): with everything in Europe
+     * (nothing on the map, no colony, no ship at sea), a ship left in port
+     * and colonists on the dock, no turn start ever has an arrival, so no
+     * chain starts and Europe is never opened as a reminder, turn after
+     * turn; nor after a load of the arrival turn (the ship in port with
+     * its work at 0, a fresh object as a load builds it).
      */
-    public void testNothingOut() {
-        assertFalse(ClassicVoyages.nothingOut(null));
+    public void testEuropeOpensOnlyAtAnArrival() {
         for (Unit u : new ArrayList<>(this.dutch.getUnitSet())) u.dispose();
-        assertTrue(ClassicVoyages.nothingOut(this.dutch));
-        final Unit ship = new ServerUnit(this.game, this.dutch.getEurope(),
+        final Unit left = new ServerUnit(this.game, this.dutch.getEurope(),
                                          this.dutch, merchantman);
+        left.setWorkLeft(-1);
         new ServerUnit(this.game, this.dutch.getEurope(), this.dutch, colonist);
-        assertTrue(ClassicVoyages.nothingOut(this.dutch));
-        ship.setLocation(this.dutch.getHighSeas());
-        assertFalse("a ship at sea", ClassicVoyages.nothingOut(this.dutch));
-        ship.setLocation(this.dutch.getEurope());
-        final Unit land = new ServerUnit(this.game, this.map.getTile(3, 3),
-                                         this.dutch, merchantman);
-        assertFalse("a unit on the map", ClassicVoyages.nothingOut(this.dutch));
-        land.dispose();
-        assertTrue(ClassicVoyages.nothingOut(this.dutch));
+        new ServerUnit(this.game, this.dutch.getEurope(), this.dutch, colonist);
+        final ClassicVoyages v = new ClassicVoyages();
+        for (int turn = 2; turn <= 61; turn++) {
+            v.note(this.dutch);                 // our turn shown: nothing at sea
+            assertTrue("turn " + turn, v.take(this.dutch, turn).isEmpty());
+        }
+        // The arrival turn's state after a load: in port, work 0, no note,
+        // no message: no arrival, no Europe.
+        final Unit a = atSea(merchantman, true);
+        arriveInEurope(a);
+        assertEquals(0, a.getWorkLeft());
+        assertTrue(new ClassicVoyages().take(this.dutch, 62).isEmpty());
+        // The same ship noted at sea in the session: an arrival, once.
+        final ClassicVoyages w = new ClassicVoyages();
+        final Unit b = atSea(galleon, true);
+        w.note(this.dutch);
+        arriveInEurope(b);
+        assertEquals(List.of(b), w.take(this.dutch, 63).europe);
+        assertTrue(w.take(this.dutch, 63).isEmpty());
+        assertTrue(w.take(this.dutch, 64).isEmpty());
     }
 
     /**
-     * The load fallback (R4 section 6.4): a ship in port whose work is 0
-     * arrived at this turn's start; -1 (any later turn), a land unit, a
-     * damaged ship or a foreign one did not.
+     * Europe's close by itself after a ship sailed (Roger, 2026-10-08): no
+     * ship left in port; colonists on the dock and ships on the high seas
+     * do not keep it open; a second ship in port (also one under repair)
+     * does; no Europe: never.
      */
-    public void testArrivedThisTurn() {
+    public void testClosesAfterSailing() {
         for (Unit u : new ArrayList<>(this.dutch.getUnitSet())) u.dispose();
-        final Unit a = atSea(merchantman, true);
-        arriveInEurope(a);
-        final Unit old = new ServerUnit(this.game, this.dutch.getEurope(),
-                                        this.dutch, galleon);
-        old.setWorkLeft(-1);
-        final Unit c = new ServerUnit(this.game, this.dutch.getEurope(),
-                                      this.dutch, colonist);
-        c.setWorkLeft(0);
-        assertTrue(ClassicVoyages.arrivedThisTurn(a, this.dutch));
-        assertFalse(ClassicVoyages.arrivedThisTurn(old, this.dutch));
-        assertFalse(ClassicVoyages.arrivedThisTurn(c, this.dutch));
-        assertFalse(ClassicVoyages.arrivedThisTurn(a, null));
-        assertEquals(List.of(a), ClassicVoyages.loaded(this.dutch).europe);
-        assertTrue(ClassicVoyages.loaded(this.dutch).newWorld.isEmpty());
-        a.setHitPoints(1);
-        assertFalse("damaged", ClassicVoyages.arrivedThisTurn(a, this.dutch));
-        assertTrue(ClassicVoyages.loaded(null).isEmpty());
+        final Europe europe = this.dutch.getEurope();
+        assertFalse(ClassicVoyages.closesAfterSailing(null));
+        assertTrue("an empty port", ClassicVoyages.closesAfterSailing(europe));
+        final Unit a = new ServerUnit(this.game, europe, this.dutch, merchantman);
+        final Unit b = new ServerUnit(this.game, europe, this.dutch, galleon);
+        new ServerUnit(this.game, europe, this.dutch, colonist);
+        new ServerUnit(this.game, europe, this.dutch, colonist);
+        assertFalse(ClassicVoyages.closesAfterSailing(europe));
+        a.setLocation(this.dutch.getHighSeas());   // a sails: b is still in port
+        a.setDestination(this.map);
+        assertFalse(ClassicVoyages.closesAfterSailing(europe));
+        b.setLocation(this.dutch.getHighSeas());   // the last ship sails
+        b.setDestination(this.map);
+        assertTrue("colonists on the dock", ClassicVoyages.closesAfterSailing(europe));
+        atSea(merchantman, true);                  // one bound for Europe
+        assertTrue("ships at sea", ClassicVoyages.closesAfterSailing(europe));
+        final Unit repair = new ServerUnit(this.game, europe, this.dutch, merchantman);
+        repair.setHitPoints(1);
+        assertTrue(repair.isDamaged());
+        assertFalse("a ship under repair", ClassicVoyages.closesAfterSailing(europe));
+        repair.dispose();
+        assertTrue(ClassicVoyages.closesAfterSailing(europe));
+    }
+
+    /**
+     * A timed band's end (europe-voyage D1): while the player has the turn
+     * it goes at its time; after our end it stays through the AI phase,
+     * the first unit of our next turn takes it away 2 frames later (once);
+     * with no unit up the poll takes it once our turn is shown and nothing
+     * is pending; a new band forgets it.
+     */
+    public void testBandEnd() {
+        final ClassicVoyages.BandEnd e = new ClassicVoyages.BandEnd();
+        assertTrue("the turn goes on", e.timeUp(true));
+        assertFalse(e.expired());
+        assertFalse(e.timeUp(false));             // our end went out
+        assertTrue(e.expired());
+        assertFalse("the AI phase", e.unitUp(false));
+        assertFalse(e.poll(false, false));
+        assertFalse("our turn, its first unit coming", e.poll(true, true));
+        assertTrue("the first unit", e.unitUp(true));
+        assertFalse("once", e.unitUp(true));
+        assertFalse("scheduled already", e.poll(true, false));
+        e.reset();                                // the band went
+        assertFalse(e.expired());
+        assertFalse(e.unitUp(true));
+        assertFalse(e.timeUp(false));
+        assertTrue("no unit up: the poll", e.poll(true, false));
+        e.reset();                                // a new band
+        assertFalse(e.poll(true, false));
+        assertEquals(2 * ClassicAdvisorLayer.FRAME_MS, ClassicVoyages.BAND_AFTER_UNIT_MS);
     }
 
     /**
      * With the real server's turns (spec R4 section 7.5): a ship sails for
-     * Europe, arrives after {@code turnsToSail} new turns with its work at
-     * 0 and no destination, and is noted and taken as an arrival; our next
-     * end (SKIPPED) and turn set its work to -1, so the load fallback holds
-     * for the arrival turn only.  Back to the New World it is an arrival
-     * there.
+     * Europe, arrives after {@code turnsToSail} new turns with no
+     * destination, and is noted and taken as an arrival, once; a load of
+     * that turn (a fresh object) shows none.  Back to the New World it is
+     * an arrival there.
      */
     public void testServerVoyage() {
         final Game sg = ServerTestHelper.startServerGame(getTestMap(
@@ -235,14 +285,17 @@ public class ClassicVoyagesTest extends FreeColTestCase {
             }
             assertEquals(3, turns);
             assertEquals(0, ship.getWorkLeft());
-            assertTrue(ClassicVoyages.arrivedThisTurn(ship, me));
             assertNull(ship.getDestination());
+            assertTrue("a load of the arrival turn",
+                       new ClassicVoyages().take(me, 10).isEmpty());
             assertEquals(List.of(ship), v.take(me, 10).europe);
-            // Our end (doEndTurn sets SKIPPED) and the next turn: -1.
+            assertTrue(v.take(me, 10).isEmpty());
+            // Our end (doEndTurn sets SKIPPED) and the next turn: the ship
+            // left in port is no arrival.
             ship.setState(Unit.UnitState.SKIPPED);
+            v.note(me);
             ServerTestHelper.newTurn();
-            assertEquals(-1, ship.getWorkLeft());
-            assertFalse(ClassicVoyages.arrivedThisTurn(ship, me));
+            assertTrue(v.take(me, 11).isEmpty());
             // Back to the New World.
             ship.setLocation(me.getHighSeas());
             ship.setDestination(sg.getMap());
@@ -250,7 +303,7 @@ public class ClassicVoyagesTest extends FreeColTestCase {
             v.note(me);
             ServerTestHelper.newTurn();
             assertTrue(ship.hasTile());
-            final ClassicVoyages.Arrivals back = v.take(me, 11);
+            final ClassicVoyages.Arrivals back = v.take(me, 12);
             assertTrue(back.europe.isEmpty());
             assertEquals(List.of(ship), back.newWorld);
         } finally {
@@ -268,8 +321,18 @@ public class ClassicVoyagesTest extends FreeColTestCase {
         /** Whether Europe opens when asked (false: it fails). */
         boolean opens = true;
         long now = 0L;
+        /**
+         * The Europe screen is open but behind the map or minimized while
+         * the player is at the map (the GUI's {@code raisesEurope}).
+         */
+        boolean hidden = false;
+        /** The host calls that throw (H REVIEW2 L1): their prefixes. */
+        List<String> throwsIn = List.of();
 
         private void call(String s) {
+            for (String t : this.throwsIn) {
+                if (s.startsWith(t)) throw new IllegalStateException(s + " failed");
+            }
             this.calls.add(s + " @" + (this.now / MS));
         }
 
@@ -281,12 +344,26 @@ public class ClassicVoyagesTest extends FreeColTestCase {
         @Override
         public boolean openEurope() {
             if (!this.hasEurope) return false;
+            if (this.europeOpen) {
+                // Open already: brought up (the GUI's raiseEurope).
+                call("raise arrival");
+                this.hidden = false;
+                return true;
+            }
             call("open");
             if (this.opens) this.europeOpen = true;
             return true;
         }
 
         @Override public boolean europeOpen() { return this.europeOpen; }
+
+        @Override
+        public void keepEuropeUp() {
+            if (!this.hidden) return;
+            call("raise hold");
+            this.hidden = false;
+        }
+
         @Override public void jumpTo(Unit ship) { call("jump " + ship.getId()); }
         @Override public void done() { call("done"); }
         @Override public void event(String what) { }
@@ -407,6 +484,100 @@ public class ClassicVoyagesTest extends FreeColTestCase {
     }
 
     /**
+     * H REVIEW2 M1: an arrival while the Europe screen is open but behind
+     * the map or minimized brings it up (no second screen); while the hold
+     * waits for its close, a Europe that goes behind the map again comes
+     * up again at the next poll (50 ms), as often as needed; the hold
+     * still ends only with the close.  Meanwhile the chain says it waits
+     * for Europe (the E key passes then), before and after not.
+     */
+    public void testChainBringsAHiddenEuropeUp() {
+        final Unit a = atSea(merchantman, true);
+        final FakeHost h = new FakeHost();
+        h.europeOpen = true;                    // open since the last turn ...
+        h.hidden = true;                        // ... behind the map
+        final ClassicVoyages.Chain c = chain(h, List.of(a), List.of());
+        assertFalse(c.waitsForEurope());
+        final long[] due = { c.step(0L) };
+        assertFalse(c.waitsForEurope());
+        run(c, h, due, 600);
+        assertEquals(List.of("band E " + a.getId() + " @0", "raise arrival @542",
+                             "clear @592"), h.calls);
+        assertFalse(h.hidden);
+        assertEquals(ClassicVoyages.Chain.State.EUROPE_CLOSE, c.state());
+        assertTrue(c.waitsForEurope());
+        for (int i = 1; i <= 3; i++) {          // Alt+Tab, a click on the map, minimized
+            h.hidden = true;
+            run(c, h, due, 600 + i * 1000);
+            assertFalse(h.hidden);
+            assertFalse(c.isDone());
+        }
+        assertEquals(List.of("raise hold @642", "raise hold @1642", "raise hold @2642"),
+                     h.calls.subList(3, 6));
+        run(c, h, due, 60_000);                 // up: nothing more
+        assertEquals(6, h.calls.size());
+        h.europeOpen = false;                   // closed (or closed by itself)
+        run(c, h, due, 60_100);
+        assertTrue(c.isDone());
+        assertFalse(c.waitsForEurope());
+        assertEquals("done @60042", h.calls.get(6));
+    }
+
+    /**
+     * H REVIEW2 L1: a host call that throws ends the chain at once: the
+     * band goes, the host hears the end (the turn start goes on), the step
+     * says "over"; in any state.  A {@code done} that throws after another
+     * failure reaches the caller (the GUI's runner drops the chain then);
+     * the chain's own last {@code done} that throws does not (the host
+     * was told).
+     */
+    public void testChainFailureEndsIt() {
+        final Unit a = atSea(merchantman, true), b = atSea(galleon, false);
+        for (String where : new String[] { "band", "open", "jump", "timed" }) {
+            final FakeHost h = new FakeHost();
+            h.throwsIn = List.of(where);
+            final ClassicVoyages.Chain c = chain(h, List.of(a), List.of(b));
+            final long[] due = { c.step(0L) };
+            run(c, h, due, 1000);
+            h.europeOpen = false;
+            run(c, h, due, 3000);
+            assertTrue(where, c.isDone());
+            assertEquals(where, -1L, due[0]);
+            final String last = h.calls.get(h.calls.size() - 1);
+            assertTrue(where + " " + h.calls, last.startsWith("done"));
+            assertTrue(where + " " + h.calls, h.calls.get(h.calls.size() - 2)
+                       .startsWith("clear"));
+        }
+        final FakeHost h = new FakeHost();
+        h.throwsIn = List.of("clear");          // the band cannot go: still done
+        ClassicVoyages.Chain c = chain(h, List.of(a), List.of());
+        long[] due = { c.step(0L) };
+        run(c, h, due, 1000);
+        assertTrue(c.isDone());
+        assertTrue(h.calls.get(h.calls.size() - 1).startsWith("done"));
+        // The chain's own end throws: over, nothing thrown.
+        final FakeHost h2 = new FakeHost();
+        h2.throwsIn = List.of("done");
+        h2.hasEurope = false;
+        c = chain(h2, List.of(a), List.of());
+        due = new long[] { c.step(0L) };
+        run(c, h2, due, 1000);
+        assertTrue(c.isDone());
+        assertEquals(-1L, due[0]);
+        // A failure, then its done throws too: the caller hears it.
+        final FakeHost h3 = new FakeHost();
+        h3.throwsIn = List.of("band", "done");
+        c = chain(h3, List.of(a), List.of());
+        try {
+            c.step(0L);
+            fail("done threw");
+        } catch (IllegalStateException expected) {
+            assertTrue(c.isDone());
+            assertEquals(-1L, c.step(100L * MS));
+        }
+    }
+
+    /**
      * The notices lose FreeCol's "arrived in Europe" of our ships (the
      * chain shows it); the mercenaries' UNIT_ARRIVED, another message and
      * a foreign ship's arrival stay.
@@ -440,6 +611,12 @@ public class ClassicVoyagesTest extends FreeColTestCase {
         assertEquals(557.0, ClassicVoyages.TUTORIAL_MS);
         assertEquals(128.0, ClassicVoyages.NEW_WORLD_RELEASE_MS);
         assertEquals(1000.0, ClassicVoyages.EUROPE_TIMEOUT_MS);
+        // The last ship sailed to the map back: 25 frames (opening_013),
+        // 26 frames (opening_014).
+        assertEquals(357.0, ClassicVoyages.EUROPE_CLOSE_MS);
+        assertTrue(ClassicVoyages.EUROPE_CLOSE_MS >= 25 * ClassicAdvisorLayer.FRAME_MS - 1
+                   && ClassicVoyages.EUROPE_CLOSE_MS <= 26 * ClassicAdvisorLayer.FRAME_MS);
+        assertEquals(28.5, ClassicVoyages.BAND_AFTER_UNIT_MS, 0.1);
     }
 
     /** A set of units, in order. */

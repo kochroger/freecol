@@ -1602,7 +1602,18 @@ public class ClassicHudTest extends TestCase {
             assertTrue(b.toString(), ClassicKeyMap.waitAllows(b, false));
             assertEquals(b.toString(), b.actionIds.contains("newAction"),
                          ClassicKeyMap.waitAllows(b, true));
+            // H REVIEW2 M1: while the arrival chain holds the turn start for
+            // Europe, E (Europe up again) fires too; nothing else.
+            assertEquals(b.toString(), b.actionIds.contains("newAction")
+                         || b.actionIds.equals(List.of("europeAction")),
+                         ClassicKeyMap.waitAllows(b, true, true));
+            assertEquals(b.toString(), ClassicKeyMap.waitAllows(b, true),
+                         ClassicKeyMap.waitAllows(b, true, false));
+            assertTrue(b.toString(), ClassicKeyMap.waitAllows(b, false, true));
         }
+        assertTrue(ClassicKeyMap.waitAllows(find("E"), true, true));
+        assertFalse(ClassicKeyMap.waitAllows(find("E"), true, false));
+        assertFalse(ClassicKeyMap.waitAllows(find("F"), true, true));
 
         // The installed bindings: the action fires only while not waiting.
         final javax.swing.JPanel host = new javax.swing.JPanel();

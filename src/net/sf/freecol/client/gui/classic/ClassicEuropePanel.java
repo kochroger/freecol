@@ -151,6 +151,12 @@ final class ClassicEuropePanel extends JPanel {
     /** Run when the screen is dismissed (Escape / the exit button). */
     private final Runnable onClose;
 
+    /**
+     * Told of a ship that sailed for the New World ({@link #setSail}): the
+     * last ship in port closes the screen by itself (ClassicGUI), or null.
+     */
+    private final java.util.function.Consumer<Unit> onSailed;
+
     /** The three action buttons, rebuilt each paint (virtual-space bounds + label). */
     private final List<Rectangle> buttonBounds = new ArrayList<>();
     private final List<String> buttonLabels = new ArrayList<>();
@@ -203,10 +209,25 @@ final class ClassicEuropePanel extends JPanel {
 
     ClassicEuropePanel(FreeColClient freeColClient, ImageLibrary lib,
                        Europe europe, Runnable onClose) {
+        this(freeColClient, lib, europe, onClose, null);
+    }
+
+    /**
+     * @param freeColClient The client.
+     * @param lib The image library.
+     * @param europe Our Europe.
+     * @param onClose Run when the screen is dismissed.
+     * @param onSailed Told of a ship that sailed for the New World, or
+     *     null.
+     */
+    ClassicEuropePanel(FreeColClient freeColClient, ImageLibrary lib,
+                       Europe europe, Runnable onClose,
+                       java.util.function.Consumer<Unit> onSailed) {
         this.freeColClient = freeColClient;
         this.lib = lib;
         this.europe = europe;
         this.onClose = onClose;
+        this.onSailed = onSailed;
         setOpaque(true);
         setBackground(Color.BLACK);
         setPreferredSize(new Dimension(VW * 3, VH * 3));
@@ -251,8 +272,18 @@ final class ClassicEuropePanel extends JPanel {
 
     private void onClick(MouseEvent e) {
         if (this.scale <= 0) return;
-        final int vx = (e.getX() - this.originX) / this.scale;
-        final int vy = (e.getY() - this.originY) / this.scale;
+        clickAt((e.getX() - this.originX) / this.scale,
+                (e.getY() - this.originY) / this.scale);
+    }
+
+    /**
+     * A click at a point of the 320&times;200 canvas: the mouse's, and the
+     * scripted harness's {@code sclick} ({@link #paintTargets} first).
+     *
+     * @param vx Canvas x.
+     * @param vy Canvas y.
+     */
+    void clickAt(int vx, int vy) {
         // The exit button ("E") at the bottom right, as in the original art.
         if (vx >= EXIT_X && vy >= MARKET_Y) {
             close();
@@ -389,6 +420,14 @@ final class ClassicEuropePanel extends JPanel {
         igc().moveTo(ship, map);
         this.selectedUnit = null;
         refresh();
+        // Sailed (the server took it out of port): the last ship closes the
+        // screen by itself, colonists on the dock or not (Roger, 2026-10-08).
+        if (!ship.isInEurope() && this.onSailed != null) this.onSailed.accept(ship);
+    }
+
+    /** @return The Europe this screen shows. */
+    Europe europe() {
+        return this.europe;
     }
 
     /** Track which button the pointer is over, and repaint if it changed. */
@@ -510,6 +549,22 @@ final class ClassicEuropePanel extends JPanel {
     /** Repaint after a model change (a recruit, a purchase, an arrival). */
     void refresh() {
         repaint();
+    }
+
+    /**
+     * The scripted harness: the click targets of the screen as it is now,
+     * painted into an image (a minimized run's window never paints, and
+     * the targets are rebuilt by each paint).  EDT only.
+     */
+    void paintTargets() {
+        final BufferedImage img = new BufferedImage(Math.max(VW, getWidth()),
+            Math.max(VH, getHeight()), BufferedImage.TYPE_INT_ARGB);
+        final Graphics2D g = img.createGraphics();
+        try {
+            paintComponent(g);
+        } finally {
+            g.dispose();
+        }
     }
 
 

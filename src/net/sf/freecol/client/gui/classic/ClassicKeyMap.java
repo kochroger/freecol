@@ -199,6 +199,30 @@ final class ClassicKeyMap {
         return !waiting || WHILE_WAITING.containsAll(b.actionIds);
     }
 
+    /**
+     * The actions whose key also fires while the arrival chain holds our
+     * turn start for the Europe screen (H REVIEW2 M1): E brings a Europe
+     * screen behind the map or minimized up again
+     * ({@code ClassicGUI.showEuropePanel}); every other game key stays
+     * inert until Europe is closed.
+     */
+    static final Set<String> WHILE_EUROPE_HOLDS = Set.of("europeAction");
+
+    /**
+     * {@link #waitAllows(Binding, boolean)}, and while the arrival chain
+     * holds the turn start for Europe the keys of
+     * {@link #WHILE_EUROPE_HOLDS} too.
+     *
+     * @param b The binding.
+     * @param waiting Whether the player waits now.
+     * @param europeHolds Whether the chain waits for Europe's close.
+     * @return True if it may fire.
+     */
+    static boolean waitAllows(Binding b, boolean waiting, boolean europeHolds) {
+        return waitAllows(b, waiting)
+            || (europeHolds && WHILE_EUROPE_HOLDS.containsAll(b.actionIds));
+    }
+
     /** Whether BEFEHLE row {@code index} is listed in context {@code c}. */
     static boolean orderListed(int index, ClassicMenuModel.Context c) {
         return ClassicMenuModel.isVisible(
@@ -307,6 +331,28 @@ final class ClassicKeyMap {
                                    BooleanSupplier blocked,
                                    BooleanSupplier waiting,
                                    Consumer<Binding> refused) {
+        return install(host, mapViewer, lookup, mode, context, blocked, waiting,
+                       refused, () -> false);
+    }
+
+    /**
+     * {@link #install(JComponent, JComponent, Function, Supplier, Supplier,
+     * BooleanSupplier, BooleanSupplier, Consumer)}, and while
+     * {@code europeHolds} the keys of {@link #WHILE_EUROPE_HOLDS} fire
+     * although the player waits.
+     *
+     * @param europeHolds Whether the arrival chain holds the turn start for
+     *     the Europe screen ({@link ClassicGUI#chainWaitsForEurope}).
+     * @return The keystrokes bound.
+     */
+    static List<KeyStroke> install(JComponent host, JComponent mapViewer,
+                                   Function<String, Action> lookup,
+                                   Supplier<GUI.ViewMode> mode,
+                                   Supplier<ClassicMenuModel.Context> context,
+                                   BooleanSupplier blocked,
+                                   BooleanSupplier waiting,
+                                   Consumer<Binding> refused,
+                                   BooleanSupplier europeHolds) {
         final Set<KeyStroke> skip = mapViewerKeys();
         if (mapViewer != null) {
             final KeyStroke[] ks = mapViewer.getInputMap(
@@ -324,7 +370,8 @@ final class ClassicKeyMap {
                     @Override
                     public void actionPerformed(ActionEvent e) {
                         if (blocked.getAsBoolean()) return;
-                        if (!waitAllows(b, waiting.getAsBoolean())) {
+                        if (!waitAllows(b, waiting.getAsBoolean(),
+                                        europeHolds.getAsBoolean())) {
                             ClassicFrameRecorder.event("key-blocked", b.key.toString());
                             return;
                         }

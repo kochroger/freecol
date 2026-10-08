@@ -274,26 +274,10 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
             return this.hold;
         }
 
-        /** A Europe screen exists (W13); a band is on the strip. */
-        boolean europe = false, band = false;
-
-        /** The turn the guard last opened Europe in (the GUI's once per turn). */
-        int guardTurn = -1;
-
-        /** Whether the guard's other conditions hold (nothing out, a Europe). */
-        boolean guardWanted = false;
+        /** A Europe screen exists (W13). */
+        boolean europe = false;
 
         @Override public boolean europeOpen() { return this.europe; }
-        @Override public boolean bandUp() { return this.band; }
-
-        @Override
-        public boolean openEuropeInstead() {
-            if (!this.guardWanted || this.guardTurn == this.turn || this.band) return false;
-            this.guardTurn = this.turn;
-            this.europe = true;
-            this.calls.add("guard");
-            return true;
-        }
     }
 
     /** A flow without a thread, on the fake clock and host. */
@@ -2256,33 +2240,46 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     }
 
     /**
-     * W13: a band holds the automatic end; it comes 485 ms after the
-     * band's end, not before (R4 section 5.6, U3).  The band's end does
-     * not re-base a pending hand-over (R4 verifier item 5: the next unit
-     * comes under the band, clip008 #44199/#44215).
+     * Europe-voyage D1: a departure that is the turn's last action does
+     * not wait for its band: the band's paint is the last change, and the
+     * automatic end comes 485 ms after it (opening_013 #1536 -&gt; #1570),
+     * with the band still up.  The player has the turn until our end goes
+     * out, not in the AI phase, again after our next turn's wipe (the band
+     * that ran out meanwhile goes with its first unit,
+     * {@link ClassicVoyages.BandEnd}).  The band's end does not re-base a
+     * pending hand-over (R4 verifier item 5: the next unit comes under the
+     * band, clip008 #44199/#44215).
      */
-    public void testBandHoldsTheIdleEnd() {
+    public void testDepartureBandDoesNotHoldTheEnd() {
         final Rig r = new Rig(this.game);
-        r.host.band = true;                     // "Holl. Handelsschiff Ziel: Amsterdam"
+        assertTrue(r.flow.playerHasTurn());
+        r.flow.screenChanged();                 // "Holl. Handelsschiff Ziel: Amsterdam"
+        r.clock.advanceMs(5);                   // the controller's end view
         r.flow.noUnitLeft();
-        r.advanceMs(485);
+        assertFalse("the idle pause brings no unit", r.flow.unitComingUp());
+        r.advanceMs(479.9);
         assertEquals(0, r.count("endTurn"));
-        for (int i = 0; i < 30; i++) {          // 1.5 s of polls: nothing re-armed
-            r.flow.tick();
-            r.advanceMs(50);
-        }
-        assertEquals(0, r.count("endTurn"));
-        assertNull(r.flow.pending());
-        r.host.band = false;
-        r.flow.bandEnded();
-        r.advanceMs(484.9);
-        assertEquals(0, r.count("endTurn"));
-        r.advanceMs(0.2);
+        assertTrue(r.flow.playerHasTurn());
+        r.advanceMs(0.2);                       // 485 ms after the band
         assertEquals(1, r.count("endTurn"));
+        assertFalse("the AI phase", r.flow.playerHasTurn());
+        r.advanceMs(1470);                      // the band's 1955 ms are over
+        r.flow.tick();
+        assertFalse(r.flow.playerHasTurn());
+        final Unit p = ship(9, 9);
+        ourTurn(r, 2);
+        assertFalse("not shown yet", r.flow.playerHasTurn());
+        assertTrue(r.flow.unitChosen(p, null));
+        assertEquals(1, r.count("wipe"));
+        assertTrue(r.flow.playerHasTurn());
+        assertTrue("its first unit", r.flow.unitComingUp());
+        r.advanceMs(300);
+        assertEquals(1, r.count("activate " + p.getId()));
+        assertFalse(r.flow.unitComingUp());
 
         // A hand-over pending when a band ends keeps its time.
         final Unit a = ship(5, 5), b = ship(7, 5);
-        nextTurn(r, 2);
+        nextTurn(r, 3);
         assertTrue(r.flow.unitChosen(a, null));
         r.advanceMs(300);
         assertEquals(1, r.count("activate " + a.getId()));
@@ -2329,61 +2326,36 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     }
 
     /**
-     * W13 guard (R4 section 5.7): with nothing out, the automatic end
-     * opens Europe instead, once per turn; the end comes 485 ms after its
-     * close; the next turn again.  Off in the Spielzugende mode and while
-     * a band is up (the band first).
+     * No reminder (Roger, 2026-10-08; Part H's guard is gone): the turn
+     * flow has no way to open Europe instead of an end, and no band holds
+     * it; 60 turns, each with its unit up and moved while a ship waits in
+     * Europe: every turn ends by itself 485 ms after the last move, with
+     * no Europe screen in between.
      */
-    public void testGuardOpensEuropeOncePerTurn() {
+    public void testNoEuropeInsteadOfTheEnd() {
+        for (java.lang.reflect.Method m : ClassicTurnFlow.Host.class.getMethods()) {
+            assertFalse(m.getName(), m.getName().equals("openEuropeInstead")
+                        || m.getName().equals("bandUp"));
+        }
         final Rig r = new Rig(this.game);
-        r.host.guardWanted = true;
-        r.flow.noUnitLeft();
-        r.advanceMs(485);
-        assertEquals(1, r.count("guard"));
-        assertEquals(0, r.count("endTurn"));
-        r.advanceMs(5000);
-        assertEquals(0, r.count("endTurn"));
-        r.host.europe = false;
-        r.flow.boxClosed();
-        r.advanceMs(485);
-        assertEquals(1, r.count("guard"));
-        assertEquals(1, r.count("endTurn"));
-        // The next turn: again.
-        ourTurn(r, 2);
-        r.flow.noUnitLeft();
-        r.advanceMs(485);
-        assertEquals(2, r.count("guard"));
-        assertEquals(1, r.count("endTurn"));
-        // With Spielzugende on: never.
-        r.host.europe = false;
-        nextTurn(r, 3);
-        r.host.promptPref = true;
-        r.flow.noUnitLeft();
-        r.advanceMs(500);
-        assertEquals(2, r.count("guard"));
-        assertTrue(r.flow.isPrompt());
-    }
-
-    /**
-     * W13 (R4 section 7.3 testNoSilentRun): 60 turns with nothing in the
-     * New World and a ship in port: every turn shows Europe exactly once
-     * before it ends; none ends unseen.
-     */
-    public void testNoSilentRun() {
-        final Rig r = new Rig(this.game);
-        r.host.guardWanted = true;
-        for (int turn = 1; turn <= 60; turn++) {
-            if (turn > 1) ourTurn(r, turn);
-            r.flow.noUnitLeft();
-            r.advanceMs(485);
-            assertEquals("turn " + turn, turn, r.count("guard"));
-            assertEquals("turn " + turn, turn - 1, r.count("endTurn"));
-            r.advanceMs(3000);                  // the player looks at Europe
-            assertEquals("turn " + turn, turn - 1, r.count("endTurn"));
-            r.host.europe = false;
-            r.flow.boxClosed();
-            r.advanceMs(485);
-            assertEquals("turn " + turn, turn, r.count("endTurn"));
+        final Unit a = ship(5, 5);
+        r.flow.endTurnNow("key");               // turn 1 over
+        for (int turn = 2; turn <= 61; turn++) {
+            ourTurn(r, turn);
+            a.setMovesLeft(a.getInitialMovesLeft());
+            final int ends = r.count("endTurn");
+            assertTrue(r.flow.unitChosen(a, null));
+            r.advanceMs(300);
+            assertEquals("turn " + turn, turn - 1, r.count("activate " + a.getId()));
+            a.setMovesLeft(0);                  // its last move
+            r.flow.screenChanged();
+            assertFalse(r.flow.unitChosen(a, a));   // the re-selection
+            r.flow.noUnitLeft();                // the controller's end view
+            r.advanceMs(484.9);
+            assertEquals("turn " + turn, ends, r.count("endTurn"));
+            r.advanceMs(0.2);
+            assertEquals("turn " + turn, ends + 1, r.count("endTurn"));
+            assertFalse(r.host.europe);
         }
     }
 

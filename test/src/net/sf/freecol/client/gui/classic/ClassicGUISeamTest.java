@@ -3650,7 +3650,64 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         onEdt(() -> gui.unitSailedForEurope(ship, null));
         onEdt(() -> gui.unitSailedForEurope(null, null));
         assertFalse(gui.europeHoldsTheEnd());
-        assertFalse(gui.openEuropeInstead());
         assertFalse(gui.holdForArrivals());
+        assertFalse(gui.chainWaitsForEurope());
+        onEdt(() -> gui.europeShipSailed(ship));   // in port: did not sail
+        onEdt(() -> gui.europeShipSailed(null));
+    }
+
+    /**
+     * Europe opens by itself only at an arrival (Roger, 2026-10-08): Part
+     * H's guard and its load fallback are gone (no method, no call), and
+     * the Classic UI's only own call of {@code showEuropePanel} is the
+     * arrival chain's ({@code VoyageHost.openEurope}); the player's E and
+     * the menu go through FreeCol's {@code EuropeAction}.
+     */
+    public void testEuropeOpensOnlyAtAnArrival() throws Exception {
+        for (String name : new String[] { "openEuropeInstead", "guardWants",
+                                          "loadedArrivals" }) {
+            for (java.lang.reflect.Method m : ClassicGUI.class.getDeclaredMethods()) {
+                assertFalse(name, m.getName().equals(name));
+            }
+        }
+        for (java.lang.reflect.Method m : ClassicVoyages.class.getDeclaredMethods()) {
+            assertFalse(m.getName(), m.getName().equals("nothingOut")
+                        || m.getName().equals("loaded")
+                        || m.getName().equals("arrivedThisTurn"));
+        }
+        final String src = new String(Files.readAllBytes(new File(
+            "src/net/sf/freecol/client/gui/classic/ClassicGUI.java").toPath()),
+            StandardCharsets.UTF_8);
+        final java.util.List<Integer> calls = new java.util.ArrayList<>();
+        for (int i = src.indexOf("showEuropePanel();"); i >= 0;
+             i = src.indexOf("showEuropePanel();", i + 1)) {
+            calls.add(i);
+        }
+        assertEquals("one own call", 1, calls.size());
+        final int host = src.indexOf("public boolean openEurope() {");
+        assertTrue(host > 0 && calls.get(0) > host && calls.get(0) - host < 800);
+        for (String other : new String[] { "ClassicMapViewer", "ClassicTurnFlow",
+                                           "ClassicInfoPanel", "ClassicMenuStrip" }) {
+            final String s = new String(Files.readAllBytes(new File(
+                "src/net/sf/freecol/client/gui/classic/" + other + ".java").toPath()),
+                StandardCharsets.UTF_8);
+            assertFalse(other, s.contains("showEuropePanel("));
+        }
+    }
+
+    /**
+     * H REVIEW2 M1: while the arrival chain waits for Europe's close, an
+     * open Europe comes up again whenever the player is at the map (the
+     * map's window active: Europe behind it or minimized); not when another
+     * window (Europe itself, another program) is active, not over a box or
+     * an open menu of the map, never without a Europe screen.
+     */
+    public void testRaisesEurope() {
+        assertTrue(ClassicGUI.raisesEurope(true, true, false, false));
+        assertFalse("Europe or another program active",
+                    ClassicGUI.raisesEurope(true, false, false, false));
+        assertFalse("a box first", ClassicGUI.raisesEurope(true, true, true, false));
+        assertFalse("a menu first", ClassicGUI.raisesEurope(true, true, false, true));
+        assertFalse("no Europe", ClassicGUI.raisesEurope(false, true, false, false));
     }
 }

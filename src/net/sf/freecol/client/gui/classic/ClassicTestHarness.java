@@ -392,6 +392,44 @@ final class ClassicTestHarness {
         }
 
         @Override
+        public void screenClick(int x, int y)
+            throws ClassicScriptDriver.ScriptException {
+            final boolean[] found = { false };
+            try {
+                SwingUtilities.invokeAndWait(() -> {
+                        final Window s = gui.openScreen();
+                        final java.awt.Container cp = (s instanceof JFrame)
+                            ? ((JFrame) s).getContentPane() : null;
+                        if (!(cp instanceof ClassicEuropePanel)) return;
+                        found[0] = true;
+                        final ClassicEuropePanel ep = (ClassicEuropePanel)cp;
+                        ep.paintTargets();
+                        ClassicFrameRecorder.event("sclick", x + "," + y + " -> Europe");
+                    });
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                throw new ClassicScriptDriver.ScriptException("sclick: " + e.getCause());
+            }
+            if (!found[0]) {
+                throw new ClassicScriptDriver.ScriptException("no Europe screen to click");
+            }
+            // The click itself is queued, as a real one: it may ask a box
+            // (a modal loop) that the script answers.
+            SwingUtilities.invokeLater(() -> {
+                    final Window s = gui.openScreen();
+                    final java.awt.Container cp = (s instanceof JFrame)
+                        ? ((JFrame) s).getContentPane() : null;
+                    if (cp instanceof ClassicEuropePanel) {
+                        ((ClassicEuropePanel)cp).clickAt(x, y);
+                    } else {
+                        ClassicFrameRecorder.event("sclick", x + "," + y + " lost");
+                    }
+                });
+        }
+
+        @Override
         public void move(int x, int y) {
             final long when = System.currentTimeMillis();
             SwingUtilities.invokeLater(() -> {

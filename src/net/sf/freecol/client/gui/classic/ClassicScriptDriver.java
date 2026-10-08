@@ -111,6 +111,18 @@ final class ClassicScriptDriver {
         void move(int x, int y);
 
         /**
+         * Click the left button on the open classic screen's own canvas
+         * (the Europe screen).
+         *
+         * @param x Screen canvas x.
+         * @param y Screen canvas y.
+         * @exception ScriptException if no such screen is open.
+         */
+        default void screenClick(int x, int y) throws ScriptException {
+            throw new ScriptException("no classic screen to click");
+        }
+
+        /**
          * Set an option.
          *
          * @param name A classic pref or a mapped client option name.
@@ -238,6 +250,10 @@ final class ClassicScriptDriver {
             break;
         case MOVE:
             this.host.move((int)c.number, c.y);
+            break;
+        case SCREEN_CLICK:
+            this.host.screenClick((int)c.number, c.y);
+            Thread.sleep(KEY_HOLD_MS);
             break;
         case WAIT_GAME:
             await(this.host::inGame, 0L, c.number, "the in-game HUD");
