@@ -1866,8 +1866,34 @@ thread the box is asked at once (the controller posts these with
 `invokeLater`); from another thread it is posted, so no server message
 waits for the player.
 
+Dropped (part K3, Roger 2026-10-08: "den gibt es auch gar nicht im
+Original - bitte löschen"; GAME.TXT has neither): two of FreeCol's notices
+at a first contact never come, the recorder logs `notice-dropped <id>`.
+- `model.unit.nativeSettlementContact` ("Ihr trefft auf einen Späher der
+  Tupi aus Paraná-mirim."). FreeCol's server sends it once per village, not
+  per tribe: when our unit comes next to a village or one of its people,
+  and in the natives' turn when one of them comes next to ours
+  (`ServerUnit.csNewContactCheck`). The meeting stays woodcut 3 and the
+  chief's box.
+- `diplomacy.offerAccepted` / `diplomacy.offerRejected` ("Spanien hat Euer
+  großzügiges Angebot angenommen" / "abgelehnt") when they only echo our own
+  answer to the other nation's proposal: the server sends the session's
+  result to both sides and the client turns it into this notice for whoever
+  gets it (`InGameController.diplomacyHandler`). `showNegotiationDialog`
+  notes the other nation before it answers (the contact peace without a
+  box, G1, and the box's "Annehmen" / "Abbrechen"); a notice about a nation
+  so noted is dropped (`ClassicNotices.isAnswerEcho`, by the label of its
+  `%nation%`), as a model message and as an information message. The note
+  is kept (a notice held for the first scene passes the filter twice) and
+  cleared at the game's teardown. Our own proposals are "not yet"; when
+  they are built, sending one must take its nation out of the note so that
+  the real answer is shown.
+
 Tests: `ClassicNoticesTest` (the silent ones, the rules, the tribe, the
-words with the pack, the GUI's two seams; and `testGoldenAgainstTheClips`:
+words with the pack, the GUI's two seams; the dropped notices,
+`testTheMeetingNoticeNeverComes`, `testTheEchoOfOurAnswerNeverComes`,
+`testTheOriginalHasNoneOfThem` and, on the server,
+`testTheServerSendsTheDroppedMeetingNotice`; and `testGoldenAgainstTheClips`:
 @BURIAL1, @CHIEFGUIDES, @LEARNALREADY and @CHIEFGIFT as the GUI builds
 them from FreeCol's messages, 0 px off on box and portrait).
 
@@ -1945,6 +1971,8 @@ sleep`).
   sent to us: a box in FreeCol's words, "Annehmen" / "Abbrechen", the bar
   and Escape on "Abbrechen". Our own proposals (a scout's "Verhandeln", a
   ship's trade at a foreign colony): the "not yet" notice, nothing sent.
+  The "accepted" / "rejected" notice that the server's result brings back
+  after our answer never comes (K3, Notices above).
 - **The recruits** (`showEmigrationDialog`: William Brewster, the Fountain
   of Youth). A list box of the three recruits (D2's rows), bar on row 1,
   a click beside it doing nothing: GAME.TXT `@RECRUITCHOOSE` (our

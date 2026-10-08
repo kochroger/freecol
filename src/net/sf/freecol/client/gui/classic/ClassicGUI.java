@@ -321,6 +321,17 @@ public class ClassicGUI extends GUI {
      */
     private final List<HeldMessages> heldMessages = new ArrayList<>();
 
+    /**
+     * The nations ({@link ClassicNotices#nationKey}) whose proposal we
+     * answered in {@link #showNegotiationDialog}: FreeCol's "accepted" or
+     * "rejected" notice about them only echoes our answer and is dropped
+     * ({@link ClassicNotices#isAnswerEcho}, part K3).  Kept, not consumed:
+     * a notice held for the first scene passes the filter twice.
+     * Concurrent: the information notice may come off the EDT.
+     */
+    private final Set<String> answeredNations
+        = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     /** The layer that shows the first scene, created on first use. */
     private ClassicHudOverlay hudOverlay;
 
@@ -1263,6 +1274,7 @@ public class ClassicGUI extends GUI {
         this.pendingTips.clear();
         this.colonyShown = null;
         this.voyages.clear();
+        this.answeredNations.clear();
         if (this.menuStrip != null) this.menuStrip.setBand(null);
         // FreeCol's goto batch again for whatever comes next (W5f), and
         // no held letter or road left over.
@@ -4617,7 +4629,9 @@ public class ClassicGUI extends GUI {
      * illegal-move messages, which only a goto's failed step still posts
      * (a move key gets the original's refusal first,
      * {@link #illegalMoveKey}).  The colony refusals come as the original's
-     * boxes from their cause ({@link #colonyNotice}).  On the event thread
+     * boxes from their cause ({@link #colonyNotice}).  The "rejected" that
+     * only echoes our own "no" to another nation's proposal never comes
+     * (K3, {@link ClassicNotices#isAnswerEcho}).  On the event thread
      * the box is asked at once (the controller posts these with
      * {@code invokeLater}); from another thread it is posted, so no
      * server message waits for the player.
@@ -4647,6 +4661,12 @@ public class ClassicGUI extends GUI {
         }
         if (ClassicNotices.silent(id)) {
             ClassicFrameRecorder.event("notice-silent", id);
+            return null;
+        }
+        // "... hat Euer großzügiges Angebot abgelehnt." after our own "no"
+        // to the other nation's proposal: no offer of ours (K3).
+        if (ClassicNotices.isAnswerEcho(template, this.answeredNations)) {
+            ClassicFrameRecorder.event("notice-dropped", id);
             return null;
         }
         final ClassicAdvisorBox.Request r = ClassicNotices.request(
@@ -5121,6 +5141,8 @@ public class ClassicGUI extends GUI {
      * The notices of {@link #showMessagePopup} that come up: without
      * FreeCol's start message, its tip after the first landing (W10) and its
      * other tutorial messages (W11),
+     * without FreeCol's notices of a first contact that the original does
+     * not have (K3, {@link #withoutDropped}),
      * and without the colony reports whose row of "Koloniebericht-Optionen"
      * is off (W14).
      *
@@ -5128,7 +5150,34 @@ public class ClassicGUI extends GUI {
      * @return A new list, possibly empty.
      */
     List<ModelMessage> noticesShown(List<ModelMessage> messages) {
-        return ClassicOptionBoxes.reportsShown(withoutStartMessage(messages), prefs());
+        return ClassicOptionBoxes.reportsShown(withoutDropped(
+            withoutStartMessage(messages), this.answeredNations), prefs());
+    }
+
+    /**
+     * {@code messages} without FreeCol's notices that never come (K3,
+     * {@link ClassicNotices}): the meeting with a village's people
+     * ({@link ClassicNotices#dropped}) and the "accepted" that only echoes
+     * our own answer to another nation's proposal
+     * ({@link ClassicNotices#isAnswerEcho}).  Each one dropped is a
+     * recorder line {@code notice-dropped <id>}.
+     *
+     * @param messages The messages; not changed.
+     * @param answered The nations whose proposal we answered.
+     * @return A new list, in their order.
+     */
+    static List<ModelMessage> withoutDropped(List<ModelMessage> messages,
+                                             Set<String> answered) {
+        final List<ModelMessage> rest = new ArrayList<>();
+        for (ModelMessage m : messages) {
+            if (ClassicNotices.dropped(m.getId())
+                || ClassicNotices.isAnswerEcho(m, answered)) {
+                ClassicFrameRecorder.event("notice-dropped", m.getId());
+                continue;
+            }
+            rest.add(m);
+        }
+        return rest;
     }
 
     /**
@@ -5913,6 +5962,10 @@ public class ClassicGUI extends GUI {
      * "Abbrechen", the bar on "Abbrechen", which Escape takes too.  Our own
      * proposals (a scout's negotiation, a ship's trade at a foreign
      * colony) are not built yet: the "not yet" notice, nothing happens.
+     * Before an answer goes out, the other nation is noted
+     * ({@link #answeredNations}): FreeCol's "hat Euer großzügiges Angebot
+     * angenommen" (abgelehnt) that the server's result brings back is no
+     * news and never comes (K3, Roger 2026-10-08).
      */
     @Override
     public void showNegotiationDialog(FreeColGameObject our,
@@ -5948,6 +6001,7 @@ public class ClassicGUI extends GUI {
         }
         if (ClassicSeams.isContactPeace(agreement)) {
             ClassicFrameRecorder.event("negotiation", "contact peace accepted");
+            answering(agreement);
             agreement.setStatus(TradeStatus.ACCEPT_TRADE);
             handler.handle(agreement);
             return;
@@ -5958,11 +6012,30 @@ public class ClassicGUI extends GUI {
             false, ClassicAdvisorBox.Portrait.NONE, (Boolean yes) -> {
                 ClassicFrameRecorder.event("negotiation", agreement.getContext()
                     + " accepted=" + yes);
+                answering(agreement);
                 agreement.setStatus((Boolean.TRUE.equals(yes))
                     ? TradeStatus.ACCEPT_TRADE
                     : TradeStatus.REJECT_TRADE);
                 handler.handle(agreement);
             });
+    }
+
+    /**
+     * Note the other nation of a proposal we answer
+     * ({@link #answeredNations}, K3): its sender and recipient that are
+     * not us (both without a client, in the tests).
+     *
+     * @param agreement The proposal.
+     */
+    private void answering(DiplomaticTrade agreement) {
+        final Player me = myPlayer();
+        for (Player p : new Player[] { agreement.getSender(),
+                                       agreement.getRecipient() }) {
+            final String key = (p == null
+                || (me != null && me.getId().equals(p.getId()))) ? null
+                : ClassicNotices.nationKey(p);
+            if (key != null) this.answeredNations.add(key);
+        }
     }
 
     /**

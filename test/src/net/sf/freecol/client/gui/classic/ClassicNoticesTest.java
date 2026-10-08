@@ -32,11 +32,18 @@ import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
 import net.sf.freecol.common.i18n.Messages;
+import net.sf.freecol.common.model.DiplomaticTrade;
+import net.sf.freecol.common.model.Direction;
+import net.sf.freecol.common.model.FreeColGameObject;
 import net.sf.freecol.common.model.Game;
+import net.sf.freecol.common.model.GoldTradeItem;
 import net.sf.freecol.common.model.IndianSettlement;
 import net.sf.freecol.common.model.ModelMessage;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.StringTemplate;
+import net.sf.freecol.common.model.Tile;
+import net.sf.freecol.common.model.Unit;
+import net.sf.freecol.server.model.ServerUnit;
 import net.sf.freecol.util.test.FreeColTestCase;
 
 
@@ -50,7 +57,9 @@ import net.sf.freecol.util.test.FreeColTestCase;
  * #20177, from the mounds' "nothing" rumour), @CHIEFGUIDES (clip008
  * #46396), @LEARNALREADY (#37156) and @CHIEFGIFT (#51431), 0 px off on the
  * box and the portrait's pixels (needs the pack and {@code -Dclassic.clips},
- * else skipped with a note).
+ * else skipped with a note).  And FreeCol's first-contact notices that the
+ * original does not have (part K3): the meeting with a village's people,
+ * and the "accepted" / "rejected" that echoes our own answer.
  */
 public class ClassicNoticesTest extends FreeColTestCase {
 
@@ -82,15 +91,17 @@ public class ClassicNoticesTest extends FreeColTestCase {
         }
     }
 
-    /** Keeps the boxes asked; answers 0. */
+    /** Keeps the boxes asked; answers {@link #answer} (0 unless set). */
     private static final class Keeper implements ClassicGUI.Prompter {
 
         final List<ClassicAdvisorBox.Request> boxes = new ArrayList<>();
 
+        int answer = 0;
+
         @Override
         public int ask(ClassicAdvisorBox.Request r) {
             this.boxes.add(r);
-            return 0;
+            return this.answer;
         }
     }
 
@@ -269,6 +280,271 @@ public class ClassicNoticesTest extends FreeColTestCase {
             "model.lostCityRumour.nothing.mounds.description", dutch)));
         assertEquals(3, keep.boxes.size());
         if (t != null) assertEquals("BURIAL1", keep.boxes.get(2).id);
+    }
+
+
+    // K3: FreeCol's notices of a first contact that the original does not have
+
+    /** FreeCol's meeting notice as the server builds it ({@code ServerUnit.csNewContactCheck}). */
+    private static ModelMessage meeting(FreeColGameObject source, IndianSettlement is) {
+        final ModelMessage m = new ModelMessage(ModelMessage.MessageType.FOREIGN_DIPLOMACY,
+            ClassicNotices.SCOUT_MEETING, source, is);
+        m.addStringTemplate("%nation%", is.getOwner().getNationLabel());
+        m.addName("%settlement%", is.getName());
+        return m;
+    }
+
+    /** FreeCol's "accepted" as the client builds it ({@code InGameController.diplomacyHandler}). */
+    private static ModelMessage accepted(Player other) {
+        final ModelMessage m = new ModelMessage(ModelMessage.MessageType.FOREIGN_DIPLOMACY,
+            ClassicNotices.OFFER_ACCEPTED, other);
+        m.addStringTemplate("%nation%", other.getNationLabel());
+        return m;
+    }
+
+    /** FreeCol's "rejected" as the client builds it (an information message). */
+    private static StringTemplate rejected(Player other) {
+        return StringTemplate.template(ClassicNotices.OFFER_REJECTED)
+            .addStringTemplate("%nation%", other.getNationLabel());
+    }
+
+    /** An ordinary notice (the mounds' "nothing", @BURIAL1 with the pack). */
+    private static ModelMessage mounds(Player p) {
+        return new ModelMessage(ModelMessage.MessageType.LOST_CITY_RUMOUR,
+            "model.lostCityRumour.nothing.mounds.description", p);
+    }
+
+    /**
+     * K3 (Roger 2026-10-08, screenshot 1): FreeCol's "Ihr trefft auf einen
+     * Späher der Tupi aus Paraná-mirim." never comes, in both of the
+     * server's variants (our unit next to a village, one of its people
+     * next to ours in the natives' turn): not alone, not among other
+     * notices, not in the turn report.  The other notices keep their
+     * boxes and their order.
+     */
+    public void testTheMeetingNoticeNeverComes() throws Exception {
+        final Game game = getStandardGame();
+        final IndianSettlement is = arawakVillage(game);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Unit ours = new ServerUnit(game, is.getTile().getNeighbourOrNull(Direction.N),
+            dutch, spec().getUnitType("model.unit.freeColonist"));
+        final Unit brave = is.getOwnedUnitList().get(0);
+        final ModelMessage ourMove = meeting(ours, is), theirMove = meeting(brave, is);
+        final ModelMessage other = mounds(dutch), other2 = mounds(dutch);
+        assertTrue(ClassicNotices.dropped(ClassicNotices.SCOUT_MEETING));
+        assertFalse(ClassicNotices.dropped(other.getId()));
+        assertFalse(ClassicNotices.dropped(ClassicNotices.OFFER_ACCEPTED));   // only as an echo
+        assertFalse(ClassicNotices.dropped(null));
+        assertNull("not one of the original's notices",
+                   ClassicNotices.rule(ClassicNotices.SCOUT_MEETING));
+        final NoticeGUI gui = new NoticeGUI(game, dutch);
+        final Keeper keep = new Keeper();
+        gui.prompter = keep;
+        assertEquals(List.of(other, other2),
+                     gui.noticesShown(List.of(ourMove, other, theirMove, other2)));
+        assertTrue(gui.noticesShown(List.of(ourMove, theirMove)).isEmpty());
+        // The input list stays as it was.
+        final List<ModelMessage> in = new ArrayList<>(List.of(ourMove, other));
+        gui.noticesShown(in);
+        assertEquals(List.of(ourMove, other), in);
+        // Through the GUI's two channels: no box for it.
+        gui.showModelMessages(List.of(ourMove));
+        gui.showReportTurnPanel(List.of(theirMove, ourMove));
+        assertTrue(keep.boxes.isEmpty());
+        gui.showModelMessages(List.of(theirMove, other));
+        assertEquals(1, keep.boxes.size());
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        assertEquals((t != null) ? "BURIAL1" : "message " + other.getId(),
+                     keep.boxes.get(0).id);
+    }
+
+    /**
+     * K3 (Roger 2026-10-08, screenshot 2: "Spanien hat Euer großzügiges
+     * Angebot angenommen." — "ich habe den Spaniern gar kein Angebot
+     * gemacht"): the "accepted" and "rejected" that the server's result
+     * brings back after our own answer to another nation's proposal never
+     * come: the first contact's peace (accepted without a box, sent first
+     * to us or to them) and a proposal answered in the box ("Abbrechen"
+     * and "Annehmen").  Those of a nation whose proposal we did not answer
+     * still come, in FreeCol's words.
+     */
+    public void testTheEchoOfOurAnswerNeverComes() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player spanish = game.getPlayerByNationId("model.nation.spanish");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        final Player english = game.getPlayerByNationId("model.nation.english");
+        final NoticeGUI gui = new NoticeGUI(game, dutch);
+        final Keeper keep = new Keeper();
+        gui.prompter = keep;
+        final ModelMessage other = mounds(dutch);
+
+        // The rule itself.
+        final java.util.Set<String> spain = java.util.Set.of(ClassicNotices.nationKey(spanish));
+        assertTrue(ClassicNotices.isAnswerEcho(accepted(spanish), spain));
+        assertTrue(ClassicNotices.isAnswerEcho(rejected(spanish), spain));
+        assertFalse(ClassicNotices.isAnswerEcho(accepted(french), spain));
+        assertFalse(ClassicNotices.isAnswerEcho(accepted(spanish), java.util.Set.of()));
+        assertFalse(ClassicNotices.isAnswerEcho(accepted(spanish), null));
+        assertFalse(ClassicNotices.isAnswerEcho(null, spain));
+        assertFalse(ClassicNotices.isAnswerEcho(StringTemplate.template("model.x")
+            .addStringTemplate("%nation%", spanish.getNationLabel()), spain));
+        assertFalse(ClassicNotices.isAnswerEcho(
+            StringTemplate.template(ClassicNotices.OFFER_ACCEPTED), spain));
+        assertNull(ClassicNotices.nationKey(null));
+        assertNull(ClassicNotices.rule(ClassicNotices.OFFER_ACCEPTED));
+        assertNull(ClassicNotices.rule(ClassicNotices.OFFER_REJECTED));
+
+        // Before any answer, Spain's "accepted" is no echo.
+        final ModelMessage fromSpain = accepted(spanish);
+        assertEquals(List.of(fromSpain, other), gui.noticesShown(List.of(fromSpain, other)));
+
+        // The first contact's peace, sent first to us (our pioneer met
+        // Isabella, Roger's turn 6): accepted without a box, no echo.
+        final List<DiplomaticTrade> got = new ArrayList<>();
+        final DiplomaticTrade peace = DiplomaticTrade.makePeaceTreaty(
+            DiplomaticTrade.TradeContext.CONTACT, dutch, spanish);
+        SwingUtilities.invokeAndWait(() ->
+            gui.showNegotiationDialog(null, null, peace, null, got::add));
+        assertEquals(List.of(peace), got);
+        assertEquals(DiplomaticTrade.TradeStatus.ACCEPT_TRADE, peace.getStatus());
+        assertTrue(keep.boxes.isEmpty());
+        assertEquals(List.of(other), gui.noticesShown(List.of(fromSpain, other)));
+        assertEquals("twice, as for a notice held for the first scene",
+                     List.of(other), gui.noticesShown(List.of(fromSpain, other)));
+        gui.showModelMessages(List.of(fromSpain));
+        gui.showReportTurnPanel(List.of(accepted(spanish)));
+        assertTrue(keep.boxes.isEmpty());
+        // Another nation's "accepted" still comes.
+        final ModelMessage fromFrance = accepted(french);
+        assertEquals(List.of(fromFrance), gui.noticesShown(List.of(fromFrance)));
+
+        // The peace sent first to them (their unit met ours): the same.
+        final DiplomaticTrade theirs = DiplomaticTrade.makePeaceTreaty(
+            DiplomaticTrade.TradeContext.CONTACT, english, dutch);
+        SwingUtilities.invokeAndWait(() ->
+            gui.showNegotiationDialog(null, null, theirs, null, got::add));
+        assertEquals(DiplomaticTrade.TradeStatus.ACCEPT_TRADE, theirs.getStatus());
+        assertTrue(gui.noticesShown(List.of(accepted(english))).isEmpty());
+        assertTrue(keep.boxes.isEmpty());
+
+        // France's proposal in the box: "Abbrechen", then France's
+        // "rejected" (an information notice) and "accepted" are echoes.
+        final DiplomaticTrade gold = new DiplomaticTrade(game,
+            DiplomaticTrade.TradeContext.DIPLOMATIC, french, dutch,
+            List.of(new GoldTradeItem(game, french, dutch, 100)), 1);
+        keep.answer = 1;
+        SwingUtilities.invokeAndWait(() ->
+            gui.showNegotiationDialog(null, null, gold, null, got::add));
+        assertEquals(DiplomaticTrade.TradeStatus.REJECT_TRADE, gold.getStatus());
+        assertEquals(1, keep.boxes.size());                 // the proposal's box
+        assertNull(gui.showInformationPanel(null, rejected(french)));
+        SwingUtilities.invokeAndWait(() -> { });            // a posted box
+        SwingUtilities.invokeAndWait(() -> gui.showInformationPanel(null, rejected(french)));
+        assertEquals(1, keep.boxes.size());
+        assertTrue(gui.noticesShown(List.of(fromFrance)).isEmpty());
+        // "Annehmen" the same.
+        keep.answer = 0;
+        gold.setStatus(DiplomaticTrade.TradeStatus.PROPOSE_TRADE);
+        SwingUtilities.invokeAndWait(() ->
+            gui.showNegotiationDialog(null, null, gold, null, got::add));
+        assertEquals(DiplomaticTrade.TradeStatus.ACCEPT_TRADE, gold.getStatus());
+        assertEquals(2, keep.boxes.size());
+        assertTrue(gui.noticesShown(List.of(accepted(french))).isEmpty());
+
+        // A GUI that answered nothing: both come, in FreeCol's words.
+        final NoticeGUI fresh = new NoticeGUI(game, dutch);
+        final Keeper keep2 = new Keeper();
+        fresh.prompter = keep2;
+        SwingUtilities.invokeAndWait(() -> fresh.showInformationPanel(null, rejected(french)));
+        fresh.showModelMessages(List.of(accepted(french)));
+        assertEquals(2, keep2.boxes.size());
+        assertEquals("notice " + ClassicNotices.OFFER_REJECTED, keep2.boxes.get(0).id);
+        assertEquals(Messages.message(rejected(french)), keep2.boxes.get(0).plainText());
+        assertEquals("message " + ClassicNotices.OFFER_ACCEPTED, keep2.boxes.get(1).id);
+    }
+
+    /**
+     * K3: GAME.TXT has none of the dropped notices (Roger: "den gibt es
+     * auch gar nicht im Original"): no "trefft", no offer "angenommen" or
+     * "abgelehnt" (needs the pack, else skipped with a note).
+     */
+    public void testTheOriginalHasNoneOfThem() throws Exception {
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final File g = (pack == null) ? null : pack.textFile(ClassicText.GAME);
+        if (g == null) {
+            System.err.println("ClassicNoticesTest: testTheOriginalHasNoneOfThem"
+                + " skipped, no pack texts (ant classic-assets)");
+            return;
+        }
+        final List<String> lines = ClassicText.decode(
+            java.nio.file.Files.readAllBytes(g.toPath()));
+        assertTrue(lines.size() > 1000);
+        int greetings = 0;
+        for (String l : lines) {
+            assertFalse(l, l.contains("trefft"));
+            assertFalse(l, l.contains("Angebot angenommen"));
+            assertFalse(l, l.contains("Angebot abgelehnt"));
+            if (l.startsWith("@HELLOFIRST") || l.startsWith("@INDIANWELCOME")) greetings++;
+        }
+        assertEquals("the original's own meeting boxes are there", 2, greetings);
+    }
+
+    /**
+     * K3 on the server: the meeting notice the Classic UI drops is the one
+     * FreeCol's server sends us, in both variants: our unit next to a
+     * village, and one of a village's people next to our unit in the
+     * natives' turn (each village once).
+     */
+    public void testTheServerSendsTheDroppedMeetingNotice() throws Exception {
+        final Game game = net.sf.freecol.server.ServerTestHelper
+            .startServerGame(getTestMap(true));
+        try {
+            final net.sf.freecol.server.model.ServerPlayer dutch
+                = getServerPlayer(game, "model.nation.dutch");
+            final net.sf.freecol.common.model.Map map = game.getMap();
+            final net.sf.freecol.common.model.UnitType colonist
+                = spec().getUnitType("model.unit.freeColonist");
+            // Our unit next to a Tupi village.
+            final IndianSettlement tupi = new IndianSettlementBuilder(game)
+                .settlementTile(map.getTile(5, 8)).build();
+            final Tile a = tupi.getTile().getNeighbourOrNull(Direction.N);
+            final ServerUnit ours = new ServerUnit(game, a, dutch, colonist);
+            dutch.exploreTile(tupi.getTile());   // the server sends it for an explored village only
+            net.sf.freecol.common.networking.ChangeSet cs
+                = new net.sf.freecol.common.networking.ChangeSet();
+            ours.csNewContactCheck(a, false, cs);
+            assertMeeting(cs, dutch, tupi);
+            // An Arawak brave next to our other unit, far from both villages.
+            final IndianSettlement arawak = new IndianSettlementBuilder(game)
+                .player(game.getPlayerByNationId("model.nation.arawak"))
+                .settlementTile(map.getTile(14, 3)).build();
+            final ServerUnit brave = (ServerUnit) arawak.getOwnedUnitList().get(0);
+            dutch.exploreTile(arawak.getTile());
+            final Tile b = map.getTile(14, 11);
+            brave.setLocation(b);
+            new ServerUnit(game, b.getNeighbourOrNull(Direction.N), dutch, colonist);
+            cs = new net.sf.freecol.common.networking.ChangeSet();
+            brave.csNewContactCheck(b, false, cs);
+            assertMeeting(cs, dutch, arawak);
+        } finally {
+            net.sf.freecol.server.model.Session.clearAll();
+            net.sf.freecol.server.ServerTestHelper.stopServerGame();
+        }
+    }
+
+    /** One meeting notice in {@code cs}, to {@code to}, about {@code is}. */
+    private static void assertMeeting(net.sf.freecol.common.networking.ChangeSet cs,
+                                      Player to, IndianSettlement is) {
+        String found = null;
+        for (String line : cs.toString().split("\n")) {
+            if (!line.contains(ClassicNotices.SCOUT_MEETING)) continue;
+            assertNull("one only: " + cs, found);
+            found = line;
+        }
+        assertNotNull(cs.toString(), found);
+        assertTrue(found, found.contains(" to " + to.getId()));
+        assertTrue(found, found.contains(is.getName()));
     }
 
 

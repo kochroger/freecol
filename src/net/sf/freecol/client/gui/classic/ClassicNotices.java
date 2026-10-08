@@ -24,6 +24,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import net.sf.freecol.common.model.FreeColObject;
 import net.sf.freecol.common.model.Ownable;
@@ -65,6 +66,27 @@ import net.sf.freecol.common.model.StringTemplate;
  * it first with the original's refusal box (GAME.TXT has one for most of
  * them, R3; the earlier "the original shows nothing" was an inference,
  * clip008 11-spec-delta.md:106, and wrong).
+ *
+ * <p><b>Dropped</b> (part K3, Roger 2026-10-08: "den gibt es auch gar nicht
+ * im Original - bitte löschen").  Two of FreeCol's notices at a first
+ * contact have nothing in GAME.TXT and never come:
+ * <ul>
+ *   <li>{@link #SCOUT_MEETING}, "Ihr trefft auf einen Späher der %nation%
+ *       aus %settlement%.", which the server sends once per village, not
+ *       per tribe: when our unit comes next to a village or to one of its
+ *       people, and in the natives' turn when one of them comes next to
+ *       ours ({@code ServerUnit.csNewContactCheck}).  The meeting stays the
+ *       woodcut and the chief's box.</li>
+ *   <li>{@link #OFFER_ACCEPTED} and {@link #OFFER_REJECTED}, "%nation% hat
+ *       Euer großzügiges Angebot angenommen" (abgelehnt), when they only
+ *       echo our own answer to the other nation's proposal
+ *       ({@link #isAnswerEcho}).  The server sends the session's result to
+ *       both sides ({@code DiplomacySession.completeInternal}) and the
+ *       client turns it into this notice for whoever gets it
+ *       ({@code InGameController.diplomacyHandler}); at a European first
+ *       contact the Classic UI accepts the peace without a box (G1), so the
+ *       player made no offer at all.</li>
+ * </ul>
  */
 final class ClassicNotices {
 
@@ -164,6 +186,18 @@ final class ClassicNotices {
     static final List<String> SILENT = Arrays.asList("move.noAttackWater",
         "move.noTile", "info.notYourTurn");
 
+    /** FreeCol's notice of a meeting with a village's people (class comment). */
+    static final String SCOUT_MEETING = "model.unit.nativeSettlementContact";
+
+    /** FreeCol's notice that the other nation accepted "our" offer. */
+    static final String OFFER_ACCEPTED = "diplomacy.offerAccepted";
+
+    /** FreeCol's notice that the other nation rejected "our" offer. */
+    static final String OFFER_REJECTED = "diplomacy.offerRejected";
+
+    /** FreeCol's model messages that never come (class comment). */
+    static final List<String> DROPPED = Arrays.asList(SCOUT_MEETING);
+
 
     private ClassicNotices() {}   // static helpers only
 
@@ -175,6 +209,51 @@ final class ClassicNotices {
      */
     static boolean silent(String id) {
         return id != null && (id.startsWith("move.noAccess") || SILENT.contains(id));
+    }
+
+    /**
+     * Whether a model message never comes (class comment): FreeCol's
+     * meeting with a village's people.
+     *
+     * @param id The message id, or null.
+     * @return True if it is dropped.
+     */
+    static boolean dropped(String id) {
+        return id != null && DROPPED.contains(id);
+    }
+
+    /**
+     * The key of a nation in {@link #isAnswerEcho}: the id of its label,
+     * as FreeCol's notice names it ({@code Player.getNationLabel}).
+     *
+     * @param p The player, or null.
+     * @return The key, or null.
+     */
+    static String nationKey(Player p) {
+        final StringTemplate t = (p == null) ? null : p.getNationLabel();
+        return (t == null) ? null : t.getId();
+    }
+
+    /**
+     * Whether a notice only echoes our own answer to another nation's
+     * proposal (class comment): "accepted" or "rejected" about a nation
+     * whose proposal we answered.  Our own proposals are not built yet
+     * ({@code ClassicSeams.isOwnProposal}: the "not yet" notice, nothing is
+     * sent); once they are, sending one must take its nation out of
+     * {@code answered}, so that its real answer is shown.
+     *
+     * @param t The notice (a model message or an information message), or null.
+     * @param answered The keys ({@link #nationKey}) of the nations whose
+     *     proposal we answered last.
+     * @return True if it is dropped.
+     */
+    static boolean isAnswerEcho(StringTemplate t, Set<String> answered) {
+        if (t == null || answered == null
+            || !(OFFER_ACCEPTED.equals(t.getId()) || OFFER_REJECTED.equals(t.getId()))) {
+            return false;
+        }
+        final StringTemplate n = t.getReplacement("%nation%");
+        return n != null && n.getId() != null && answered.contains(n.getId());
     }
 
     /**
