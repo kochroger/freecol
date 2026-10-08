@@ -4566,6 +4566,12 @@ public class ClassicGUI extends GUI {
         ClassicFrameRecorder.note("fathers", "known=" + this.knownFathers.size());
     }
 
+    /** Paint the panel's turn indicator now (EDT), if there is a panel. */
+    private void paintIndicatorNow() {
+        final ClassicInfoPanel ip = this.infoPanel;
+        if (ip != null) ip.paintIndicatorNow();
+    }
+
     /** @return Whether our player has a father this view has not shown yet. */
     boolean joinsDue() {
         return !ClassicCongress.joined(this.knownFathers, myPlayer(), false).isEmpty();
@@ -4600,6 +4606,10 @@ public class ClassicGUI extends GUI {
         for (FoundingFather ff : joins) {
             later.remove(ff);
             ClassicFrameRecorder.event("father-joined", ff.getId());
+            // The box is due 342 ms after our indicator lights (V); it
+            // lights once the box is asked (the turn flow's rule for a
+            // turn-start box), so paint it now, not at the next 50-ms poll.
+            if (first) SwingUtilities.invokeLater(this::paintIndicatorNow);
             this.prompter.ask(ClassicCongress.freedom(text, me, ff,
                 (first) ? ClassicCongress.FREEDOM_AFTER_TURN_MS : 0.0));
             first = false;
