@@ -448,13 +448,20 @@ folding Col1's real signal (fortification) onto FreeCol's size×stockade grid:
 unfortified `003`(small)→`000`(medium/large), stockade `001`, fort/fortress the
 stone `002`. See the "Settlements" block of `aliases.properties` for the full table.
 
-**Edge scrolling.** A mouse-motion listener sets an edge direction when the
-cursor enters a ~1-tile hot zone at any window edge/corner; a repeating `Timer`
-pans the view by a **raw** rectangular-grid step while the mouse stays there
-(stopped on `mouseExited`), clamped like every view origin (see "The view
-rule"). Raw `(x,y)` steps, *not* `Direction.step` — the
-isometric N/S step jumps two raw rows. Suppressed while the mouse is over the
-minimap box.
+**No edge scrolling (removed in part K1).** The pointer's motion never moves
+the view; only presses are listened to. Phase 1b had FreeCol's edge scrolling:
+a cell-wide hot zone along the map's edge and a 110-ms `Timer` that panned the
+view one cell per tick while the pointer rested there. It undid every jump to
+the unit up within 110 ms (the turn start, the hand-over, a minimap click), and
+Europe's exit button and the word "Spielzugende" both sit next to that zone, so
+in Roger's test of `abc27b588` the view ended on open sea and his units were out
+of reach (`freecol-spike-results\k\REPRO.md` section 1). The original's view
+moves only by its jumps (landfall 02 sections 1 and 5). Ways to move the view by
+hand: a minimap click (navigation, to the place clicked), the centre command
+(C, to the unit up), a click on an unexplored or a foreign tile. The unit up
+comes back into the view by the view rule (its next move, the next unit, the
+next turn) and when Europe closes (`ClassicGUI.europeGone`,
+`ClassicMapViewer.showActiveUnit`).
 
 **Controller wiring (clicks & keys drive the real `InGameController`).**
 
@@ -529,9 +536,10 @@ minimap box.
   `updateActiveUnit` → `changeView(unit)` path, which the classic `GUI` already
   delegates to `changeToMoveUnits` (so the view jumps to the next active unit
   when it is in the margin or off the view, `player.hasNextActiveUnit()`).
-  Movement was verified live post-end-turn; note that panning the view away
-  (e.g. a minimap click) leaves the active unit off-screen until its next move
-  starts, whose source-tile test brings the view back.
+  Movement was verified live post-end-turn; note that moving the view away
+  (a minimap click is navigation, Roger 2026-10-08) leaves the active unit
+  off-screen until its next move starts, whose source-tile test brings the
+  view back, or until Europe closes (the same test for the unit up, K1).
 
 **Minimap raster.** A whole-map overview: a plain rectangular
 `map.getWidth() × map.getHeight()` raster — **no** isometric projection (unlike

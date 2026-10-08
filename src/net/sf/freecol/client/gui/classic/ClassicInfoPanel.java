@@ -145,8 +145,12 @@ final class ClassicInfoPanel extends JComponent {
      */
     private int[] shown = null;
 
-    /** The minimap shown in the last paint (for click-to-recentre). */
-    private ClassicHud.MinimapModel lastMinimap = null;
+    /**
+     * The minimap shown in the last paint (for click-to-recentre).
+     * Package-private for the tests: a click through the panel's own
+     * listener without a game client to paint from.
+     */
+    ClassicHud.MinimapModel lastMinimap = null;
 
     /**
      * The panel as the last paint rendered it (80x192), which a
@@ -700,7 +704,11 @@ final class ClassicInfoPanel extends JComponent {
     /**
      * A press on the word "Spielzugende" ends the turn (build spec W17 item
      * 7: the pointer rested on the word before every end, 5 of 5); a click
-     * in the minimap's interior recentres the map on that tile.
+     * in the minimap's interior recentres the map on that tile, in every
+     * mode: navigation, the view goes to the place clicked, not to the
+     * unit up, which stays up (Roger, 2026-10-08 ~17:45, k\ROGER-CLARIFICATION.md);
+     * its next move brings the view back by the view rule's test on its
+     * source tile.
      */
     private void onClick(MouseEvent e) {
         final int s = scale();
@@ -713,12 +721,29 @@ final class ClassicInfoPanel extends JComponent {
             flow.endTurnNow("prompt-click");
             return;
         }
-        final ClassicHud.MinimapModel m = this.lastMinimap;
-        if (m == null) return;
+        final int[] t = minimapTile(this.lastMinimap, vx, vy);
+        if (t == null) return;
+        ClassicFrameRecorder.event("minimap-click", t[0] + "," + t[1]);
+        this.mapViewer.recenterOnTile(t[0], t[1]);
+    }
+
+    /**
+     * The map tile under a press in the minimap's interior: the window
+     * the player sees (its last paint), one pixel per tile
+     * ({@link ClassicHud#minimapOriginX}, {@link ClassicHud#minimapOriginY}).
+     *
+     * @param m The minimap as last painted, or null.
+     * @param vx The press's x on the 320x200 canvas.
+     * @param vy The press's y on the 320x200 canvas.
+     * @return The tile {x, y}, or null outside the interior (or no minimap
+     *     painted yet).
+     */
+    static int[] minimapTile(ClassicHud.MinimapModel m, int vx, int vy) {
+        if (m == null) return null;
         final Rectangle in = ClassicHud.MINIMAP;
-        if (!in.contains(vx, vy)) return;
-        this.mapViewer.recenterOnTile(
+        if (!in.contains(vx, vy)) return null;
+        return new int[] {
             ClassicHud.minimapOriginX(m.mapWidth, m.c0) + vx - in.x,
-            ClassicHud.minimapOriginY(m.mapHeight, m.r0) + vy - in.y);
+            ClassicHud.minimapOriginY(m.mapHeight, m.r0) + vy - in.y };
     }
 }

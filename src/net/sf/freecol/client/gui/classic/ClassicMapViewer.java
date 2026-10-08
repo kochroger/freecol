@@ -25,14 +25,12 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Stroke;
 import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.awt.event.MouseMotionAdapter;
 import java.awt.image.BufferedImage;
 import java.util.BitSet;
 import java.util.List;
@@ -46,7 +44,6 @@ import javax.swing.InputMap;
 import javax.swing.JPanel;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
-import javax.swing.Timer;
 
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.gui.GUI;
@@ -159,9 +156,6 @@ final class ClassicMapViewer extends JPanel {
      * {@link ClassicHud#settlementOffset}).
      */
     private static final int ICON_MARGIN = 3;
-
-    /** Interval (ms) between successive edge-scroll steps while at an edge. */
-    private static final int EDGE_SCROLL_INTERVAL_MS = 110;
 
     private final FreeColClient freeColClient;
 
@@ -434,18 +428,9 @@ final class ClassicMapViewer extends JPanel {
     private boolean palettePaint = false;
 
     /**
-     * Repeating timer that drives edge scrolling; it pans the view by
-     * {@link #edgeDX}/{@link #edgeDY} each tick while the mouse sits in an edge
-     * hot zone, and is stopped whenever that direction is zero.
-     */
-    private final Timer edgeScrollTimer;
-    private int edgeDX;
-    private int edgeDY;
-
-    /**
      * Set by {@link #dispose}.  The viewer can stay the content pane for a
      * moment after it is disposed (until the queued title panel replaces it),
-     * and a mouse event still queued for it must not restart the timer.
+     * and a late close (a menu's, a box's) must not restart the blink clock.
      */
     private boolean disposed = false;
 
@@ -492,30 +477,17 @@ final class ClassicMapViewer extends JPanel {
         setBackground(Color.BLACK);
         setOpaque(true);
         setFocusable(true);
+        // Only presses: the pointer's motion never moves the view.  The
+        // original's view moves only by its jumps (landfall 02 sections 1
+        // and 5); FreeCol's edge scrolling (Phase 1b) panned it a cell every
+        // 110 ms while the pointer rested at the map's edge, and undid every
+        // jump to the unit up within 110 ms (Roger's test of abc27b588: the
+        // view on open sea after Europe's exit and after "Spielzugende",
+        // his units out of reach; k\REPRO.md section 1).
         addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent e) {
                     onClick(e);
-                }
-                @Override
-                public void mouseExited(MouseEvent e) {
-                    stopEdgeScroll();
-                }
-            });
-        addMouseMotionListener(new MouseMotionAdapter() {
-                @Override
-                public void mouseMoved(MouseEvent e) {
-                    updateEdgeScroll(e.getPoint());
-                }
-                @Override
-                public void mouseDragged(MouseEvent e) {
-                    updateEdgeScroll(e.getPoint());
-                }
-            });
-        this.edgeScrollTimer = new Timer(EDGE_SCROLL_INTERVAL_MS, e -> {
-                if (inputBlocked()) return;
-                if (this.edgeDX != 0 || this.edgeDY != 0) {
-                    panView(this.edgeDX, this.edgeDY);
                 }
             });
         installKeyBindings();
@@ -1006,14 +978,20 @@ final class ClassicMapViewer extends JPanel {
         return this.minimapPPT;
     }
 
-    /** Recentre the main view on the given map tile (clamped to the map). */
+    /**
+     * Recentre the main view on the given map tile (clamped to the map): a
+     * minimap click, in every mode; the mode, the unit up and the
+     * Spielzugende square stay as they are.
+     */
     void recenterOnTile(int tileX, int tileY) {
         final Map map = getMap();
         if (map == null) return;
         final Tile t = map.getTile(
             Math.max(0, Math.min(map.getWidth() - 1, tileX)),
             Math.max(0, Math.min(map.getHeight() - 1, tileY)));
-        if (t != null) this.gui.setFocus(t);
+        if (t == null) return;
+        if (this.gui != null) this.gui.setFocus(t);
+        else setFocus(t);
     }
 
     /**
@@ -1155,6 +1133,28 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
+     * A screen over the map closed and the map shows the unit whose turn
+     * it is (Roger, 2026-10-08: Europe closes "then the map shows the unit
+     * whose turn it is"): the view rule of a unit coming up
+     * ({@link #jumpIfNeeded}, build spec W4 (a)) for the active unit,
+     * painted at once as one cut ({@link #jumpTo}).  It matters only after
+     * the player moved the view himself (a minimap click, the centre
+     * command, a click on a foreign tile): the unit up was in the view's
+     * safe zone otherwise, and the view stays.  Nothing without a unit up
+     * on the map (the Spielzugende mode, the end view, the terrain view):
+     * the view stays where it is (landfall 02 section 4.4).
+     *
+     * @param reason What closed (for the recorder's {@code view-jump}).
+     * @return True if the view moved.
+     */
+    boolean showActiveUnit(String reason) {
+        final Unit u = this.activeUnit;
+        if (this.viewMode != GUI.ViewMode.MOVE_UNITS || u == null
+            || u.isDisposed() || u.getTile() == null) return false;
+        return jumpTo(u.getTile(), reason);
+    }
+
+    /**
      * Put {@code tile} in cell (7,6) of the view, clamped to the map.
      *
      * @param tile The tile, or null to keep the view.
@@ -1176,7 +1176,7 @@ final class ClassicMapViewer extends JPanel {
      *
      * @param v The new origin {x, y}, already clamped.
      * @param reason What moves it (for the recorder).
-     * @param tile The tile it centres on, or null (a pan).
+     * @param tile The tile it centres on, or null.
      * @return True if the view moved.
      */
     private boolean moveView(int[] v, String reason, Tile tile) {
@@ -2409,69 +2409,12 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
-     * Pan the view by {@code (dx, dy)} raw grid cells, clamped to the view
-     * origins the map allows ({@link ClassicHud#clampView}: never past the
-     * map's edge, build spec W4.7).
-     *
-     * <p>The classic viewer draws on a plain rectangular grid keyed on raw map
-     * coordinates, so panning steps by raw {@code x}/{@code y} — not via
-     * {@link net.sf.freecol.common.model.Direction} (whose isometric N/S steps
-     * two rows), so the grid moves exactly one cell in the pressed
-     * direction.
-     *
-     * @param dx The columns to pan.
-     * @param dy The rows to pan.
-     */
-    void panView(int dx, int dy) {
-        final Map map = getMap();
-        final int[] o = viewOrigin();
-        if (map == null || o == null) return;
-        if (moveView(ClassicHud.clampView(map.getWidth(), map.getHeight(),
-                                          o[0] + dx, o[1] + dy), "pan", null)) {
-            repaint();
-        }
-    }
-
-    /**
-     * Update the edge-scroll direction from the current mouse position, starting
-     * or stopping the repeating scroll timer as the mouse enters or leaves an
-     * edge hot zone.
-     */
-    private void updateEdgeScroll(Point p) {
-        // Edge-scroll hot zone: roughly a tile wide, so it is easy to hit
-        // without being triggered by ordinary map clicks.
-        final int margin = tileW();
-        int dx = 0;
-        int dy = 0;
-        if (p.x < margin) dx = -1;
-        else if (p.x >= getWidth() - margin) dx = 1;
-        if (p.y < margin) dy = -1;
-        else if (p.y >= getHeight() - margin) dy = 1;
-        this.edgeDX = dx;
-        this.edgeDY = dy;
-        if ((dx == 0 && dy == 0) || this.disposed) {
-            this.edgeScrollTimer.stop();
-        } else if (!this.edgeScrollTimer.isRunning()) {
-            this.edgeScrollTimer.start();
-        }
-    }
-
-    /** Stop edge scrolling (mouse left the panel). */
-    private void stopEdgeScroll() {
-        this.edgeDX = 0;
-        this.edgeDY = 0;
-        this.edgeScrollTimer.stop();
-    }
-
-    /**
      * Release this viewer for good.  Called by {@code ClassicGUI.teardownInGame}
-     * when the game is left for the title screen: the edge-scroll Swing
-     * {@code Timer} and the blink clock's thread would otherwise keep
-     * firing against a game that no longer exists.
+     * when the game is left for the title screen: the blink clocks' threads
+     * would otherwise keep firing against a game that no longer exists.
      */
     void dispose() {
         this.disposed = true;
-        stopEdgeScroll();
         this.blink.close();
         this.promptBlink.close();
         this.layer = null;

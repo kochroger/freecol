@@ -22,6 +22,7 @@ package net.sf.freecol.client.gui.classic;
 import java.util.ArrayList;
 import java.util.List;
 
+import net.sf.freecol.client.gui.GUI;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Player;
@@ -1265,6 +1266,272 @@ public class ClassicMapViewerTest extends FreeColTestCase {
             mv.clickOn(colony.getTile(), french);
             javax.swing.SwingUtilities.invokeAndWait(() -> { });
             assertTrue(log.toString(), log.isEmpty());
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /** A 58x72 explored ocean map, the original's size. */
+    private Map originalOcean(Game game) {
+        final Map map = new MapBuilder(game).setDimensions(58, 72)
+            .setBaseTileType(spec().getTileType("model.tile.ocean"))
+            .setExploredByAll(true).build();
+        game.changeMap(map);
+        return map;
+    }
+
+    /** Whether a tile is in the 15x12 view at origin {@code o}. */
+    private static boolean inView(int[] o, Tile t) {
+        final int c = t.getX() - o[0], r = t.getY() - o[1];
+        return c >= 0 && c < ClassicHud.VIEW_COLS && r >= 0 && r < ClassicHud.VIEW_ROWS;
+    }
+
+    /** The pointer resting at {@code (x, y)} on a component: a real one's motion event. */
+    private static void pointerAt(java.awt.Component c, int id, int x, int y) {
+        c.dispatchEvent(new java.awt.event.MouseEvent(c, id,
+            System.currentTimeMillis(),
+            (id == java.awt.event.MouseEvent.MOUSE_DRAGGED)
+                ? java.awt.event.InputEvent.BUTTON1_DOWN_MASK : 0,
+            x, y, 0, false));
+    }
+
+    /**
+     * K1 (Roger's test of abc27b588, k\REPRO.md section 1): the pointer's
+     * motion never moves the view.  FreeCol's edge scrolling panned it one
+     * cell every 110 ms while the pointer rested in a cell-wide zone along
+     * the map's edge, and undid every jump to the unit up within 110 ms
+     * (live: the soldier at (47,47) off the view, the view on open sea at
+     * (40,59); the pioneer next turn, the view at (1,40)).  The original's
+     * view moves only by its jumps (landfall 02 sections 1 and 5).
+     */
+    public void testThePointerNeverMovesTheView() throws Exception {
+        final Game game = getStandardGame();
+        final Map map = originalOcean(game);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile sea = map.getTile(30, 30);
+        final Unit ship = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final ClassicMapViewer mv = new ClassicMapViewer(null, null, null, false);
+        try {
+            mv.setFixedScale(2);
+            mv.setSize(240 * 2, 192 * 2);   // cells of 32 px
+            mv.setFocus(sea);
+            mv.changeToMoveUnits(ship);
+            final int[] o = mv.peekViewOrigin();
+            assertTrue(java.util.Arrays.equals(new int[] { 23, 24 }, o));
+            // The pointer at rest in each edge zone and corner, longer than
+            // the old step each; then dragged along the bottom edge.
+            final int w = mv.getWidth(), h = mv.getHeight();
+            final int[][] at = { { w - 4, h / 2 }, { 3, h / 2 }, { w / 2, 3 },
+                                 { w / 2, h - 4 }, { 3, 3 }, { w - 4, 3 },
+                                 { 3, h - 4 }, { w - 4, h - 4 } };
+            for (int[] p : at) {
+                pointerAt(mv, java.awt.event.MouseEvent.MOUSE_MOVED, p[0], p[1]);
+                Thread.sleep(150);
+            }
+            pointerAt(mv, java.awt.event.MouseEvent.MOUSE_DRAGGED, w / 2, h - 4);
+            Thread.sleep(600);
+            javax.swing.SwingUtilities.invokeAndWait(() -> { });
+            assertTrue(java.util.Arrays.toString(mv.peekViewOrigin()),
+                       java.util.Arrays.equals(o, mv.peekViewOrigin()));
+            assertTrue(inView(mv.peekViewOrigin(), ship.getTile()));
+
+            // The next turn's unit comes up in the margin (cell (7,10)):
+            // its jump (W4 (a)) stays with the pointer resting in the
+            // bottom zone, and the unit stays in cell (7,6).
+            mv.changeToEndTurn();
+            ship.setLocation(map.getTile(30, 34));
+            pointerAt(mv, java.awt.event.MouseEvent.MOUSE_MOVED, w / 2, h - 4);
+            mv.changeToMoveUnits(ship);
+            final int[] o2 = mv.peekViewOrigin();
+            assertTrue(java.util.Arrays.equals(new int[] { 23, 28 }, o2));
+            Thread.sleep(1000);
+            javax.swing.SwingUtilities.invokeAndWait(() -> { });
+            assertTrue(java.util.Arrays.toString(mv.peekViewOrigin()),
+                       java.util.Arrays.equals(o2, mv.peekViewOrigin()));
+            assertTrue(inView(mv.peekViewOrigin(), ship.getTile()));
+            // Nothing listens to the pointer's motion at all.
+            assertEquals(0, mv.getMouseMotionListeners().length);
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /**
+     * K1 (Roger, 2026-10-08 ~17:45, k\ROGER-CLARIFICATION.md): a click on
+     * the minimap is navigation.  Through the panel's own listener, in
+     * every mode (a unit up, the Spielzugende mode, the end view, the
+     * terrain view), the view goes to the place clicked (the tile in cell
+     * (7,6), clamped; the minimap one pixel per tile, landfall 02 section
+     * 7), and the mode, the unit up, the selected tile and the mode's
+     * square stay as they are.  The unit up comes back into the view by
+     * the view rule: its next move's test on its source tile, a unit
+     * coming up at the next turn's start.
+     */
+    public void testMinimapClickInEveryMode() throws Exception {
+        final Game game = getStandardGame();
+        final Map map = originalOcean(game);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile sea = map.getTile(30, 30);
+        final Unit ship = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final ClassicGUI gui = new ClassicGUI(null);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        final ClassicInfoPanel panel = new ClassicInfoPanel(null, mv, null, null, null, null);
+        panel.setSize(ClassicHud.PANEL_W * 2, ClassicHud.PANEL_H * 2);
+        try {
+            mv.setFocus(sea);
+            mv.changeToMoveUnits(ship);
+            final int[] home = { 23, 24 };
+            assertTrue(java.util.Arrays.equals(home, mv.peekViewOrigin()));
+
+            // The pixel -> tile rule: px = 251 + X; py = 9 + Y - oy with
+            // oy = clamp(r0 - 13, 1, H - 40): (261,47) is tile (10,49).
+            panel.lastMinimap = ClassicHud.minimapOf(map, 23, 24);
+            assertTrue(java.util.Arrays.equals(new int[] { 10, 49 },
+                ClassicInfoPanel.minimapTile(panel.lastMinimap, 261, 47)));
+            assertNull(ClassicInfoPanel.minimapTile(panel.lastMinimap, 251, 30));  // the frame
+            assertNull(ClassicInfoPanel.minimapTile(panel.lastMinimap, 260, 60));  // below it
+            assertNull(ClassicInfoPanel.minimapTile(null, 261, 47));
+
+            // A unit up: the view to (10,49) in cell (7,6), the ship stays
+            // up, off the view.
+            minimapClick(panel, mv, map, 261, 47);
+            assertTrue(java.util.Arrays.toString(mv.peekViewOrigin()),
+                       java.util.Arrays.equals(new int[] { 3, 43 }, mv.peekViewOrigin()));
+            assertSame(ship, mv.getActiveUnit());
+            assertEquals(GUI.ViewMode.MOVE_UNITS, mv.getViewMode());
+            assertTrue(mv.isBlinkArmed());
+            assertFalse(inView(mv.peekViewOrigin(), ship.getTile()));
+            // Clamped at the map's edge: the click at the top right.
+            minimapClick(panel, mv, map, 307, 9);
+            final int[] ne = mv.peekViewOrigin();
+            assertEquals(42, ne[0]);
+            assertSame(ship, mv.getActiveUnit());
+            // Its next move: the view rule's test on its source tile.
+            assertTrue(mv.jumpIfNeeded(ship.getTile(), "move"));
+            assertTrue(java.util.Arrays.equals(home, mv.peekViewOrigin()));
+
+            // The Spielzugende mode: the view moves, the square stays.
+            mv.changeToEndTurn();
+            mv.enterPrompt(sea);
+            panel.enterPrompt(sea);
+            final boolean armed = mv.isPromptArmed(), held = mv.isPromptHeld(),
+                shown = mv.isPromptShown();
+            minimapClick(panel, mv, map, 300, 20);   // tile (49,22)
+            assertTrue(java.util.Arrays.toString(mv.peekViewOrigin()),
+                       java.util.Arrays.equals(new int[] { 42, 16 }, mv.peekViewOrigin()));
+            assertEquals(GUI.ViewMode.END_TURN, mv.getViewMode());
+            assertNull(mv.getActiveUnit());
+            assertSame(sea, mv.promptTile());
+            assertFalse(mv.isPromptFrozen());
+            assertEquals(armed, mv.isPromptArmed());
+            assertEquals(held, mv.isPromptHeld());
+            assertEquals(shown, mv.isPromptShown());
+            assertNotNull(panel.promptFacts());
+            // The mode's end, then our next turn: the unit up comes into
+            // the view (W4 (a)).
+            mv.freezePrompt();
+            mv.changeToEndTurn();
+            mv.changeToMoveUnits(ship);
+            assertTrue(java.util.Arrays.equals(home, mv.peekViewOrigin()));
+
+            // The end view with no unit and no square.
+            mv.changeToEndTurn();
+            minimapClick(panel, mv, map, 261, 47);
+            assertTrue(java.util.Arrays.equals(new int[] { 3, 43 }, mv.peekViewOrigin()));
+            assertEquals(GUI.ViewMode.END_TURN, mv.getViewMode());
+            assertNull(mv.getActiveUnit());
+
+            // The terrain view: the cursor stays on its tile.  The
+            // minimap's window follows the view (oy = 43 - 13 = 30):
+            // (300,20) is tile (49,41) now.
+            mv.changeToTerrain(map.getTile(10, 49));
+            minimapClick(panel, mv, map, 300, 20);
+            assertTrue(java.util.Arrays.toString(mv.peekViewOrigin()),
+                       java.util.Arrays.equals(new int[] { 42, 35 }, mv.peekViewOrigin()));
+            assertEquals(GUI.ViewMode.TERRAIN, mv.getViewMode());
+            assertSame(map.getTile(10, 49), mv.getSelectedTile());
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /** A press on the minimap at canvas {@code (vx, vy)}, as the panel last painted it. */
+    private static void minimapClick(ClassicInfoPanel panel, ClassicMapViewer mv,
+                                     Map map, int vx, int vy) {
+        final int[] o = mv.peekViewOrigin();
+        panel.lastMinimap = ClassicHud.minimapOf(map, o[0], o[1]);
+        final int s = panel.getWidth() / ClassicHud.PANEL_W;
+        panel.dispatchEvent(new java.awt.event.MouseEvent(panel,
+            java.awt.event.MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+            java.awt.event.InputEvent.BUTTON1_DOWN_MASK,
+            (vx - ClassicHud.PANEL_X) * s + s / 2, (vy - ClassicHud.PANEL_Y) * s + s / 2,
+            1, false, java.awt.event.MouseEvent.BUTTON1));
+    }
+
+    /**
+     * K1 (Roger, 2026-10-08: Europe closes, "then the map shows the unit
+     * whose turn it is"): after Europe's close a unit up that the player's
+     * minimap click left off the view comes back into it, in cell (7,6)
+     * (the view rule of a unit coming up); one still in the view's safe
+     * zone keeps the view; with no unit up (the Spielzugende mode) the
+     * view stays where the player put it.  A box over the map (its hold
+     * and release of the blink) never moves the view.
+     */
+    public void testEuropeCloseShowsTheUnitUp() {
+        final Game game = getStandardGame();
+        final Map map = originalOcean(game);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile sea = map.getTile(30, 30);
+        final Unit ship = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final ClassicGUI gui = new ClassicGUI(null);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        try {
+            mv.setFocus(sea);
+            mv.changeToMoveUnits(ship);
+            final int[] home = { 23, 24 };
+            // A box over the map keeps the view.
+            mv.holdBlink("dialog");
+            mv.resumeBlink("dialog");
+            assertTrue(java.util.Arrays.equals(home, mv.peekViewOrigin()));
+            gui.europeGone();
+            assertTrue(java.util.Arrays.equals(home, mv.peekViewOrigin()));
+
+            // Navigated away (the minimap), E, Europe's close: back.
+            mv.recenterOnTile(10, 49);
+            assertTrue(java.util.Arrays.equals(new int[] { 3, 43 }, mv.peekViewOrigin()));
+            gui.europeGone();
+            assertTrue(java.util.Arrays.toString(mv.peekViewOrigin()),
+                       java.util.Arrays.equals(home, mv.peekViewOrigin()));
+            assertSame(ship, mv.getActiveUnit());
+
+            // Navigated a little: the ship still in the safe zone (cell
+            // (5,4)), the view stays.
+            mv.recenterOnTile(32, 32);
+            final int[] near = mv.peekViewOrigin();
+            assertTrue(java.util.Arrays.equals(new int[] { 25, 26 }, near));
+            gui.europeGone();
+            assertTrue(java.util.Arrays.equals(near, mv.peekViewOrigin()));
+
+            // The Spielzugende mode (E in the mode): no unit up, the view stays.
+            mv.changeToEndTurn();
+            mv.enterPrompt(sea);
+            mv.recenterOnTile(10, 49);
+            gui.europeGone();
+            assertTrue(java.util.Arrays.equals(new int[] { 3, 43 }, mv.peekViewOrigin()));
+            assertNull(mv.getActiveUnit());
+            assertSame(sea, mv.promptTile());
+            // An arrival: no unit up at Europe's close either; the unit
+            // that comes through the cycle brings its own jump.
+            mv.changeToEndTurn();
+            gui.europeGone();
+            assertTrue(java.util.Arrays.equals(new int[] { 3, 43 }, mv.peekViewOrigin()));
+            mv.changeToMoveUnits(ship);
+            assertTrue(java.util.Arrays.equals(home, mv.peekViewOrigin()));
         } finally {
             mv.dispose();
         }

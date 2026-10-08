@@ -3721,7 +3721,22 @@ public class ClassicGUI extends GUI {
         closeEuropePanel();
         this.europeAskedAt = 0L;
         ClassicFrameRecorder.event("europe-close", "");
+        europeGone();
+    }
+
+    /**
+     * After the Europe screen's close ({@link #europeClosed}): the map
+     * shows the unit whose turn it is (Roger, 2026-10-08).  A unit up
+     * before Europe opened (E during the turn) is in the view again: the
+     * view rule of a unit coming up, when the player had moved the view
+     * away (a minimap click; {@code ClassicMapViewer.showActiveUnit}).  At
+     * an arrival no unit is up yet: the arrival chain goes on and the
+     * unit comes through the unit cycle with its own jump.  Package-
+     * private for the tests.  EDT only.
+     */
+    void europeGone() {
         try {
+            if (this.mapViewer != null) this.mapViewer.showActiveUnit("europe");
             if (this.voyageChain != null) runVoyageChain();
         } finally {
             if (this.turnFlow != null) this.turnFlow.boxClosed();
