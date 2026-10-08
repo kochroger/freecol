@@ -164,18 +164,41 @@ public class ClassicPacificTest extends FreeColTestCase {
         assertTrue(pacific(map.getTile(6, 10)));
     }
 
+    /** The SAV's 16-bit little-endian word at {@code o}. */
+    private static int u16(byte[] s, int o) {
+        return (s[o] & 0xFF) | ((s[o + 1] & 0xFF) << 8);
+    }
+
+    /**
+     * Where a SAV's TERRAIN layer starts (MASK follows it): the records in
+     * front of the map are counted in the header, colonies (0x2E, 202
+     * bytes each, from byte 390), units (0x2C, 28 bytes) and dwellings
+     * (0x2A, 18 bytes), the rest is fixed (I fixer: every on-map unit
+     * record has MASK bit 0x01 at this offset in saves 00, 01, 08 and 09,
+     * which a search for the row rule cannot tell from offsets whole map
+     * rows away).
+     *
+     * @param s The save.
+     * @return The offset, or -1 if the header is not a 58x72 map whose
+     *     four layers fit in the file.
+     */
+    static int terrainOffset(byte[] s) {
+        if (s.length < 0x30 || u16(s, 0x0C) != W || u16(s, 0x0E) != H) return -1;
+        final int t = 3005 + 18 * u16(s, 0x2A) + 28 * u16(s, 0x2C) + 202 * u16(s, 0x2E);
+        return (t + 4 * W * H <= s.length) ? t : -1;
+    }
+
     /**
      * Golden: on the original's own terrain (saves 00, 01, 08 and 09, three
      * maps), the Pacific is exactly the tiles with bit 0x20 of the MASK
-     * layer (983, 983, 667 and 928 tiles; pacific.md §0 and §1.2 for the
-     * layer offsets).  Skipped with a note without the original.
+     * layer (pacific.md §0 and §1.2).  The layers' offset comes from the
+     * header's record counts ({@link #terrainOffset}) and is checked by the
+     * units' tiles, so a save Roger plays on again still checks; a file
+     * whose header does not fit is skipped with a note, as a missing one.
      */
     public void testGoldenAgainstTheOriginalSaves() throws IOException {
         final String[] saves = { "COLONY09.SAV", "COLONY08.SAV",
                                  "COLONY01.SAV", "COLONY00.SAV" };
-        final int[] terrain = { 7857, 7801, 7867, 15849 };
-        final int[] counts = { 983, 983, 667, 928 };
-        int checked = 0;
         for (int i = 0; i < saves.length; i++) {
             final Path f = Path.of(INSTALL, saves[i]);
             if (!Files.isRegularFile(f)) {
@@ -184,7 +207,25 @@ public class ClassicPacificTest extends FreeColTestCase {
                 continue;
             }
             final byte[] s = Files.readAllBytes(f);
-            final int t0 = terrain[i], m0 = t0 + W * H;
+            final int t0 = terrainOffset(s), m0 = t0 + W * H;
+            if (t0 < 0) {
+                System.err.println("ClassicPacificTest: " + f
+                    + " has no 58x72 map where its header says, golden check skipped");
+                continue;
+            }
+            // The offset is the map's: every unit record on the map (x,y
+            // its first two bytes) has the MASK's unit bit 0x01.
+            final int units = u16(s, 0x2C), u0 = 390 + 202 * u16(s, 0x2E);
+            int onMap = 0, unitBit = 0;
+            for (int k = 0; k < units; k++) {
+                final int x = s[u0 + 28 * k] & 0xFF, y = s[u0 + 28 * k + 1] & 0xFF;
+                if (x < 1 || x > W - 2 || y < 1 || y > H - 2) continue;
+                onMap++;
+                if ((s[m0 + y * W + x] & 0x01) != 0) unitBit++;
+            }
+            assertTrue(saves[i] + " units on the map", onMap > 0);
+            assertEquals(saves[i] + " unit tiles with MASK bit 0x01 at " + t0,
+                         onMap, unitBit);
             final Game game = getStandardGame();
             final Map map = map(game, Topology.SQUARE, W, H, (x, y) -> {
                     final int v = s[t0 + y * W + x] & 31;
@@ -206,12 +247,9 @@ public class ClassicPacificTest extends FreeColTestCase {
                     }
                 }
             }
-            assertEquals(saves[i] + " bit 0x20", counts[i], n);
+            assertTrue(saves[i] + " bit 0x20 on " + n + " tiles", n > 500);   // 696..983 so far
             assertEquals(saves[i] + " mismatches:" + sb, 0, wrong);
-            checked++;
         }
-        if (checked == 0) return;
-        assertEquals(saves.length, checked);
     }
 
     /**

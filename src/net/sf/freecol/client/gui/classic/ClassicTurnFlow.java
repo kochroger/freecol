@@ -974,10 +974,13 @@ final class ClassicTurnFlow {
             return true;
         }
         if (held != null && !fixed && p == null && previous == held && unit != held
-            && !ranOut(held)) {
+            && !ranOut(held) && held.isCandidateForNextActiveUnit()) {
             // The view opened with the cycle's unit from its cursor (a
             // load, I2): FreeCol's own startup choice that follows goes
-            // back (its iterator, which brought the ship again).
+            // back (its iterator, which brought the ship again).  Only
+            // while that unit can still take orders: after S, F or a goto
+            // order that kept its moves (FreeCol often makes no startup
+            // choice) this is the choice after those orders, below.
             ClassicFrameRecorder.event("cycle", "kept " + id(held) + ", controller="
                 + id(unit) + " (load)");
             this.host.putBack(unit);

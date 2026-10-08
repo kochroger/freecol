@@ -1438,6 +1438,44 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         for (Unit x : u) x.dispose();
     }
 
+    /**
+     * I fixer (the review's must-fix): after a load the cursor's unit is
+     * up and FreeCol makes no startup choice (live, i-acc-cyc-load).  S, F
+     * or a goto order that stops with moves left on that unit: the
+     * controller's next choice must not go back as the startup one did
+     * (no unit was left up, and Space cannot skip a sentried unit); the
+     * cycle's next unit comes at once, exactly as without the load.
+     */
+    public void testLoadThenOrdersBringTheCyclesNext() {
+        for (String order : new String[] { "S", "F", "goto" }) {
+            final String[] seen = new String[2];
+            for (boolean load : new boolean[] { false, true }) {
+                final Rig r = new Rig(this.game);
+                final Unit[] u = threeShips(r, true);
+                final Unit a = u[0], b = u[1], c = u[2];
+                r.host.active = b;
+                r.host.real.activated(b);
+                if (load) r.flow.cycleUnitUp(b);   // no startup choice follows
+                switch (order) {
+                case "S": b.setState(Unit.UnitState.SENTRY); break;
+                case "F": b.setState(Unit.UnitState.FORTIFYING); break;
+                default: b.setDestination(c.getTile()); break;
+                }
+                assertTrue(b.getMovesLeft() > 0);  // the order kept the moves
+                final String what = order + " load=" + load;
+                assertTrue(what, r.flow.unitChosen(a, b));   // FreeCol's next choice
+                assertEquals(what, 1, r.count("putBack " + a.getId()));   // the cycle's instead
+                assertEquals(what, 1, r.count("activate " + c.getId()));
+                assertSame(what, c, r.host.active);
+                assertNull(what, r.flow.pending());
+                seen[load ? 1 : 0] = r.host.calls.toString()
+                    .replace(a.getId(), "a").replace(b.getId(), "b").replace(c.getId(), "c");
+                for (Unit x : u) x.dispose();
+            }
+            assertEquals(order, seen[0], seen[1]);       // the load changes nothing
+        }
+    }
+
     /** The controller chooses: the flow takes it, or it is made active at once (ClassicGUI.changeView). */
     private static void choose(Rig r, Unit unit, Unit previous) {
         if (!r.flow.unitChosen(unit, previous)) r.host.activate(unit);
