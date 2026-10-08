@@ -131,10 +131,12 @@ public class ClassicFoundingTest extends FreeColTestCase {
         assertEquals(413.8, ClassicFounding.SPRITE_AFTER_PROMPT_MS, 0.1);
         assertEquals(485.1, ClassicFounding.BLACK_AFTER_PROMPT_MS, 0.1);
         final long ms = 1_000_000L;
-        // The black 485 ms after the close when the colony came in time.
+        // The black 485 ms after the close when the colony came in time,
+        // and when the server's round trip made it later (live: 462 ms).
         assertEquals(485_116_000L, ClassicGUI.blackAfterFounding(0L, 413 * ms), 1000L);
-        // A late colony: 72 ms after its paint.
-        assertEquals(522 * ms, ClassicGUI.blackAfterFounding(0L, 450 * ms));
+        assertEquals(485_116_000L, ClassicGUI.blackAfterFounding(0L, 462 * ms), 1000L);
+        // A colony later still: on the map one frame before the black.
+        assertEquals(494_268_000L, ClassicGUI.blackAfterFounding(0L, 480 * ms), 1000L);
         // No box (the stopgap or no pack): 72 ms after the paint.
         assertEquals(1072 * ms, ClassicGUI.blackAfterFounding(Long.MIN_VALUE, 1000 * ms));
     }

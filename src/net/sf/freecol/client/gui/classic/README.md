@@ -2221,9 +2221,11 @@ appearance: its "woodcut 2" is k = 3, its "woodcut 3" k = 7). Spec:
 - **Timeline.** The box closes (#3340); the map without it until the colony,
   413.8 ms (29 frames) after the close, `getNewColonyName` holding (#3369); woodcut
   2 (first colony only) black 485.1 ms (34 frames) after the close and never sooner
-  than 72 ms after the colony's paint (`blackAfterFounding`, recorder
-  `founding-map`); the woodcut as in "Woodcuts"; the colony screen built while
-  the map shows and made visible 328 ms after the map came back (#4009 -> #4032;
+  than one frame after the colony's paint (`blackAfterFounding`; live the
+  server's round trip after the hold put the colony 48 ms late, recorder
+  `founding-map`; without a box 72 ms after the paint); the woodcut as in
+  "Woodcuts"; the colony screen built while the map shows and made visible
+  328 ms after the map came back (#4009 -> #4032;
   before I6 it was built after the wait, ~130 ms late); @TUTORIAL4 514 ms later
   (I4). A later colony: the screen as soon as the colony is on the map (I).
 - Tests: `ClassicFoundingTest` (warnings, COLONY.TXT, timeline, boxes; golden

@@ -7668,7 +7668,9 @@ public class ClassicGUI extends GUI {
 
     /**
      * Woodcut 2's black: {@link ClassicFounding#BLACK_AFTER_PROMPT_MS}
-     * after the @COLONY box closed, at least
+     * after the @COLONY box closed, the colony on the map at least a frame
+     * before it (the server's round trip after the 414 ms hold may have
+     * eaten into the original's 72 ms: live 48 ms); without a box
      * {@link ClassicWoodcut#BLACK_AFTER_COLONY_MS} after the colony's paint.
      *
      * @param closed When the box closed, or {@code Long.MIN_VALUE} (none).
@@ -7676,11 +7678,11 @@ public class ClassicGUI extends GUI {
      * @return When the black is due (clock ns).
      */
     static long blackAfterFounding(long closed, long painted) {
-        final long afterPaint = painted
-            + Math.round(ClassicWoodcut.BLACK_AFTER_COLONY_MS * 1e6);
-        return (closed == Long.MIN_VALUE) ? afterPaint
-            : Math.max(afterPaint, closed
-                + Math.round(ClassicFounding.BLACK_AFTER_PROMPT_MS * 1e6));
+        if (closed == Long.MIN_VALUE) {
+            return painted + Math.round(ClassicWoodcut.BLACK_AFTER_COLONY_MS * 1e6);
+        }
+        return Math.max(painted + Math.round(ClassicWoodcut.FRAME_MS * 1e6),
+            closed + Math.round(ClassicFounding.BLACK_AFTER_PROMPT_MS * 1e6));
     }
 
     /**

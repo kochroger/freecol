@@ -56,9 +56,9 @@ import net.sf.freecol.common.model.StringTemplate;
  *   <li><b>The timeline.</b>  The prompt closes (#3340); the colony on
  *   the map {@link #SPRITE_AFTER_PROMPT_MS} later (#3369); the first
  *   colony's woodcut 2 black {@link #BLACK_AFTER_PROMPT_MS} after the
- *   close (#3374), never sooner than {@link ClassicWoodcut#BLACK_AFTER_COLONY_MS}
- *   after the colony's paint; the map {@link ClassicWoodcut#FOLLOW_COLONY_MS}
- *   (#4009 -&gt; #4032), then the colony screen, then @TUTORIAL4
+ *   close (#3374), the colony on the map at least a frame before it;
+ *   the map {@link ClassicWoodcut#FOLLOW_COLONY_MS} (#4009 -&gt; #4032),
+ *   then the colony screen, then @TUTORIAL4
  *   ({@link ClassicTips#COLONY_TIP_MS}, #4068).</li>
  * </ul>
  */
