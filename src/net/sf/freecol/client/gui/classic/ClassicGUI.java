@@ -1271,6 +1271,7 @@ public class ClassicGUI extends GUI {
         this.woodcutsAsked = 0;
         this.woodcutsPosted = 0;
         this.foundingTile = null;
+        this.foundingClosed = Long.MIN_VALUE;
         this.mapViewer = null;
         this.terrainOracle = null;
         this.waterCycle = null;
@@ -3296,8 +3297,9 @@ public class ClassicGUI extends GUI {
                 // A colony just founded brings @TUTORIAL4 over its screen (W11).
                 final boolean founding = this.foundingTile != null
                     && colony.getTile() == this.foundingTile;
-                // The first colony's woodcut, before its screen (W9).
-                if (!foundingWoodcut(colony)) return;
+                // The first colony's woodcut, before its screen (W9, D4).
+                final long due = foundingWoodcut(colony);
+                if (due == VIEW_GONE) return;
                 closeColonyPanel();
                 final ClassicColonyPanel panel = new ClassicColonyPanel(
                     getFreeColClient(), this.imageLibrary, colony,
@@ -3309,6 +3311,20 @@ public class ClassicGUI extends GUI {
                 f.setBackground(Color.BLACK);
                 f.setContentPane(panel);
                 prepareChildWindow(f, this.frame, true);
+                // Built while the map shows after the woodcut, shown at
+                // its time (V: 328 ms, clip008 #4009 -> #4032).
+                if (due != 0L) {
+                    try {
+                        waitClock().waitUntil(due);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                    if (this.mapViewer == null || this.colonyFrame != f) {
+                        if (this.colonyFrame == f) closeColonyPanel();
+                        else f.dispose();
+                        return;
+                    }
+                }
                 f.setVisible(true);
                 f.getContentPane().requestFocusInWindow();
                 colonyScreenShown(colony, waitClock().now(), founding);
@@ -5636,16 +5652,74 @@ public class ClassicGUI extends GUI {
     /**
      * {@inheritDoc}
      *
-     * The base implementation asks for the name through {@code modalInputDialog},
-     * which the classic {@code GUI} still no-ops (dialogs are Phase 3) — so it
-     * would return null and silently abort every attempt to found a colony.
-     * Until the classic name prompt exists, take the name FreeCol would have
-     * suggested, made unique if the player somehow already used it.
+     * The original's @COLONY box (master plan D4, {@link ClassicFounding}):
+     * the colonist, the name field with COLONY.TXT's first unused name of
+     * our nation selected.  Enter founds with the field's text, Escape
+     * founds nothing (null: FreeCol's controller stops before the server,
+     * no move used).  A name some settlement has already is FreeCol's
+     * notice and founds nothing.  Then the map without the box until the
+     * colony comes, {@link ClassicFounding#SPRITE_AFTER_PROMPT_MS} after
+     * the close (V clip008 #3340 -&gt; #3369), and the first colony's
+     * woodcut 2 ({@link #foundingWoodcut}).  Without GAME.TXT: the default
+     * name, no box (FreeCol's suggestion without COLONY.TXT).  EDT (the B
+     * key's controller call).
      */
     @Override
     public String getNewColonyName(Player player, Tile tile) {
+        this.foundingTile = null;
+        this.foundingClosed = Long.MIN_VALUE;
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        String dflt = ClassicFounding.defaultName(ClassicText.colonyNames(pack,
+            ClassicFounding.section(player)), getGame());
+        final boolean freeCols = dflt == null;
+        if (freeCols) dflt = freeColColonyName(player);
+        final ClassicAdvisorBox.Request r = ClassicFounding.colonyRequest(
+            ClassicText.load(pack), dflt, ClassicFounding.title());
+        String name = dflt;
+        if (r != null) {
+            final int got = onEventThread(() -> this.prompter.ask(r),
+                                          ClassicAdvisorBox.Bar.DISMISSED);
+            name = ClassicFounding.answered(r, got);
+            ClassicFrameRecorder.event("colony-name", ((name == null)
+                ? "cancelled, nothing used" : name) + " default=" + dflt
+                + " answer=" + got);
+            if (name == null) {
+                if (freeCols) player.putSettlementName(dflt);
+                return null;
+            }
+        }
+        final Game game = getGame();
+        if ((game != null && game.getSettlementByName(name) != null)
+            || player.getSettlementByName(name) != null) {
+            showInformationPanel(tile, ClassicFounding.notUnique(name));
+            return null;
+        }
         // The founding's woodcut comes before the colony screen (W9).
         noteFounding(tile);
+        if (r != null) {
+            final long closed = lastBoxClose();
+            this.foundingClosed = closed;
+            onEventThread(() -> {
+                    try {
+                        waitClock().waitUntil(closed + Math.round(
+                            ClassicFounding.SPRITE_AFTER_PROMPT_MS * 1e6));
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return null;
+                }, null);
+        }
+        return name;
+    }
+
+    /**
+     * FreeCol's suggestion for a colony's name, made unique if the player
+     * somehow already used it (the classic default without COLONY.TXT).
+     *
+     * @param player The player.
+     * @return The name.
+     */
+    private static String freeColColonyName(Player player) {
         final String suggested = player.getSettlementName(null);
         if (player.getSettlementByName(suggested) == null) return suggested;
         for (int i = 2; i < 100; i++) {
@@ -5769,6 +5843,11 @@ public class ClassicGUI extends GUI {
                 : this.mapViewer.getActiveUnit(), tile);
             return askLandfall(carrier, firstLander(carrier, tile));
         }
+        // The site warnings: the original's @NOPORT, or none (D4).
+        if (ClassicFounding.siteWarnings(template)) {
+            final Boolean found = siteWarning(template);
+            if (found != null) return found;
+        }
         // The learn question is a village box: the first entry's woodcut
         // before it when no key brought one (W9).
         if (template != null && LEARN_QUESTION.equals(template.getId())) villageWoodcut();
@@ -5783,6 +5862,34 @@ public class ClassicGUI extends GUI {
         final int chosen = onEventThread(() -> this.prompter.ask(r),
                                          ClassicAdvisorBox.Bar.DISMISSED);
         return confirmed(chosen);
+    }
+
+    /**
+     * FreeCol's site warnings as the original's (master plan D4,
+     * {@link ClassicFounding}): a land-locked site is @NOPORT with the
+     * frontiersman, its first row and Escape found nothing; the other
+     * warnings have no words in the original and found the colony without
+     * a box.  Nothing used: FreeCol asks before the server is told.
+     *
+     * @param warnings FreeCol's warnings.
+     * @return Whether to found, or null without the original's text
+     *     (FreeCol's words then).
+     */
+    private Boolean siteWarning(StringTemplate warnings) {
+        if (!ClassicFounding.landLocked(warnings)) {
+            ClassicFrameRecorder.event("dialog-silent", "site warning "
+                + Messages.message(warnings).replace('\n', ' ') + " -> found");
+            return Boolean.TRUE;
+        }
+        final ClassicAdvisorBox.Request r = ClassicFounding.noPortRequest(
+            ClassicText.load(ClassicPackFiles.runtime()), ClassicFounding.title());
+        if (r == null) return null;
+        final int chosen = onEventThread(() -> this.prompter.ask(r),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        final boolean found = ClassicFounding.foundsAnyway(chosen);
+        ClassicFrameRecorder.event("site-warning", "NOPORT chosen=" + chosen
+            + ((found) ? " found" : " declined, nothing used"));
+        return found;
     }
 
     /** FreeCol's question on crossing onto the high seas, never shown (W0f). */
@@ -6813,6 +6920,13 @@ public class ClassicGUI extends GUI {
     private Tile foundingTile = null;
 
     /**
+     * When the @COLONY box of the colony being founded closed (the box
+     * layer's clock), or {@code Long.MIN_VALUE}: woodcut 2's black is
+     * timed from it (D4).
+     */
+    private long foundingClosed = Long.MIN_VALUE;
+
+    /**
      * Read the woodcuts already seen in this game: the save's
      * {@code classicWoodcuts} and, for a save without it (an older build,
      * the standard GUI), the ones whose event left a trace.  EDT only;
@@ -7514,32 +7628,59 @@ public class ClassicGUI extends GUI {
 
     /**
      * Woodcut 2 before the first colony's screen, once the map shows the
-     * colony (V: clip008 #3369 the colony on the map, #3374 black, #4009
-     * the map, #4032 the colony screen).  EDT only.
+     * colony (V: clip008 #3340 the @COLONY box closed, #3369 the colony on
+     * the map, #3374 black, #4009 the map, #4032 the colony screen): its
+     * black {@link ClassicFounding#BLACK_AFTER_PROMPT_MS} after the box's
+     * close and never sooner than {@link ClassicWoodcut#BLACK_AFTER_COLONY_MS}
+     * after the colony's paint.  EDT only.
      *
      * @param colony The colony whose screen comes.
-     * @return False if the game view went meanwhile.
+     * @return When its screen is due ({@link ClassicWoodcut#FOLLOW_COLONY_MS}
+     *     after the map came back), 0 for at once (no woodcut), or
+     *     {@link #VIEW_GONE} if the game view went meanwhile.
      */
-    private boolean foundingWoodcut(Colony colony) {
+    long foundingWoodcut(Colony colony) {
         final Tile t = this.foundingTile;
-        if (t == null || colony.getTile() != t) return true;
+        if (t == null || colony.getTile() != t) return 0L;
         this.foundingTile = null;
-        if (woodcutShown(ClassicWoodcut.COLONY)) return true;
+        final long closed = this.foundingClosed;
+        this.foundingClosed = Long.MIN_VALUE;
+        if (woodcutShown(ClassicWoodcut.COLONY)) return 0L;
         // The map with the new colony first, the black 72 ms after it.
         if (this.hudPane != null) {
             this.hudPane.paintImmediately(0, 0, this.hudPane.getWidth(),
                                           this.hudPane.getHeight());
         }
-        final long back = woodcut(ClassicWoodcut.COLONY, waitClock().now()
-            + Math.round(ClassicWoodcut.BLACK_AFTER_COLONY_MS * 1e6),
-            ClassicWoodcut.FOLLOW_COLONY_MS);
-        if (back == ClassicAdvisorLayer.NOT_SHOWN) return this.mapViewer != null;
-        try {
-            waitClock().waitUntil(back + Math.round(ClassicWoodcut.FOLLOW_COLONY_MS * 1e6));
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-        }
-        return this.mapViewer != null;
+        final long painted = waitClock().now();
+        ClassicFrameRecorder.event("founding-map", colony.getName() + ((closed
+            == Long.MIN_VALUE) ? "" : String.format(java.util.Locale.ROOT,
+                " %.1f ms after the name box", (painted - closed) / 1e6)));
+        final long black = blackAfterFounding(closed, painted);
+        final long back = woodcut(ClassicWoodcut.COLONY, black,
+                                  ClassicWoodcut.FOLLOW_COLONY_MS);
+        if (this.mapViewer == null) return VIEW_GONE;
+        if (back == ClassicAdvisorLayer.NOT_SHOWN) return 0L;
+        return back + Math.round(ClassicWoodcut.FOLLOW_COLONY_MS * 1e6);
+    }
+
+    /** {@link #foundingWoodcut}: the game view went, no screen. */
+    static final long VIEW_GONE = -1L;
+
+    /**
+     * Woodcut 2's black: {@link ClassicFounding#BLACK_AFTER_PROMPT_MS}
+     * after the @COLONY box closed, at least
+     * {@link ClassicWoodcut#BLACK_AFTER_COLONY_MS} after the colony's paint.
+     *
+     * @param closed When the box closed, or {@code Long.MIN_VALUE} (none).
+     * @param painted When the map showed the colony.
+     * @return When the black is due (clock ns).
+     */
+    static long blackAfterFounding(long closed, long painted) {
+        final long afterPaint = painted
+            + Math.round(ClassicWoodcut.BLACK_AFTER_COLONY_MS * 1e6);
+        return (closed == Long.MIN_VALUE) ? afterPaint
+            : Math.max(afterPaint, closed
+                + Math.round(ClassicFounding.BLACK_AFTER_PROMPT_MS * 1e6));
     }
 
     /**

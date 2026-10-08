@@ -154,8 +154,8 @@ save plays on as it was (R1b re-applies the rules on load, later).
   `modalConfirmDialog` (e.g. the build-colony site warnings), `modalChoiceDialog`
   (e.g. which unit(s) to disembark from a laden ship; now the original's
   landing box, see "The landing") and `getNewColonyName`
-  (which returns FreeCol's suggested name, made unique, rather than prompting —
-  the base `modalInputDialog` still no-ops). Without these, founding a colony —
+  (now the original's @COLONY box and @NOPORT, see "Founding a colony"; the
+  base `modalInputDialog` still no-ops). Without these, founding a colony —
   and hence the colony screen — would be unreachable. All run their dialog on the
   event thread via `onEventThread` (controllers call from arbitrary threads).
   Phase 3 reskins them.
@@ -2171,6 +2171,7 @@ appearance: its "woodcut 2" is k = 3, its "woodcut 3" k = 7). Spec:
   is in `Request.field.answer()` (the bar that closed the box wrote it). The
   stopgap off the map shows the text and takes the default. D4's @COLONY
   prompt uses the same field.
+  (Escape there founds nothing, see "Founding a colony".)
 - **Kept** in `Player.classicLandName` (save and owner scope only, written
   only when set; an update never removes it; on the server's copy in single
   player, as the woodcuts). The panel's land line and the tips' `%STRING2`
@@ -2190,6 +2191,46 @@ appearance: its "woodcut 2" is k = 3, its "woodcut 3" k = 7). Spec:
   `03_LANDHO_naming` (0 px), `ClassicAdvisorLayerTest.testANameField`,
   `ClassicGUISeamTest.testLandHoAtTheSighting`, `testTheLandingSendsTheName`,
   `testRegionNamedAtOnce`, `PlayerTest.testClassicLandName`.
+
+### Founding a colony (master plan D4; I6)
+
+`ClassicFounding` (headless: the site warning, the name box, the times) and
+`ClassicGUI.modalConfirmDialog` / `getNewColonyName` / `foundingWoodcut` /
+`showColonyPanel`. V: clip008 `01-colony.md` section 1 (#1002, #2789-#4068).
+
+- **Site warning.** FreeCol's `Tile.getBuildColonyWarnings` (a label of
+  `warning.*` keys, asked only with its client option "colony warnings", on by
+  default): a land-locked site is GAME.TXT's **@NOPORT** with the frontiersman,
+  box (62,112,196,64), the bar on row 1 "Oh, daran hatte ich nicht gedacht."
+  (V #1002), which founds nothing, as Escape and a click beside it do; only
+  row 2 "Und das ist genau das, was ich vorhatte." founds. FreeCol's other
+  warnings (little food, lumber or ore, land of ours, of Europeans, of natives)
+  have no words in the original: answered "found" without a box (I; recorder
+  `dialog-silent site warning ...`). Without GAME.TXT FreeCol's words as before.
+- **Name.** GAME.TXT's **@COLONY** with the colonist (MSS5) and the W10 name
+  field, box (71,113,178,37) (the section has no `@width`: the box is the
+  field's, 29 + 144 + 5). The default is COLONY.TXT's (`ClassicText.colonyNames`)
+  first name of our nation that no settlement in the game has, "New Amsterdam"
+  for the Dutch (FreeCol's suggestion only without the file), selected; the first
+  key replaces it. Enter founds with the text (empty: the default); **Escape
+  founds nothing** (null to the controller: no move used, the unit stays up); a
+  name some settlement has is FreeCol's notice `nameColony.notUnique` and founds
+  nothing. Recorder `colony-name`.
+- **Nothing used on a refusal:** `InGameController.buildColony` asks the warning
+  and the name before it tells the server (tested from the source).
+- **Timeline.** The box closes (#3340); the map without it until the colony,
+  413.8 ms (29 frames) after the close, `getNewColonyName` holding (#3369); woodcut
+  2 (first colony only) black 485.1 ms (34 frames) after the close and never sooner
+  than 72 ms after the colony's paint (`blackAfterFounding`, recorder
+  `founding-map`); the woodcut as in "Woodcuts"; the colony screen built while
+  the map shows and made visible 328 ms after the map came back (#4009 -> #4032;
+  before I6 it was built after the wait, ~130 ms late); @TUTORIAL4 514 ms later
+  (I4). A later colony: the screen as soon as the colony is on the map (I).
+- Tests: `ClassicFoundingTest` (warnings, COLONY.TXT, timeline, boxes; golden
+  #1002, #2789, #3218 0 px, the arrow and the field's one stray pixel of #3218
+  apart), `ClassicGUISeamTest.testTheFoundingAsTheOriginal`,
+  `ClassicAdvisorLayerTest.testADeclinedSiteWarningHoldsNothing` (Roger's freeze
+  report), `testWoodcutsOfTheColonyAndTheVillage`.
 
 ### The tutorial tips (master plan W11; I4)
 

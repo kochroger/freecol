@@ -236,6 +236,68 @@ final class ClassicText {
         }
     }
 
+    /** The colonies' default names by nation (master plan D4). */
+    static final String COLONY = "COLONY.TXT";
+
+    /** COLONY.TXT's lists by pack directory (an empty map: unreadable). */
+    private static final Map<File, Map<String, List<String>>> COLONY_NAMES = new HashMap<>();
+
+    /**
+     * A nation's default colony names ({@code COLONY.TXT}, which the
+     * converter copies), read once per pack directory: the section's
+     * lines up to {@code @STOP}, a year after a comma dropped
+     * ("Jamestown,1607" is "Jamestown").
+     *
+     * @param pack The pack (may be null).
+     * @param nation The section, e.g. {@code DUTCH}.
+     * @return The names in the file's order (shared, unmodifiable), or
+     *     null without the file or the section.
+     */
+    static List<String> colonyNames(ClassicPackFiles pack, String nation) {
+        if (pack == null || nation == null) return null;
+        Map<String, List<String>> m;
+        synchronized (COLONY_NAMES) {
+            m = COLONY_NAMES.get(pack.directory());
+            if (m == null) {
+                final File f = pack.textFile(COLONY);
+                m = Collections.emptyMap();
+                if (f != null) {
+                    try {
+                        m = colonyLists(Files.readAllBytes(f.toPath()));
+                    } catch (IOException e) {
+                        logger.log(Level.WARNING, "Unreadable " + f, e);
+                    }
+                }
+                COLONY_NAMES.put(pack.directory(), m);
+            }
+        }
+        final List<String> l = m.get(nation);
+        return (l == null || l.isEmpty()) ? null : l;
+    }
+
+    /**
+     * COLONY.TXT's lists: every section's names up to its {@code @STOP}
+     * (which the decoder reads as a section of its own) or a blank line,
+     * each up to a comma, trimmed.
+     *
+     * @param bytes The file.
+     * @return The lists by section (unmodifiable).
+     */
+    static Map<String, List<String>> colonyLists(byte[] bytes) {
+        final Map<String, List<String>> out = new HashMap<>();
+        for (Map.Entry<String, List<String>> e : sections(decode(bytes)).entrySet()) {
+            final List<String> names = new ArrayList<>();
+            for (String l : e.getValue()) {
+                final int comma = l.indexOf(',');
+                final String n = ((comma < 0) ? l : l.substring(0, comma)).trim();
+                if (n.isEmpty()) break;
+                names.add(n);
+            }
+            if (!names.isEmpty()) out.put(e.getKey(), Collections.unmodifiableList(names));
+        }
+        return Collections.unmodifiableMap(out);
+    }
+
     /**
      * The lines of {@code @WOODCUT}, the trailing blank lines dropped.
      *

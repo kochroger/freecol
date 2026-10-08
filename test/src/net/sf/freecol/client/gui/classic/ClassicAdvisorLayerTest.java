@@ -330,6 +330,22 @@ public class ClassicAdvisorLayerTest extends TestCase {
             .rows("a", "a a", "a a a").cancelRow(2).build();
     }
 
+    /** @NOPORT's shape ({@link ClassicFounding#noPortRequest}) in the test font. */
+    private static ClassicAdvisorBox.Request noPort() {
+        return ClassicAdvisorBox.Request.builder(ClassicFounding.NOPORT_SECTION)
+            .freeColText("a a a").rows("a", "a a").defaultRow(0).cancelRow(0)
+            .portrait(ClassicAdvisorBox.Portrait.SCOUT).build();
+    }
+
+    /** Run the timer and the clock until the asked box is up (a palette lead). */
+    private void showWhenDue() throws Exception {
+        for (int i = 0; i < 100 && !up(); i++) {
+            runTimer();
+            if (!up()) this.clock.advanceMs(5);
+        }
+        assertTrue(up());
+    }
+
 
     // Tests
 
@@ -577,6 +593,63 @@ public class ClassicAdvisorLayerTest extends TestCase {
         assertEquals(1, bar());
         key(KeyEvent.VK_ENTER);
         assertEquals(1, a.get());
+    }
+
+    /**
+     * D4, Roger's freeze report: a declined site warning (@NOPORT's first
+     * row, Enter where the bar stands) answers its caller at once and
+     * leaves the layer idle and hidden, so the map's keys go on (the turn
+     * continues); the same box again, Escape: its first row too; again,
+     * the second row; then the name box, Escape: dismissed, founds
+     * nothing.  Every caller has its own answer, none before its key (G5's
+     * nested-loop check, 1.5 s).
+     */
+    public void testADeclinedSiteWarningHoldsNothing() throws Exception {
+        // B on a land-locked site: Enter on the bar's row, "Oh, daran
+        // hatte ich nicht gedacht.": founds nothing.
+        final Answer a = ask(noPort());
+        flush();
+        showWhenDue();
+        assertEquals(0, bar());
+        key(KeyEvent.VK_ENTER);
+        assertEquals(0, a.get());
+        assertFalse(ClassicFounding.foundsAnyway(0));
+        assertFalse(up());
+        assertFalse(edt(() -> this.layer.isBusy()));
+        assertFalse(edt(() -> this.layer.isVisible()));   // the map's keys again
+        assertEquals(1, this.host.idle);
+        // B again: Escape, the same.
+        this.clock.advanceMs(1000);
+        final Answer b = ask(noPort());
+        flush();
+        showWhenDue();
+        key(KeyEvent.VK_ESCAPE);
+        assertEquals(0, b.get());
+        assertEquals(2, this.host.idle);
+        // B again: the second row founds; the name box after it, Escape.
+        this.clock.advanceMs(1000);
+        final Answer c = ask(noPort());
+        flush();
+        showWhenDue();
+        key(KeyEvent.VK_DOWN);
+        key(KeyEvent.VK_ENTER);
+        assertEquals(1, c.get());
+        assertTrue(ClassicFounding.foundsAnyway(1));
+        final ClassicAdvisorBox.Request name = ClassicAdvisorBox.Request
+            .builder(ClassicFounding.COLONY_SECTION).freeColText("a a").rows("a")
+            .portrait(ClassicAdvisorBox.Portrait.COLONIST).field("a a").build();
+        final Answer d = ask(name);
+        flush();
+        this.clock.advanceMs(ClassicAdvisorLayer.CHAIN_MS);
+        showWhenDue();
+        Thread.sleep(1500);                      // G5: no answer before its key
+        assertFalse(d.isDone());
+        key(KeyEvent.VK_ESCAPE);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, d.get());
+        assertNull(ClassicFounding.answered(name, d.get()));
+        assertFalse(up());
+        assertFalse(edt(() -> this.layer.isBusy()));
+        assertEquals(4, this.host.idle);
     }
 
     /**

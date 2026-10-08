@@ -214,10 +214,10 @@ public class ClassicGUISeamTest extends FreeColTestCase {
     /**
      * W0e: Escape (and the close button) answers "no" in every classic
      * confirm, whichever option Enter takes; Enter still takes the
-     * controller's default.  The confirms of the learn question, the site
-     * warnings (land-locked), the rumour and the hostile action, with
-     * their controller's {@code defaultOk} (the landing has its own box,
-     * {@link #testLandfallBox}).
+     * controller's default.  The confirms of the learn question, the rumour
+     * and the hostile action, with their controller's {@code defaultOk}
+     * (the landing has its own box, {@link #testLandfallBox}; the site
+     * warnings theirs, {@link #testTheFoundingAsTheOriginal}).
      */
     public void testEscapeAnswersNo() {
         final ClassicGUI gui = new ClassicGUI(null);
@@ -225,13 +225,10 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         gui.prompter = fake;
         final Player arawak = getStandardGame()
             .getPlayerByNationId("model.nation.arawak");
-        final StringTemplate landLocked = StringTemplate.label("\n")
-            .add("warning.landLocked");
         final Object[][] confirms = {
             { StringTemplate.template("learnSkill.text")
                   .addName("%skill%", "Pelzjäger"),
               "learnSkill.yes", "learnSkill.no", true },
-            { landLocked, "buildColony.yes", "buildColony.no", true },
             { StringTemplate.key("exploreLostCityRumour.text"),
               "exploreLostCityRumour.yes", "exploreLostCityRumour.no", true },
             { StringTemplate.template("confirmHostile.peace")
@@ -2833,7 +2830,9 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             };
             this.prompter = r -> {
                 this.order.add(r.id);
-                return ClassicAdvisorBox.Bar.DISMISSED;
+                // A name box (D4's @COLONY): Enter on the default.
+                return (r.hasField()) ? new ClassicAdvisorBox.Bar(r).enter()
+                    : ClassicAdvisorBox.Bar.DISMISSED;
             };
         }
 
@@ -2995,6 +2994,149 @@ public class ClassicGUISeamTest extends FreeColTestCase {
     }
 
     /**
+     * D4: the founding as in the original.  FreeCol's site warnings: a
+     * land-locked site is @NOPORT with the frontiersman, the bar on "Oh,
+     * daran hatte ich nicht gedacht.", which, like Escape and a click
+     * beside it, founds nothing (Roger's freeze report: the answer comes
+     * back at once); only the second row founds; the other warnings found
+     * without a box.  The name: @COLONY with COLONY.TXT's first unused
+     * name, Enter founds with it (not before the colony's 414 ms), typing
+     * replaces it, Escape founds nothing at once (no woodcut), a name in
+     * use is FreeCol's notice and founds nothing.  FreeCol's controller
+     * asks both before it tells the server: a refusal uses nothing.
+     */
+    public void testTheFoundingAsTheOriginal() throws Exception {
+        // The controller: the warnings and the name before the server.
+        final String igc = new String(Files.readAllBytes(new File(
+            "src/net/sf/freecol/client/control/InGameController.java").toPath()),
+            StandardCharsets.UTF_8);
+        final int at = igc.indexOf("public boolean buildColony(Unit unit)");
+        assertTrue(at > 0);
+        final int warn = igc.indexOf("modalConfirmDialog(tile, warnings", at);
+        final int warnNo = igc.indexOf("return false;", warn);
+        final int ask = igc.indexOf("getGUI().getNewColonyName(player, tile)", at);
+        final int nameNo = igc.indexOf("if (name == null) return false;", at);
+        final int server = igc.indexOf("askServer().buildColony(name, unit)", at);
+        assertTrue(warn > at && warnNo > warn && ask > warnNo && nameNo > ask
+                   && server > nameNo);
+
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicText text = ClassicText.load(pack);
+        if (text == null) {
+            System.err.println(getClass().getSimpleName() + ": founding skipped, no pack");
+            return;
+        }
+        final Game game = getStandardGame();
+        final Map map = getTestMap(true);
+        game.changeMap(map);
+        final Colony colony = createStandardColony();
+        final Player dutch = colony.getOwner();
+        final WoodcutGUI gui = new WoodcutGUI(game, dutch);
+        final KeyPrompter keys = new KeyPrompter();
+        final List<String> typing = new ArrayList<>();
+        gui.prompter = r -> {
+            gui.order.add(r.id);
+            if (!typing.isEmpty() && r.hasField()) {
+                final ClassicAdvisorBox.Bar b = new ClassicAdvisorBox.Bar(r);
+                for (char c : typing.get(0).toCharArray()) b.type(c, null);
+                return b.enter();
+            }
+            return keys.ask(r);
+        };
+        // A colonist inland, all land around: FreeCol warns land-locked.
+        final Tile site = map.getTile(map.getWidth() / 2 + 3, map.getHeight() / 2 + 3);
+        final Unit colonist = new ServerUnit(game, site, dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        final StringTemplate warnings = site.getBuildColonyWarnings(colonist);
+        assertTrue(ClassicFounding.landLocked(warnings));
+        final int moves = colonist.getMovesLeft();
+        final Object[][] answers = {
+            { new String[] { "ENTER" }, false },          // the bar's row: Nein
+            { new String[] { "ESC" }, false },
+            { new String[] { "OUT" }, false },            // a click beside it
+            { new String[] { "DOWN", "UP", "ENTER" }, false },
+            { new String[] { "DOWN", "ENTER" }, true },   // "genau das, was ich vorhatte"
+        };
+        for (Object[] a : answers) {
+            keys.press((String[]) a[0]);
+            gui.order.clear();
+            final long t0 = System.nanoTime();
+            final boolean[] got = { !(Boolean) a[1] };
+            onEdt(() -> got[0] = gui.modalConfirmDialog(site, warnings, (ImageIcon) null,
+                "buildColony.yes", "buildColony.no", true));
+            assertEquals(Arrays.toString((String[]) a[0]), a[1], got[0]);
+            assertEquals(List.of(ClassicFounding.NOPORT_SECTION), gui.order);
+            assertTrue("answered at once", System.nanoTime() - t0 < 1_000_000_000L);
+            final ClassicAdvisorBox.Request r = last(keys.boxes);
+            assertSame(ClassicAdvisorBox.Portrait.SCOUT, r.portrait);
+            assertEquals(0, r.defaultRow);
+        }
+        assertEquals(moves, colonist.getMovesLeft());
+        // The other warnings: no box, found.
+        gui.order.clear();
+        final StringTemplate food = StringTemplate.label("\n").add("warning.noFood");
+        final boolean[] silent = { false };
+        onEdt(() -> silent[0] = gui.modalConfirmDialog(site, food, (ImageIcon) null,
+            "buildColony.yes", "buildColony.no", true));
+        assertTrue(silent[0]);
+        assertTrue(gui.order.isEmpty());
+
+        // The name: the first COLONY.TXT name no settlement has.
+        final String dflt = ClassicFounding.defaultName(
+            ClassicText.colonyNames(pack, "DUTCH"), game);
+        assertNotNull(dflt);
+        assertFalse(dflt.equals(colony.getName()));
+        final Tile home = colony.getTile();
+        final String[] name = { null };
+        // Escape: nothing, at once, no founding noted.
+        keys.press("ESC");
+        gui.order.clear();
+        long t0 = System.nanoTime();
+        onEdt(() -> name[0] = gui.getNewColonyName(dutch, home));
+        assertNull(name[0]);
+        assertTrue(System.nanoTime() - t0 < 300_000_000L);
+        assertEquals(List.of(ClassicFounding.COLONY_SECTION), gui.order);
+        final ClassicAdvisorBox.Request box = last(keys.boxes);
+        assertEquals(dflt, box.field.initial);
+        assertSame(ClassicAdvisorBox.Portrait.COLONIST, box.portrait);
+        onEdt(() -> gui.showColonyPanel(colony, null));
+        onEdt(() -> { });
+        assertFalse(gui.order.contains("woodcut 2"));
+        // A click beside the box does nothing: the box stays (here: left
+        // open, as not answered), nothing founded.
+        keys.press("OUT");
+        onEdt(() -> name[0] = gui.getNewColonyName(dutch, home));
+        assertNull(name[0]);
+        // Enter: the default, the colony 414 ms after the close.
+        keys.press("ENTER");
+        t0 = System.nanoTime();
+        onEdt(() -> name[0] = gui.getNewColonyName(dutch, home));
+        assertEquals(dflt, name[0]);
+        assertTrue(System.nanoTime() - t0 >= 410_000_000L);
+        // Typed: "Base".
+        typing.add("Base");
+        onEdt(() -> name[0] = gui.getNewColonyName(dutch, home));
+        assertEquals("Base", name[0]);
+        // A name in use: FreeCol's notice, nothing founded.
+        typing.set(0, colony.getName());
+        gui.order.clear();
+        onEdt(() -> name[0] = gui.getNewColonyName(dutch, home));
+        assertNull(name[0]);
+        assertEquals(List.of(ClassicFounding.COLONY_SECTION,
+                             "notice nameColony.notUnique"), gui.order);
+        // Another nation's settlement's name too (the server refuses it).
+        final IndianSettlement is = new IndianSettlementBuilder(game)
+            .player(game.getPlayerByNationId("model.nation.arawak"))
+            .settlementTile(map.getTile(3, 3)).build();
+        typing.set(0, is.getName());
+        gui.order.clear();
+        onEdt(() -> name[0] = gui.getNewColonyName(dutch, home));
+        assertNull(is.getName(), name[0]);
+        assertEquals(List.of(ClassicFounding.COLONY_SECTION,
+                             "notice nameColony.notUnique"), gui.order);
+    }
+
+    /**
      * W9: the first colony's woodcut 2 comes between the founding (the
      * name, {@code getNewColonyName}) and its colony screen; opening a
      * colony later, and a second founding, show none.  The first village
@@ -3012,11 +3154,16 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         onEdt(() -> gui.showColonyPanel(colony, null));
         onEdt(() -> { });
         assertTrue(gui.order.isEmpty());
+        // The name box (D4) first, Enter on the default.
+        final boolean box = ClassicText.load(ClassicPackFiles.runtime()) != null;
         onEdt(() -> gui.getNewColonyName(dutch, colony.getTile()));
         onEdt(() -> gui.showColonyPanel(colony, null));
         onEdt(() -> { });
-        assertEquals(List.of("woodcut 2"), gui.order);
+        assertEquals((box) ? List.of(ClassicFounding.COLONY_SECTION, "woodcut 2")
+                     : List.of("woodcut 2"), gui.order);
+        gui.order.remove(ClassicFounding.COLONY_SECTION);
         onEdt(() -> gui.getNewColonyName(dutch, colony.getTile()));
+        gui.order.remove(ClassicFounding.COLONY_SECTION);
         onEdt(() -> gui.showColonyPanel(colony, null));
         onEdt(() -> { });
         assertEquals(List.of("woodcut 2"), gui.order);
