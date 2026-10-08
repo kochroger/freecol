@@ -6862,7 +6862,7 @@ public class ClassicGUI extends GUI {
         if (tips.isEmpty()) {
             timer.cancel();
         } else {
-            timer.schedule(tips.get(0).due, () -> runTips(waitClock().now()));
+            timer.schedule(tips.get(0).due - TIP_LEAD_NANOS, () -> runTips(waitClock().now()));
         }
     }
 
@@ -6877,7 +6877,7 @@ public class ClassicGUI extends GUI {
         final List<Tip> tips = pendingTips();
         if (tips.isEmpty()) return;
         final Tip next = tips.get(0);
-        if (next.due > now) {
+        if (next.due - TIP_LEAD_NANOS > now) {
             armTips();
             return;
         }
@@ -6888,20 +6888,32 @@ public class ClassicGUI extends GUI {
             }
             return;
         }
+        long showAt = next.due;
         final long closed = boxClosedAt();
         if (closed != Long.MIN_VALUE && closed > next.asked) {
             final long after = closed + ClassicVoyages.nanos(ClassicTips.TIP_MS);
-            if (after > now) {
+            if (after - TIP_LEAD_NANOS > now) {
                 if (this.adviceTimer != null) {
-                    this.adviceTimer.schedule(after, () -> runTips(waitClock().now()));
+                    this.adviceTimer.schedule(after - TIP_LEAD_NANOS,
+                                              () -> runTips(waitClock().now()));
                 }
                 return;
             }
+            showAt = Math.max(showAt, after);
         }
         this.pendingTips.remove(next);
-        showTip(next);
+        showTip(next, showAt);
         armTips();
     }
+
+    /**
+     * A tip is asked this much before its moment, so the box layer can load
+     * its advisor's palette in the lead and show it on time
+     * ({@code Request.showAtNanos}; V: @TUTORIAL5 457 ms after @UNREST with
+     * the admiral's palette in between).
+     */
+    static final long TIP_LEAD_NANOS = ClassicVoyages.nanos(
+        ClassicAdvisorLayer.PALETTE_LEAD_MS + ClassicAdvisorLayer.FRAME_MS);
 
     /**
      * Show a due tip if it still fits: a unit tip only while its unit is
@@ -6910,8 +6922,9 @@ public class ClassicGUI extends GUI {
      * at its next trigger.  EDT only.
      *
      * @param tip The tip.
+     * @param showAt When the box is to appear (its advisor's palette before).
      */
-    private void showTip(Tip tip) {
+    private void showTip(Tip tip, long showAt) {
         final Player me = myPlayer();
         if (me == null || !tipsOn() || tipShown(me, tip.k)) return;
         final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
@@ -6938,7 +6951,7 @@ public class ClassicGUI extends GUI {
         } else {
             values = tip.values;
         }
-        final ClassicAdvisorBox.Request r = ClassicTips.request(t, tip.k, values);
+        final ClassicAdvisorBox.Request r = ClassicTips.request(t, tip.k, values, showAt);
         if (r == null) return;   // no pack: FreeCol has no such tip
         markTip(me, tip.k);
         ClassicFrameRecorder.event("tip", ClassicTips.section(tip.k));

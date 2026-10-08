@@ -2657,11 +2657,14 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         onEdt(() -> gui.landNamed(1000 * MS));
         assertEquals(1, gui.pendingTips().size());
         assertEquals(1457 * MS, gui.pendingTips().get(0).due);
-        onEdt(() -> gui.runTips(1456 * MS));
+        onEdt(() -> gui.runTips(1457 * MS - ClassicGUI.TIP_LEAD_NANOS - 1));
         assertTrue(gui.order.isEmpty());
-        onEdt(() -> gui.runTips(1457 * MS));
+        onEdt(() -> gui.runTips(1457 * MS - ClassicGUI.TIP_LEAD_NANOS));
         assertEquals(List.of("TUTORIAL2"), gui.order);
         assertSame(ClassicAdvisorBox.Portrait.ADMIRAL, fake.boxes.get(0).portrait);
+        // Asked a palette lead early, shown on time (the box layer's showAt).
+        assertEquals(1457 * MS, fake.boxes.get(0).showAtNanos);
+        assertTrue(ClassicGUI.TIP_LEAD_NANOS >= ClassicVoyages.nanos(ClassicAdvisorLayer.PALETTE_LEAD_MS));
         assertTrue(ClassicGUI.tipShown(dutch, 2));
         onEdt(() -> gui.landNamed(2000 * MS));                // once per game
         assertTrue(gui.pendingTips().isEmpty());
@@ -2691,6 +2694,7 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertTrue(gui.order.isEmpty());
         onEdt(() -> gui.runTips(5057 * MS));
         assertEquals(List.of("TUTORIAL13"), gui.order);
+        assertEquals(5057 * MS, fake.boxes.get(fake.boxes.size() - 1).showAtNanos);
         gui.closedAt = Long.MIN_VALUE;
         // The soldier up, but the pioneer up again by its moment: dropped, not marked.
         onEdt(() -> gui.unitUp(soldier, 6000 * MS));

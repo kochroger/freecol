@@ -2175,6 +2175,11 @@ options box's row = FreeCol's `model.option.guiShowTutorial`). FreeCol's own
   (a click, the view's first unit, the turn start, `bringNow`) gets its tip
   457 ms after it came up; a unit whose tip came at its switch gets none at
   its activation. Order when several fit: 11, 13, 14, 3; one per switch.
+- **On time with another advisor:** a tip is asked `TIP_LEAD_NANOS` (the
+  palette lead, 3 frames, plus one) before its moment with the box's
+  `showAt`, so the layer loads the advisor's palette in the lead and the box
+  appears at the moment (the first live run had @TUTORIAL13's box 75 ms late:
+  the lead came after the moment).
 - **Dropped, not marked** (it comes at its next trigger): a unit tip when
   another unit is up or coming by then, or the map is not what the player
   sees; a colony tip when its screen closed. A box up holds a tip (polled);

@@ -150,11 +150,30 @@ final class ClassicTips {
      */
     static ClassicAdvisorBox.Request request(ClassicText t, int k,
                                              Map<String, String> values) {
+        return request(t, k, values, 0L);
+    }
+
+    /**
+     * {@link #request(ClassicText, int, Map)} shown at a given time, its
+     * advisor's palette in the lead before it (the box layer's
+     * {@code showAtNanos}).
+     *
+     * @param t The original texts, or null.
+     * @param k The tip's number.
+     * @param values The values.
+     * @param showAtNanos When the box appears (clock ns), or 0 for at once.
+     * @return The box, or null without the text.
+     */
+    static ClassicAdvisorBox.Request request(ClassicText t, int k,
+                                             Map<String, String> values,
+                                             long showAtNanos) {
         final String s = section(k);
         final ClassicText.Message m = (t == null) ? null : t.message(s);
         final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText(s, m, values);
+        if (b == null) return null;
+        if (showAtNanos != 0L) b.showAt(showAtNanos);
         // GAME.TXT's @x (only @TUTORIAL4 of these has one: x 10, clip008 #4068).
-        return (b == null) ? null : b.portrait(portrait(k)).x(m.x)
+        return b.portrait(portrait(k)).x(m.x)
             .stopgap(Messages.message("classic.dialog.messages"), null).build();
     }
 
