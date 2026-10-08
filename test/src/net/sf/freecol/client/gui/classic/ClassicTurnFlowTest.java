@@ -110,6 +110,14 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
             this.coming.add(unit.getId() + "@" + baseNanos);
         }
 
+        /** How many hand-overs of any kind started (K2). */
+        int handOvers = 0;
+
+        @Override
+        public void handOverStarted() {
+            this.handOvers++;
+        }
+
         @Override
         public ClassicUnitCycle.Kind dueKind(Unit unit) {
             return (this.real != null) ? this.real.kind(unit) : this.kinds.get(unit);
@@ -1212,6 +1220,62 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertTrue(r.flow.unitChosen(b, b) || r.flow.unitChosen(a, b));
         assertSame(g, r.flow.pending().unit);
         assertEquals(1, r.host.coming.size());
+    }
+
+    /**
+     * K2: every hand-over tells the host at its start, of any kind (an
+     * activation, a goto run, a visit): the cycle has moved past the unit
+     * up, and one drawn in its colony's place gives the colony back then
+     * (Roger's soldier in Base Silver after W, F or S).  A kept hand-over
+     * does not tell it again; a turn start does not tell it.
+     */
+    public void testHandOverStartTellsTheHost() {
+        final Unit a = ship(5, 5), b = ship(7, 5);
+        final Rig r = new Rig(this.game);
+        r.host.active = a;
+        a.setMovesLeft(0);
+        r.flow.screenChanged();
+        r.clock.advanceMs(2);
+        assertEquals(0, r.host.handOvers);
+        assertTrue(r.flow.unitChosen(b, a));
+        assertEquals(1, r.host.handOvers);
+        assertTrue(r.flow.unitChosen(b, a));        // kept: not again
+        assertEquals(1, r.host.handOvers);
+        r.advanceMs(500);
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertEquals(1, r.host.handOvers);
+        // A goto run's hand-over.
+        final Unit g = ship(9, 5);
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.cycle = x -> (x == b) ? g : null;
+        b.setMovesLeft(0);
+        r.flow.screenChanged();
+        r.clock.advanceMs(2);
+        assertTrue(r.flow.unitChosen(b, b) || r.flow.unitChosen(a, b));
+        assertSame(g, r.flow.pending().unit);
+        assertEquals(2, r.host.handOvers);
+
+        // A visit's hand-over.
+        final Unit c = ship(11, 5), v = ship(13, 5);
+        final Rig s = new Rig(this.game);
+        s.host.active = c;
+        s.host.kinds.put(v, ClassicUnitCycle.Kind.VISIT);
+        s.host.cycle = x -> (x == c) ? v : null;
+        c.setMovesLeft(0);
+        s.flow.screenChanged();
+        assertTrue(s.flow.unitChosen(c, c) || s.flow.unitChosen(a, c));
+        assertSame(v, s.flow.pending().unit);
+        assertEquals(1, s.host.handOvers);
+
+        // A turn start: no hand-over.
+        final Rig t = new Rig(this.game);
+        nextTurn(t, 2);
+        t.host.kinds.put(b, ClassicUnitCycle.Kind.ORDERS);
+        t.host.cycle = x -> (x == null) ? b : null;
+        b.setMovesLeft(3);
+        assertTrue(t.flow.unitChosen(b, null));
+        assertEquals(ClassicTurnFlow.Kind.TURN_START, t.flow.pending().kind);
+        assertEquals(0, t.host.handOvers);
     }
 
     /** A box up when the next unit is due: it comes up with the close. */

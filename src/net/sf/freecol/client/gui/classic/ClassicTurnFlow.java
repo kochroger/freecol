@@ -251,6 +251,13 @@ final class ClassicTurnFlow {
         default void unitComing(Unit unit, long baseNanos) {}
 
         /**
+         * A hand-over has started, of any kind (an activation, a goto run,
+         * a visit): the cycle has moved past the unit up, and a unit drawn
+         * in its colony's place gives the colony back now (K2).
+         */
+        default void handOverStarted() {}
+
+        /**
          * @param unit A unit.
          * @return Why the unit cycle has it due now, or null
          *     ({@link ClassicUnitCycle#kind}).
@@ -1834,6 +1841,7 @@ final class ClassicTurnFlow {
 
     private void start(Pending p) {
         this.pending = p;
+        if (p.kind == Kind.HANDOVER) this.host.handOverStarted();
         // The unit's tutorial tip at the switch (W11), from the last change;
         // not for a goto run or a visit (their last stage is not ACTIVATE).
         if (p.kind == Kind.HANDOVER && p.unit != null && p.base != 0L

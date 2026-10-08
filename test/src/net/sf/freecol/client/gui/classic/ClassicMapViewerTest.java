@@ -761,7 +761,7 @@ public class ClassicMapViewerTest extends FreeColTestCase {
     }
 
     /**
-     * Critic 5 and 4 (design 10 §6.1, W6a): the layer reads the explored
+     * Critic 5 and 4 (design 10 Â§6.1, W6a): the layer reads the explored
      * state as shown.  A slide whose model already holds the reveal (a
      * server-pushed move) paints no new tile before its final draw, not
      * even in its 3-px margins; the final draw shows it and paints the
@@ -995,7 +995,7 @@ public class ClassicMapViewerTest extends FreeColTestCase {
     /**
      * Without the pack's index sheets (and in the adaptive layout) the map
      * draws the RGBA fallback: an unexplored tile flat in the dark sea's
-     * colour, VICEROY's index 61 (design 10 §4).
+     * colour, VICEROY's index 61 (design 10 Â§4).
      */
     public void testFallbackDrawsUnexploredDark() {
         final Game server = seaGame();
@@ -1041,7 +1041,7 @@ public class ClassicMapViewerTest extends FreeColTestCase {
     }
 
     /**
-     * The water cycle on the map (M1c design 10 §7.2/§7.3, W6c; Critic 3):
+     * The water cycle on the map (M1c design 10 Â§7.2/Â§7.3, W6c; Critic 3):
      * a palette step due in the middle of a slide is painted at its own
      * deadline, between two slide steps, with the new colours at once; a
      * step while the slide's final draw is due paints that final draw (the
@@ -1605,5 +1605,337 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         assertEquals(2, roadFrames(map, a).size());
         ra.setTurnsToComplete(3);
         assertEquals(List.of(ClassicTileArt.ROAD_HUB), roadFrames(map, b));
+    }
+
+    /** A GUI whose turn flow brings {@code coming[0]} and holds no blink. */
+    private static ClassicGUI cycleGui(final Unit[] coming) {
+        return new ClassicGUI(null) {
+                @Override
+                Unit comingUnit() {
+                    return coming[0];
+                }
+
+                @Override
+                String blinkHoldReason() {
+                    return null;
+                }
+            };
+    }
+
+    /**
+     * K2 (Roger's test of abc27b588, k\REPRO.md section 2: his soldier sent
+     * with G to Base Silver "vanished" there; the cycle brought him, the
+     * panel showed him, the map drew only the colony).  The unit up on our
+     * colony's tile is drawn there in the colony's place while its blink
+     * is ON and the colony while OFF, as the original draws the
+     * merchantman up in Base (clip008 #35590 ON, #35613 OFF); the colony
+     * as soon as the unit is done or the cycle moved past it (its last
+     * move: #50603 -&gt; #50610), and under every unit there that is not
+     * up, the colony's workers included (#32928).
+     */
+    public void testAUnitUpOnItsColonyTile() {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final net.sf.freecol.common.model.Colony colony = createStandardColony(1, 9, 7);
+        assertSame(dutch, colony.getOwner());
+        final Tile base = colony.getTile();
+        final Unit worker = colony.getUnitList().get(0);
+        assertTrue(worker.isInColony());
+        assertSame(base, worker.getTile());
+        final Unit soldier = new ServerUnit(game, base, dutch,
+            spec().getUnitType("model.unit.veteranSoldier"));
+        final Unit other = new ServerUnit(game, map.getTile(5, 7), dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        final int moves = soldier.getMovesLeft();
+        assertTrue(moves > 0);
+        assertEquals(Unit.UnitState.ACTIVE, soldier.getState());
+        final Unit[] coming = { null };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, cycleGui(coming), null, false);
+        try {
+            mv.setFocus(base);
+            // Nobody up: the colony, its soldier and its worker under it.
+            assertNull(mv.unitOverSettlement(base));
+            assertFalse(mv.isShownAt(soldier, base));
+            assertNull(mv.unitOverSettlement(map.getTile(5, 7)));   // no settlement
+
+            // The soldier comes up (Roger's turn 14): ON, in Base's place,
+            // with no marker (the worker is in a building, not on the
+            // tile); a key starts his slide at offset 1.
+            mv.changeToMoveUnits(soldier);
+            assertTrue(mv.isBlinkArmed());
+            assertSame(soldier, mv.unitOverSettlement(base));
+            assertTrue(mv.isShownAt(soldier, base));
+            assertFalse(mv.isShownAt(worker, base));
+            assertSame(ClassicHud.NO_MARKER, mv.markerOf(soldier, base));
+            assertFalse(ClassicMapViewer.startsAtOffsetZero(false, true,
+                mv.isShownAt(soldier, base)));
+            // OFF: Base; a key then starts at offset 0 (#35751 -> #35756).
+            mv.setBlinkOff(true);
+            assertNull(mv.unitOverSettlement(base));
+            assertFalse(mv.isShownAt(soldier, base));
+            assertTrue(ClassicMapViewer.startsAtOffsetZero(false, true,
+                mv.isShownAt(soldier, base)));
+            mv.setBlinkOff(false);
+            assertSame(soldier, mv.unitOverSettlement(base));
+            // A box over the map while OFF: ON and held, the soldier.
+            mv.setBlinkOff(true);
+            mv.holdBlink("dialog");
+            assertSame(soldier, mv.unitOverSettlement(base));
+            mv.resumeBlink("dialog");
+            assertSame(soldier, mv.unitOverSettlement(base));
+
+            // The cycle moved past him (W, F, S: a hand-over to another
+            // unit pending): Base.  A hand-over to him: he is up.
+            coming[0] = other;
+            assertNull(mv.unitOverSettlement(base));
+            coming[0] = soldier;
+            assertSame(soldier, mv.unitOverSettlement(base));
+            coming[0] = null;
+
+            // Done: no moves left (his last move, the farmer #50610),
+            // skipped (Space), sentried or fortified: Base.
+            soldier.setMovesLeft(0);
+            assertNull(mv.unitOverSettlement(base));
+            soldier.setMovesLeft(moves);
+            for (Unit.UnitState s : new Unit.UnitState[] { Unit.UnitState.SKIPPED,
+                    Unit.UnitState.SENTRY, Unit.UnitState.FORTIFYING }) {
+                soldier.setState(s);
+                assertNull(s.toString(), mv.unitOverSettlement(base));
+                soldier.setState(Unit.UnitState.ACTIVE);
+                soldier.setMovesLeft(moves);
+                assertSame(soldier, mv.unitOverSettlement(base));
+            }
+            // A unit working in the colony is never drawn, even as the
+            // active unit.
+            mv.changeToMoveUnits(worker);
+            assertNull(mv.unitOverSettlement(base));
+            assertFalse(mv.isShownAt(worker, base));
+
+            // Another unit up elsewhere: Base.
+            mv.changeToMoveUnits(other);
+            assertNull(mv.unitOverSettlement(base));
+            assertTrue(mv.isShownAt(other, other.getTile()));
+
+            // The visit of his completed fortification (W5f): drawn for it
+            // (I), not in the Spielzugende mode, gone with the next unit.
+            soldier.setState(Unit.UnitState.FORTIFYING);
+            soldier.setState(Unit.UnitState.FORTIFIED);
+            assertEquals(0, soldier.getMovesLeft());
+            mv.visit(soldier);
+            assertSame(soldier, mv.unitOverSettlement(base));
+            mv.enterPrompt(base);
+            assertNull(mv.unitOverSettlement(base));
+            mv.freezePrompt();                      // the end: the square frozen
+            assertSame(soldier, mv.unitOverSettlement(base));
+            mv.changeToMoveUnits(other);
+            assertNull(mv.unitOverSettlement(base));
+            mv.visit(soldier);
+            mv.changeToEndTurn();
+            assertNull(mv.unitOverSettlement(base));
+            soldier.setState(Unit.UnitState.ACTIVE);
+            soldier.setMovesLeft(moves);
+
+            // The original's case: the merchantman up in Base (clip008
+            // #35590), with its cargo marker; the soldier up next to it
+            // has the stack marker.
+            final Unit ship = new ServerUnit(game, base, dutch,
+                spec().getUnitType("model.unit.merchantman"));
+            final Unit passenger = new ServerUnit(game, ship, dutch,
+                spec().getUnitType("model.unit.freeColonist"));
+            assertNotNull(passenger);
+            mv.changeToMoveUnits(ship);
+            assertSame(ship, mv.unitOverSettlement(base));
+            assertSame(ClassicHud.CARGO_MARKER, mv.markerOf(ship, base));
+            mv.changeToMoveUnits(soldier);
+            assertSame(soldier, mv.unitOverSettlement(base));
+            assertSame(ClassicHud.STACK_MARKER, mv.markerOf(soldier, base));
+            mv.changeToTerrain(base);
+            assertNull(mv.unitOverSettlement(base));
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /** The cell of tile {@code (x, y)} at origin {@code o}: {magenta, cyan} pixels. */
+    private static int[] cellColours(java.awt.image.BufferedImage img, int[] o, int x, int y) {
+        final int cx = (x - o[0]) * 16, cy = (y - o[1]) * 16;
+        int m = 0, c = 0;
+        for (int py = cy; py < cy + 16; py++) {
+            for (int px = cx; px < cx + 16; px++) {
+                final int p = img.getRGB(px, py) & 0xFFFFFF;
+                if (p == 0xFF00FF) m++;
+                if (p == 0x00FFFF) c++;
+            }
+        }
+        return new int[] { m, c };
+    }
+
+    /**
+     * Art for the pixel tests: every unit an 8x8 magenta square in its
+     * 16x16 sprite, every settlement a 16x16 cyan square (no terrain: no
+     * image library).
+     */
+    private static void squaresArt(ClassicMapViewer mv) {
+        final java.awt.image.BufferedImage unit = new java.awt.image.BufferedImage(
+            16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        final java.awt.image.BufferedImage town = new java.awt.image.BufferedImage(
+            16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 16; y++) {
+            for (int x = 0; x < 16; x++) {
+                town.setRGB(x, y, 0xFF00FFFF);
+                if (x >= 4 && x < 12 && y >= 4 && y < 12) unit.setRGB(x, y, 0xFFFF00FF);
+            }
+        }
+        mv.setTestArt(u -> unit, s -> town);
+    }
+
+    /** The whole map painted into its offscreen image now. */
+    private static void paintAll(ClassicMapViewer mv, java.awt.image.BufferedImage img) {
+        final java.awt.Graphics2D g = img.createGraphics();
+        try {
+            mv.paintComponent(g);
+        } finally {
+            g.dispose();
+        }
+    }
+
+    /**
+     * K2 on the screen: Base's cell shows the soldier up and no colony
+     * while ON, the colony and no soldier while OFF; Space and the cycle
+     * moving past him give the colony back at once (no blink change).  A
+     * slide out of the colony shows offset 0 in the colony's place and the
+     * colony back behind the sprite from offset 1 on (clip008 #35756,
+     * #35757); a last move into the colony shows the sprite over it at
+     * the hold and the colony alone at the final draw (#50603, #50610).
+     */
+    public void testTheColonyCellShowsTheUnitUp() throws Exception {
+        final Game game = getStandardGame();
+        final Map map = new MapBuilder(game).setDimensions(58, 72)
+            .setBaseTileType(spec().getTileType("model.tile.plains"))
+            .setExploredByAll(true).build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final net.sf.freecol.common.model.Colony colony = createStandardColony(1, 30, 30);
+        final Tile base = colony.getTile();
+        final Unit soldier = new ServerUnit(game, base, dutch,
+            spec().getUnitType("model.unit.veteranSoldier"));
+        final Tile east = map.getTile(31, 30);
+        final Unit farmer = new ServerUnit(game, east, dutch,
+            spec().getUnitType("model.unit.expertFarmer"));
+        final int moves = soldier.getMovesLeft();
+        final Unit[] coming = { null };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, cycleGui(coming),
+                                                         null, false);
+        final java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+            240, 192, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        try {
+            squaresArt(mv);
+            mv.setFixedScale(1);
+            mv.paintOffscreen(img);
+            mv.setFocus(base);
+            int[] o = mv.peekViewOrigin();
+            assertEquals(7, 30 - o[0]);
+            paintAll(mv, img);
+            int[] mc = cellColours(img, o, 30, 30);
+            assertEquals(0, mc[0]);                       // nobody up: Base
+            assertEquals(256, mc[1]);
+
+            mv.changeToMoveUnits(soldier);
+            paintAll(mv, img);
+            mc = cellColours(img, o, 30, 30);
+            assertTrue(mc[0] > 0);                        // ON: the soldier
+            assertEquals(0, mc[1]);                       // and no Base
+            mv.setBlinkOff(true);                         // OFF: the cell now
+            mc = cellColours(img, o, 30, 30);
+            assertEquals(0, mc[0]);
+            assertEquals(256, mc[1]);
+            mv.setBlinkOff(false);
+            mc = cellColours(img, o, 30, 30);
+            assertTrue(mc[0] > 0);
+            assertEquals(0, mc[1]);
+
+            // Space: no blink change, Base back at once.
+            soldier.setState(Unit.UnitState.SKIPPED);
+            mv.rearmBlink("skip");
+            assertFalse(mv.isBlinkArmed());
+            mc = cellColours(img, o, 30, 30);
+            assertEquals(0, mc[0]);
+            assertEquals(256, mc[1]);
+            soldier.setState(Unit.UnitState.ACTIVE);
+            mv.changeToMoveUnits(soldier);
+            paintAll(mv, img);
+            assertTrue(cellColours(img, o, 30, 30)[0] > 0);
+            // W: the hand-over to the next unit starts (the turn flow's
+            // hook): Base back at once.
+            coming[0] = farmer;
+            mv.refreshCover();
+            mc = cellColours(img, o, 30, 30);
+            assertEquals(0, mc[0]);
+            assertEquals(256, mc[1]);
+            coming[0] = null;
+            paintAll(mv, img);
+            assertTrue(cellColours(img, o, 30, 30)[0] > 0);
+
+            // The slide out of Base, with the view's jump (Base in the
+            // margin): offset 0 in Base's place, Base back from offset 1.
+            mv.setFocus(map.getTile(36, 30));
+            o = mv.peekViewOrigin();
+            assertEquals(1, 30 - o[0]);
+            paintAll(mv, img);
+            final List<int[]> frames = new ArrayList<>();
+            final ClassicMapViewer view = mv;
+            final ClassicSlide.Clock clock = new ClassicSlide.Clock() {
+                    long now = System.nanoTime();
+
+                    @Override
+                    public long now() {
+                        return this.now;
+                    }
+
+                    @Override
+                    public void waitUntil(long due) {
+                        frames.add(cellColours(img, view.peekViewOrigin(), 30, 30));
+                        if (due > this.now) this.now = due;
+                    }
+                };
+            mv.setSlideClock(clock);
+            mv.animateMove(soldier, base, map.getTile(29, 30));
+            o = mv.peekViewOrigin();
+            assertEquals(7, 30 - o[0]);                   // the jump
+            assertEquals(ClassicSlide.LAST_STEP + 1, frames.size());
+            assertTrue(frames.get(0)[0] > 0);             // offset 0: the soldier
+            assertEquals(0, frames.get(0)[1]);            // in Base's place
+            assertTrue(frames.get(1)[0] > 0);             // offset 1: the soldier
+            assertTrue(frames.get(1)[1] > 0);             // over Base
+            mv.finalDraw();
+
+            // The farmer's last move into Base: over it at the hold, Base
+            // alone at the final draw (no moves left); with moves left he
+            // is up there, in Base's place.
+            mv.changeToMoveUnits(farmer);
+            paintAll(mv, img);
+            frames.clear();
+            mv.animateMove(farmer, east, base);
+            final int[] hold = frames.get(frames.size() - 1);
+            assertTrue(hold[0] > 0);
+            assertTrue(hold[1] > 0);
+            farmer.setLocation(base);
+            farmer.setMovesLeft(0);
+            mv.finalDraw();
+            mc = cellColours(img, o, 30, 30);
+            assertEquals(0, mc[0]);
+            assertEquals(256, mc[1]);
+            farmer.setMovesLeft(1);
+            mv.changeToMoveUnits(farmer);
+            paintAll(mv, img);
+            mc = cellColours(img, o, 30, 30);
+            assertTrue(mc[0] > 0);
+            assertEquals(0, mc[1]);
+            assertEquals(moves, soldier.getMovesLeft());
+        } finally {
+            mv.dispose();
+        }
     }
 }

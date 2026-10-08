@@ -3003,6 +3003,13 @@ public class ClassicGUI extends GUI {
         }
 
         @Override
+        public void handOverStarted() {
+            // A unit up on our colony's tile that the cycle has moved past
+            // (W, F, S) gives the colony back now (K2).
+            if (mapViewer != null) mapViewer.refreshCover();
+        }
+
+        @Override
         public boolean hasNextActiveUnit() {
             final Player p = getMyPlayer();
             return p != null && p.hasNextActiveUnit();

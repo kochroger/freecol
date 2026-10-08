@@ -194,6 +194,27 @@ final class ClassicMapViewer extends JPanel {
      */
     private Unit visitedUnit = null;
 
+    /**
+     * The settlement tile last painted with a unit in the settlement's
+     * place ({@link #unitOverSettlement}), and that unit; null when the
+     * last paint of every such tile showed the settlement.  A change of
+     * the rule's answer that comes without a blink change (Space, W, F or
+     * S on the unit up) repaints the cell ({@link #refreshCover}).
+     */
+    private Tile coverTile = null;
+    private Unit coverUnit = null;
+
+    /** The view origin of that paint (replaced on every view move). */
+    private int[] coverOrigin = null;
+
+    /**
+     * Tests: the sprites of units and of settlements instead of the image
+     * library's (which the tests do not have), null for the library's
+     * ({@link #setTestArt}).
+     */
+    private java.util.function.Function<Unit, BufferedImage> testUnitArt = null;
+    private java.util.function.Function<Settlement, BufferedImage> testSettlementArt = null;
+
     // In-progress unit slide (see animateMove): the unit drawn animOffset
     // native pixels from animFrom toward animTo, or null when idle.
     private Unit animUnit;
@@ -1734,6 +1755,19 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
+     * Tests: draw units and settlements with these sprites (the tests have
+     * no image library), null for the library's.
+     *
+     * @param units A unit's sprite, at most 16x16.
+     * @param settlements A settlement's sprite.
+     */
+    void setTestArt(java.util.function.Function<Unit, BufferedImage> units,
+                    java.util.function.Function<Settlement, BufferedImage> settlements) {
+        this.testUnitArt = units;
+        this.testSettlementArt = settlements;
+    }
+
+    /**
      * The screen area a slide changes: its source and destination cells
      * (and every cell between, for the isometric model's two-row steps),
      * plus the icon's reach past them ({@link #ICON_MARGIN}).
@@ -1786,7 +1820,11 @@ final class ClassicMapViewer extends JPanel {
      * @return True if the unit's icon is on screen there.
      */
     boolean isShownAt(Unit unit, Tile tile) {
-        if (tile.getSettlement() != null || !shownExplored(tile)) return false;
+        if (!shownExplored(tile)) return false;
+        // On a settlement's tile only the unit drawn in its place (K2).
+        if (tile.getSettlement() != null) {
+            return unit != null && unit == unitOverSettlement(tile);
+        }
         if (this.blinkOff && this.activeUnit != null
             && this.activeUnit.getTile() == tile) return false;
         return displayUnit(tile) == unit;
@@ -1871,6 +1909,9 @@ final class ClassicMapViewer extends JPanel {
             this.blink.stop();
             ClassicFrameRecorder.event("blink", "stop " + reason);
         }
+        // A unit up on a settlement's tile that is done (Space, its last
+        // move) gives the settlement back at once (K2).
+        refreshCover();
     }
 
     /**
@@ -1888,6 +1929,9 @@ final class ClassicMapViewer extends JPanel {
         }
         setBlinkOff(false);
         holdPrompt(reason);
+        // The hand-over's hold: the cycle has moved past a unit up on a
+        // settlement's tile (W, F, S), which gives the settlement back (K2).
+        refreshCover();
     }
 
     /**
@@ -1938,6 +1982,17 @@ final class ClassicMapViewer extends JPanel {
         ClassicFrameRecorder.event("prompt", "on " + xy(tile)
             + (this.promptHeld ? " held" : ""));
         paintPromptCell();
+        refreshCover();   // nothing is up in the mode (K2)
+    }
+
+    /**
+     * Whether the Spielzugende mode waits now: its square is live, not the
+     * frozen one a turn start keeps until a unit comes up.
+     *
+     * @return True in the live mode.
+     */
+    private boolean promptLive() {
+        return this.promptTile != null && !this.promptFrozen;
     }
 
     /**
@@ -2478,8 +2533,9 @@ final class ClassicMapViewer extends JPanel {
             // mode (the original's manual, p. 10: the player "may continue
             // to perform management functions" while it flashes, as E opens
             // Europe); the mode stays and goes on after the colony screen
-            // closes.  A unit on a settlement's tile, which the map does
-            // not draw there, is never freed or brought up by the click
+            // closes.  A unit on a settlement's tile, which the map draws
+            // there only while it is up (K2, unitOverSettlement; in the
+            // mode no unit is), is never freed or brought up by the click
             // (the review of part J: the colony's fortified guard lost its
             // orders).  Elsewhere only an own unit that a click frees
             // (fortified, fortifying or sentried, with moves left) or that
@@ -2609,6 +2665,15 @@ final class ClassicMapViewer extends JPanel {
             }
         }
 
+        // A unit drawn in a settlement's place that the view no longer
+        // shows: nothing is drawn over the settlement any more (K2).
+        final Tile cover = this.coverTile;
+        if (cover != null && (clip == null || clip.contains(0, 0, getWidth(), getHeight()))
+            && (cover.getX() < x0 || cover.getX() > x1
+                || cover.getY() < y0 || cover.getY() > y1)) {
+            noteCover(cover, null);
+        }
+
         paintAnimatedUnit(g, vx, vy);
         // The original draws no box around the active unit; the cursor
         // marks only a selected tile (TERRAIN).
@@ -2668,14 +2733,26 @@ final class ClassicMapViewer extends JPanel {
 
     /**
      * Paint what stands on a tile, over every cell's terrain: the
-     * settlement, else the unit in front (none while the active unit's
-     * blink is OFF on this tile).
+     * settlement, or the unit up there in its place
+     * ({@link #unitOverSettlement}); else the unit in front (none while
+     * the active unit's blink is OFF on this tile).
      */
     private void paintOccupant(Graphics2D g, Tile tile, int sx, int sy) {
         if (!shownExplored(tile)) return;
         final Settlement settlement = tile.getSettlement();
         if (settlement != null) {
-            paintSettlement(g, settlement, sx, sy);
+            final Unit up = unitOverSettlement(tile);
+            if (up != null) {
+                paintUnit(g, up, sx, sy, markerOf(up, tile));
+            } else if (this.animUnit == null || this.animOffset != 0
+                       || tile != this.animFrom) {
+                // A slide out of a settlement shows offset 0 instead of the
+                // settlement, the sprite back under it from offset 1 on
+                // (clip008 #35751 OFF -> #35756 the ship in Base's place ->
+                // #35757 Base again behind it).
+                paintSettlement(g, settlement, sx, sy);
+            }
+            noteCover(tile, up);
             return;
         }
         if (this.blinkOff && this.activeUnit != null
@@ -2719,6 +2796,102 @@ final class ClassicMapViewer extends JPanel {
         return queuedAt(tile);
     }
 
+    /**
+     * The unit drawn on a settlement's tile instead of the settlement (K2,
+     * Roger's soldier that "vanished" in Base Silver).  The original draws
+     * the unit up on its colony's tile in the colony's place while its
+     * blink is ON and the colony while OFF (clip008 #35590 the merchantman
+     * in Base, #35613 Base, 23 frames each), and the colony as soon as the
+     * unit is done (#50603 -&gt; #50610: the farmer's last move into Base,
+     * the colony at the final draw); a unit there that is not up is never
+     * drawn (#32928).  So:
+     * <ul>
+     *   <li>the active unit, while it is up -- it takes orders with moves
+     *   left ({@link Unit.UnitState#ACTIVE}, not working in the colony),
+     *   no slide moves it, and no hand-over to another unit is pending
+     *   (the cycle moved past it: W, F, S) -- and its blink is ON;</li>
+     *   <li>else the unit of a visit (W5f; inferred: its completion is
+     *   shown on the unit), until the next unit or the Spielzugende
+     *   mode.</li>
+     * </ul>
+     * A land unit up there is not recorded; the rule is the ship's (I).
+     *
+     * @param tile The tile.
+     * @return The unit, or null when the settlement is drawn (or the tile
+     *     has none).
+     */
+    Unit unitOverSettlement(Tile tile) {
+        if (tile == null || tile.getSettlement() == null) return null;
+        final Unit a = this.activeUnit;
+        if (a != null && a.getTile() == tile && isUp(a)) {
+            return (this.blinkOff) ? null : a;
+        }
+        final Unit v = this.visitedUnit;
+        if (v != null && v != this.animUnit && v.getTile() == tile
+            && !v.isDisposed() && !v.isInColony() && !promptLive()) return v;
+        return null;
+    }
+
+    /**
+     * Whether the active unit is up: in MOVE_UNITS it takes orders, has
+     * moves left, does not slide, works in no building, and no hand-over to
+     * another unit is pending.
+     *
+     * @param a The active unit.
+     * @return True if it is up.
+     */
+    private boolean isUp(Unit a) {
+        if (a == this.animUnit || this.viewMode != GUI.ViewMode.MOVE_UNITS
+            || a.getState() != Unit.UnitState.ACTIVE || a.getMovesLeft() <= 0
+            || a.isInColony()) return false;
+        final Unit coming = (this.gui == null) ? null : this.gui.comingUnit();
+        return coming == null || coming == a;
+    }
+
+    /**
+     * What a paint drew on a settlement's tile: {@code up} in the
+     * settlement's place, or (null) the settlement.  Called by the paint.
+     *
+     * @param tile The settlement's tile.
+     * @param up The unit drawn there, or null.
+     */
+    private void noteCover(Tile tile, Unit up) {
+        if (up != null) {
+            this.coverOrigin = this.origin;
+            if (up != this.coverUnit || tile != this.coverTile) {
+                this.coverTile = tile;
+                this.coverUnit = up;
+                if (ClassicFrameRecorder.on()) {
+                    ClassicFrameRecorder.event("cover", "on unit=" + up.getId()
+                        + " at=" + xy(tile));
+                }
+            }
+        } else if (tile == this.coverTile) {
+            if (ClassicFrameRecorder.on()) {
+                ClassicFrameRecorder.event("cover", "off unit="
+                    + this.coverUnit.getId() + " at=" + xy(tile));
+            }
+            this.coverTile = null;
+            this.coverUnit = null;
+            this.coverOrigin = null;
+        }
+    }
+
+    /**
+     * The settlement's tile painted with a unit in its place is painted
+     * again now if the rule's answer for it has changed
+     * ({@link #unitOverSettlement}): the unit up there is done or the
+     * cycle moved past it, and the settlement comes back with the change,
+     * not with the next blink toggle.  Not after the view has moved since
+     * that paint: the whole map's paint is due then, as one cut (W4), and
+     * it shows the settlement.  EDT only.
+     */
+    void refreshCover() {
+        final Tile t = this.coverTile;
+        if (t != null && this.origin == this.coverOrigin
+            && unitOverSettlement(t) != this.coverUnit) paintCellNow(t);
+    }
+
     /** Whether a unit carries at least one unit (not counting one mid-slide). */
     private boolean carriesUnits(Unit unit) {
         if (!unit.isNaval()) return false;
@@ -2753,8 +2926,14 @@ final class ClassicMapViewer extends JPanel {
      */
     private void paintUnit(Graphics2D g, Unit unit, int sx, int sy,
                            int[] marker) {
-        if (this.lib == null) return;   // no art (tests)
-        final BufferedImage img = this.lib.getScaledUnitImage(unit);
+        final BufferedImage img;
+        if (this.testUnitArt != null) {
+            img = this.testUnitArt.apply(unit);
+        } else if (this.lib == null) {
+            return;   // no art (tests)
+        } else {
+            img = this.lib.getScaledUnitImage(unit);
+        }
         if (this.fixedScale <= 0) {
             drawCentered(g, img, sx, sy);
             return;
@@ -2787,8 +2966,14 @@ final class ClassicMapViewer extends JPanel {
      */
     private void paintSettlement(Graphics2D g, Settlement settlement,
                                  int sx, int sy) {
-        if (this.lib == null) return;   // no art (tests)
-        final BufferedImage art = this.lib.getScaledSettlementImage(settlement);
+        final BufferedImage art;
+        if (this.testSettlementArt != null) {
+            art = this.testSettlementArt.apply(settlement);
+        } else if (this.lib == null) {
+            return;   // no art (tests)
+        } else {
+            art = this.lib.getScaledSettlementImage(settlement);
+        }
         if (art == null) return;
         // A colony's flag in its nation's colours, as on the panel (build
         // spec W21b; clip008 #14868, clip006 #9345: the Dutch flag orange).

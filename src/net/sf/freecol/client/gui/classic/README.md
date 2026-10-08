@@ -688,6 +688,28 @@ cell-fitted sprites (`drawCentered`, `UNIT_CELL_FRACTION`).
   (`ClassicMapViewerTest.testCursorOnlyWhileThePlayerCanUseIt`).
 - **Blink.** `setBlinkOff` draws the active unit's tile bare (no unit,
   carrier or stack); the blink clock drives it (next section), a slide clears it.
+- **A unit up in a settlement** (part K2, Roger's soldier that "vanished" in
+  Base Silver; `unitOverSettlement`). A settlement's tile shows the settlement,
+  except while a unit is *up* there: the active unit that takes orders
+  (ACTIVE, moves left, in no building), is not sliding and has no hand-over
+  to another unit pending is drawn **in the settlement's place** while its
+  blink is ON, the settlement while OFF (clip008 #35590 the merchantman up in
+  Base, #35613 Base, 23 frames each); a visit's unit (W5f) is drawn there
+  until the next unit or the Spielzugende mode (I). As soon as the unit is
+  done the settlement comes back: its last move (the final draw, #50603 ->
+  #50610), Space, or the cycle moving past it (W, F, S). Those changes have no
+  blink change, so `refreshCover` repaints the cell (from `rearmBlink`,
+  `holdBlink`, `enterPrompt` and every hand-over's start,
+  `ClassicTurnFlow.Host.handOverStarted`), not after a view move (the whole
+  map is painted then, one cut). A colony's workers and every unit there that
+  is not up stay hidden (#32928). A slide out of a settlement that starts at
+  offset 0 shows it in the settlement's place and the settlement back behind
+  the sprite from offset 1 on (#35751 OFF -> #35756 -> #35757). A land unit
+  up in a colony is not recorded: the rule is the ship's (I). No colony
+  screen opens (the original's ship did not get one). Recorder events:
+  `cover on|off unit=.. at=x,y`. Tests: `ClassicMapViewerTest.testAUnitUpOnItsColonyTile`
+  (the rule), `testTheColonyCellShowsTheUnitUp` (the pixels, with
+  `setTestArt`), `ClassicTurnFlowTest.testHandOverStartTellsTheHost`.
 
 **The slide** (`animateMove` on `ClassicSlide`): offsets 1..15 one native
 pixel per step on an absolute schedule `t_k = t1 + (k-1)S` with S = 16.43 ms,
@@ -786,7 +808,8 @@ recorder's `Thread.sleep` plus spin, never `parkNanos`) and run on the EDT
   once the active unit has no moves left (W5: after its last move it stays on
   screen, unblinking, through the pause).
 - **OFF paint** = the bare tile: terrain and overlays, no unit at all, carrier
-  and stack included (`paintOccupant`); a settlement stays (I). A toggle paints
+  and stack included (`paintOccupant`); a settlement stays, and is what OFF
+  shows of a unit up in it (K2, clip008 #35613). A toggle paints
   only the unit's cell plus the icon's reach (`paintBlinkCell`).
 - **Minimap dot.** The active unit's pixel is its nation colour while ON and
   white (`BLINK_DOT_RGB`, index 15) while OFF (`ClassicInfoPanel.blinkDot`,
