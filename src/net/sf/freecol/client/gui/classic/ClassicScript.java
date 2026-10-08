@@ -52,11 +52,22 @@ import javax.swing.KeyStroke;
  *       classic screen's own 320x200 canvas (the Europe screen: its ship
  *       in port, its Set Sail; also in a minimized run, whose screen never
  *       painted).</li>
+ *   <li>{@code tclick <x> <y>}: a left click on map tile (x, y) as the
+ *       map shows it now: the canvas point at its cell's centre in the
+ *       15x12 view (a unit in the Spielzugende mode, J2); an error if the
+ *       tile is not in the view.</li>
  *   <li>{@code waitGame [timeoutMs]}: until the in-game HUD is up.</li>
  *   <li>{@code waitIdle [timeoutMs]}: until our player has the controls
  *       (our turn, no dialog or scene, no slide running) for a moment.</li>
- *   <li>{@code waitTurn [timeoutMs]}: until a later turn than the current
- *       one has started and we have the controls.</li>
+ *   <li>{@code waitTurn [timeoutMs [keystroke]]}: until a later turn than
+ *       the current one has started and we have the controls (the
+ *       Spielzugende mode counts: it waits for the player); with a
+ *       keystroke, that key answers every box on screen meanwhile, once
+ *       per box (the turn start's notices, J2).</li>
+ *   <li>{@code markTurn}: the next {@code waitTurn} waits for a later
+ *       turn than this one, not than its own start (put it before a key
+ *       that ends the turn at once, as Enter in the Spielzugende mode: the
+ *       AI phase may be over before {@code waitTurn} starts; J2).</li>
  *   <li>{@code waitBox <prefix> [timeoutMs [keystroke]]}: until an advisor
  *       box whose id starts with the prefix is on screen (its id as the
  *       recorder's probe writes it, blanks as {@code _}:
@@ -81,7 +92,7 @@ final class ClassicScript {
 
     /** The commands. */
     enum Op { WAIT, KEY, CLICK, MOVE, WAIT_GAME, WAIT_IDLE, WAIT_TURN, PREF, LOG,
-        QUIT, GOTO, WAIT_BOX, SCREEN_CLICK }
+        QUIT, GOTO, WAIT_BOX, SCREEN_CLICK, TILE_CLICK, MARK_TURN }
 
     /** Default timeouts (ms) of the waits. */
     static final long WAIT_GAME_TIMEOUT = 180_000L;
@@ -194,15 +205,24 @@ final class ClassicScript {
             final int y = integer(xy[1], ClassicFrameRecorder.H);
             return new Command(Op.SCREEN_CLICK, n, s, x, y, null, null, false);
         }
+        case "tclick": {
+            final String[] xy = rest.split("\\s+");
+            if (xy.length != 2) throw new IllegalArgumentException(cmd + " needs x and y");
+            final int x = integer(xy[0], 10_000);
+            final int y = integer(xy[1], 10_000);
+            return new Command(Op.TILE_CLICK, n, s, x, y, null, null, false);
+        }
         case "waitgame":
             return new Command(Op.WAIT_GAME, n, s, millis(rest, WAIT_GAME_TIMEOUT),
                                0, null, null, false);
         case "waitidle":
             return new Command(Op.WAIT_IDLE, n, s, millis(rest, WAIT_IDLE_TIMEOUT),
                                0, null, null, false);
-        case "waitturn":
-            return new Command(Op.WAIT_TURN, n, s, millis(rest, WAIT_TURN_TIMEOUT),
-                               0, null, null, false);
+        case "waitturn": {
+            final String[] tk = rest.split("\\s+", 2);
+            return new Command(Op.WAIT_TURN, n, s, millis(tk[0], WAIT_TURN_TIMEOUT),
+                               0, (tk.length > 1) ? keyStroke(tk[1]) : null, null, false);
+        }
         case "waitbox": {
             final String[] pt = rest.split("\\s+", 3);
             if (rest.isEmpty()) {
@@ -228,6 +248,9 @@ final class ClassicScript {
             final int y = integer(xy[1], 10_000);
             return new Command(Op.GOTO, n, s, x, y, null, null, false);
         }
+        case "markturn":
+            if (!rest.isEmpty()) throw new IllegalArgumentException("markTurn takes no argument");
+            return new Command(Op.MARK_TURN, n, s, 0, 0, null, null, false);
         case "log":
             return new Command(Op.LOG, n, s, 0, 0, null, rest, false);
         case "quit":

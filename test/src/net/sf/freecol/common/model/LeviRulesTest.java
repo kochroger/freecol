@@ -63,6 +63,7 @@ public class LeviRulesTest extends FreeColTestCase {
         CHANGED.put(GameOptions.SAVE_PRODUCTION_OVERFLOW, Boolean.FALSE);  // row 12
         CHANGED.put(GameOptions.ALLOW_STUDENT_SELECTION, Boolean.TRUE);    // row 13
         CHANGED.put(GameOptions.TURNS_TO_SAIL, "2");                       // the original's (W13)
+        CHANGED.put(GameOptions.FORTIFY_KEEPS_MOVES, Boolean.TRUE);        // the original's (J2)
         CHANGED.put(GameOptions.CANCEL_KEEPS_MOVE, Boolean.TRUE);          // house rules
         CHANGED.put(GameOptions.REVENGE_MODE, Boolean.FALSE);
         CHANGED.put(GameOptions.LAST_COLONY_DEFEAT, Boolean.TRUE);
@@ -319,6 +320,23 @@ public class LeviRulesTest extends FreeColTestCase {
         dutch.addFather(game.getSpecification()
             .getFoundingFather("model.foundingFather.ferdinandMagellan"));
         assertEquals(1, ship.getSailTurns());
+    }
+
+    /**
+     * The original's fortification (J2): a completed fortification keeps
+     * the turn's moves in levi, not in classic and freecol (which get the
+     * option from Specification.fixGameOptions); it sits where the game
+     * options dialog shows it.  The server's side:
+     * {@code ServerUnitTest.testFortifyKeepsMoves}.
+     */
+    public void testFortifyKeepsMoves() {
+        assertTrue(spec(LEVI).getBoolean(GameOptions.FORTIFY_KEEPS_MOVES));
+        assertFalse(spec("classic").getBoolean(GameOptions.FORTIFY_KEEPS_MOVES));
+        assertFalse(spec("freecol").getBoolean(GameOptions.FORTIFY_KEEPS_MOVES));
+        assertNotNull(spec(LEVI).getOptionGroup(GameOptions.GAMEOPTIONS_MAP)
+                      .getOption(GameOptions.FORTIFY_KEEPS_MOVES));
+        assertEquals("Fortifying keeps the moves",
+                     Messages.getName(GameOptions.FORTIFY_KEEPS_MOVES));
     }
 
     /**

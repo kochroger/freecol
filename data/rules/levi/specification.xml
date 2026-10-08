@@ -86,6 +86,13 @@
              move. -->
         <booleanOption id="model.option.cancelKeepsMove"
                        defaultValue="true"/>
+        <!-- The original's fortification: a unit whose fortification
+             completes at the turn start keeps its moves for that turn
+             (opening_014 #2177: the completing unit's block shows
+             "Zuege: 1"), so a click frees it and it can move at once.
+             FreeCol (classic, freecol) takes the turn's moves. -->
+        <booleanOption id="model.option.fortifyKeepsMoves"
+                       defaultValue="true"/>
         <!-- The original's sailing time between Europe and the New
              World: two turns each way (landfall: off the map in 1503,
              in Amsterdam at the start of 1505; clip008: off the map in

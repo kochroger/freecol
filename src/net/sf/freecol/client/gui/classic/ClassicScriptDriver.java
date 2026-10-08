@@ -61,6 +61,29 @@ final class ClassicScriptDriver {
     /** How long a key is held down (ms), about a quick real press. */
     static final long KEY_HOLD_MS = 80L;
 
+    /** A map cell's size on the 320x200 canvas (the 15x12 view of 16x16 cells). */
+    static final int CELL = 16;
+
+    /**
+     * The 320x200 canvas point of map tile (x, y) in the view whose
+     * top-left tile is {@code origin}: its cell's centre, under the menu
+     * strip ({@code tclick}).
+     *
+     * @param origin The view's top-left tile {x, y}, or null.
+     * @param x Map x.
+     * @param y Map y.
+     * @return {x, y} on the canvas, or null if the tile is not in the view.
+     */
+    static int[] tileCanvasPoint(int[] origin, int x, int y) {
+        if (origin == null) return null;
+        final int c = x - origin[0], r = y - origin[1];
+        if (c < 0 || r < 0 || c >= ClassicHud.VIEW_COLS || r >= ClassicHud.VIEW_ROWS) {
+            return null;
+        }
+        return new int[] { c * CELL + CELL / 2,
+                           ClassicMenuBar.HEIGHT + r * CELL + CELL / 2 };
+    }
+
     /** What the script acts on. */
     interface Host {
 
@@ -123,6 +146,21 @@ final class ClassicScriptDriver {
         }
 
         /**
+         * Click the left button on a map tile as the map shows it now
+         * ({@link ClassicScriptDriver#tileCanvasPoint}).
+         *
+         * @param x Map x.
+         * @param y Map y.
+         * @exception ScriptException if there is no map or the tile is not
+         *     in the view.
+         * @exception InterruptedException if interrupted.
+         */
+        default void tileClick(int x, int y)
+            throws ScriptException, InterruptedException {
+            throw new ScriptException("no map to click");
+        }
+
+        /**
          * Set an option.
          *
          * @param name A classic pref or a mapped client option name.
@@ -156,6 +194,12 @@ final class ClassicScriptDriver {
 
     /** The host. */
     private final Host host;
+
+    /**
+     * The turn {@code markTurn} noted, for the next {@code waitTurn}, or
+     * {@link Integer#MIN_VALUE} for none.
+     */
+    private int markedTurn = Integer.MIN_VALUE;
 
     /** The result file, or null. */
     private final File result;
@@ -255,16 +299,27 @@ final class ClassicScriptDriver {
             this.host.screenClick((int)c.number, c.y);
             Thread.sleep(KEY_HOLD_MS);
             break;
+        case TILE_CLICK:
+            this.host.tileClick((int)c.number, c.y);
+            break;
         case WAIT_GAME:
             await(this.host::inGame, 0L, c.number, "the in-game HUD");
             break;
         case WAIT_IDLE:
             await(this.host::isIdle, IDLE_STABLE_MS, c.number, "the controls");
             break;
+        case MARK_TURN:
+            this.markedTurn = this.host.turnNumber();
+            break;
         case WAIT_TURN: {
-            final int start = this.host.turnNumber();
-            await(() -> this.host.turnNumber() > start && this.host.isIdle(),
-                  IDLE_STABLE_MS, c.number, "a turn after turn " + start);
+            final int start = (this.markedTurn != Integer.MIN_VALUE) ? this.markedTurn
+                : this.host.turnNumber();
+            this.markedTurn = Integer.MIN_VALUE;
+            final BooleanSupplier cond = (c.key == null)
+                ? () -> this.host.turnNumber() > start && this.host.isIdle()
+                : answering(c.key, () -> this.host.turnNumber() > start
+                            && this.host.isIdle());
+            await(cond, IDLE_STABLE_MS, c.number, "a turn after turn " + start);
             break;
         }
         case WAIT_BOX:
@@ -286,6 +341,36 @@ final class ClassicScriptDriver {
         default:
             throw new ScriptException("unknown command " + c.op);
         }
+    }
+
+    /**
+     * A condition that first answers a box on screen with {@code key}, once
+     * per box, as {@link #waitBox} does ({@code waitTurn} with a key: the
+     * turn start's notices); while a box is up the condition is false.
+     *
+     * @param key The key.
+     * @param cond The condition.
+     * @return The answering condition.
+     */
+    private BooleanSupplier answering(KeyStroke key, BooleanSupplier cond) {
+        final String[] answered = { null };
+        return () -> {
+            final String b = this.host.boxOnScreen();
+            if (b == null) {
+                answered[0] = null;
+                return cond.getAsBoolean();
+            }
+            if (!b.equals(answered[0])) {
+                ClassicFrameRecorder.event("log", "waitTurn answers " + b);
+                answered[0] = b;
+                try {
+                    this.host.key(key, KEY_HOLD_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            return false;
+        };
     }
 
     /**

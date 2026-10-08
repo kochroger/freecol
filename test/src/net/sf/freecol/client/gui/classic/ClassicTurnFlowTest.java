@@ -256,6 +256,16 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
             this.calls.add("leave");
         }
 
+        @Override
+        public void promptClicked() {
+            this.calls.add("promptClicked");
+        }
+
+        /** Our ships' arrival chain holds the turn start (W13, H REVIEW2 L5). */
+        boolean arrivals = false;
+
+        @Override public boolean arrivalsHold() { return this.arrivals; }
+
         @Override public Player currentPlayer() { return this.current; }
         @Override public Player myPlayer() { return this.me; }
         @Override public Player nextPlayer() { return this.next; }
@@ -449,6 +459,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
      */
     public void testAutomaticEnd() {
         final Rig r = new Rig(this.game);
+        r.flow.unitShown(ship(5, 5));     // a unit came up (J2)
         r.flow.screenChanged();            // the final draw
         r.clock.advanceMs(3);
         r.flow.noUnitLeft();               // the controller's end view
@@ -473,6 +484,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     /** A change before the end re-bases it; nothing ends with a unit left. */
     public void testRebaseAndConditions() {
         final Rig r = new Rig(this.game);
+        r.flow.unitShown(ship(5, 5));     // a unit came up (J2)
         r.flow.noUnitLeft();
         r.advanceMs(100);
         r.flow.screenChanged();            // e.g. the panel refresh
@@ -507,6 +519,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     /** A box up when the pause ends holds it; its close re-arms from the close. */
     public void testBoxHoldsTheEnd() {
         final Rig r = new Rig(this.game);
+        r.flow.unitShown(ship(5, 5));     // a unit came up (J2)
         r.flow.noUnitLeft();
         r.host.blocked = true;             // e.g. a FreeCol message
         r.advanceMs(485);
@@ -525,6 +538,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
 
         // A screen without a close hook: the poll re-arms.
         final Rig s = new Rig(this.game);
+        s.flow.unitShown(ship(6, 5));
         s.flow.noUnitLeft();
         s.host.blocked = true;
         s.advanceMs(485);
@@ -539,6 +553,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     public void testVillageCancel() {
         final Tile village = this.map.getTile(6, 5);
         final Rig r = new Rig(this.game);
+        r.flow.unitShown(ship(5, 5));     // the unit at the village came up
         r.flow.villageBoxCancelled(village);
         r.flow.boxClosed();
         r.flow.noUnitLeft();
@@ -561,6 +576,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
 
         // A cancel long ago does not count, nor does its village.
         final Rig o = new Rig(this.game);
+        o.flow.unitShown(ship(5, 6));
         o.flow.villageBoxCancelled(village);
         o.advanceMs(1000);
         o.flow.noUnitLeft();
@@ -590,6 +606,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
             final Rig r = new Rig(this.game);
             r.host.promptPref = promptPref;
             r.host.active = ship(5, 5);
+            r.flow.unitShown(r.host.active);   // it came up (J2)
             r.host.nextActive = true;        // the unit kept its moves
             r.flow.villageBoxCancelled(village);
             r.flow.boxClosed();
@@ -685,6 +702,169 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         r.advanceMs(485);
         assertEquals(1, r.count("endTurn"));
         assertEquals(1, r.count("prompt"));
+    }
+
+    /**
+     * opening_014 1512: in the mode (here with the pref off, nothing came
+     * up) a click on an own unit ends the mode without an end: its look
+     * goes in the response (#4475), the unit's block 2 frames later
+     * (#4477), the controller's choice of the same unit meanwhile is kept,
+     * the input is blocked until the block; the unit came up, so after its
+     * last move the turn ends by itself 485 ms later (#4646 -&gt; #4680)
+     * and the mode does not come back.  The pref's mode takes a click the
+     * same way.
+     */
+    public void testPromptClick() {
+        assertEquals(2 * ClassicAdvisorLayer.FRAME_MS, ClassicTurnFlow.PROMPT_CLICK_MS);
+        for (boolean pref : new boolean[] { false, true }) {
+            final Unit a = ship(5, 5);
+            final Rig r = new Rig(this.game);
+            r.host.promptPref = pref;
+            nextTurn(r, 2);
+            r.flow.noUnitLeft();                 // nothing came at the turn start
+            r.advanceMs(328);
+            assertTrue(r.flow.isPrompt());
+            r.advanceMs(3000);
+            r.host.calls.clear();
+            assertTrue(r.flow.unitClicked(a, null));
+            assertEquals(List.of("promptClicked"), r.host.calls);
+            assertFalse(r.flow.isPrompt());
+            assertTrue(r.flow.isInputBlocked());
+            assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
+            assertSame(a, r.flow.pending().unit);
+            assertFalse(r.flow.cameUpThisTurn());
+            // FreeCol's own choice after the state change: the same unit, kept.
+            assertTrue(r.flow.unitChosen(a, null));
+            assertEquals(0, r.count("putBack " + a.getId()));
+            r.advanceMs(ClassicTurnFlow.PROMPT_CLICK_MS - 0.1);
+            assertEquals(0, r.count("activate " + a.getId()));
+            r.advanceMs(0.2);
+            assertEquals(1, r.count("activate " + a.getId()));
+            assertTrue(r.flow.cameUpThisTurn());
+            assertFalse(r.flow.isInputBlocked());
+            assertEquals(0, r.count("leave"));
+            assertEquals(0, r.count("freeze"));
+            // Its last move: the automatic end, no mode again (pref off).
+            r.host.active = a;
+            a.setMovesLeft(0);
+            r.flow.screenChanged();
+            assertFalse(r.flow.unitChosen(a, a));
+            r.host.active = null;
+            r.flow.noUnitLeft();
+            assertEquals((pref) ? "PROMPT PROMPT@500" : "END_TURN END@485",
+                         r.flow.pending().toString());
+            r.advanceMs(500);
+            assertEquals((pref) ? 0 : 1, r.count("endTurn"));   // calls cleared at the click
+        }
+        // The controller's choice in the mode (not a click) stays at once.
+        final Unit b = ship(7, 5);
+        final Rig c = new Rig(this.game);
+        nextTurn(c, 2);
+        c.flow.noUnitLeft();
+        c.advanceMs(328);
+        assertFalse(c.flow.unitChosen(b, null));
+        assertEquals(1, c.count("leave"));
+        assertNull(c.flow.pending());
+        assertTrue(c.flow.cameUpThisTurn());
+    }
+
+    /**
+     * The click through the GUI (J2 live check, run click4): freeing the
+     * unit is FreeCol's {@code changeState}, whose {@code updateGUI} asks
+     * for the next active unit at once and, with no unit up, chooses the
+     * freed unit: that choice is the click (the mode's look goes, the unit
+     * 2 frames later), not the controller's choice that left the mode and
+     * activated it at once; the click's own call after it keeps it.
+     */
+    public void testAClickInTheModeThroughTheGUI() {
+        final Unit f = ship(5, 5);
+        f.setState(Unit.UnitState.FORTIFYING);
+        f.setState(Unit.UnitState.FORTIFIED);
+        f.setMovesLeft(f.getInitialMovesLeft());
+        final Rig r = new Rig(this.game);
+        nextTurn(r, 2);
+        r.flow.noUnitLeft();
+        r.advanceMs(328);
+        assertTrue(r.flow.isPrompt());
+        final List<String> log = new ArrayList<>();
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                void wake(Unit u) {   // the server's state change, then updateGUI
+                    log.add("wake " + u.getState());
+                    u.setState(Unit.UnitState.ACTIVE);
+                    changeView(u, false);
+                    log.add("chosen pending=" + r.flow.pending());
+                }
+            };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        gui.turnFlow = r.flow;
+        try {
+            r.host.calls.clear();
+            gui.unitClicked(f);
+            assertEquals(List.of("wake FORTIFIED", "chosen pending=HANDOVER ACTIVATE@29"),
+                         log);
+            assertEquals(List.of("promptClicked"), r.host.calls);
+            assertNull(mv.getActiveUnit());          // not at once
+            assertSame(f, r.flow.pending().unit);
+            r.advanceMs(ClassicTurnFlow.PROMPT_CLICK_MS);
+            assertEquals(List.of("promptClicked", "activate " + f.getId()), r.host.calls);
+            assertTrue(r.flow.cameUpThisTurn());
+            // Outside the mode no echo is a click: a plain choice stays one.
+            assertNull(r.flow.pending());
+            gui.changeView(f, false);
+            assertNull(r.flow.pending());
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /**
+     * H REVIEW2 L5: our ships' arrival chain holds the turn start with no
+     * box before it; our colour lights at the hold, before the chain's band
+     * (landfall #27876 -&gt; #27878), not the last AI player's through the
+     * band; the father box's hold lights it with its box (blocked), as
+     * before.  The wipe after the chain needs no tick of its own.
+     */
+    public void testOwnColourDuringTheArrivalHold() {
+        final Unit a = ship(5, 5);
+        final Rig r = new Rig(this.game);
+        r.flow.endTurnNow("key");
+        r.flow.tick();
+        assertEquals(0x6D3C18, r.flow.indicatorRgb());
+        ourTurn(r, 2);
+        r.flow.tick();
+        assertEquals(0x6D3C18, r.flow.indicatorRgb());
+        r.host.hold = true;
+        r.host.arrivals = true;                 // the hold starts the chain
+        r.host.painted.clear();
+        assertTrue(r.flow.unitChosen(a, null));
+        assertEquals(0, r.count("wipe"));
+        assertEquals(List.of(0xFF7100), r.host.painted);
+        assertEquals(0xFF7100, r.flow.indicatorRgb());
+        r.flow.tick();
+        assertEquals(1, r.host.painted.size());
+        // The chain is done: the wipe, no tick of our colour again.
+        r.host.hold = false;
+        r.host.arrivals = false;
+        r.host.painted.clear();
+        r.flow.boxClosed();
+        assertEquals(1, r.count("wipe"));
+        assertFalse(r.host.painted.contains(0xFF7100));
+
+        // The father box: the hold alone does not light it ...
+        final Rig f = new Rig(this.game);
+        f.flow.endTurnNow("key");
+        f.flow.tick();
+        ourTurn(f, 2);
+        f.host.hold = true;
+        f.host.painted.clear();
+        assertTrue(f.flow.unitChosen(a, null));
+        assertTrue(f.host.painted.isEmpty());
+        assertEquals(0x6D3C18, f.flow.indicatorRgb());
+        // ... its box does.
+        f.host.blocked = true;
+        assertEquals(0xFF7100, f.flow.indicatorRgb());
     }
 
     /** The hand-over: 500 ms, or a jump at 280 ms and the block at 500 ms. */
@@ -797,6 +977,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     public void testEndCancelsHandOver() {
         final Unit a = ship(5, 5), b = ship(7, 5);
         final Rig r = new Rig(this.game);
+        r.flow.unitShown(a);              // it came up (J2)
         r.host.active = a;
         a.setMovesLeft(0);
         assertTrue(r.flow.unitChosen(b, a));
@@ -904,7 +1085,8 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(1, r.count("wipe"));
         r.advanceMs(300);
         assertEquals(1, r.count("activate " + a.getId()));
-        // No unit: the idle end waits for the box as well.
+        // No unit: the idle decision waits for the box as well; nothing
+        // came up, so the Spielzugende mode, 328 ms after the wipe (J2).
         r.flow.endTurnNow("key");
         r.host.turn = 3;
         r.host.myTurn = true;
@@ -917,21 +1099,175 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         r.host.hold = false;
         r.flow.tick();
         assertEquals(2, r.count("wipe"));
-        r.advanceMs(485);
-        assertEquals(ends + 1, r.count("endTurn"));
+        assertEquals("PROMPT PROMPT@328", r.flow.pending().toString());
+        r.advanceMs(328);
+        assertTrue(r.flow.isPrompt());
+        r.advanceMs(5000);
+        assertEquals(ends, r.count("endTurn"));
     }
 
-    /** No unit at the start of our turn: the wipe, then the automatic end. */
+    /**
+     * No unit at the start of our turn (all fortified or sentried, the
+     * ship at sea), with the pref off: the wipe, then the Spielzugende
+     * mode 328 ms after it in the place of the first unit's block
+     * (opening_014 1511 #3696 -&gt; #3719/#3720, 1512 #4288 -&gt;
+     * #4310/#4311), and it waits for the player (J2; the original's
+     * manual p. 10).  The pref's own mode at a turn start: the same time.
+     */
     public void testTurnStartWithoutUnits() {
+        assertTrue(ClassicTurnFlow.PROMPT_START_MS >= 314
+                   && ClassicTurnFlow.PROMPT_START_MS <= 342);
+        for (boolean pref : new boolean[] { false, true }) {
+            final Rig r = new Rig(this.game);
+            r.host.promptPref = pref;
+            r.flow.endTurnNow("auto");
+            r.host.turn = 2;
+            r.host.myTurn = true;
+            r.host.current = r.host.me;
+            r.flow.noUnitLeft();
+            assertEquals(1, r.count("wipe"));
+            assertFalse(r.flow.cameUpThisTurn());
+            assertEquals(ClassicTurnFlow.Kind.PROMPT, r.flow.pending().kind);
+            r.advanceMs(327.9);
+            assertEquals(0, r.count("prompt"));
+            r.advanceMs(0.2);
+            assertEquals(1, r.count("prompt"));
+            assertTrue(r.flow.isPrompt());
+            assertFalse(r.flow.isInputBlocked());
+            assertFalse(r.flow.unitComingUp());     // an expired band goes now
+            r.advanceMs(60000);
+            r.flow.tick();
+            assertEquals(1, r.count("endTurn"));    // it waits
+            // Enter: forced ON, the request one frame later.
+            r.flow.endTurnNow("key");
+            assertEquals(1, r.count("freeze"));
+            r.advanceMs(15.1);
+            assertEquals(2, r.count("endTurn"));
+        }
+    }
+
+    /**
+     * The mode with the pref off at a later change (J2): after a visit's
+     * completion at the end's own time, 485 ms (opening_014 1510 #2178
+     * -&gt; #2211/#2212: 33/34 frames), not the pref's 500; and nothing
+     * held it at the turn start, a change since the wipe makes it a later
+     * one.  A turn in which a unit came up ends by itself as before
+     * (#691, #1834), also when it came up at once, by a click, as a turn
+     * start's or a hand-over's unit, or a goto unit that arrived with
+     * moves left; a visit, a goto unit's block before its run and the
+     * Europe screen do not count.
+     */
+    public void testPromptWhenNoUnitCameUp() {
+        final Unit p = ship(5, 5), g = ship(7, 5), v = ship(9, 5);
+        // 1510: the turn start's visit, then the mode 485 ms after its
+        // completion.
         final Rig r = new Rig(this.game);
-        r.flow.endTurnNow("auto");
-        r.host.turn = 2;
-        r.host.myTurn = true;
-        r.host.current = r.host.me;
-        r.flow.noUnitLeft();
+        nextTurn(r, 2);
+        r.host.due = true;
+        r.host.kinds.put(v, ClassicUnitCycle.Kind.VISIT);
+        r.host.cycle = x -> (x == null) ? v : null;
+        r.host.onNext = () -> r.flow.noUnitLeft();   // the controller's end view
+        assertTrue(r.flow.dueInstead(null));
         assertEquals(1, r.count("wipe"));
-        r.advanceMs(485);
+        r.advanceMs(300);
+        assertEquals(1, r.count("visit " + v.getId()));
+        r.host.due = false;
+        r.host.kinds.clear();
+        r.advanceMs(15);                            // the completion
+        assertEquals(1, r.count("shown " + v.getId()));
+        assertFalse(r.flow.cameUpThisTurn());
+        assertEquals("PROMPT PROMPT@485", r.flow.pending().toString());
+        r.advanceMs(484.9);
+        assertEquals(0, r.count("prompt"));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("prompt"));
+        assertEquals(1, r.count("endTurn"));
+
+        r.advanceMs(60000);
+        assertEquals(1, r.count("endTurn"));        // it waits
+        r.flow.endTurnNow("key");                   // Enter
+        r.advanceMs(15.1);
         assertEquals(2, r.count("endTurn"));
+
+        // A turn whose unit came up and was moved: the automatic end.
+        ourTurn(r, 3);
+        r.host.cycle = x -> null;
+        assertTrue(r.flow.unitChosen(p, null));
+        r.advanceMs(300);
+        assertEquals(1, r.count("activate " + p.getId()));
+        assertTrue(r.flow.cameUpThisTurn());
+        r.host.active = p;
+        p.setMovesLeft(0);
+        r.flow.screenChanged();
+        assertFalse(r.flow.unitChosen(p, p));      // the re-selection
+        r.host.active = null;
+        r.flow.noUnitLeft();
+        assertEquals("END_TURN END@485", r.flow.pending().toString());
+        r.advanceMs(485);
+        assertEquals(3, r.count("endTurn"));
+        assertEquals(1, r.count("prompt"));
+
+        // A goto unit's block and run with no moves left after it: no
+        // unit came up, the mode (485 ms after the run's last change).
+        ourTurn(r, 4);
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.cycle = x -> (x == null) ? g : null;
+        r.host.onGoto = u -> u.setMovesLeft(0);
+        assertTrue(r.flow.unitChosen(g, null));
+        r.advanceMs(300);
+        assertEquals(1, r.count("activate " + g.getId()));
+        r.host.active = g;
+        runStage(r, 100);
+        assertEquals(1, r.count("goto " + g.getId()));
+        r.flow.screenChanged();                     // the run's final draw
+        r.host.kinds.clear();
+        r.host.active = null;
+        r.run();
+        assertFalse(r.flow.cameUpThisTurn());
+        assertEquals("PROMPT PROMPT@485", r.flow.pending().toString());
+        r.advanceMs(485);
+        assertEquals(2, r.count("prompt"));
+        r.flow.endTurnNow("key");
+        r.advanceMs(15.1);
+        assertEquals(4, r.count("endTurn"));
+
+        // The same goto unit arrived with moves left: it stays up, so it
+        // came up, and the end is the automatic one.
+        g.setMovesLeft(3);
+        ourTurn(r, 5);
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.onGoto = null;
+        assertTrue(r.flow.unitChosen(g, null));
+        r.advanceMs(300);
+        runStage(r, 100);
+        r.host.kinds.clear();
+        r.run();
+        assertEquals(3, r.count("activate " + g.getId()));   // block, arrived
+        assertTrue(r.flow.cameUpThisTurn());
+
+        // The pref decides nothing else: off and a unit came up, the end;
+        // on, the mode at its own 500 ms.
+        final Rig q = new Rig(this.game);
+        q.host.promptPref = true;
+        q.flow.unitShown(p);
+        q.flow.screenChanged();
+        q.flow.noUnitLeft();
+        assertEquals("PROMPT PROMPT@500", q.flow.pending().toString());
+
+        // A unit made active at once (the controller's choice in the
+        // middle of a turn, after a box) counts; a unit of another turn
+        // does not.
+        final Rig a = new Rig(this.game);
+        assertFalse(a.flow.unitChosen(p, null));
+        assertTrue(a.flow.cameUpThisTurn());
+        a.host.turn = 2;
+        assertFalse(a.flow.cameUpThisTurn());
+        // Not our turn: nothing counts.
+        final Rig o = new Rig(this.game);
+        o.host.myTurn = false;
+        o.flow.unitShown(p);
+        o.host.myTurn = true;
+        assertFalse(o.flow.cameUpThisTurn());
     }
 
     /** After our end went through: our turn {@code turn}, not shown yet. */
@@ -1093,7 +1429,8 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         n.advanceMs(300);
         assertEquals(1, n.count("activate " + g.getId()));
 
-        // Nothing due: the end view, the wipe and the automatic end.
+        // Nothing due: the end view, the wipe and, with no unit up in
+        // the turn, the Spielzugende mode 328 ms after the wipe (J2).
         final Rig e = new Rig(this.game);
         nextTurn(e, 2);
         assertFalse(e.flow.dueInstead(null));
@@ -1101,7 +1438,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         e.flow.noUnitLeft();
         assertEquals(1, e.count("begins"));        // once per turn
         assertEquals(1, e.count("wipe"));
-        assertEquals(ClassicTurnFlow.Kind.END_TURN, e.flow.pending().kind);
+        assertEquals("PROMPT PROMPT@328", e.flow.pending().toString());
     }
 
     /**
@@ -1230,6 +1567,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         // The idle end armed; a visit becomes due before it fires: kept,
         // the controller brings nothing, the cycle's unit comes.
         final Rig n = new Rig(this.game);
+        n.flow.unitShown(a);              // a came up (J2)
         n.flow.noUnitLeft();
         assertEquals(ClassicTurnFlow.Kind.END_TURN, n.flow.pending().kind);
         n.host.due = true;
@@ -1840,7 +2178,9 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertFalse(r.flow.isInputBlocked());
         assertEquals(0, r.count("next"));
 
-        // Nothing else due: the controller's end view arms the end.
+        // Nothing else due: the controller's end view arms the idle
+        // decision; no unit came up (the goto unit's block is no chance
+        // to move it), so it is the Spielzugende mode (J2).
         g.setState(Unit.UnitState.ACTIVE);
         final Rig n = new Rig(this.game);
         nextTurn(n, 2);
@@ -1854,11 +2194,13 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertTrue(n.flow.unitChosen(g, null));
         n.advanceMs(300);
         runStage(n, 100);
+        n.flow.screenChanged();               // the block and the run were changes
         n.run();
         assertEquals(1, n.count("next"));
-        assertEquals(ClassicTurnFlow.Kind.END_TURN, n.flow.pending().kind);
+        assertEquals(ClassicTurnFlow.Kind.PROMPT, n.flow.pending().kind);
 
-        // The controller chooses nothing: the flow arms the end itself.
+        // The controller chooses nothing: the flow arms it itself; the
+        // mode comes and waits, the turn never hangs without one.
         g.setState(Unit.UnitState.ACTIVE);
         final Rig q = new Rig(this.game);
         nextTurn(q, 2);
@@ -1868,10 +2210,15 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertTrue(q.flow.unitChosen(g, null));
         q.advanceMs(300);
         runStage(q, 100);
+        q.flow.screenChanged();
         q.run();
         assertEquals(1, q.count("next"));
-        assertEquals(ClassicTurnFlow.Kind.END_TURN, q.flow.pending().kind);
-        q.advanceMs(485);
+        assertEquals(ClassicTurnFlow.Kind.PROMPT, q.flow.pending().kind);
+        q.advanceMs(500);
+        assertTrue(q.flow.isPrompt());
+        assertEquals(1, q.count("endTurn"));
+        q.flow.endTurnNow("key");
+        q.advanceMs(15.1);
         assertEquals(2, q.count("endTurn"));
 
         // Disposed meanwhile (the game view went): the marker does nothing.
@@ -1911,10 +2258,15 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(0, r.count("activate " + g.getId()));
         assertEquals(1, r.count("next"));
         assertNotNull(r.flow.pending());
-        assertEquals(ClassicTurnFlow.Kind.END_TURN, r.flow.pending().kind);
-        r.advanceMs(484.9);
+        // No unit came up this turn: the Spielzugende mode (J2), due
+        // 328 ms after the wipe, so at once; it waits for the player.
+        assertEquals(ClassicTurnFlow.Kind.PROMPT, r.flow.pending().kind);
+        r.advanceMs(28);
+        assertTrue(r.flow.isPrompt());
+        r.advanceMs(5000);
         assertEquals(1, r.count("endTurn"));
-        r.advanceMs(0.2);
+        r.flow.endTurnNow("key");
+        r.advanceMs(15.1);
         assertEquals(2, r.count("endTurn"));
 
         // Its own run takes it off; nothing comes.
@@ -1929,11 +2281,13 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(1, n.count("activate " + h.getId()));
         runStage(n, 100);
         assertEquals(1, n.count("goto " + h.getId()));
+        n.flow.screenChanged();                 // the run's last slide
         n.run();                                // the marker
         assertEquals(1, n.count("next"));
-        assertEquals(ClassicTurnFlow.Kind.END_TURN, n.flow.pending().kind);
+        assertEquals("PROMPT PROMPT@485", n.flow.pending().toString());
         n.advanceMs(485);
-        assertEquals(2, n.count("endTurn"));
+        assertTrue(n.flow.isPrompt());
+        assertEquals(1, n.count("endTurn"));
 
         // A unit left to move: no end armed.
         final Unit k = ship(9, 5);
@@ -1998,7 +2352,8 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         q.advanceMs(300);
         assertEquals(1, q.count("activate " + a.getId()));
 
-        // A new turn with no unit to move: the wipe, then the automatic end.
+        // A new turn with no unit to move: the wipe, then the
+        // Spielzugende mode 328 ms after it (J2).
         final Rig n = new Rig(this.game);
         n.host.onEndTurn = null;
         n.flow.endTurnNow("auto");
@@ -2006,9 +2361,10 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         n.host.turn = 2;
         n.flow.noUnitLeft();
         assertEquals(1, n.count("wipe"));
-        assertEquals(ClassicTurnFlow.Kind.END_TURN, n.flow.pending().kind);
-        n.advanceMs(485);
-        assertEquals(2, n.count("endTurn"));
+        assertEquals("PROMPT PROMPT@328", n.flow.pending().toString());
+        n.advanceMs(328);
+        assertTrue(n.flow.isPrompt());
+        assertEquals(1, n.count("endTurn"));
     }
 
     /**
@@ -2252,6 +2608,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
      */
     public void testDepartureBandDoesNotHoldTheEnd() {
         final Rig r = new Rig(this.game);
+        r.flow.unitShown(ship(3, 3));     // the ship came up and sailed (J2)
         assertTrue(r.flow.playerHasTurn());
         r.flow.screenChanged();                 // "Holl. Handelsschiff Ziel: Amsterdam"
         r.clock.advanceMs(5);                   // the controller's end view
@@ -2301,6 +2658,7 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
      */
     public void testEuropeHoldsTheEnd() {
         final Rig r = new Rig(this.game);
+        r.flow.unitShown(ship(3, 3));     // a unit came up (J2)
         r.host.europe = true;
         r.host.blocked = ClassicGUI.screenUp(true, false, true);   // behind the map
         assertFalse(r.host.blocked);

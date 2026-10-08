@@ -43,7 +43,13 @@ import net.sf.freecol.common.model.Unit;
  *   {@code endTurnPrompt} on, read at this idle decision, the Spielzugende
  *   mode follows instead ({@link #PROMPT_MS}, W17): the host draws it, and
  *   it waits for Enter, Space or a press on the word; the end forces its
- *   look ON and the request follows {@link #PROMPT_END_MS} later.</li>
+ *   look ON and the request follows {@link #PROMPT_END_MS} later.  With
+ *   the pref off the mode comes too when no unit of ours came up in the
+ *   turn ({@link #cameUp}; opening_014 1510-1512, the original's manual
+ *   p. 10): at the end's own time after a later change, or
+ *   {@link #PROMPT_START_MS} after the wipe when nothing at all came.  A
+ *   click on an own unit in the mode brings it up
+ *   {@link #PROMPT_CLICK_MS} after the mode's look went.</li>
  *   <li><b>Hand-over</b> (W5e): once the previous unit ran out of moves
  *   (or was skipped), the next unit of the original's unit cycle comes
  *   ({@link ClassicUnitCycle}, W5f; the controller's choice is put back),
@@ -105,6 +111,22 @@ final class ClassicTurnFlow {
 
     /** Spielzugende mode entry after a cancelled village box (#4136 -&gt; #4193). */
     static final double PROMPT_VILLAGE_MS = 813.0;
+
+    /**
+     * Spielzugende mode entry at a turn start where nothing comes: after
+     * the wipe, in the place of the first unit's block (opening_014 #4288
+     * -&gt; #4310/#4311, #3696 -&gt; #3719/#3720: 314-342 ms; the frame
+     * that completes it).
+     */
+    static final double PROMPT_START_MS = 328.0;
+
+    /**
+     * A click on an own unit in the Spielzugende mode: the unit's block
+     * this long after the mode's look went (opening_014 #4475 -&gt; #4477:
+     * 2 frames; the square, the minimap pixel and the map flag in the
+     * response, the panel's word until the block).
+     */
+    static final double PROMPT_CLICK_MS = 2 * ClassicAdvisorLayer.FRAME_MS;
 
     /**
      * The end command in the Spielzugende mode: the indicator (and our
@@ -363,6 +385,16 @@ final class ClassicTurnFlow {
         /** The Spielzugende mode ends without an end (a unit was activated). */
         void leavePrompt();
 
+        /**
+         * A click on an own unit ends the Spielzugende mode (opening_014
+         * #4475): the square and the minimap pixel go now; the panel keeps
+         * the tile mode with the word as it is (it stops blinking) until
+         * the unit's block replaces it ({@link #activate}).
+         */
+        default void promptClicked() {
+            leavePrompt();
+        }
+
         /** @return The player whose turn it is, or null. */
         Player currentPlayer();
 
@@ -387,6 +419,19 @@ final class ClassicTurnFlow {
          * @return True if the wipe must wait.
          */
         default boolean holdTurnStart() {
+            return false;
+        }
+
+        /**
+         * Whether our ships' arrival chain holds the turn start now (W13;
+         * no side effect, unlike {@link #holdTurnStart}): our colour is in
+         * the indicator meanwhile, also with no box up (landfall #27876
+         * -&gt; #27878: Holland's colour 2 frames before the arrival band;
+         * H REVIEW2 L5).
+         *
+         * @return True while the chain runs.
+         */
+        default boolean arrivalsHold() {
             return false;
         }
 
@@ -576,6 +621,24 @@ final class ClassicTurnFlow {
     /** Our colour's tick just before the wipe ({@link #flashOwnColour}). */
     private boolean ownFlash = false;
 
+    /**
+     * The turn in which a unit of ours last came up for orders, with its
+     * block and blink ({@link #cameUp}: the turn start's unit, a hand-over,
+     * the controller's choice, a click, a goto unit that arrived with
+     * moves left); not a visit, a goto run, the Europe screen or a box.
+     * With the pref off, a turn with none gets the Spielzugende mode
+     * instead of the automatic end (opening_014; the original's manual,
+     * p. 10: "only displayed at the end of a turn in which you haven't yet
+     * had a chance to move a unit").  {@link #NO_TURN} for none.
+     */
+    private int cameUpTurn = NO_TURN;
+
+    /** The screen changed since our turn's wipe (the wipe's own paint not counted). */
+    private boolean changedSinceWipe = true;
+
+    /** The wipe's own paint is under way ({@link #wipe}). */
+    private boolean wiping = false;
+
     /** The state for the recorder's probe (another thread). */
     private volatile String probeState = "idle";
 
@@ -749,6 +812,7 @@ final class ClassicTurnFlow {
         if (this.disposed) return;
         final long now = this.clock.now();
         this.lastChange = now;
+        if (!this.wiping) this.changedSinceWipe = true;
         final Pending p = this.pending;
         if (p != null && !p.started() && !p.held && p.base != 0L
             && p.kind != Kind.TURN_START) {
@@ -870,19 +934,72 @@ final class ClassicTurnFlow {
      *     make it active at once.
      */
     boolean unitChosen(Unit unit, Unit previous) {
-        return unitChosen(unit, previous, false, false);
+        return comesUp(unit, unitChosen(unit, previous, false, false));
     }
 
     /**
      * The player clicked an own unit: it is not replaced by the unit
-     * cycle's choice (as {@link #unitChosen(Unit, Unit)} otherwise).
+     * cycle's choice (as {@link #unitChosen(Unit, Unit)} otherwise).  In
+     * the Spielzugende mode the mode's look goes at once and the unit comes
+     * up {@link #PROMPT_CLICK_MS} later (opening_014 #4475 -&gt; #4477);
+     * the caller has freed a fortified or sentried unit first
+     * ({@code ClassicGUI.unitClicked}).
      *
      * @param unit The unit.
      * @param previous The map's active unit now, or null.
      * @return As {@link #unitChosen(Unit, Unit)}.
      */
     boolean unitClicked(Unit unit, Unit previous) {
-        return unitChosen(unit, previous, false, true);
+        return comesUp(unit, unitChosen(unit, previous, false, true));
+    }
+
+    /**
+     * An own unit came up outside the flow: the unit the game view opens
+     * with (a load, the game's start; {@code ClassicGUI.reconnectGUI}).
+     *
+     * @param unit The unit, or null.
+     */
+    void unitShown(Unit unit) {
+        if (this.disposed) return;
+        cameUp(unit, "shown");
+    }
+
+    /**
+     * @param unit The unit chosen, or null.
+     * @param taken What {@link #unitChosen(Unit, Unit, boolean, boolean)}
+     *     returned: false makes the unit active at once, so it came up.
+     * @return {@code taken}.
+     */
+    private boolean comesUp(Unit unit, boolean taken) {
+        if (!taken && !this.disposed) cameUp(unit, "at once");
+        return taken;
+    }
+
+    /**
+     * A unit of ours came up for orders in this turn (its block and blink):
+     * the turn's idle decision is then the automatic end, not the
+     * Spielzugende mode ({@link #cameUpTurn}).
+     *
+     * @param unit The unit, or null.
+     * @param why How (for the recorder).
+     */
+    private void cameUp(Unit unit, String why) {
+        if (unit == null || !unit.hasTile() || !this.host.myTurn() || this.ending) return;
+        final int turn = this.host.turnNumber();
+        if (turn == this.cameUpTurn) return;
+        this.cameUpTurn = turn;
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("came-up", unit.getId() + " turn=" + turn
+                + " (" + why + ")");
+        }
+    }
+
+    /**
+     * @return Whether a unit of ours came up in the current turn
+     *     ({@link #cameUpTurn}; tests and the recorder).
+     */
+    boolean cameUpThisTurn() {
+        return this.cameUpTurn == this.host.turnNumber();
     }
 
     /**
@@ -895,7 +1012,7 @@ final class ClassicTurnFlow {
      * @return As {@link #unitChosen(Unit, Unit)}.
      */
     boolean carrierChosen(Unit carrier, Unit boarded) {
-        return unitChosen(carrier, boarded, true, true);
+        return comesUp(carrier, unitChosen(carrier, boarded, true, true));
     }
 
     /**
@@ -935,6 +1052,7 @@ final class ClassicTurnFlow {
         }
         final Unit held = this.heldUp;
         this.heldUp = null;
+        if (fixed && !boarding && this.prompt) return promptClick(unit);
         if (p != null && (p.kind == Kind.TURN_START
                 || (p.kind == Kind.HANDOVER
                     && (p.unit == unit || unit == previous
@@ -1011,6 +1129,27 @@ final class ClassicTurnFlow {
     }
 
     /**
+     * A click on an own unit in the Spielzugende mode (opening_014 1512):
+     * the mode ends without an end; its square and minimap pixel go in the
+     * response's paint (#4475), and the unit's block follows
+     * {@link #PROMPT_CLICK_MS} later (#4477) as a hand-over of its own, so
+     * the controller's choice of the same unit meanwhile is kept.
+     *
+     * @param unit The unit clicked.
+     * @return True: the flow brings it.
+     */
+    private boolean promptClick(Unit unit) {
+        cancel("prompt-click");
+        this.prompt = false;
+        this.idleWanted = false;
+        ClassicFrameRecorder.event("endturn-prompt", "click " + unit.getId());
+        this.host.promptClicked();
+        start(new Pending(Kind.HANDOVER, unit, this.clock.now(),
+                          new Stage(PROMPT_CLICK_MS, Action.ACTIVATE)));
+        return true;
+    }
+
+    /**
      * Bring the cycle's next unit: as a hand-over (its pause from the last
      * change) after a unit that ran out, else at once ({@link #bringNow}),
      * as FreeCol's controller brings its choice after orders that keep
@@ -1052,6 +1191,7 @@ final class ClassicTurnFlow {
                               new Stage(VISIT_SHOW_MS, Action.SHOW)));
         } else {
             this.host.activate(next);
+            cameUp(next, "at once");
         }
     }
 
@@ -1064,6 +1204,7 @@ final class ClassicTurnFlow {
      */
     void cycleUnitUp(Unit unit) {
         this.heldUp = unit;
+        cameUp(unit, "load");
     }
 
     /**
@@ -1383,7 +1524,9 @@ final class ClassicTurnFlow {
      * request goes out, and none while our turn is shown.
      *
      * <p>Our new turn before its wipe: ours while its turn-start boxes are
-     * up, and for one tick just before the wipe ({@link #OWN_FLASH_MS});
+     * up, while our ships' arrival chain holds it (from the hold on, before
+     * the chain's band, landfall #27876 -&gt; #27878; H REVIEW2 L5), and
+     * for one tick just before the wipe ({@link #OWN_FLASH_MS});
      * until then the colour shown stays.  FreeCol autosaves and prepares
      * its turn report between the player change and the controller's
      * first view change (0.16-0.41 s), where our colour used to light; the
@@ -1403,7 +1546,8 @@ final class ClassicTurnFlow {
             }
             if (this.turnStarted) return -1;
             final int own = ClassicHud.indicatorRgb(me);
-            if (this.ownFlash || this.shownIndicator < 0 || this.host.blocked()) {
+            if (this.ownFlash || this.shownIndicator < 0 || this.host.blocked()
+                || this.host.arrivalsHold()) {
                 return own;
             }
             return this.shownIndicator;
@@ -1582,7 +1726,17 @@ final class ClassicTurnFlow {
 
     /**
      * Arm the idle pause if nothing is left to move: the automatic end, or
-     * the Spielzugende mode with the pref on (read now, delta W5a).
+     * the Spielzugende mode with the pref on (read now, delta W5a) or when
+     * no unit of ours came up in this turn ({@link #cameUpTurn}; opening_014
+     * 1510-1512, all three with the option off).
+     *
+     * <p>Its time: the mode at a turn start where nothing changed since
+     * the wipe comes {@link #PROMPT_START_MS} after the wipe (#4288 -&gt;
+     * #4311, #3696 -&gt; #3720), in any other case the pause runs from the
+     * last change: the pref's mode {@link #PROMPT_MS} (W17), the mode with
+     * the pref off at the automatic end's time, {@link #END_TURN_MS} (a
+     * visit's completion #2178 -&gt; #2212: 33/34 frames, the same timer
+     * as the end, I).
      *
      * @param base When the last change was.
      */
@@ -1605,9 +1759,19 @@ final class ClassicTurnFlow {
             && this.clock.now() - this.villageCancel <= nanos(VILLAGE_WINDOW_MS);
         this.idleVillage = (village) ? this.villageTile : null;
         final boolean promptPref = this.host.promptPref();
-        start(new Pending((promptPref) ? Kind.PROMPT : Kind.END_TURN, null, base,
-                new Stage(idleMs(promptPref, village),
-                          (promptPref) ? Action.PROMPT : Action.END)));
+        final int turn = this.host.turnNumber();
+        final boolean noneCameUp = this.cameUpTurn != turn;
+        final boolean mode = promptPref || noneCameUp;
+        final boolean atStart = mode && this.turnStarted && this.wipeNanos != 0L
+            && !this.changedSinceWipe;
+        if (noneCameUp && !promptPref) {
+            ClassicFrameRecorder.event("endturn-idle", "Spielzugende: no unit came up in turn "
+                + turn + ((atStart) ? " (turn start)" : ""));
+        }
+        start(new Pending((mode) ? Kind.PROMPT : Kind.END_TURN, null,
+                (atStart) ? this.wipeNanos : base,
+                new Stage((atStart) ? PROMPT_START_MS : idleMs(promptPref, village),
+                          (mode) ? Action.PROMPT : Action.END)));
     }
 
     /**
@@ -1618,13 +1782,24 @@ final class ClassicTurnFlow {
     private boolean wipe() {
         if (this.turnStarted) return true;
         if (!this.host.myTurn() || this.host.blocked()) return false;
-        if (this.host.holdTurnStart()) return false;   // its box first (D8a)
+        if (this.host.holdTurnStart()) {
+            // Its box first (D8a), or the arrival chain: our colour lights
+            // now, before the chain's band (H REVIEW2 L5).
+            if (indicatorRgb() != this.shownIndicator) this.host.paintIndicator();
+            return false;
+        }
         flashOwnColour();
         this.turnStarted = true;
         this.unwipedSince = 0L;
         this.wipeNanos = this.clock.now();
         ClassicFrameRecorder.event("turn-wipe", "turn=" + this.host.turnNumber());
-        this.host.wipe();
+        this.wiping = true;
+        try {
+            this.host.wipe();
+        } finally {
+            this.wiping = false;
+            this.changedSinceWipe = false;
+        }
         updateProbe();
         return true;
     }
@@ -1744,6 +1919,8 @@ final class ClassicTurnFlow {
             case ACTIVATE:
                 if (usable(p.unit)) {
                     this.host.activate(p.unit);
+                    // Not a goto unit's block before its run (GOTO next).
+                    if (last) cameUp(p.unit, p.kind.toString());
                 } else {
                     this.pending = null;
                     this.timer.cancel();
@@ -1883,6 +2060,7 @@ final class ClassicTurnFlow {
         if (usable(unit) && unit.getMovesLeft() > 0 && !unit.isOnCarrier()
             && unit.getState() == Unit.UnitState.ACTIVE) {
             this.host.activate(unit);
+            cameUp(unit, "goto arrived");
         } else {
             afterUnit(unit, "goto");
         }

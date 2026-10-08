@@ -62,7 +62,18 @@ save plays on as it was (R1b re-applies the rules on load, later).
   Amsterdam in 1515, and from Amsterdam in 1508, back on the map in 1510 (both
   ways 2 turns; Roger's levi game took 3, 1503 -> 1506). Magellan's -1 still
   applies (1 turn). New games only: a save keeps its option
-  (`LeviRulesTest.testSailingTime`).
+  (`LeviRulesTest.testSailingTime`). Every clip's ship left from the east
+  edge; the original's manual gives 1-4 turns, longer from the west (pp. 14,
+  60; H REVIEW2 L3). Roger (2026-10-08): 2 turns both ways as the standard;
+  the west edge's longer voyage and Magellan's west-only bonus (PEDIA
+  @FATHER5, L4) are not built.
+- **The original's fortification** (J2): `model.option.fortifyKeepsMoves` on:
+  a unit whose fortification completes at the turn start keeps that turn's
+  moves (opening_014 #2177: "Züge: 1" in its block), so a click frees it and
+  it moves at once; classic and freecol take them (`ServerUnit.csNewTurn`).
+  Rules and saves without the option take the moves
+  (`Specification.fixGameOptions`); a running game keeps what its save has.
+  (`ServerUnitTest.testFortifyKeepsMoves`, `LeviRulesTest.testFortifyKeepsMoves`.)
 - **House rules** (game options; rules and saves without them get FreeCol's
   behaviour from `Specification.fixGameOptions`):
   - `model.option.cancelKeepsMove` on (D1, moved here from the classic
@@ -483,7 +494,8 @@ minimap box.
     begins) and the map/minimap refresh. Through `ClassicGUI.requestEndTurn` ->
     `ClassicTurnFlow.endTurnNow`, which lights the turn indicator first (W5c).
     Without a key the turn ends by itself 485 ms after the last change once
-    nothing can move (W5a). Since W17 only in the Spielzugende mode (or with no
+    nothing can move, if a unit came up in the turn (W5a; else the
+    Spielzugende mode waits, J2). Since W17 only in the Spielzugende mode (or with no
     unit up and none left that can move, `ClassicGUI.mayEndTurnByKey`; a unit
     off the map, a ship that has sailed for Europe, counts as none): the
     original has no other end of turn, with units left it ends by itself once
@@ -943,7 +955,10 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   for the session (`SESSION_OPTIONS`, restored at teardown): it ends at once.
   With the classic pref `endTurnPrompt` on -- read at this idle decision, not
   at the turn start -- the Spielzugende mode follows at **500 ms** (813 after a
-  village cancel) instead; see "The Spielzugende mode" (W17).
+  village cancel) instead; see "The Spielzugende mode" (W17). With the pref
+  off the automatic end comes only in a turn in which a unit of ours came up
+  for orders; in a turn with none (all fortified or sentried, the ship at sea)
+  the Spielzugende mode comes and waits (J2, below).
 - **Stale panel (W5b).** `ClassicInfoPanel` remembers the block it last built
   for a unit and paints it while no unit is active or the remembered unit has
   no moves left (`showsLive`): after the last move the panel keeps "Züge" and
@@ -960,7 +975,10 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   server's answer and the player change come in either order, so the
   prediction holds until the player or the turn number changes, or 1.5 s
   after the server's answer).
-  - **Ours** (#FF7100) lights while our new turn's boxes are up, and
+  - **Ours** (#FF7100) lights while our new turn's boxes are up, while our
+    ships' arrival chain holds the turn start (from the hold on, painted at
+    once; the chain's first step 2 frames later, `CHAIN_AFTER_COLOUR_MS`:
+    landfall #27876 -> #27878, H REVIEW2 L5), and
     otherwise only for one tick, in a paint of its own, just before the wipe
     (`flashOwnColour`, `OWN_FLASH_MS` = 16.43 ms: 1-2 frames, as every end in
     the landfall clip; M1 acceptance F4). Between the player change and the
@@ -1115,8 +1133,9 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   flow asks it -- a block or a goto run whose unit is gone (`usable`: off the
   map, disposed, not ours) and the cycle has nothing after it -- and nothing
   came (`nextUnitOrIdle`: no `unitChosen`, no `noUnitLeft`), the flow brings
-  the cycle's next due unit, or arms the automatic end itself if nothing can
-  move. A unit off the map that the controller re-selects
+  the cycle's next due unit, or arms the idle decision itself if nothing can
+  move (the automatic end, or the Spielzugende mode in a turn in which no
+  unit came up). A unit off the map that the controller re-selects
   (`moveDirection`'s redisplay of the ship after its last move) is no unit
   to show when nothing else can move or is due
   (`ClassicGUI.goneWithNothingLeft`): the end view and `noUnitLeft`, as
@@ -1135,6 +1154,8 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   `endturn-timer-cancel`, `end-turn <auto|key|refused|settled late|refused:
   next unit>`, `indicator <rgb|off> cur=.. [predicted]`, `turn-wait`,
   `turn-wipe`, `handover ...`, `endturn-prompt`, `endturn-village`,
+  `came-up <unit> turn=.. (<how>)`, `endturn-idle Spielzugende: no unit came
+  up in turn ..`, `click-wake <unit> <state>`,
   `key-blocked`, `key-ignored`, `click-blocked`; the `state` probe has
   `flow=<kind>/<stage> [waiting] [prompt] [goto]`, and `waitIdle` waits while
   the flow is busy.
@@ -1142,9 +1163,10 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
 `ClassicTurnFlowTest` runs the flow on a fake clock and host: the pauses and
 stages, the 485-ms end and its re-basing, the conditions, a box holding it,
 the village pause, the Spielzugende hand-off, the hand-over with and without
-its jump, the turn start (with a box, with a jump, without units, after an
-AI phase no poll saw, after a refusal), our colour's tick before the wipe and
-with a box up, goto units first and a goto unit with no path, a goto ship
+its jump, the turn start (with a box, with a jump, without units: the mode,
+after an AI phase no poll saw, after a refusal), the mode when no unit came
+up and a click in it (J2), our colour's tick before the wipe, with a box up
+and during the arrival hold, goto units first and a goto unit with no path, a goto ship
 gone off the map with no choice from the controller, a refusal not
 sent and a slow answer, a stage that throws, a disposed flow, a screen behind
 the map, the indicator's colours and its poll, and `ClassicOneShot` (replace,
@@ -1166,6 +1188,45 @@ the mode and waits. Measured in landing-slow (1505-1507) and clip004
 (1509/1510); the panel re-rendered with our painters is identical to the
 original's #2306, #2328, #2352 and clip004 #1974, #1995 (0 px; the m1 W17
 harness).
+
+**With the pref off (J2; opening_014 1510, 1511, 1512, i-prep
+spielzugende-fortified.md; H REVIEW2 M2; the original's manual p. 10: "only
+displayed at the end of a turn in which you haven't yet had a chance to move a
+unit")** the same mode, look and wait come in a turn in which no unit of ours
+came up for orders (`ClassicTurnFlow.cameUpTurn`: the turn start's unit, a
+hand-over's, the controller's choice made active at once, a click, a goto unit
+that arrived with moves left, the view's first unit after a load; not a
+visit, a goto unit's block before its run, the Europe screen and its
+sailings, a box). Typical: every unit fortified or sentried, the ship at sea.
+A turn in which a unit came up -- moved, fortified (F), skipped (Space) --
+still ends by itself 485 ms after the last change (#691, #1834, #4680).
+
+- **When.** At a turn start where nothing came at all, **328 ms** after the
+  wipe, in the place of the first unit's block (`PROMPT_START_MS`; #4288 ->
+  #4310/#4311, after Europe closed #3696 -> #3719/#3720: 314-342 ms; also the
+  pref's own mode at a turn start); after a later change (a visit's
+  completion, a box's close) at the automatic end's **485 ms** (#2178 ->
+  #2211/#2212, I: the same timer as the end; the pref's mode keeps its 500).
+  Nothing changed since the wipe (`changedSinceWipe`) decides "turn start".
+- **A click on an own unit that can move** ends the mode without an end, in
+  the pref's mode too (#4475 -> #4477): a fortified, fortifying or sentried
+  unit is freed first (`ClassicGUI.unitClicked` -> `wake`, the server's
+  `changeState(ACTIVE)`, before the activation, so the cycle's cursor goes on
+  it, I2), the square and the minimap pixel go and the map's repaint shows the
+  freed unit's "-" (`promptClicked`); the panel keeps the tile mode with the
+  word as it was (it stops blinking; white in the clip, the panel icon's F
+  too) until the unit's block **2 frames** later (`PROMPT_CLICK_MS`, a
+  hand-over of its own, so FreeCol's own choice of the unit after the state
+  change is kept). The unit then plays as any other; after its last move the
+  turn ends by itself (#4646 -> #4680) and the mode does not come back. A
+  unit with no moves left takes no click in the mode (it keeps its orders).
+  The same freeing on a click outside the mode (`ClassicMapViewer.clickOn`,
+  both branches).
+- **The levi rules keep the moves of a completed fortification**
+  (`model.option.fortifyKeepsMoves`, "The rules"): FreeCol takes the turn's
+  moves when FORTIFYING becomes FORTIFIED at the turn start; the original's
+  visit block shows "Züge: 1" (#2177), so a unit whose fortification
+  completed this turn can be freed and moved at once.
 
 - **The cursor tile.** The last active unit's tile (`ClassicMapViewer.
   promptTileFor`: the target of its last move), or the village whose box was
@@ -1197,23 +1258,36 @@ harness).
   the end request follow 15 ms later (`PROMPT_END_MS`, #5500 -> #5501). The
   word stays white until the turn-start wipe; the square and its pixel stay
   until a paint covers them -- a slide over the cell or a slide's final draw, a
-  jump, the next activation (clip004 #2766, landing-slow #2902/#5525/#6460).
+  jump, the next activation (clip004 #2766, landing-slow #2902/#5525/#6460) --
+  or the next mode replaces them (also through FreeCol's fallback terrain view
+  at our next turn's start, which no longer clears a frozen square; opening_014
+  #4309 -> #4311, J2).
 - **Other input** in the mode: the arrows are inert; a map click does
-  something only on an own unit that can still move, which becomes active and
-  ends the mode (I, item 6); the menus and the minimap work.
+  something only on an own unit that can still move, which comes up as above
+  (opening_014 1512; W17 item 6); the menus and the minimap work.
 - **Not built / I:** the colony block and "+ Weiter +" of a colony tile (W21),
   the meaning of the number after the position, Enter vs. click (both work),
-  what arrows do.
-- Recorder events: `endturn-prompt on|end <why>|left`, `prompt on|off n=..|hold|
-  restart|freeze|clear <why>`, `click-ignored prompt`.
+  what arrows do; the turn-start visit's block ("Befestigen", black F, #2177:
+  ours shows no block) and its jump right after an F order at 300-314 ms
+  (ours 500); the original's one-frame black word while the mode is drawn
+  (#2211).
+- Recorder events: `endturn-prompt on|end <why>|left|click <unit>`,
+  `endturn-idle Spielzugende: no unit came up in turn ..`, `came-up`,
+  `click-wake`, `prompt on|off n=..|hold|restart|freeze|clear <why>`,
+  `click-ignored prompt`.
 
 Tests: `ClassicTurnFlowTest.testPromptMode` / `testPromptModeKeepsAndLeaves` /
 `testVillageCancel` (the stages, the forced-ON end one frame before the
 request, the pref off in the mode, leaving by a unit, the village tile),
+`testTurnStartWithoutUnits`, `testPromptWhenNoUnitCameUp`, `testPromptClick`
+(J2: 328 ms after the wipe, 485 after a visit, what counts as come up, the
+click's 2 frames, the automatic end after the clicked unit's move),
 `ClassicMapViewerTest.testPromptSquare` (phases, hold and restart, freeze,
-what clears it, the minimap pixel), `ClassicHudTest.testTileMode*` (lines,
-layout, word and square pixels, live tile facts), `ClassicBlinkTest.
-testArmDelayed`.
+what clears it, the minimap pixel), `testAClickFreesTheUnit`,
+`testPromptClickKeepsTheWordUntilTheBlock`, `ClassicHudTest.testTileMode*`
+(lines, layout, word and square pixels, live tile facts), `ClassicBlinkTest.
+testArmDelayed`, `ServerUnitTest.testFortifyKeepsMoves`,
+`LeviRulesTest.testFortifyKeepsMoves`.
 
 ### Escape, the high seas and the Europe question (build spec W0e, W0f, W8a; house rule D1)
 
@@ -1426,8 +1500,9 @@ and units at sea or in Europe never count as movable. Now as the original:
   start, never as a reminder of ships left in port (Roger, 2026-10-08).
 - **The chain** (`ClassicVoyages.Chain`), inside the turn flow's hold before the
   year flips (`ClassicGUI.holdTurnStart`: the father offer first, then the
-  arrivals; the hold is asked only when no box is up, so the band comes on the
-  next paint after the last turn-start box): one band per ship in Europe, 542 ms
+  arrivals; the hold is asked only when no box is up, so the band comes after
+  the last turn-start box; our colour lights at the hold, the chain's first
+  step 2 frames later, L5): one band per ship in Europe, 542 ms
   apart; Europe opens 542 ms after the last (38 frames, landfall #27878 ->
   #27916); a box up then (an emigration question): Europe after its close; open
   already (windowed, behind the map or minimized): refreshed, restored and
@@ -1457,7 +1532,14 @@ and units at sea or in Europe never count as movable. Now as the original:
   waiting on the dock; not if a ship is in port again by then; a modal list or
   a box up: after it. It is the player's close for the turn flow: the arrival
   hold ends (the wipe) and the unit whose turn it is comes through the unit
-  cycle, or, with nothing to move, the turn's end.
+  cycle, or, with nothing to move, the Spielzugende mode 328 ms after the wipe
+  (opening_014 1511 #3696 -> #3719/#3720; J2).
+- **Turns with nothing to move** (the ship at sea, every unit fortified or
+  sentried, nothing in the New World) no longer run on by themselves: with no
+  unit up in the turn the Spielzugende mode comes and waits for Enter, Space
+  or a press on the word (J2, "The Spielzugende mode"; H REVIEW2 M2). Before
+  J2 such turns ended 485 ms after the wipe, which was not the original's
+  behaviour (Roger's 1504-1545).
 - **No reminder** (Roger, 2026-10-08): Part H's guard (Europe opened instead
   of the automatic end when nothing was in the New World) and its Europe after
   a load are gone. Ships left in Europe get no reminder.
@@ -1478,7 +1560,8 @@ and units at sea or in Europe never count as movable. Now as the original:
   arrival, a failing host), `ClassicBandsTest` (stand-in and the pack's texts,
   `bandX` 94/71/83/83), `ClassicTurnFlowTest.testDepartureBandDoesNotHoldTheEnd`,
   `testEuropeHoldsTheEnd`, `testNoEuropeInsteadOfTheEnd`,
-  `testArrivalHoldsTheWipe`, `ClassicGUISeamTest.testVoyageSeams`,
+  `testArrivalHoldsTheWipe`, `testOwnColourDuringTheArrivalHold`,
+  `ClassicGUISeamTest.testVoyageSeams`,
   `testEuropeOpensOnlyAtAnArrival`, `testRaisesEurope`,
   `testWoodcutsOfTheEventsAndNotices`, `ClassicHudTest.testKeysWhileWaiting`,
   `ClassicScriptTest.testScreenClick`, `PlayerTest.testClassicTips`,
@@ -5159,8 +5242,14 @@ woke late in 25 (> 5 ms in 17, at most 12.4 ms), the new one never (at most
 
 **Input script** (`-Dfreecol.classic.script=<file>`, format in
 `ClassicScript`'s class comment): `wait <ms>`, `key <KeyStroke>` (e.g. `LEFT`,
-`NUMPAD7`, `ENTER`, `alt G`), `click <x> <y>` (canvas pixels), `sclick <x> <y>` (the open Europe screen's own 320x200 canvas, also minimized), `waitGame`,
-`waitIdle`, `waitTurn` (optional timeout ms), `pref <name> on|off` (the classic
+`NUMPAD7`, `ENTER`, `alt G`), `click <x> <y>` (canvas pixels), `sclick <x> <y>` (the open Europe screen's own 320x200 canvas, also minimized),
+`tclick <x> <y>` (map tile (x, y) as the map shows it now: its cell's centre
+on the canvas, an error out of the view; J2), `waitGame`,
+`waitIdle`, `waitTurn [timeoutMs [key]]` (with a key, every box on screen
+meanwhile gets it once: the turn start's notices; the Spielzugende mode counts
+as having the controls), `markTurn` (the next `waitTurn` waits for a turn after
+the marked one: before a key that ends the turn at once, Enter in the mode,
+whose AI phase can be over before `waitTurn` starts; J2), `pref <name> on|off` (the classic
 prefs below, or `autoSave`/`combatAnalysis`/`tutorTips`, which set FreeCol's
 own options), `goto <x> <y>` (the active unit gets FreeCol's goto order to that
 tile, `InGameController.goToTile`; W5f's goto units), `waitBox <prefix>

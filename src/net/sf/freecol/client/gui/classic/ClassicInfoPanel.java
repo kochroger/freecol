@@ -128,6 +128,9 @@ final class ClassicInfoPanel extends JComponent {
     private ClassicHud.TileFacts promptFacts = null;
     private boolean promptFrozen = false;
 
+    /** A click on a unit ended the mode: the tile mode stays until its block ({@link #promptClicked}). */
+    private boolean promptClicked = false;
+
     /**
      * The season line of the last paint in our turn: kept while the turn
      * flow waits for our next turn, so the year changes in the paint of
@@ -206,6 +209,7 @@ final class ClassicInfoPanel extends JComponent {
         this.staleColony = null;
         this.promptFacts = null;
         this.promptFrozen = false;
+        this.promptClicked = false;
         this.blockHeld = false;
     }
 
@@ -240,6 +244,7 @@ final class ClassicInfoPanel extends JComponent {
     void enterPrompt(Tile tile) {
         this.promptFacts = (tile == null) ? null : tileFacts(tile);
         this.promptFrozen = false;
+        this.promptClicked = false;
     }
 
     /**
@@ -252,17 +257,54 @@ final class ClassicInfoPanel extends JComponent {
         paintNow();
     }
 
-    /** The mode was left without an end (a unit was activated): the unit block is back. */
+    /**
+     * The mode was left without an end (a unit was activated): the unit
+     * block is back.  After a click on a unit ({@link #promptClicked}) only
+     * the minimap's pixel changes now; the tile mode and the word stay
+     * until the unit's block replaces them ({@link #dropPrompt}).
+     */
     void leavePrompt() {
         if (this.promptFacts == null) return;
+        if (this.promptClicked) {
+            paintMinimapNow();
+            return;
+        }
         this.promptFacts = null;
         this.promptFrozen = false;
         paintNow();
     }
 
+    /**
+     * A click on an own unit ended the mode (opening_014 #4475): the word
+     * stops blinking as it is (white #4475, the block #4477), and a press
+     * on it no longer ends the turn.
+     *
+     * @param on Whether the word is white now.
+     */
+    void promptClicked(boolean on) {
+        if (this.promptFacts == null) return;
+        this.promptClicked = true;
+        this.promptFrozen = on;
+    }
+
+    /**
+     * The tile mode goes without a paint of its own: a unit's block is
+     * painted next (the activation's one panel paint, W3).
+     */
+    void dropPrompt() {
+        this.promptFacts = null;
+        this.promptFrozen = false;
+        this.promptClicked = false;
+    }
+
     /** @return The tile mode's tile, or null (tests and the recorder). */
     ClassicHud.TileFacts promptFacts() {
         return this.promptFacts;
+    }
+
+    /** @return Whether the tile mode's word is held white (tests). */
+    boolean isPromptWordFrozen() {
+        return this.promptFrozen;
     }
 
     /** The tile mode's facts of a live tile, as the player knows it. */
@@ -277,7 +319,8 @@ final class ClassicInfoPanel extends JComponent {
                 sp = null;
             }
         }
-        return ClassicHud.TileFacts.of(tile, this.freeColClient.getMyPlayer(),
+        return ClassicHud.TileFacts.of(tile, (this.freeColClient == null) ? null
+                                       : this.freeColClient.getMyPlayer(),
                                        sp, units, colonyFacts(tile));
     }
 

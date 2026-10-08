@@ -1739,7 +1739,11 @@ public class ClassicGUI extends GUI {
                 this.mapViewer.changeToMoveUnits(first);
                 cycleActivated(first);
                 unitUp(first, waitClock().now());
-                if (fromCursor(first) && this.turnFlow != null) this.turnFlow.cycleUnitUp(first);
+                if (this.turnFlow != null) {
+                    // A unit up: this turn's end is the automatic one (J2).
+                    this.turnFlow.unitShown(first);
+                    if (fromCursor(first)) this.turnFlow.cycleUnitUp(first);
+                }
             } else if (tile != null) {
                 this.mapViewer.changeToTerrain(tile);
             }
@@ -2411,18 +2415,66 @@ public class ClassicGUI extends GUI {
      */
     @Override
     public void changeView(Unit unit, boolean force) {
-        changeView(unit, false, "unit");
+        // The controller's choice of the unit a click is freeing, from
+        // inside the state change (its updateGUI runs at once on the event
+        // thread): that is the click itself (J2 live check, run click4).
+        changeView(unit, unit != null && unit == this.clickWaking, "unit");
     }
 
     /**
      * A click on an own unit: it becomes active as the controller's choice
      * would ({@link #changeView(Unit, boolean)}), but at a hand-over the
-     * unit cycle does not replace it (master plan W5f).
+     * unit cycle does not replace it (master plan W5f).  A fortified,
+     * fortifying or sentried unit that can still move is freed first, in
+     * and outside the Spielzugende mode (Roger, 2026-10-08: "Sobald ich auf
+     * den Pionier klicke, ist er wieder frei"; opening_014 #4475: the flag's
+     * F becomes "-" in the click's response): the server's state change
+     * comes before the activation, so the unit cycle's cursor goes on it
+     * (I2) and the map's repaint shows the "-".
      *
      * @param unit The unit clicked.
      */
     void unitClicked(Unit unit) {
+        if (wakesOnClick(unit)) {
+            ClassicFrameRecorder.event("click-wake", unit.getId() + " " + unit.getState());
+            this.clickWaking = unit;
+            try {
+                wake(unit);
+            } finally {
+                this.clickWaking = null;
+            }
+        }
         changeView(unit, true, "click");
+    }
+
+    /**
+     * The unit a click is freeing, during its state change: FreeCol's
+     * {@code changeState} asks for the next active unit at once (its
+     * {@code updateGUI} runs now on the event thread), and with no unit up
+     * (the Spielzugende mode) it chooses the freed unit; that choice is the
+     * click ({@link #changeView(Unit, boolean)}).  EDT only.
+     */
+    private Unit clickWaking = null;
+
+    /**
+     * Whether a click frees the unit ({@link #unitClicked}): fortified,
+     * fortifying or sentried, with moves left.  A unit with none keeps its
+     * orders (a refused action costs nothing): in the turn its
+     * fortification completed FreeCol takes its moves unless the rules
+     * keep them ({@code model.option.fortifyKeepsMoves}, levi).
+     *
+     * @param unit The unit, or null.
+     * @return True to free it.
+     */
+    static boolean wakesOnClick(Unit unit) {
+        if (unit == null || !unit.hasTile() || unit.isOnCarrier()
+            || unit.getMovesLeft() <= 0) return false;
+        switch (unit.getState()) {
+        case FORTIFIED: case FORTIFYING: case SENTRY:
+            return true;
+        default:
+            return false;
+        }
     }
 
     /**
@@ -2467,7 +2519,10 @@ public class ClassicGUI extends GUI {
      * @param unit The unit.
      */
     private void activateNow(Unit unit) {
-        if (this.infoPanel != null) this.infoPanel.releaseBlock();
+        if (this.infoPanel != null) {
+            this.infoPanel.releaseBlock();
+            this.infoPanel.dropPrompt();   // a click's kept word: the block replaces it
+        }
         this.mapViewer.changeToMoveUnits(unit);
         cycleActivated(unit);
         unitUp(unit, waitClock().now());
@@ -2567,8 +2622,9 @@ public class ClassicGUI extends GUI {
      *
      * <p>No unit left: the unit cycle's next due unit if there is one (a
      * goto unit, a visit, master plan W5f), else the turn flow ends the
-     * turn 485 ms after the last change (build spec W5a), never FreeCol's
-     * {@code autoEndTurn}.
+     * turn 485 ms after the last change (build spec W5a), or, in a turn in
+     * which no unit came up, shows the Spielzugende mode and waits (J2),
+     * never FreeCol's {@code autoEndTurn}.
      */
     @Override
     public void changeView() {
@@ -2950,7 +3006,10 @@ public class ClassicGUI extends GUI {
         @Override
         public void activate(Unit unit) {
             if (mapViewer == null) return;
-            if (infoPanel != null) infoPanel.releaseBlock();
+            if (infoPanel != null) {
+                infoPanel.releaseBlock();
+                infoPanel.dropPrompt();   // a click's kept word: the block replaces it
+            }
             mapViewer.changeToMoveUnits(unit);
             cycleActivated(unit);
             unitUp(unit, waitClock().now());
@@ -3042,6 +3101,22 @@ public class ClassicGUI extends GUI {
         public void leavePrompt() {
             if (mapViewer != null) mapViewer.clearPrompt("left", true);
             if (infoPanel != null) infoPanel.leavePrompt();
+        }
+
+        @Override
+        public void promptClicked() {
+            // opening_014 #4475: the square and the minimap pixel go, the
+            // map's repaint shows the freed unit's "-"; the panel's word
+            // stays as it is until the block (#4477).
+            if (infoPanel != null) {
+                infoPanel.promptClicked(mapViewer != null && mapViewer.isPromptShown());
+            }
+            if (mapViewer != null) mapViewer.clearPrompt("click", true);
+        }
+
+        @Override
+        public boolean arrivalsHold() {
+            return ClassicGUI.this.arrivalsHold();
         }
 
         @Override
@@ -3818,8 +3893,12 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * Start the arrival chain; its first step is posted, so the band comes
-     * with the next paint after the box that closed last (A5).
+     * Start the arrival chain; its first step comes
+     * {@link ClassicVoyages#CHAIN_AFTER_COLOUR_MS} later, after our colour
+     * lit in the indicator (the turn flow paints it at the hold,
+     * {@link #arrivalsHold}; landfall #27876 -&gt; #27878, H REVIEW2 L5),
+     * and the band with the next paint after the box that closed last
+     * (A5).
      *
      * @param a The arrivals.
      * @param why What starts it (for the recorder).
@@ -3830,7 +3909,21 @@ public class ClassicGUI extends GUI {
             ship -> ClassicBands.arrivalEurope(t, ship),
             ship -> ClassicBands.arrivalNewWorld(t, ship));
         ClassicFrameRecorder.event("voyage", "arrivals " + a + " (" + why + ")");
-        SwingUtilities.invokeLater(this::runVoyageChain);
+        if (this.voyageTimer != null) {
+            this.voyageTimer.schedule(waitClock().now()
+                + ClassicVoyages.nanos(ClassicVoyages.CHAIN_AFTER_COLOUR_MS),
+                this::runVoyageChain);
+        } else {
+            SwingUtilities.invokeLater(this::runVoyageChain);
+        }
+    }
+
+    /**
+     * @return Whether our ships' arrival chain holds the turn start: our
+     *     colour is in the indicator meanwhile (H REVIEW2 L5).  EDT only.
+     */
+    boolean arrivalsHold() {
+        return this.voyageChain != null;
     }
 
     /**

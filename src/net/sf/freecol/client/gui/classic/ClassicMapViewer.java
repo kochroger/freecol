@@ -1000,7 +1000,11 @@ final class ClassicMapViewer extends JPanel {
         if (tile != this.selectedTile || this.viewMode != GUI.ViewMode.TERRAIN) {
             this.changeToShow = true;   // the cursor moves
         }
-        clearPrompt("terrain", true);
+        // A live square goes; a frozen one (the mode ended with Enter) is
+        // the controller's fallback view at our next turn's start, and
+        // stays until the next mode replaces it or a unit comes up
+        // (opening_014 #4288 -> #4309, J2).
+        if (!this.promptFrozen) clearPrompt("terrain", true);
         this.viewMode = GUI.ViewMode.TERRAIN;
         this.selectedTile = tile;
         this.activeUnit = null;
@@ -1890,8 +1894,15 @@ final class ClassicMapViewer extends JPanel {
      * @param tile The cursor tile, or null for none.
      */
     void enterPrompt(Tile tile) {
+        final Tile old = this.promptTile;
         this.promptBlink.stop();
         this.promptTile = null;
+        if (old != null && old != tile) {
+            // The last mode's frozen square, kept through the turn start,
+            // goes with this paint (opening_014 #4309 -> #4310/#4311, J2).
+            repaint();
+            if (tile == null && this.gui != null) this.gui.paintPromptPanel();
+        }
         if (tile == null) return;
         this.promptTile = tile;
         this.promptOff = false;
@@ -2496,8 +2507,10 @@ final class ClassicMapViewer extends JPanel {
     void clickOn(Tile tile, Player player) {
         if (this.gui != null && this.gui.turnPrompt()) {
             // The Spielzugende mode: only an own unit that can still move
-            // takes a click, and becomes active (build spec W17 item 6, I);
-            // the rest of the map is inert, as the arrows are.
+            // takes a click, also a fortified or sentried one, which is
+            // freed, and it comes up (opening_014 #4475/#4477; the turn
+            // then ends by itself after it, #4680); the rest of the map is
+            // inert, as the arrows are (W17 item 6).
             final Unit u = (tile.isExplored()) ? tile.getFirstUnit() : null;
             if (u != null && player != null && player.owns(u)
                 && u.getMovesLeft() > 0) {
@@ -2528,7 +2541,9 @@ final class ClassicMapViewer extends JPanel {
         }
         final Unit unit = tile.getFirstUnit();
         if (unit != null && player != null && player.owns(unit)) {
-            // Our unit active; the unit cycle goes on after it (W5f).
+            // Our unit active, freed first if it was fortified or sentried
+            // and can move (ClassicGUI.wakesOnClick); the unit cycle goes
+            // on after it (W5f).
             this.gui.unitClicked(unit);
         } else if (unit != null) { // Someone else's unit: select the tile
             this.gui.setFocus(tile);

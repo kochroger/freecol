@@ -3088,6 +3088,11 @@ public final class Specification implements OptionContainer {
         ret |= checkOp(GameOptions.CANCEL_KEEPS_MOVE,
                        GameOptions.GAMEOPTIONS_MAP,
                        Boolean.FALSE, BooleanOption.class);
+        // The original's fortification (levi): without it the completed
+        // fortification takes the turn's moves, as FreeCol does.
+        ret |= checkOp(GameOptions.FORTIFY_KEEPS_MOVES,
+                       GameOptions.GAMEOPTIONS_MAP,
+                       Boolean.FALSE, BooleanOption.class);
         ret |= checkOp(GameOptions.REVENGE_MODE,
                        GameOptions.GAMEOPTIONS_VICTORY_CONDITIONS,
                        Boolean.TRUE, BooleanOption.class);

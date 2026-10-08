@@ -344,6 +344,179 @@ public class ClassicMapViewerTest extends FreeColTestCase {
     }
 
     /**
+     * J2 (Roger, 2026-10-08; opening_014 1512): a click on an own
+     * fortified, fortifying or sentried unit that can move frees it (the
+     * server's state change, before the activation) and it comes up, in
+     * the Spielzugende mode and outside it; with no moves left it keeps its
+     * orders: ignored in the mode, made active as before outside it.
+     */
+    public void testAClickFreesTheUnit() {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile land = map.getTile(5, 7), sea = map.getTile(15, 7);
+        final Unit soldier = new ServerUnit(game, land, dutch,
+            spec().getUnitType("model.unit.veteranSoldier"));
+        final Unit ship = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final Unit aboard = new ServerUnit(game, ship, dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        aboard.setState(Unit.UnitState.SENTRY);
+
+        // Who is freed by a click.
+        assertFalse(ClassicGUI.wakesOnClick(null));
+        assertFalse(ClassicGUI.wakesOnClick(soldier));          // ACTIVE
+        assertFalse(ClassicGUI.wakesOnClick(aboard));           // on its ship
+        final int moves = soldier.getInitialMovesLeft();
+        soldier.setState(Unit.UnitState.FORTIFYING);
+        assertTrue(ClassicGUI.wakesOnClick(soldier));
+        soldier.setState(Unit.UnitState.FORTIFIED);             // FreeCol: no moves now
+        assertFalse(ClassicGUI.wakesOnClick(soldier));          // nothing to move
+        soldier.setMovesLeft(moves);                            // a later turn
+        assertTrue(ClassicGUI.wakesOnClick(soldier));
+
+        final List<String> log = new ArrayList<>();
+        final boolean[] prompt = { false };
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                boolean turnPrompt() {
+                    return prompt[0];
+                }
+
+                @Override
+                void wake(Unit u) {   // the server's state change
+                    log.add("wake " + u.getState() + " active=" + mapViewer.getActiveUnit());
+                    u.setState(Unit.UnitState.ACTIVE);
+                }
+            };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        try {
+            mv.setFocus(land);
+            // Outside the mode: freed first, then up.
+            mv.clickOn(land, dutch);
+            assertEquals(List.of("wake FORTIFIED active=null"), log);
+            assertEquals(Unit.UnitState.ACTIVE, soldier.getState());
+            assertSame(soldier, mv.getActiveUnit());
+
+            // In the mode: a sentried one, the same.
+            mv.changeToEndTurn();
+            soldier.setState(Unit.UnitState.SENTRY);
+            log.clear();
+            prompt[0] = true;
+            mv.clickOn(land, dutch);
+            assertEquals(List.of("wake SENTRY active=null"), log);
+            assertSame(soldier, mv.getActiveUnit());
+
+            // No moves left: the mode ignores the click, the orders stay ...
+            mv.changeToEndTurn();
+            soldier.setState(Unit.UnitState.FORTIFYING);
+            soldier.setState(Unit.UnitState.FORTIFIED);
+            soldier.setMovesLeft(0);
+            log.clear();
+            mv.clickOn(land, dutch);
+            assertTrue(log.toString(), log.isEmpty());
+            assertNull(mv.getActiveUnit());
+            assertEquals(Unit.UnitState.FORTIFIED, soldier.getState());
+            // ... outside it the unit is shown, still fortified.
+            prompt[0] = false;
+            mv.clickOn(land, dutch);
+            assertTrue(log.toString(), log.isEmpty());
+            assertSame(soldier, mv.getActiveUnit());
+            assertEquals(Unit.UnitState.FORTIFIED, soldier.getState());
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /**
+     * J2 (opening_014 #4288 -&gt; #4309 -&gt; #4311; live run voyage): the
+     * square the end command froze stays through our next turn's start,
+     * also through FreeCol's fallback terrain view there, until the next
+     * mode replaces it (on another tile: the old one goes in the same
+     * paint) or a unit comes up; a live square still goes with the
+     * terrain view.
+     */
+    public void testFrozenSquareThroughTheTurnStart() {
+        final Game game = getStandardGame();
+        final Map map = new MapBuilder(game).setDimensions(58, 72)
+            .setBaseTileType(spec().getTileType("model.tile.ocean"))
+            .setExploredByAll(true).build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile sea = map.getTile(30, 30), other = map.getTile(31, 30);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, null, null, false);
+        try {
+            mv.setFocus(sea);
+            mv.enterPrompt(sea);
+            mv.freezePrompt();
+            mv.changeToTerrain(sea);               // the next turn's fallback view
+            assertSame(sea, mv.promptTile());
+            assertTrue(mv.isPromptFrozen());
+            mv.enterPrompt(other);                 // the next mode
+            assertSame(other, mv.promptTile());
+            assertFalse(mv.isPromptFrozen());
+            assertTrue(mv.isPromptShown());
+            mv.changeToTerrain(sea);               // a live square goes
+            assertNull(mv.promptTile());
+            // Frozen, then a unit comes up: it goes.
+            mv.enterPrompt(sea);
+            mv.freezePrompt();
+            final Unit ship = new ServerUnit(game, sea, dutch,
+                spec().getUnitType("model.unit.merchantman"));
+            mv.changeToMoveUnits(ship);
+            assertNull(mv.promptTile());
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /**
+     * J2: the panel's side of a click in the Spielzugende mode
+     * (opening_014 #4475 -&gt; #4477): the mode's square goes, the tile
+     * mode and its word stay as they are (white here) and the word no
+     * longer ends the turn, until the unit's block drops them without a
+     * paint of its own; a mode left otherwise drops them at once.
+     */
+    public void testPromptClickKeepsTheWordUntilTheBlock() {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Tile sea = map.getTile(15, 7);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, null, null, false);
+        final ClassicInfoPanel panel = new ClassicInfoPanel(null, mv, null, null, null, null);
+        try {
+            panel.enterPrompt(sea);
+            assertNotNull(panel.promptFacts());
+            panel.promptClicked(true);
+            assertTrue(panel.isPromptWordFrozen());
+            panel.leavePrompt();                 // the square's clear: the minimap only
+            assertNotNull(panel.promptFacts());
+            panel.dropPrompt();                  // the block replaces it
+            assertNull(panel.promptFacts());
+            assertFalse(panel.isPromptWordFrozen());
+            // Clicked while OFF: the word stays black.
+            panel.enterPrompt(sea);
+            panel.promptClicked(false);
+            assertFalse(panel.isPromptWordFrozen());
+            assertNotNull(panel.promptFacts());
+            // Left otherwise (the controller's unit): dropped at once.
+            panel.enterPrompt(sea);
+            panel.leavePrompt();
+            assertNull(panel.promptFacts());
+            // The wipe forgets a kept word.
+            panel.enterPrompt(sea);
+            panel.promptClicked(true);
+            panel.clearStale();
+            assertNull(panel.promptFacts());
+            panel.dropPrompt();                  // nothing to drop: harmless
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /**
      * Build spec W5: after its last move the unit stays on screen and does
      * not blink (landfall 03 section 1); the panel keeps the block from
      * before that move until another unit comes up (W5b); the hand-over

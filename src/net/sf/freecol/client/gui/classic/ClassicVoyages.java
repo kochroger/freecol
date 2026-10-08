@@ -87,6 +87,13 @@ final class ClassicVoyages {
      */
     static final double BAND_AFTER_UNIT_MS = 2 * ClassicAdvisorLayer.FRAME_MS;
 
+    /**
+     * The arrival chain's first step after our colour lit in the turn
+     * indicator at the hold (landfall #27876 -&gt; #27878: 2 frames;
+     * H REVIEW2 L5).
+     */
+    static final double CHAIN_AFTER_COLOUR_MS = 2 * ClassicAdvisorLayer.FRAME_MS;
+
     /** The arrival band to Europe drawn (38 frames: LF, c6, c5 0.542-0.556 s). */
     static final double BAND_TO_EUROPE_MS = 542.0;
 

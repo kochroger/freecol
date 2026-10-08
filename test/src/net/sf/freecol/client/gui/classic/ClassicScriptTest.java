@@ -154,6 +154,51 @@ public class ClassicScriptTest extends TestCase {
         assertTrue(result(r), result(r).contains("no classic screen"));
     }
 
+    /**
+     * J2: {@code tclick x y} clicks a map tile as the map shows it now
+     * (a unit in the Spielzugende mode): the cell's centre on the canvas,
+     * under the 8-px menu strip; a tile out of the 15x12 view, or no map,
+     * fails the script cleanly.
+     */
+    public void testTileClick() throws IOException {
+        final ClassicScript s = parse("tclick 49 43", "TClick 0 71");
+        assertEquals(ClassicScript.Op.TILE_CLICK, s.commands.get(0).op);
+        assertEquals(49L, s.commands.get(0).number);
+        assertEquals(43, s.commands.get(0).y);
+        assertBad("tclick 5", "tclick needs x and y");
+        assertBad("tclick -1 3", "outside");
+        // The point: view origin (42,37), tile (49,43) in cell (7,6).
+        assertArrayEquals(new int[] { 7 * 16 + 8, 8 + 6 * 16 + 8 },
+            ClassicScriptDriver.tileCanvasPoint(new int[] { 42, 37 }, 49, 43));
+        assertArrayEquals(new int[] { 8, 16 },
+            ClassicScriptDriver.tileCanvasPoint(new int[] { 42, 37 }, 42, 37));
+        assertArrayEquals(new int[] { 14 * 16 + 8, 8 + 11 * 16 + 8 },
+            ClassicScriptDriver.tileCanvasPoint(new int[] { 42, 37 }, 56, 48));
+        assertNull(ClassicScriptDriver.tileCanvasPoint(new int[] { 42, 37 }, 57, 43));
+        assertNull(ClassicScriptDriver.tileCanvasPoint(new int[] { 42, 37 }, 49, 49));
+        assertNull(ClassicScriptDriver.tileCanvasPoint(new int[] { 42, 37 }, 41, 43));
+        assertNull(ClassicScriptDriver.tileCanvasPoint(null, 49, 43));
+        final FakeHost h = new FakeHost() {
+                @Override
+                public void tileClick(int x, int y) {
+                    this.calls.add("tclick " + x + "," + y);
+                }
+            };
+        File r = resultFile();
+        new ClassicScriptDriver(parse("tclick 49 43", "quit"), h, r).run();
+        assertEquals(Arrays.asList("tclick 49,43", "quit"), h.calls);
+        assertEquals("ok", result(r));
+        final FakeHost none = new FakeHost();   // the default: no map
+        r = resultFile();
+        new ClassicScriptDriver(parse("tclick 49 43", "log never"), none, r).run();
+        assertTrue(result(r), result(r).startsWith("error line 1"));
+        assertTrue(result(r), result(r).contains("no map"));
+    }
+
+    private static void assertArrayEquals(int[] want, int[] got) {
+        assertEquals(java.util.Arrays.toString(want), java.util.Arrays.toString(got));
+    }
+
     public void testMalformedLinesAreRejectedWithTheirLine() {
         assertBad("wait", "milliseconds expected");
         assertBad("wait -5", "negative");
@@ -325,6 +370,71 @@ public class ClassicScriptTest extends TestCase {
         final File r2 = resultFile();
         new ClassicScriptDriver(parse("waitBox pedia 200"), none, r2).run();
         assertTrue(result(r2), result(r2).contains("timeout after 200 ms waiting for a box pedia"));
+    }
+
+    /**
+     * J2: {@code waitTurn [timeoutMs [keystroke]]}: with a key, every box
+     * on screen meanwhile gets it once (the turn start's notices), and
+     * the wait goes on until the new turn is ours and idle; without a key
+     * as before.
+     */
+    public void testWaitTurnAnswersBoxes() throws IOException {
+        final ClassicScript s = parse("waitTurn 30000 ENTER", "waitTurn 900", "waitTurn");
+        assertEquals(ClassicScript.Op.WAIT_TURN, s.commands.get(0).op);
+        assertEquals(30000L, s.commands.get(0).number);
+        assertEquals(java.awt.event.KeyEvent.VK_ENTER, s.commands.get(0).key.getKeyCode());
+        assertNull(s.commands.get(1).key);
+        assertEquals(ClassicScript.WAIT_TURN_TIMEOUT, s.commands.get(2).number);
+        assertBad("waitTurn 5 FOO", "not a key");
+        assertBad("waitTurn x", "not a number");
+        final int[] asked = { 0 };
+        final FakeHost h = new FakeHost() {
+                @Override
+                public String boxOnScreen() {
+                    ++asked[0];
+                    return (asked[0] < 3) ? "message_model.player.emigrate:42"
+                        : (asked[0] < 5) ? null
+                        : (asked[0] < 7) ? "message_x:43" : null;
+                }
+            };
+        h.turnAfter = 1;                        // the next turn after the start
+        final File r = resultFile();
+        new ClassicScriptDriver(parse("waitTurn 5000 ENTER", "quit"), h, r).run();
+        assertEquals("ok", result(r));
+        assertEquals(Arrays.asList("key pressed ENTER " + ClassicScriptDriver.KEY_HOLD_MS,
+                                   "key pressed ENTER " + ClassicScriptDriver.KEY_HOLD_MS,
+                                   "quit"), h.calls);
+        assertTrue(asked[0] >= 7);
+    }
+
+    /**
+     * J2: {@code markTurn} before a key that ends the turn at once (Enter
+     * in the Spielzugende mode): the next {@code waitTurn} waits for a
+     * turn after the marked one, so a fast AI phase that is over before
+     * the wait starts does not make it wait a turn too long; once.
+     */
+    public void testMarkTurn() throws IOException {
+        assertEquals(ClassicScript.Op.MARK_TURN, parse("markTurn").commands.get(0).op);
+        assertBad("markTurn 5", "no argument");
+        final FakeHost h = new FakeHost();
+        h.turnAfter = 1;           // the mark sees turn 1, everything after turn 2
+        File r = resultFile();
+        new ClassicScriptDriver(parse("markTurn", "key ENTER", "waitTurn 2000", "quit"),
+                                h, r).run();
+        assertEquals("ok", result(r));
+        // Without the mark the same wait times out (turn 2 is its start).
+        final FakeHost n = new FakeHost();
+        n.turnAfter = 0;
+        r = resultFile();
+        new ClassicScriptDriver(parse("key ENTER", "waitTurn 300", "quit"), n, r).run();
+        assertTrue(result(r), result(r).contains("timeout after 300 ms waiting for a turn after turn 2"));
+        // The mark is used once: the next wait starts from its own turn.
+        final FakeHost o = new FakeHost();
+        o.turnAfter = 1;
+        r = resultFile();
+        new ClassicScriptDriver(parse("markTurn", "waitTurn 2000", "waitTurn 300"), o, r).run();
+        assertTrue(result(r), result(r).contains("line 3"));
+        assertTrue(result(r), result(r).contains("waiting for a turn after turn 2"));
     }
 
     public void testATimeoutEndsTheRunAndQuits() throws IOException {

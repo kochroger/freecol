@@ -1166,10 +1166,17 @@ public class ServerUnit extends Unit implements TurnTaker {
                     setWorkImprovement(null);
                     locDirty = true;
                     break;
-                case FORTIFYING:
+                case FORTIFYING: {
+                    // FORTIFIED takes the moves (Unit.setStateUnchecked);
+                    // the original's rules keep this turn's (levi).
+                    final int moves = getMovesLeft();
                     setState(UnitState.FORTIFIED);
+                    if (spec.getBoolean(GameOptions.FORTIFY_KEEPS_MOVES)) {
+                        setMovesLeft(moves);
+                    }
                     unitDirty = true;
                     break;
+                }
                 case SKIPPED: default:
                     lb.add(" work completed, bad state: ", getState());
                     setState(UnitState.ACTIVE);

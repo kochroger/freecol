@@ -32,6 +32,7 @@ import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Modifier;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Role;
+import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileImprovement;
 import net.sf.freecol.common.model.TileImprovementType;
@@ -519,5 +520,51 @@ public class ServerUnitTest extends FreeColTestCase {
         ServerTestHelper.newTurn();
         assertEquals("Lumber delivered with hardy pioneer and mill",
                      20 * 2 * 3, colony.getGoodsCount(lumberType));
+    }
+
+    /**
+     * The fortification's completion at the turn start (J2): FreeCol takes
+     * the turn's moves (Unit.setStateUnchecked), so a unit freed in that
+     * turn cannot move; with {@code model.option.fortifyKeepsMoves} (on in
+     * the "levi" rules, the original's: opening_014 #2177 "Zuege: 1") it
+     * keeps them, and once freed (ACTIVE) it can move at once.  Later
+     * turns give a fortified unit its moves either way.
+     */
+    public void testFortifyKeepsMoves() {
+        Game game = ServerTestHelper.startServerGame(getTestMap(plains));
+        final Specification spec = game.getSpecification();
+        Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        Tile tile = game.getMap().getTile(5, 8);
+        ServerUnit soldier = new ServerUnit(game, tile, dutch, soldierType);
+        final int moves = soldier.getInitialMovesLeft();
+        assertTrue(moves > 0);
+
+        assertFalse("FreeCol's rules", spec.getBoolean(GameOptions.FORTIFY_KEEPS_MOVES));
+        soldier.setState(Unit.UnitState.FORTIFYING);
+        ServerTestHelper.newTurn();
+        assertEquals(Unit.UnitState.FORTIFIED, soldier.getState());
+        assertEquals("the completion takes the moves", 0, soldier.getMovesLeft());
+        ServerTestHelper.newTurn();
+        assertEquals(Unit.UnitState.FORTIFIED, soldier.getState());
+        assertEquals("a later turn: the moves", moves, soldier.getMovesLeft());
+
+        spec.setBoolean(GameOptions.FORTIFY_KEEPS_MOVES, true);
+        try {
+            soldier.setState(Unit.UnitState.ACTIVE);
+            soldier.setState(Unit.UnitState.FORTIFYING);
+            ServerTestHelper.newTurn();
+            assertEquals(Unit.UnitState.FORTIFIED, soldier.getState());
+            assertEquals("the original's: kept", moves, soldier.getMovesLeft());
+            soldier.setState(Unit.UnitState.ACTIVE);   // a click frees it
+            assertEquals(moves, soldier.getMovesLeft());
+            assertTrue(soldier.isCandidateForNextActiveUnit());
+            // A unit that was not fortifying is not touched.
+            ServerUnit other = new ServerUnit(game, tile, dutch, colonistType);
+            other.setState(Unit.UnitState.SENTRY);
+            ServerTestHelper.newTurn();
+            assertEquals(Unit.UnitState.SENTRY, other.getState());
+        } finally {
+            spec.setBoolean(GameOptions.FORTIFY_KEEPS_MOVES, false);
+        }
     }
 }

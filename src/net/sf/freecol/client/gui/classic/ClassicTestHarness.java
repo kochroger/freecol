@@ -430,6 +430,28 @@ final class ClassicTestHarness {
         }
 
         @Override
+        public void tileClick(int x, int y)
+            throws ClassicScriptDriver.ScriptException, InterruptedException {
+            final int[][] p = new int[1][];
+            try {
+                SwingUtilities.invokeAndWait(() -> {
+                        final ClassicMapViewer mv = gui.mapViewer;
+                        p[0] = (mv == null) ? null
+                            : ClassicScriptDriver.tileCanvasPoint(mv.viewOrigin(), x, y);
+                    });
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                throw new ClassicScriptDriver.ScriptException("tclick: " + e.getCause());
+            }
+            if (p[0] == null) {
+                throw new ClassicScriptDriver.ScriptException("tclick: tile " + x + ","
+                    + y + " is not in the view");
+            }
+            ClassicFrameRecorder.event("tclick", x + "," + y + " -> " + p[0][0] + ","
+                + p[0][1]);
+            click(p[0][0], p[0][1]);
+        }
+
+        @Override
         public void move(int x, int y) {
             final long when = System.currentTimeMillis();
             SwingUtilities.invokeLater(() -> {

@@ -71,6 +71,15 @@ public class GameOptions {
     public static final String CANCEL_KEEPS_MOVE
         = "model.option.cancelKeepsMove";
 
+    /**
+     * The original's fortification: a unit whose fortification completes
+     * at the turn start keeps its moves for that turn (a click frees it
+     * and it can move at once).  FreeCol takes them.  On in the "levi"
+     * rules; rules and saves without it take the moves.
+     */
+    public static final String FORTIFY_KEEPS_MOVES
+        = "model.option.fortifyKeepsMoves";
+
     /** Do missionaries provide extra benefits. */
     public static final String ENHANCED_MISSIONARIES
         = "model.option.enhancedMissionaries";
