@@ -1256,5 +1256,41 @@ public class ClassicAdvisorLayerTest extends TestCase {
         assertEquals(e.get() + Math.round(ClassicCongress.FOLLOW_MS * 1e6),
                      (long) edt(() -> this.layer.holdUntilNanos()));
         assertTrue(closed < black);
+        // A second hall: a fresh key ends its page too.
+        final Ended e2 = new EndedHall(hall()).ask();
+        flush();
+        for (int i = 0; i < 400 && !"congress_7:held".equals(probe()); i++) {
+            this.clock.advanceMs(ClassicWoodcut.FRAME_MS);
+            runTimer();
+        }
+        assertEquals("congress_7:held", probe());
+        key(KeyEvent.VK_ENTER);
+        for (int i = 0; i < 40 && !"congress_7:page".equals(probe()); i++) {
+            this.clock.advanceMs(ClassicWoodcut.FRAME_MS);
+            runTimer();
+        }
+        assertEquals("congress_7:page", probe());
+        key(KeyEvent.VK_A);
+        assertEquals(this.clock.now(), e2.get());
+        assertFalse(up());
+    }
+
+    /** A hall asked on the EDT. */
+    private final class EndedHall {
+
+        final ClassicWoodcut.Screen s;
+
+        EndedHall(ClassicWoodcut.Screen s) {
+            this.s = s;
+        }
+
+        Ended ask() {
+            final Ended e = new Ended();
+            SwingUtilities.invokeLater(() -> {
+                    e.value = layer.showWoodcut(this.s, null, 0L, 0.0);
+                    e.done.countDown();
+                });
+            return e;
+        }
     }
 }
