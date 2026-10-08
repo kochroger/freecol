@@ -1747,6 +1747,10 @@ public class ClassicGUI extends GUI {
             // A save of this build: the unit cycle goes on from its cursor
             // (I2), not at FreeCol's saved or first unit.
             final Unit first = firstUnit(active);
+            // No unit up: the view and the Spielzugende square on our own
+            // unit, never FreeCol's fallback on the open sea (the fixer of
+            // part K; I: the original's load is not recorded).
+            final Tile shown = (first != null) ? tile : loadedViewTile(active, tile);
             if (first != null) {
                 this.mapViewer.changeToMoveUnits(first);
                 cycleActivated(first);
@@ -1756,8 +1760,8 @@ public class ClassicGUI extends GUI {
                     this.turnFlow.unitShown(first);
                     if (fromCursor(first)) this.turnFlow.cycleUnitUp(first);
                 }
-            } else if (tile != null) {
-                this.mapViewer.changeToTerrain(tile);
+            } else if (shown != null) {
+                this.mapViewer.changeToTerrain(shown);
             }
             // Prefer an active unit for the initial view: the original
             // always opens looking at the piece that is up, centred and
@@ -1774,7 +1778,7 @@ public class ClassicGUI extends GUI {
                     ? first.getTile()
                 : (viewerActive != null && viewerActive.getTile() != null)
                     ? viewerActive.getTile()
-                : tile;
+                : shown;
             if (focusTile != null) {
                 this.mapViewer.setFocus(focusTile);
             }
@@ -2381,6 +2385,12 @@ public class ClassicGUI extends GUI {
      * plan W5f; {@link ClassicTurnFlow#dueInstead}), else the turn flow
      * arms the automatic end if nothing can move any more (build spec W5a).
      * The player's view toggle no longer comes here ({@link #toggleView}).
+     * The fallback tile does not move the view (the fixer of part K): it
+     * is the first colony, else the Europe entry tile on the open sea
+     * ({@code Player.getFallbackTile}, the turn start with nothing to move),
+     * where the original keeps the view (opening_014 1510-1512); the
+     * Spielzugende mode then shows its square
+     * ({@code ClassicMapViewer.enterPrompt(Tile, boolean)}).
      */
     @Override
     public void changeView(Tile tile) {
@@ -2392,8 +2402,11 @@ public class ClassicGUI extends GUI {
                 updateActions();
                 return;
             }
+            this.mapViewer.changeToTerrain(tile, false);
+            if (this.turnFlow != null) this.turnFlow.noUnitLeft();
         }
-        selectTile(tile);
+        repaintInfo();
+        updateActions();
     }
 
     /**
@@ -2651,6 +2664,68 @@ public class ClassicGUI extends GUI {
     void openedWithNoUnit() {
         if (this.turnFlow == null) return;
         if (!this.turnFlow.dueInstead(null)) this.turnFlow.noUnitLeft();
+    }
+
+    /**
+     * The Spielzugende mode begins (the turn flow's
+     * {@code Host.enterPrompt}).  Build spec W17: the panel's tile mode
+     * with the word and the map's square on the cursor tile, in one go
+     * (landing-slow #2305/#2306); then it waits for Enter or a press on
+     * the word.  The map shows the square: in a turn in which no unit of
+     * ours came up by W4's test, else only when it is off the view
+     * ({@code ClassicMapViewer.enterPrompt(Tile, boolean)}; the fixer of
+     * part K).  EDT only; package-private for the tests.
+     *
+     * @param village The village of a cancelled village box, or null for
+     *     the last unit's tile.
+     */
+    void showPrompt(Tile village) {
+        if (this.mapViewer == null) return;
+        final Tile tile = (village != null) ? village : this.mapViewer.promptTileFor();
+        if (this.infoPanel != null) this.infoPanel.enterPrompt(tile);
+        // Paints the square (with the view's jump), then the panel.
+        this.mapViewer.enterPrompt(tile, this.turnFlow == null
+                                   || !this.turnFlow.cameUpThisTurn());
+    }
+
+    /**
+     * The tile a load with no unit up shows ({@link #reconnectGUI}), and
+     * the Spielzugende square's unit ({@code ClassicMapViewer.restoreLastUnit}):
+     * FreeCol's saved active unit of ours on the map (the unit the player
+     * had last, now fortified, sentried or done), else our first unit on
+     * the map in the cycle's order outside a colony's buildings, else the
+     * first one in them;
+     * only with none on the map FreeCol's fallback (the first colony,
+     * else the Europe entry tile).  FreeCol's fallback put a game without
+     * a colony on the open sea, the square there and every unit off the
+     * view (the review of part K; I: the original's load is not recorded).
+     * EDT only; package-private for the tests.
+     *
+     * @param active FreeCol's saved active unit, or null.
+     * @param fallback FreeCol's fallback tile, or null.
+     * @return The tile, or null.
+     */
+    Tile loadedViewTile(Unit active, Tile fallback) {
+        final Player me = myPlayer();
+        Unit u = (me != null && active != null && active.getOwner() == me
+                  && !active.isDisposed() && active.getTile() != null) ? active : null;
+        if (u == null && me != null) {
+            Unit working = null;
+            for (Unit v : ClassicUnitCycle.ranked(me.getUnitSet(), me)) {
+                if (v.isDisposed() || v.getTile() == null) continue;
+                if (!v.isInColony()) {
+                    u = v;
+                    break;
+                }
+                if (working == null) working = v;
+            }
+            if (u == null) u = working;
+        }
+        if (u == null) return fallback;
+        if (this.mapViewer != null) this.mapViewer.restoreLastUnit(u);
+        ClassicFrameRecorder.event("load-view", "unit=" + u.getId()
+            + " tile=" + u.getTile().getX() + "," + u.getTile().getY());
+        return u.getTile();
     }
 
     /**
@@ -3179,13 +3254,7 @@ public class ClassicGUI extends GUI {
 
         @Override
         public void enterPrompt(Tile village) {
-            // Build spec W17: the panel's tile mode with the word and the
-            // map's square on the cursor tile, in one go (landing-slow
-            // #2305/#2306); then it waits for Enter or a press on the word.
-            if (mapViewer == null) return;
-            final Tile tile = (village != null) ? village : mapViewer.promptTileFor();
-            if (infoPanel != null) infoPanel.enterPrompt(tile);
-            mapViewer.enterPrompt(tile);   // paints the square, then the panel
+            showPrompt(village);
         }
 
         @Override

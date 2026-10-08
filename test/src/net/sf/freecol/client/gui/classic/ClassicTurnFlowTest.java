@@ -2442,6 +2442,206 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     }
 
     /**
+     * The fixer of part K (Roger's item 3, "die Ansicht ist irgendwo random
+     * auf dem Meer"; the review of part K, F-B): a turn start with nothing
+     * to move.  FreeCol's fallback view ({@code ClassicGUI.changeView(Tile)}
+     * with {@code Player.getFallbackTile}: the first colony, else the
+     * Europe entry tile on the open sea) no longer moves the view; the
+     * original keeps it (opening_014 1512: the pioneer (46,41) fortified
+     * in cell (4,2), the soldier (49,45), no colony, the ship gone from
+     * (49,53); no full redraw #4287-#4311).  The Spielzugende mode then
+     * shows its square: at a turn start by W4's test (kept in the safe
+     * zone, centred in cell (7,6) off the view or in the margin), after a
+     * unit came up only when the square is off the view.  A frozen square
+     * stays through the fallback.  The geometry is opening_014's; the
+     * entry tile is I.
+     */
+    public void testTheTurnStartWithNothingToMoveKeepsTheView() {
+        final Game game = getStandardGame();
+        final Map map = new MapBuilder(game).setDimensions(58, 72)
+            .setBaseTileType(spec().getTileType("model.tile.plains"))
+            .setExploredByAll(true).build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile pTile = map.getTile(46, 41), sTile = map.getTile(49, 45);
+        final Unit pioneer = new ServerUnit(game, pTile, dutch,
+            spec().getUnitType("model.unit.hardyPioneer"));
+        final Unit soldier = new ServerUnit(game, sTile, dutch,
+            spec().getUnitType("model.unit.veteranSoldier"));
+        dutch.setEntryTile(map.getTile(49, 53));
+        final Rig r = new Rig(game);
+        final ClassicGUI gui = new ClassicGUI(null);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        gui.turnFlow = r.flow;
+        try {
+            // 1511: the soldier, then the pioneer up and fortified.
+            mv.setFocus(sTile);
+            mv.changeToMoveUnits(soldier);
+            mv.changeToMoveUnits(pioneer);
+            pioneer.setState(Unit.UnitState.FORTIFYING);
+            soldier.setState(Unit.UnitState.FORTIFYING);
+            final int[] view = mv.peekViewOrigin();
+            assertTrue(java.util.Arrays.equals(new int[] { 42, 39 }, view));
+            assertSame(pTile, mv.promptTileFor());
+
+            // 1512's start: no colony, the fallback is the entry tile.
+            ourTurn(r, 2);
+            final Tile entry = dutch.getFallbackTile();
+            assertSame(map.getTile(49, 53), entry);
+            gui.changeView(entry);
+            assertEquals(net.sf.freecol.client.gui.GUI.ViewMode.TERRAIN, mv.getViewMode());
+            assertTrue(java.util.Arrays.equals(view, mv.peekViewOrigin()));
+            assertFalse(r.flow.cameUpThisTurn());
+            gui.showPrompt(null);                          // the mode, 328 ms later
+            assertSame(pTile, mv.promptTile());
+            assertTrue(java.util.Arrays.equals(view, mv.peekViewOrigin()));
+            assertEquals(4, pTile.getX() - view[0]);       // cell (4,2), as #4311
+            assertEquals(2, pTile.getY() - view[1]);
+            mv.freezePrompt();                             // Enter: our end
+            // 1513's start: the frozen square stays through the fallback
+            // (#4288 -> #4309), the next mode takes its place.
+            ourTurn(r, 3);
+            gui.changeView(entry);
+            assertTrue(java.util.Arrays.equals(view, mv.peekViewOrigin()));
+            assertTrue(mv.isPromptFrozen());
+            assertSame(pTile, mv.promptTile());
+            gui.showPrompt(null);
+            assertFalse(mv.isPromptFrozen());
+            assertSame(pTile, mv.promptTile());
+            assertTrue(java.util.Arrays.equals(view, mv.peekViewOrigin()));
+            mv.freezePrompt();
+
+            // The AI phase (W19) or a minimap click took the view away
+            // (the jump's paint took the frozen square, clip004 #5058);
+            // the next start keeps that view, the mode brings the square
+            // back into cell (7,6).
+            mv.setFocus(map.getTile(20, 20));
+            final int[] far = mv.peekViewOrigin();
+            assertFalse(ClassicMapViewer.cellInView(pTile, far));
+            ourTurn(r, 4);
+            gui.changeView(entry);
+            assertTrue(java.util.Arrays.equals(far, mv.peekViewOrigin()));
+            gui.showPrompt(null);
+            assertSame(pTile, mv.promptTile());
+            int[] o = mv.peekViewOrigin();
+            assertEquals(7, pTile.getX() - o[0]);
+            assertEquals(6, pTile.getY() - o[1]);
+            mv.freezePrompt();
+
+            // In the margin at a turn start: centred, as a unit coming up.
+            mv.setFocus(map.getTile(46, 46));
+            o = mv.peekViewOrigin();
+            assertEquals(1, pTile.getY() - o[1]);
+            ourTurn(r, 5);
+            gui.changeView(entry);
+            gui.showPrompt(null);
+            o = mv.peekViewOrigin();
+            assertEquals(7, pTile.getX() - o[0]);
+            assertEquals(6, pTile.getY() - o[1]);
+            mv.freezePrompt();
+
+            // With a colony the fallback is the colony: the view stays.
+            final Colony colony = createStandardColony(1, 20, 30);
+            assertSame(colony.getTile(), dutch.getFallbackTile());
+            ourTurn(r, 6);
+            final int[] kept = mv.peekViewOrigin();
+            gui.changeView(colony.getTile());
+            assertTrue(java.util.Arrays.equals(kept, mv.peekViewOrigin()));
+            gui.showPrompt(null);
+            assertTrue(java.util.Arrays.equals(kept, mv.peekViewOrigin()));
+            mv.freezePrompt();
+
+            // A unit came up in this turn (the pref's mode after its last
+            // move): the square in the margin keeps the view (never on
+            // arrival), off the view it comes back.
+            ourTurn(r, 7);
+            r.flow.unitShown(soldier);
+            assertTrue(r.flow.cameUpThisTurn());
+            mv.setFocus(map.getTile(46, 46));
+            final int[] margin = mv.peekViewOrigin();
+            gui.showPrompt(null);
+            assertTrue(java.util.Arrays.equals(margin, mv.peekViewOrigin()));
+            mv.setFocus(map.getTile(20, 20));
+            gui.showPrompt(null);
+            o = mv.peekViewOrigin();
+            assertEquals(7, pTile.getX() - o[0]);
+            assertEquals(6, pTile.getY() - o[1]);
+        } finally {
+            gui.mapViewer = null;
+            mv.dispose();
+            r.flow.dispose();
+        }
+    }
+
+    /**
+     * The fixer of part K: a load with no unit up shows our own unit and
+     * puts the Spielzugende square on it, never FreeCol's fallback on the
+     * open sea ({@code ClassicGUI.loadedViewTile}; I).  FreeCol's saved
+     * active unit of ours first, else the cycle's first unit on the map
+     * outside a colony's buildings, else the fallback.
+     */
+    public void testALoadWithNothingToMoveShowsOurUnit() {
+        final Game game = getStandardGame();
+        final Map map = new MapBuilder(game).setDimensions(58, 72)
+            .setBaseTileType(spec().getTileType("model.tile.plains"))
+            .setExploredByAll(true).build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        final Tile entry = map.getTile(49, 53);
+        dutch.setEntryTile(entry);
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                Player myPlayer() {
+                    return dutch;
+                }
+            };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        try {
+            // No unit on the map: FreeCol's fallback.
+            assertSame(entry, gui.loadedViewTile(null, entry));
+            final Unit pioneer = new ServerUnit(game, map.getTile(46, 41), dutch,
+                spec().getUnitType("model.unit.hardyPioneer"));
+            final Unit soldier = new ServerUnit(game, map.getTile(49, 45), dutch,
+                spec().getUnitType("model.unit.veteranSoldier"));
+            final Unit frigate = new ServerUnit(game, map.getTile(10, 10), french,
+                spec().getUnitType("model.unit.frigate"));
+            pioneer.setState(Unit.UnitState.FORTIFYING);
+            soldier.setState(Unit.UnitState.SENTRY);
+            // The saved active unit of ours.
+            assertSame(soldier.getTile(), gui.loadedViewTile(soldier, entry));
+            assertSame(soldier.getTile(), mv.promptTileFor());
+            // Not ours, or none: the cycle's first unit on the map.
+            final Unit first = ClassicUnitCycle.ranked(dutch.getUnitSet(), dutch).get(0);
+            assertSame(first.getTile(), gui.loadedViewTile(frigate, entry));
+            assertSame(first.getTile(), mv.promptTileFor());
+            assertSame(first.getTile(), gui.loadedViewTile(null, entry));
+            assertNotSame(entry, gui.loadedViewTile(null, entry));
+            // A colony with its workers: a unit outside the buildings
+            // first; with none left, a worker's tile (the colony).
+            final Colony colony = createStandardColony(2, 20, 30);
+            Unit outside = null;
+            for (Unit u : ClassicUnitCycle.ranked(dutch.getUnitSet(), dutch)) {
+                if (u.getTile() != null && !u.isInColony()) {
+                    outside = u;
+                    break;
+                }
+            }
+            assertNotNull(outside);
+            assertSame(outside.getTile(), gui.loadedViewTile(null, colony.getTile()));
+            pioneer.dispose();
+            soldier.dispose();
+            assertSame(colony.getTile(), gui.loadedViewTile(null, entry));
+            assertSame(colony.getTile(), mv.promptTileFor());
+        } finally {
+            gui.mapViewer = null;
+            mv.dispose();
+        }
+    }
+
+    /**
      * A click on an own unit is not replaced by the cycle's choice, also
      * when the previous unit ran out (a plain hand-over to it); nothing is
      * put back.  The boarding's carrier is not replaced either.

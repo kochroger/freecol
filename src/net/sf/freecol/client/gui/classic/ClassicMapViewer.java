@@ -1021,6 +1021,20 @@ final class ClassicMapViewer extends JPanel {
      * ({@link #jumpIfNeeded}; I: the original's view mode was not recorded).
      */
     void changeToTerrain(Tile tile) {
+        changeToTerrain(tile, true);
+    }
+
+    /**
+     * TERRAIN view mode ({@link #changeToTerrain(Tile)}), the view moved
+     * for the tile or kept as it is.
+     *
+     * @param tile The tile selected.
+     * @param jump The view follows it: the player's own selection; not the
+     *     controller's fallback tile when it has no unit left (the first
+     *     colony, else the Europe entry tile on the open sea: the turn
+     *     start with nothing to move, opening_014; the fixer of part K).
+     */
+    void changeToTerrain(Tile tile, boolean jump) {
         if (tile != this.selectedTile || this.viewMode != GUI.ViewMode.TERRAIN) {
             this.changeToShow = true;   // the cursor moves
         }
@@ -1033,7 +1047,11 @@ final class ClassicMapViewer extends JPanel {
         this.selectedTile = tile;
         this.activeUnit = null;
         this.visitedUnit = null;
-        jumpIfNeeded(tile, "terrain");
+        if (jump) {
+            jumpIfNeeded(tile, "terrain");
+        } else if (tile != null) {
+            ClassicFrameRecorder.event("view-kept", "fallback tile=" + xy(tile));
+        }
         rearmBlink("terrain");
         repaint();
     }
@@ -1821,7 +1839,7 @@ final class ClassicMapViewer extends JPanel {
      */
     boolean isShownAt(Unit unit, Tile tile) {
         if (!shownExplored(tile)) return false;
-        // On a settlement's tile only the unit drawn in its place (K2).
+        // On a settlement's tile only the unit drawn over it (K2).
         if (tile.getSettlement() != null) {
             return unit != null && unit == unitOverSettlement(tile);
         }
@@ -1963,6 +1981,20 @@ final class ClassicMapViewer extends JPanel {
      * @param tile The cursor tile, or null for none.
      */
     void enterPrompt(Tile tile) {
+        enterPrompt(tile, false);
+    }
+
+    /**
+     * The Spielzugende mode begins ({@link #enterPrompt(Tile)}), and the
+     * view shows its square ({@link #promptView}): with a jump, the whole
+     * map, the square and the panel are painted at once, as one cut.
+     *
+     * @param tile The cursor tile, or null for none.
+     * @param turnStart No unit of ours came up in this turn: the square
+     *     is the turn start's view (W4's test); else the mode follows a
+     *     unit's last move and the view moves only for a square off it.
+     */
+    void enterPrompt(Tile tile, boolean turnStart) {
         final Tile old = this.promptTile;
         this.promptBlink.stop();
         this.promptTile = null;
@@ -1979,10 +2011,43 @@ final class ClassicMapViewer extends JPanel {
         this.promptHeld = blinkHoldReason() != null;
         if (!this.promptHeld) this.promptBlink.arm();
         this.changeToShow = true;
+        final boolean jumped = promptView(tile, turnStart);
         ClassicFrameRecorder.event("prompt", "on " + xy(tile)
-            + (this.promptHeld ? " held" : ""));
-        paintPromptCell();
+            + (this.promptHeld ? " held" : "") + (jumped ? " jumped" : ""));
+        if (jumped) {
+            paintNow(null);
+            if (this.gui != null) this.gui.paintPromptPanel();
+        } else {
+            paintPromptCell();
+        }
         refreshCover();   // nothing is up in the mode (K2)
+    }
+
+    /**
+     * The view for the Spielzugende mode's square (the fixer of part K,
+     * Roger 2026-10-08: after a turn the view shows what is up, "oder
+     * zumindest sichtbar").  The controller's fallback view no longer
+     * moves the view ({@code ClassicGUI.changeView(Tile)}); the original
+     * keeps it at a turn start with nothing to move, the square in the
+     * safe zone (opening_014 1510-1512: #2212, #3696 after Europe, #4311,
+     * no full redraw #4287-#4311).  So at a turn start the square's tile
+     * gets W4's test ({@link #jumpIfNeeded}): kept in the safe zone,
+     * centred in cell (7,6) in the margin or off the view, as the turn's
+     * first unit would be (after the AI phase's jumps, W19, or the
+     * player's own minimap click; I).  After a unit's last move the view
+     * is not tested (never on arrival, W4); it moves only when the square
+     * is off it (the player looked elsewhere during the end's wait; I).
+     * No view yet: nothing.
+     *
+     * @param tile The square's tile.
+     * @param turnStart No unit of ours came up in this turn.
+     * @return True if the view moved.
+     */
+    private boolean promptView(Tile tile, boolean turnStart) {
+        final int[] o = this.origin;
+        if (o == null || tile.getMap() == null) return false;
+        if (turnStart) return jumpIfNeeded(tile, "prompt");
+        return !cellInView(tile, o) && centreOn(tile, "prompt");
     }
 
     /**
@@ -2144,6 +2209,19 @@ final class ClassicMapViewer extends JPanel {
         final Unit u = this.lastUnit;
         if (u != null && !u.isDisposed() && u.getTile() != null) return u.getTile();
         return getFocus();
+    }
+
+    /**
+     * A load opened with no unit up ({@code ClassicGUI.reconnectGUI}): the
+     * unit whose tile the Spielzugende mode's square takes, as if it had
+     * been the last unit made active ({@link #promptTileFor}).
+     *
+     * @param unit The unit, ignored without a tile on the map.
+     */
+    void restoreLastUnit(Unit unit) {
+        if (unit != null && !unit.isDisposed() && unit.getTile() != null) {
+            this.lastUnit = unit;
+        }
     }
 
     /**
@@ -2655,7 +2733,7 @@ final class ClassicMapViewer extends JPanel {
             }
         }
 
-        // A unit drawn in a settlement's place that the view no longer
+        // A unit drawn over a settlement that the view no longer
         // shows: nothing is drawn over the settlement any more (K2).
         final Tile cover = this.coverTile;
         if (cover != null && (clip == null || clip.contains(0, 0, getWidth(), getHeight()))
@@ -2723,7 +2801,7 @@ final class ClassicMapViewer extends JPanel {
 
     /**
      * Paint what stands on a tile, over every cell's terrain: the
-     * settlement, or the unit up there in its place
+     * settlement, with the unit up there drawn over it
      * ({@link #unitOverSettlement}); else the unit in front (none while
      * the active unit's blink is OFF on this tile).
      */
@@ -2731,17 +2809,19 @@ final class ClassicMapViewer extends JPanel {
         if (!shownExplored(tile)) return;
         final Settlement settlement = tile.getSettlement();
         if (settlement != null) {
+            // The settlement always, the unit up over it while ON: the
+            // original's ON frame changes only the unit's sprite and flag,
+            // the colony's buildings and pennant stay around it (clip006
+            // #4625, #5169, #5299; clip008 #35590 vs #35613 OFF).  Its
+            // flag has the stack marker when other units stand on the tile
+            // (#4625 a farmer and an artillery in Fur City, #5127/#5169/
+            // #5299 in Base: the second flag's edge 2 px above the flag,
+            // rows 29-30).  A slide out of it draws over the settlement
+            // too: its offset 0 is the ON frame again (#35756 = #35590), so
+            // there is no rule of its own (the fixer of part K).
+            paintSettlement(g, settlement, sx, sy);
             final Unit up = unitOverSettlement(tile);
-            if (up != null) {
-                paintUnit(g, up, sx, sy, markerOf(up, tile));
-            } else if (this.animUnit == null || this.animOffset != 0
-                       || tile != this.animFrom) {
-                // A slide out of a settlement shows offset 0 instead of the
-                // settlement, the sprite back under it from offset 1 on
-                // (clip008 #35751 OFF -> #35756 the ship in Base's place ->
-                // #35757 Base again behind it).
-                paintSettlement(g, settlement, sx, sy);
-            }
+            if (up != null) paintUnit(g, up, sx, sy, markerOf(up, tile));
             noteCover(tile, up);
             return;
         }
@@ -2787,26 +2867,27 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
-     * The unit drawn on a settlement's tile instead of the settlement (K2,
-     * Roger's soldier that "vanished" in Base Silver).  The original draws
-     * the unit up on its colony's tile in the colony's place while its
-     * blink is ON and the colony while OFF (clip008 #35590 the merchantman
-     * in Base, #35613 Base, 23 frames each), and the colony as soon as the
-     * unit is done (#50603 -&gt; #50610: the farmer's last move into Base,
-     * the colony at the final draw); a unit there that is not up is never
-     * drawn (#32928).  So: the active unit while it is up -- it takes
-     * orders with moves left ({@link Unit.UnitState#ACTIVE}, not working
-     * in the colony), no slide moves it, and no hand-over to another unit
-     * is pending (the cycle moved past it: W, F, S) -- and its blink is
-     * ON.  A land unit up there is not recorded; the rule is the ship's
-     * (I).  The unit of a visit (W5f) is not drawn there: it is done with
-     * the completion, and when no unit follows the end comes 16 ms later
-     * (live K2 L2: drawn, it flashed for one frame); the original's visit
-     * in a colony is not recorded (I).
+     * The unit drawn over a settlement on its tile (K2, Roger's soldier
+     * that "vanished" in Base Silver; the fixer of part K: over it, not in
+     * its place).  The original draws the unit up on its colony's tile
+     * over the colony while its blink is ON and the colony alone while
+     * OFF (clip008 #35590 the merchantman in Base, #35613 Base, 23 frames
+     * each; clip006 #4625 a trapper in Fur City, #5169 and #5299 a soldier
+     * and a settler in Base after their goto), and the colony alone as
+     * soon as the unit is done (#50603 -&gt; #50610: the farmer's last move
+     * into Base, the colony at the final draw); a unit there that is not
+     * up is never drawn (#32928).  So: the active unit while it is up --
+     * it takes orders with moves left ({@link Unit.UnitState#ACTIVE}, not
+     * working in the colony), no slide moves it, and no hand-over to
+     * another unit is pending (the cycle moved past it: W, F, S) -- and
+     * its blink is ON.  The unit of a visit (W5f) is not drawn there: it
+     * is done with the completion, and when no unit follows the end comes
+     * 16 ms later (live K2 L2: drawn, it flashed for one frame); the
+     * original's visit in a colony is not recorded (I).
      *
      * @param tile The tile.
-     * @return The unit, or null when the settlement is drawn (or the tile
-     *     has none).
+     * @return The unit, or null when the settlement is drawn alone (or the
+     *     tile has none).
      */
     Unit unitOverSettlement(Tile tile) {
         if (tile == null || tile.getSettlement() == null) return null;
@@ -2834,8 +2915,8 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
-     * What a paint drew on a settlement's tile: {@code up} in the
-     * settlement's place, or (null) the settlement.  Called by the paint.
+     * What a paint drew on a settlement's tile: {@code up} over the
+     * settlement, or (null) the settlement alone.  Called by the paint.
      *
      * @param tile The settlement's tile.
      * @param up The unit drawn there, or null.
@@ -2863,13 +2944,13 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
-     * The settlement's tile painted with a unit in its place is painted
+     * The settlement's tile painted with a unit over it is painted
      * again now if the rule's answer for it has changed
      * ({@link #unitOverSettlement}): the unit up there is done or the
-     * cycle moved past it, and the settlement comes back with the change,
-     * not with the next blink toggle.  Not after the view has moved since
-     * that paint: the whole map's paint is due then, as one cut (W4), and
-     * it shows the settlement.  EDT only.
+     * cycle moved past it, and the settlement alone comes back with the
+     * change, not with the next blink toggle.  Not after the view has moved
+     * since that paint: the whole map's paint is due then, as one cut
+     * (W4), and it shows the settlement.  EDT only.
      */
     void refreshCover() {
         final Tile t = this.coverTile;

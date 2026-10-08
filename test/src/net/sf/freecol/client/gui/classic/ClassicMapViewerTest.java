@@ -761,7 +761,7 @@ public class ClassicMapViewerTest extends FreeColTestCase {
     }
 
     /**
-     * Critic 5 and 4 (design 10 Â§6.1, W6a): the layer reads the explored
+     * Critic 5 and 4 (design 10 §6.1, W6a): the layer reads the explored
      * state as shown.  A slide whose model already holds the reveal (a
      * server-pushed move) paints no new tile before its final draw, not
      * even in its 3-px margins; the final draw shows it and paints the
@@ -995,7 +995,7 @@ public class ClassicMapViewerTest extends FreeColTestCase {
     /**
      * Without the pack's index sheets (and in the adaptive layout) the map
      * draws the RGBA fallback: an unexplored tile flat in the dark sea's
-     * colour, VICEROY's index 61 (design 10 Â§4).
+     * colour, VICEROY's index 61 (design 10 §4).
      */
     public void testFallbackDrawsUnexploredDark() {
         final Game server = seaGame();
@@ -1041,7 +1041,7 @@ public class ClassicMapViewerTest extends FreeColTestCase {
     }
 
     /**
-     * The water cycle on the map (M1c design 10 Â§7.2/Â§7.3, W6c; Critic 3):
+     * The water cycle on the map (M1c design 10 §7.2/§7.3, W6c; Critic 3):
      * a palette step due in the middle of a slide is painted at its own
      * deadline, between two slide steps, with the new colours at once; a
      * step while the slide's final draw is due paints that final draw (the
@@ -1626,12 +1626,16 @@ public class ClassicMapViewerTest extends FreeColTestCase {
      * K2 (Roger's test of abc27b588, k\REPRO.md section 2: his soldier sent
      * with G to Base Silver "vanished" there; the cycle brought him, the
      * panel showed him, the map drew only the colony).  The unit up on our
-     * colony's tile is drawn there in the colony's place while its blink
-     * is ON and the colony while OFF, as the original draws the
-     * merchantman up in Base (clip008 #35590 ON, #35613 OFF); the colony
-     * as soon as the unit is done or the cycle moved past it (its last
-     * move: #50603 -&gt; #50610), and under every unit there that is not
-     * up, the colony's workers and a visited unit included (#32928).
+     * colony's tile is drawn there over the colony while its blink is ON
+     * and the colony alone while OFF, as the original draws the
+     * merchantman up in Base (clip008 #35590 ON, #35613 OFF) and the
+     * soldier up in Base (clip006 #5169; the fixer of part K: over it, not
+     * in its place); the colony alone as soon as the unit is done or the
+     * cycle moved past it (its last move: #50603 -&gt; #50610), and over
+     * every unit there that is not up, the colony's workers and a visited
+     * unit included (#32928).  Over the colony the unit keeps its marker
+     * (clip006 #4625, #5169: the stack marker with other units on the
+     * tile).
      */
     public void testAUnitUpOnItsColonyTile() {
         final Game game = getStandardGame();
@@ -1741,7 +1745,8 @@ public class ClassicMapViewerTest extends FreeColTestCase {
 
             // The original's case: the merchantman up in Base (clip008
             // #35590), with its cargo marker; the soldier up next to it
-            // has the stack marker.
+            // has the stack marker, over the colony too (clip006 #4625,
+            // #5127, #5169, #5299: the second flag's edge above the flag).
             final Unit ship = new ServerUnit(game, base, dutch,
                 spec().getUnitType("model.unit.merchantman"));
             final Unit passenger = new ServerUnit(game, ship, dutch,
@@ -1761,6 +1766,16 @@ public class ClassicMapViewerTest extends FreeColTestCase {
     }
 
     /** The cell of tile {@code (x, y)} at origin {@code o}: {magenta, cyan} pixels. */
+    /**
+     * The pixels of tile {@code (x, y)}'s cell at origin {@code o} and
+     * {@code m} pixels around it (a second flag overhangs the cell).
+     */
+    private static int[] cellPixels(java.awt.image.BufferedImage img, int[] o,
+                                    int x, int y, int m) {
+        final int cx = (x - o[0]) * 16 - m, cy = (y - o[1]) * 16 - m, n = 16 + 2 * m;
+        return img.getRGB(cx, cy, n, n, null, 0, n);
+    }
+
     private static int[] cellColours(java.awt.image.BufferedImage img, int[] o, int x, int y) {
         final int cx = (x - o[0]) * 16, cy = (y - o[1]) * 16;
         int m = 0, c = 0;
@@ -1804,13 +1819,16 @@ public class ClassicMapViewerTest extends FreeColTestCase {
     }
 
     /**
-     * K2 on the screen: Base's cell shows the soldier up and no colony
-     * while ON, the colony and no soldier while OFF; Space and the cycle
-     * moving past him give the colony back at once (no blink change).  A
-     * slide out of the colony shows offset 0 in the colony's place and the
-     * colony back behind the sprite from offset 1 on (clip008 #35756,
-     * #35757); a last move into the colony shows the sprite over it at
-     * the hold and the colony alone at the final draw (#50603, #50610).
+     * K2 on the screen, as the fixer of part K corrected it: Base's cell
+     * shows the soldier up drawn OVER the colony while ON (the original's
+     * ON frame changes only the unit's sprite and flag, the colony stays
+     * around it: clip006 #4625, #5169, #5299; clip008 #35590), the colony
+     * alone while OFF; Space and the cycle moving past him give the colony
+     * alone back at once (no blink change).  A slide out of the colony
+     * draws over it from offset 0 on: offset 0 is the ON frame again
+     * (#35756 = #35590), offset 1 the sprite one pixel out (#35757); a
+     * last move into the colony shows the sprite over it at the hold and
+     * the colony alone at the final draw (#50603, #50610).
      */
     public void testTheColonyCellShowsTheUnitUp() throws Exception {
         final Game game = getStandardGame();
@@ -1847,16 +1865,39 @@ public class ClassicMapViewerTest extends FreeColTestCase {
             mv.changeToMoveUnits(soldier);
             paintAll(mv, img);
             mc = cellColours(img, o, 30, 30);
-            assertTrue(mc[0] > 0);                        // ON: the soldier
-            assertEquals(0, mc[1]);                       // and no Base
+            assertEquals(64, mc[0]);                      // ON: the soldier
+            assertTrue(mc[1] > 0);                        // over Base: Base
+            assertTrue(mc[1] < 256 - 64);                 // around him and his flag
+            final int[] on = mc;
+            final int[] onPx = cellPixels(img, o, 30, 30, 4);
             mv.setBlinkOff(true);                         // OFF: the cell now
             mc = cellColours(img, o, 30, 30);
             assertEquals(0, mc[0]);
             assertEquals(256, mc[1]);
             mv.setBlinkOff(false);
             mc = cellColours(img, o, 30, 30);
-            assertTrue(mc[0] > 0);
-            assertEquals(0, mc[1]);
+            assertTrue(java.util.Arrays.equals(on, mc));
+            // Another unit on Base's tile, not up (hidden under Base): his
+            // flag gets the stack marker over Base as on open land, the
+            // second flag's edge overhanging it (clip006 #4625, #5169:
+            // rows 29-30 above the flag); OFF, Base alone.
+            final Unit guard = new ServerUnit(game, base, dutch,
+                spec().getUnitType("model.unit.freeColonist"));
+            assertSame(ClassicHud.STACK_MARKER, mv.markerOf(soldier, base));
+            paintAll(mv, img);
+            mc = cellColours(img, o, 30, 30);
+            assertEquals(64, mc[0]);
+            assertTrue(mc[1] > 0);
+            assertFalse(java.util.Arrays.equals(onPx, cellPixels(img, o, 30, 30, 4)));
+            mv.setBlinkOff(true);
+            mc = cellColours(img, o, 30, 30);
+            assertEquals(0, mc[0]);
+            assertEquals(256, mc[1]);
+            mv.setBlinkOff(false);
+            guard.dispose();
+            assertFalse(base.getUnitList().contains(guard));
+            paintAll(mv, img);
+            assertTrue(java.util.Arrays.equals(onPx, cellPixels(img, o, 30, 30, 4)));
 
             // Space: no blink change, Base back at once.
             soldier.setState(Unit.UnitState.SKIPPED);
@@ -1881,7 +1922,8 @@ public class ClassicMapViewerTest extends FreeColTestCase {
             assertTrue(cellColours(img, o, 30, 30)[0] > 0);
 
             // The slide out of Base, with the view's jump (Base in the
-            // margin): offset 0 in Base's place, Base back from offset 1.
+            // margin): over Base from offset 0 on, offset 0 the ON frame
+            // (#35756 = #35590), offset 1 one pixel out (#35757).
             mv.setFocus(map.getTile(36, 30));
             o = mv.peekViewOrigin();
             assertEquals(1, 30 - o[0]);
@@ -1907,15 +1949,15 @@ public class ClassicMapViewerTest extends FreeColTestCase {
             o = mv.peekViewOrigin();
             assertEquals(7, 30 - o[0]);                   // the jump
             assertEquals(ClassicSlide.LAST_STEP + 1, frames.size());
-            assertTrue(frames.get(0)[0] > 0);             // offset 0: the soldier
-            assertEquals(0, frames.get(0)[1]);            // in Base's place
-            assertTrue(frames.get(1)[0] > 0);             // offset 1: the soldier
+            assertEquals(on[0], frames.get(0)[0]);        // offset 0: the soldier
+            assertEquals(on[1], frames.get(0)[1]);        // over Base, as ON
+            assertEquals(64, frames.get(1)[0]);           // offset 1: the soldier
             assertTrue(frames.get(1)[1] > 0);             // over Base
             mv.finalDraw();
 
             // The farmer's last move into Base: over it at the hold, Base
             // alone at the final draw (no moves left); with moves left he
-            // is up there, in Base's place.
+            // is up there, over Base.
             mv.changeToMoveUnits(farmer);
             paintAll(mv, img);
             frames.clear();
@@ -1933,8 +1975,8 @@ public class ClassicMapViewerTest extends FreeColTestCase {
             mv.changeToMoveUnits(farmer);
             paintAll(mv, img);
             mc = cellColours(img, o, 30, 30);
-            assertTrue(mc[0] > 0);
-            assertEquals(0, mc[1]);
+            assertEquals(64, mc[0]);
+            assertTrue(mc[1] > 0 && mc[1] < 256 - 64);
             assertEquals(moves, soldier.getMovesLeft());
         } finally {
             mv.dispose();

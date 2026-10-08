@@ -456,7 +456,9 @@ the unit up within 110 ms (the turn start, the hand-over, a minimap click), and
 Europe's exit button and the word "Spielzugende" both sit next to that zone, so
 in Roger's test of `abc27b588` the view ended on open sea and his units were out
 of reach (`freecol-spike-results\k\REPRO.md` section 1). The original's view
-moves only by its jumps (landfall 02 sections 1 and 5). Ways to move the view by
+moves only by its jumps (landfall 02 sections 1 and 5; that the pointer never
+moves it is I: in the landfall clip the pointer never moved, so edge
+scrolling was not observable, landfall 02 l.228). Ways to move the view by
 hand: a minimap click (navigation, to the place clicked), the centre command
 (C, to the unit up), a click on an unexplored or a foreign tile. The unit up
 comes back into the view by the view rule (its next move, the next unit, the
@@ -683,34 +685,50 @@ cell-fitted sprites (`drawCentered`, `UNIT_CELL_FRACTION`).
   (`turnInputBlocked`: the automatic end, a hand-over, the AI phase) and not
   in the Spielzugende mode, which has its own square. In a turn without a unit
   the controller selects its fallback tile (the first colony, else the entry
-  tile) and the turn ends 485 ms later; the box flashed white there for about
-  0.5 s every turn (C acceptance A3), which the original does not show
+  tile; since the fixer of part K without moving the view, see "The view" in
+  the Spielzugende section); the box flashed white there for about 0.5 s
+  every turn (C acceptance A3), which the original does not show
   (`ClassicMapViewerTest.testCursorOnlyWhileThePlayerCanUseIt`).
 - **Blink.** `setBlinkOff` draws the active unit's tile bare (no unit,
   carrier or stack); the blink clock drives it (next section), a slide clears it.
 - **A unit up in a settlement** (part K2, Roger's soldier that "vanished" in
-  Base Silver; `unitOverSettlement`). A settlement's tile shows the settlement,
-  except while a unit is *up* there: the active unit that takes orders
-  (ACTIVE, moves left, in no building), is not sliding and has no hand-over
-  to another unit pending is drawn **in the settlement's place** while its
-  blink is ON, the settlement while OFF (clip008 #35590 the merchantman up in
-  Base, #35613 Base, 23 frames each). As soon as the unit is
-  done the settlement comes back: its last move (the final draw, #50603 ->
-  #50610), Space, or the cycle moving past it (W, F, S). A visit's unit (W5f)
-  is not drawn there: it is done with the completion, and drawn it flashed for
-  one frame before the end (live K2 L2); the original's visit in a colony is
-  not recorded (I). Those changes have no
-  blink change, so `refreshCover` repaints the cell (from `rearmBlink`,
-  `holdBlink`, `enterPrompt` and every hand-over's start,
+  Base Silver; `unitOverSettlement`; corrected by the fixer of part K). A
+  settlement's tile always shows the settlement; while a unit is *up* there
+  -- the active unit that takes orders (ACTIVE, moves left, in no building),
+  is not sliding and has no hand-over to another unit pending -- it is drawn
+  **over the settlement** while its blink is ON, the settlement alone while
+  OFF. The original's ON frame changes only the unit's sprite and flag; the
+  colony's buildings and pennant stay around it (clip006 #4625 the trapper up
+  in Fur City, #5169 the soldier U25 up in Base after his goto, #5299 U26;
+  clip008 #35590 the merchantman up in Base, #35613 Base, 23 frames each;
+  K2 had drawn the unit in the colony's place, the review of part K measured
+  152-180 of the colony area's 336 px unchanged between ON and OFF). Over the
+  settlement the unit keeps its marker (`markerOf`): the stack marker when
+  other units stand on the tile, as on open land (#4625 with a farmer and an
+  artillery on Fur City's tile; #5127, #5169, #5299 in Base, whose tile list
+  goes on with "+ Weiter +", #5135: the second flag's top edge and fill in
+  rows 29-30, 2 px above the flag's, measured by the fixer of part K), a
+  laden ship its cargo marker. Our map
+  draws no colony name and no size digit at all (the original's digit is
+  hidden under the unit up; the name is an open item). As soon as the unit
+  is done the settlement alone comes back: its last move (the final draw,
+  #50603 -> #50610), Space, or the cycle moving past it (W, F, S). A visit's
+  unit (W5f) is not drawn there: it is done with the completion, and drawn it
+  flashed for one frame before the end (live K2 L2); the original's visit in
+  a colony is not recorded (I). Those changes have no blink change, so
+  `refreshCover` repaints the cell (from `rearmBlink`, `holdBlink`,
+  `enterPrompt` and every hand-over's start,
   `ClassicTurnFlow.Host.handOverStarted`), not after a view move (the whole
   map is painted then, one cut). A colony's workers and every unit there that
-  is not up stay hidden (#32928). A slide out of a settlement that starts at
-  offset 0 shows it in the settlement's place and the settlement back behind
-  the sprite from offset 1 on (#35751 OFF -> #35756 -> #35757). A land unit
-  up in a colony is not recorded: the rule is the ship's (I). No colony
-  screen opens (the original's ship did not get one). Recorder events:
+  is not up stay hidden under it (#32928). A slide out of a settlement draws
+  the sprite over it from offset 0 on: offset 0 is the ON frame again
+  (#35751 OFF -> #35756 = #35590 -> #35757), so there is no rule of its own
+  (K2's offset-0 rule, which hid the settlement for that step, also hid
+  foreign villages for one frame; it is gone). No colony screen opens when a
+  unit comes up in a colony at a turn start (#35590); in the original a ship
+  that docks in our colony gets it (clip008 #30021). Recorder events:
   `cover on|off unit=.. at=x,y`. Tests: `ClassicMapViewerTest.testAUnitUpOnItsColonyTile`
-  (the rule), `testTheColonyCellShowsTheUnitUp` (the pixels, with
+  (the rule, the markers), `testTheColonyCellShowsTheUnitUp` (the pixels, with
   `setTestArt`), `ClassicTurnFlowTest.testHandOverStartTellsTheHost`.
 
 **The slide** (`animateMove` on `ClassicSlide`): offsets 1..15 one native
@@ -1290,6 +1308,26 @@ still ends by itself 485 ms after the last change (#691, #1834, #4680).
 - **The cursor tile.** The last active unit's tile (`ClassicMapViewer.
   promptTileFor`: the target of its last move), or the village whose box was
   just cancelled (`villageBoxCancelled(Tile)`, #4193), else the view's focus.
+  After a load with no unit up it is our own unit's tile
+  (`ClassicGUI.loadedViewTile`: FreeCol's saved active unit of ours, else
+  the cycle's first unit on the map outside a colony's buildings; I), and the
+  view opens centred on it, never on FreeCol's fallback on the open sea
+  (fixer of part K).
+- **The view** (fixer of part K, Roger's item 3: "die Ansicht ist irgendwo
+  random auf dem Meer"). FreeCol's fallback view at a turn start with nothing
+  to move (`Player.getFallbackTile`: the first colony, else the Europe entry
+  tile on the open sea) no longer moves the view (`ClassicGUI.changeView(Tile)`
+  -> `changeToTerrain(tile, false)`, recorder `view-kept fallback`); the
+  original keeps it (opening_014 1510-1512: #2212, #3696 after Europe, #4311;
+  no full redraw #4287-#4311). The mode's entry then shows the square
+  (`ClassicMapViewer.enterPrompt(Tile, boolean)`, `ClassicGUI.showPrompt`):
+  in a turn in which no unit of ours came up, by W4's test on the square's
+  tile (kept in the safe zone, as in opening_014; centred in cell (7,6) in
+  the margin or off the view, after the AI phase's W19 jumps or the player's
+  own minimap click; I); after a unit's last move (the pref's mode) the view
+  is not tested (never on arrival, W4) and moves only for a square off the
+  view (I). A jump paints the map, the square and the panel at once
+  (recorder `prompt on x,y jumped`).
 - **The panel's tile mode** (`ClassicHud.paintTileMode`, `TileFacts`) instead
   of the unit block: "Ort: (x, y) 1" at (242,68) (the trailing number is
   unexplained, always 1 for now), then 7 px apart the land name on land
@@ -1972,7 +2010,14 @@ sleep`).
   and Escape on "Abbrechen". Our own proposals (a scout's "Verhandeln", a
   ship's trade at a foreign colony): the "not yet" notice, nothing sent.
   The "accepted" / "rejected" notice that the server's result brings back
-  after our answer never comes (K3, Notices above).
+  after our answer never comes (K3, Notices above). Not built yet: the
+  original's own chain, woodcut 10 (once) -> @HELLOFIRST -> [@SIEGES] ->
+  @WORTHY ("Seid Ihr damit einverstanden?" Ja/Nein) -> @PEACEMEEK
+  (playthrough-1 `02-europeans.md`, France #36546-#39181, England
+  #88666-#89536 without the woodcut, V; "Nein" -> @WARMANLY, I); it is S5
+  of the playthrough-1 gap list, noted at W8c in the master plan (whose W8c
+  row lists the natives' chain). When it comes, the @WORTHY answer must
+  keep FreeCol's echo dropped.
 - **The recruits** (`showEmigrationDialog`: William Brewster, the Fountain
   of Youth). A list box of the three recruits (D2's rows), bar on row 1,
   a click beside it doing nothing: GAME.TXT `@RECRUITCHOOSE` (our
