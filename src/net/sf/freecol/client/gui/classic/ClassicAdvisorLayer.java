@@ -119,6 +119,16 @@ import javax.swing.JComponent;
  * events: {@code woodcut-black}, {@code woodcut-frame},
  * {@code woodcut-done}, {@code woodcut-close}, {@code woodcut-palette},
  * {@code woodcut-end}.
+ *
+ * <p><b>The congress hall</b> of a father's join (build spec D8c,
+ * {@link ClassicCongress}) is such a screen with its own times (the hall
+ * a frame after the black, the figure's dissolve three frames later, the
+ * black two frames after the box before), the arrow hidden from the hall
+ * to the dissolve's end and not dimmed, never marked; after its closing
+ * black (0.21 s) it shows the father's page in the same entry
+ * ({@link Phase#PAGE}), which a fresh key or click ends with the map in
+ * one paint.  Its recorder events are {@code hall-*}, its probe
+ * {@code congress_n:<step>}.
  */
 final class ClassicAdvisorLayer extends JComponent {
 
@@ -218,7 +228,7 @@ final class ClassicAdvisorLayer extends JComponent {
     }
 
     /** A woodcut's steps ({@link #showWoodcut}). */
-    enum Phase { BLACK, FRAME, DISSOLVE, HELD, CLOSING }
+    enum Phase { BLACK, FRAME, DISSOLVE, HELD, CLOSING, PAGE }
 
     /** One box or woodcut asked for, until answered. */
     private static final class Pending {
@@ -279,7 +289,8 @@ final class ClassicAdvisorLayer extends JComponent {
 
         /** @return What it is, for the recorder. */
         String id() {
-            return (this.woodcut != null) ? "woodcut " + this.woodcut.k : this.request.id;
+            return (this.woodcut != null) ? this.woodcut.name.replace('_', ' ')
+                : this.request.id;
         }
     }
 
@@ -407,7 +418,7 @@ final class ClassicAdvisorLayer extends JComponent {
         final Pending p = this.current;
         if (p == null) return isBusy() ? "due" : null;
         if (p.woodcut != null) {
-            return "woodcut_" + p.woodcut.k + ":"
+            return p.woodcut.name + ":"
                 + p.phase.toString().toLowerCase(Locale.ROOT);
         }
         return p.request.id.replace(' ', '_') + ":" + p.bar.row();
@@ -443,11 +454,13 @@ final class ClassicAdvisorLayer extends JComponent {
     /**
      * @return Whether the mouse arrow is hidden: during a woodcut's
      *     dissolve (V: landfall #2121-#2175, two or three frames after the
-     *     frame's paint until the last dissolve frame).
+     *     frame's paint until the last dissolve frame); in the congress
+     *     hall from the hall's paint (clip008 #39719: no arrow).
      */
     boolean hidesArrow() {
         final Pending p = this.current;
-        return p != null && p.woodcut != null && p.phase == Phase.DISSOLVE;
+        return p != null && p.woodcut != null && (p.phase == Phase.DISSOLVE
+            || (!p.woodcut.woodcut && p.phase == Phase.FRAME));
     }
 
     /**
@@ -606,7 +619,9 @@ final class ClassicAdvisorLayer extends JComponent {
             // would come, and after the woodcut before it.
             long due = (p.notBefore == 0L) ? now : Math.max(now, p.notBefore);
             if (this.lastClose != Long.MIN_VALUE) {
-                due = Math.max(due, this.lastClose + nanos(CHAIN_MS));
+                final double chain = (p.woodcut.chainMs >= 0.0) ? p.woodcut.chainMs
+                    : CHAIN_MS;
+                due = Math.max(due, this.lastClose + nanos(chain));
             }
             if (this.holdUntil != Long.MIN_VALUE) due = Math.max(due, this.holdUntil);
             if (due <= now) {
@@ -720,7 +735,7 @@ final class ClassicAdvisorLayer extends JComponent {
                 if (p.endedAt == NOT_SHOWN) p.endedAt = this.clock.now();
                 this.host.woodcutPalette(0, null);
                 this.host.arrowChanged();
-                this.host.woodcutEnded(p.woodcut.k);
+                if (p.woodcut.woodcut) this.host.woodcutEnded(p.woodcut.k);
             }
         }
         if (this.queue.isEmpty()) {
@@ -731,7 +746,7 @@ final class ClassicAdvisorLayer extends JComponent {
         // woodcut all of it, drawn from the current state.
         if (wasUp) paintNow(dirty);
         if (p.woodcut != null) {
-            ClassicFrameRecorder.event("woodcut-end", p.woodcut.k
+            ClassicFrameRecorder.event(kind(p) + "-end", p.woodcut.tag()
                 + ((wasUp) ? " map back" : " never shown")
                 + ((result == ClassicAdvisorBox.Bar.DISMISSED) ? " dismissed" : ""));
         } else {
@@ -752,10 +767,16 @@ final class ClassicAdvisorLayer extends JComponent {
         return new Rectangle(0, 0, getWidth(), getHeight());
     }
 
+    /** @return The recorder's prefix of a screen's events: woodcut or hall. */
+    private static String kind(Pending p) {
+        return (p.woodcut.woodcut) ? "woodcut" : "hall";
+    }
+
     /**
      * A woodcut's first paint: the whole screen black, under the woodcut's
-     * palette (the water frozen); its frame {@link
-     * ClassicWoodcut#FRAME_AFTER_BLACK_MS} later.
+     * palette (the water frozen); its frame the screen's
+     * {@code frameAfterBlackMs} later ({@link
+     * ClassicWoodcut#FRAME_AFTER_BLACK_MS} for a woodcut).
      */
     private void woodcutBlack(Pending p) {
         p.phase = Phase.BLACK;
@@ -771,21 +792,22 @@ final class ClassicAdvisorLayer extends JComponent {
         // run fs3: 53,567 px recorded as misses in one frame).
         this.host.woodcutPalette(p.woodcut.k, p.palette);
         requestFocusInWindow();
-        ClassicFrameRecorder.event("woodcut-black", p.woodcut.k + " pixels="
+        ClassicFrameRecorder.event(kind(p) + "-black", p.woodcut.tag() + " pixels="
             + p.woodcut.changed());
-        this.timer.schedule(p.blackAt + nanos(ClassicWoodcut.FRAME_AFTER_BLACK_MS),
+        this.timer.schedule(p.blackAt + nanos(p.woodcut.frameAfterBlackMs),
                             () -> woodcutFrame(p));
     }
 
-    /** The frame, the ribbon, the title and the fill, in one paint. */
+    /** The frame, the ribbon, the title and the fill (or the hall), in one paint. */
     private void woodcutFrame(Pending p) {
         if (p.done || this.current != p) return;
         p.phase = Phase.FRAME;
         p.woodcut.frame();
         paintNow(whole());
-        ClassicFrameRecorder.event("woodcut-frame", String.valueOf(p.woodcut.k));
-        p.dissolveAt = p.blackAt + nanos(ClassicWoodcut.FRAME_AFTER_BLACK_MS
-            + ClassicWoodcut.DISSOLVE_AFTER_FRAME_MS);
+        if (!p.woodcut.woodcut) this.host.arrowChanged();   // hidden from here
+        ClassicFrameRecorder.event(kind(p) + "-frame", p.woodcut.tag());
+        p.dissolveAt = p.blackAt + nanos(p.woodcut.frameAfterBlackMs
+            + p.woodcut.dissolveAfterFrameMs);
         this.timer.schedule(p.dissolveAt, () -> woodcutTick(p));
     }
 
@@ -803,13 +825,13 @@ final class ClassicAdvisorLayer extends JComponent {
         }
         final double since = (this.clock.now() - p.dissolveAt) / 1e6;
         if (w.dissolveTo(ClassicWoodcut.revealed(w.changed(), since))) {
-            paintNow(scaled(ClassicWoodcut.PICTURE));
+            paintNow(scaled(w.dirty));
         }
         if (w.complete()) {
             p.phase = Phase.HELD;
             this.shownAt = System.currentTimeMillis();
             this.host.arrowChanged();
-            ClassicFrameRecorder.event("woodcut-done", w.k + " pixels=" + w.changed());
+            ClassicFrameRecorder.event(kind(p) + "-done", w.tag() + " pixels=" + w.changed());
             return;
         }
         final double step = ClassicWoodcut.DISSOLVE_MS / (ClassicWoodcut.DISSOLVE_FRAMES - 1);
@@ -819,7 +841,9 @@ final class ClassicAdvisorLayer extends JComponent {
 
     /**
      * The key: black in one paint, the game's palette back a frame later,
-     * the map {@link ClassicWoodcut#MAP_BACK_MS} after the black.
+     * the map the screen's {@code closeMs} after the black
+     * ({@link ClassicWoodcut#MAP_BACK_MS} for a woodcut), or its page
+     * ({@link #woodcutPage}).
      */
     private void woodcutClose(Pending p) {
         p.phase = Phase.CLOSING;
@@ -827,18 +851,41 @@ final class ClassicAdvisorLayer extends JComponent {
         p.closeAt = this.clock.now();
         p.woodcut.black();
         paintNow(whole());
-        ClassicFrameRecorder.event("woodcut-close", String.valueOf(p.woodcut.k));
+        ClassicFrameRecorder.event(kind(p) + "-close", p.woodcut.tag());
         this.timer.schedule(p.closeAt + nanos(ClassicWoodcut.FRAME_MS), () -> {
                 if (p.done || this.current != p) return;
                 this.host.woodcutPalette(0, null);
-                ClassicFrameRecorder.event("woodcut-palette", p.woodcut.k + " back");
-                this.timer.schedule(p.closeAt + nanos(ClassicWoodcut.MAP_BACK_MS), () -> {
+                ClassicFrameRecorder.event(kind(p) + "-palette", p.woodcut.tag() + " back");
+                this.timer.schedule(p.closeAt + nanos(p.woodcut.closeMs), () -> {
                         if (p.done || this.current != p) return;
-                        p.endedAt = this.clock.now();
-                        this.holdUntil = p.endedAt + nanos(p.followMs);
-                        finish(p, 0);
+                        if (p.woodcut.hasPage()) {
+                            woodcutPage(p);
+                            return;
+                        }
+                        woodcutEnd(p);
                     });
             });
+    }
+
+    /**
+     * The page after the closing black (the congress hall's father page,
+     * D8c), in one paint; a fresh key or click ends it ({@link #woodcutEnd}).
+     */
+    private void woodcutPage(Pending p) {
+        p.phase = Phase.PAGE;
+        p.pressed = false;
+        p.woodcut.page();
+        paintNow(whole());
+        this.shownAt = System.currentTimeMillis();
+        requestFocusInWindow();
+        ClassicFrameRecorder.event(kind(p) + "-page", p.woodcut.tag());
+    }
+
+    /** The map comes back: the screen ends, the next box after its follow-up. */
+    private void woodcutEnd(Pending p) {
+        p.endedAt = this.clock.now();
+        this.holdUntil = p.endedAt + nanos(p.followMs);
+        finish(p, 0);
     }
 
 
@@ -867,8 +914,11 @@ final class ClassicAdvisorLayer extends JComponent {
         if (p.woodcut != null) {
             // Any fresh key once the picture is complete (I: the keys are
             // never recorded), also Escape; not one held from before.
-            if (p.phase == Phase.HELD && !predates(e.getWhen()) && !repeat) {
+            if (predates(e.getWhen()) || repeat) return;
+            if (p.phase == Phase.HELD) {
                 woodcutClose(p);
+            } else if (p.phase == Phase.PAGE) {
+                woodcutEnd(p);   // the hall's page: the map
             }
             return;
         }
@@ -972,7 +1022,7 @@ final class ClassicAdvisorLayer extends JComponent {
             // A press and its release anywhere in the window count as a
             // key, the letterbox border too (Roger: any click closes it;
             // I-prep cycle.md 3C).
-            p.pressed = p.phase == Phase.HELD;
+            p.pressed = p.phase == Phase.HELD || p.phase == Phase.PAGE;
             return;
         }
         final int row = (v == null) ? -1 : p.layout.rowAt(v.x, v.y);
@@ -994,6 +1044,7 @@ final class ClassicAdvisorLayer extends JComponent {
         final Point v = virtual(e.getPoint());
         if (p.woodcut != null) {
             if (p.pressed && p.phase == Phase.HELD) woodcutClose(p);
+            else if (p.pressed && p.phase == Phase.PAGE) woodcutEnd(p);
             return;
         }
         final int row = (v == null) ? -1 : p.layout.rowAt(v.x, v.y);

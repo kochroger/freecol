@@ -108,7 +108,7 @@ final class ClassicMenuModel {
      *   <li>declareIndependenceAction: {@code showDeclarationPanel} (GUI.java:2039)</li>
      *   <li>findSettlementAction: {@code showFindSettlementPanel} (GUI.java:2129)</li>
      *   <li>assignTradeRouteAction, tradeRouteAction: {@code showTradeRoutePanel} (GUI.java:2577)</li>
-     *   <li>colopediaAction.*: {@code showColopediaPanel} (GUI.java:2001)</li>
+     *   <li>colopediaAction.* but .fathers (D8b, ClassicGUI.showColopediaPanel): {@code showColopediaPanel} (GUI.java:2001)</li>
      * </ul>
      * (zoomIn/zoomOut need no entry: they disable themselves, GUI.canZoomInMap
      * is false, GUI.java:1701.)
@@ -121,7 +121,6 @@ final class ClassicMenuModel {
                       pedia(ColopediaAction.PanelType.UNITS),
                       pedia(ColopediaAction.PanelType.TERRAIN),
                       pedia(ColopediaAction.PanelType.BUILDINGS),
-                      pedia(ColopediaAction.PanelType.FATHERS),
                       pedia(ColopediaAction.PanelType.CONCEPTS))));
 
 

@@ -1144,4 +1144,117 @@ public class ClassicAdvisorLayerTest extends TestCase {
         assertEquals(ClassicAdvisorLayer.NOT_SHOWN, (long) edt(
             () -> this.layer.showWoodcut(null, null, 0L, 0.0)));
     }
+
+    /** A synthetic congress hall: grey, a 10x10 red figure at (100,100), a blue page. */
+    private static ClassicWoodcut.Screen hall() {
+        final BufferedImage from = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+        final BufferedImage to = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+        final BufferedImage page = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < 200; y++) {
+            for (int x = 0; x < 320; x++) {
+                from.setRGB(x, y, 0x808080);
+                to.setRGB(x, y, (x >= 100 && x < 110 && y >= 100 && y < 110)
+                          ? 0xFF0000 : 0x808080);
+                page.setRGB(x, y, 0x0000FF);
+            }
+        }
+        return new ClassicWoodcut.Screen(ClassicCongress.HALL, false, "congress_7",
+            from, to, page, ClassicCongress.HALL_AFTER_BLACK_MS,
+            ClassicCongress.DISSOLVE_AFTER_HALL_MS, ClassicCongress.PAGE_AFTER_BLACK_MS,
+            ClassicCongress.BLACK_AFTER_BOX_MS, new java.awt.Rectangle(100, 100, 10, 10));
+    }
+
+    /**
+     * D8c: the congress hall on the clock (clip008 #39714 - #40109): its
+     * black two frames after the @FREEDOM box went (not the usual 200
+     * ms), the hall one frame later with the arrow hidden from there, the
+     * figure's dissolve three frames after the hall over 55 frames, held
+     * until a fresh key; then black, the palette back a frame later, the
+     * page 15 frames (0.21 s) after the black in the same entry, which a
+     * click ends with the map at once; never marked as a woodcut; the next
+     * box no earlier than the follow-up.
+     */
+    public void testCongressHallTimeline() throws Exception {
+        final Answer box = ask(ClassicAdvisorBox.Request.builder("FREEDOM")
+            .freeColText("a a").build());
+        flush();
+        assertTrue(up());
+        key(KeyEvent.VK_ENTER);
+        assertEquals(0, box.get());
+        final long closed = this.clock.now();
+        final Ended e = new Ended();
+        final ClassicWoodcut.Screen s = hall();
+        SwingUtilities.invokeLater(() -> {
+                e.value = this.layer.showWoodcut(s, null, 0L, ClassicCongress.FOLLOW_MS);
+                e.done.countDown();
+            });
+        flush();
+        assertEquals("due", probe());
+        this.clock.advanceMs(2 * ClassicWoodcut.FRAME_MS - 0.5);
+        runTimer();
+        assertEquals("due", probe());
+        this.clock.advanceMs(0.5);
+        runTimer();
+        assertEquals("congress_7:black", probe());
+        assertEquals(List.of(ClassicCongress.HALL), this.host.woodcutPalettes);
+        assertFalse(edt(() -> this.layer.hidesArrow()));
+        this.clock.advanceMs(ClassicWoodcut.FRAME_MS);
+        runTimer();
+        assertEquals("congress_7:frame", probe());
+        assertTrue(edt(() -> this.layer.hidesArrow()));       // from the hall on
+        key(KeyEvent.VK_ENTER);                                // not yet: nothing
+        this.clock.advanceMs(3 * ClassicWoodcut.FRAME_MS - 0.5);
+        runTimer();
+        assertEquals("congress_7:frame", probe());
+        this.clock.advanceMs(0.5);
+        int frames = 0;
+        for (int i = 0; i < 200 && !"congress_7:held".equals(probe()); i++) {
+            final int before = edt(() -> this.layer.currentWoodcut().revealed());
+            runTimer();
+            if (edt(() -> this.layer.currentWoodcut().revealed()) > before) frames++;
+            assertTrue(edt(() -> this.layer.hidesArrow())
+                       || "congress_7:held".equals(probe()));
+            this.clock.advanceMs(ClassicWoodcut.FRAME_MS);
+        }
+        assertEquals(55, frames);
+        assertEquals("congress_7:held", probe());
+        assertFalse(edt(() -> this.layer.hidesArrow()));
+        assertEquals(100, s.changed());
+        // A fresh key: black, the palette back a frame later, the page
+        // 15 frames after the black.
+        key(KeyEvent.VK_SPACE);
+        final long black = this.clock.now();
+        assertEquals("congress_7:closing", probe());
+        for (int p : edt(() -> this.layer.currentWoodcut().pixels())) assertEquals(0, p);
+        this.clock.advanceMs(ClassicWoodcut.FRAME_MS);
+        runTimer();
+        assertEquals(List.of(ClassicCongress.HALL, 0), this.host.woodcutPalettes);
+        this.clock.advanceMs(14 * ClassicWoodcut.FRAME_MS - 0.5);
+        runTimer();
+        assertEquals("congress_7:closing", probe());
+        this.clock.advanceMs(0.5);
+        runTimer();
+        assertEquals("congress_7:page", probe());
+        assertTrue(edt(() -> this.layer.coversScreen()));
+        for (int p : edt(() -> this.layer.currentWoodcut().pixels())) assertEquals(0x0000FF, p);
+        assertEquals(black + Math.round(15 * ClassicWoodcut.FRAME_MS * 1e6),
+                     this.clock.now(), 1_000_000L);
+        // Held keys do nothing; no timeout; a click ends it with the map.
+        this.host.repeat = true;
+        key(KeyEvent.VK_ENTER);
+        this.host.repeat = false;
+        this.clock.advanceMs(60_000);
+        runTimer();
+        assertEquals("congress_7:page", probe());
+        assertFalse(e.isDone());
+        mouse(MouseEvent.MOUSE_PRESSED, 10, 10);
+        mouse(MouseEvent.MOUSE_RELEASED, 10, 10);
+        assertEquals(this.clock.now(), e.get());
+        assertFalse(up());
+        assertFalse(edt(() -> this.layer.coversScreen()));
+        assertTrue("never marked: " + this.host.ended, this.host.ended.isEmpty());
+        assertEquals(e.get() + Math.round(ClassicCongress.FOLLOW_MS * 1e6),
+                     (long) edt(() -> this.layer.holdUntilNanos()));
+        assertTrue(closed < black);
+    }
 }

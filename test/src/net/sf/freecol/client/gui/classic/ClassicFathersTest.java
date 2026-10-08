@@ -557,4 +557,147 @@ public class ClassicFathersTest extends FreeColTestCase {
         gui.showChooseFoundingFatherDialog(new ArrayList<>(), chosen::add);
         assertNull(gui.takePendingFathers());
     }
+
+    /** The congress seam, recorded in the order of the boxes ("hall n before"). */
+    private static ClassicGUI.Congress hallSeam(ScriptPrompter keys, List<String> log,
+                                                boolean shown) {
+        return (ff, before) -> {
+            log.add(keys.boxes.size() + ":hall " + ClassicFathers.index(ff) + " " + before);
+            return (shown) ? 1L : ClassicAdvisorLayer.NOT_SHOWN;
+        };
+    }
+
+    /**
+     * D8c at a turn start: a father joined (the set grew, his history
+     * event of this turn): @FREEDOM first, 342 ms after it is asked, then
+     * the hall with the fathers before him, then the price notice, then the
+     * emigration notice (F A3: FreeCol's order was the other way round);
+     * FreeCol's own join notice is not shown; the offer of that turn is
+     * withheld.  The next turn's report shows no join again; a second join
+     * brings the hall with the first father in it.  A father seen at the
+     * view's build never joins.
+     */
+    public void testTheJoinSequence() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        dutch.addFather(spec().getFoundingFather("model.foundingFather.williamPenn"));
+        final FatherGUI gui = new FatherGUI(game, dutch);
+        final ScriptPrompter keys = new ScriptPrompter();
+        gui.prompter = keys;
+        final List<String> log = new ArrayList<>();
+        gui.congress = hallSeam(keys, log, true);
+        gui.noteFathers();                                 // Penn: known
+        assertFalse(gui.joinsDue());
+        final FoundingFather minuit = spec().getFoundingFather(
+            "model.foundingFather.peterMinuit");
+        dutch.addFather(minuit);
+        dutch.addHistory(new HistoryEvent(game.getTurn(),
+            HistoryEvent.HistoryEventType.FOUNDING_FATHER, dutch));
+        assertTrue(gui.joinsDue());
+        final List<FoundingFather> chosen = new ArrayList<>();
+        gui.showChooseFoundingFatherDialog(fathers(spec(), "adamSmith", "laSalle",
+            "paulRevere", "pocahontas", "williamPenn"), chosen::add);
+        final ModelMessage emigrate = new ModelMessage(
+            ModelMessage.MessageType.UNIT_ADDED, "model.player.emigrate", dutch, dutch);
+        final ModelMessage joined = new ModelMessage(
+            ModelMessage.MessageType.SONS_OF_LIBERTY, ClassicCongress.JOINED_MESSAGE,
+            dutch, dutch);
+        final ModelMessage price = new ModelMessage(
+            ModelMessage.MessageType.MARKET_PRICES, "model.market.priceIncrease",
+            dutch, dutch);
+        keys.then("X").then("X").then("X").then("ENTER");
+        gui.showReportTurnPanel(List.of(emigrate, joined, price));
+        final List<String> ids = new ArrayList<>();
+        for (ClassicAdvisorBox.Request r : keys.boxes) ids.add(r.id);
+        assertEquals(Arrays.asList(ClassicCongress.SECTION,
+            "message model.market.priceIncrease", "message model.player.emigrate"), ids);
+        assertEquals(ClassicCongress.FREEDOM_AFTER_TURN_MS, keys.boxes.get(0).openDelayMs);
+        assertEquals(List.of("1:hall 2 [21]"), log);       // after @FREEDOM, Penn in it
+        assertTrue(chosen.isEmpty());                      // withheld this turn
+        assertFalse(gui.joinsDue());
+        assertFalse(gui.holdTurnStart());
+        // The next turn: no join again.
+        keys.boxes.clear();
+        keys.script.clear();
+        keys.then("X");
+        gui.showReportTurnPanel(List.of(price));
+        assertEquals(1, keys.boxes.size());
+        assertEquals(1, log.size());
+        // A second join: the hall has Minuit and Penn; without the hall
+        // his page alone (when the pack has it).
+        keys.boxes.clear();
+        keys.script.clear();
+        gui.congress = hallSeam(keys, log, false);
+        dutch.addFather(spec().getFoundingFather("model.foundingFather.adamSmith"));
+        keys.then("X").then("X");
+        gui.showModelMessages(List.of(joined));
+        assertEquals("1:hall 0 [2, 21]", log.get(1));
+        assertEquals(ClassicCongress.SECTION, keys.boxes.get(0).id);
+        assertEquals(ClassicCongress.FREEDOM_AFTER_TURN_MS, keys.boxes.get(0).openDelayMs);
+        if (keys.boxes.size() > 1) {
+            assertEquals("pedia model.foundingFather.adamSmith", keys.boxes.get(1).id);
+            assertNotNull(keys.boxes.get(1).picture);
+            assertEquals(ClassicCongress.PAGE_AFTER_BLACK_MS, keys.boxes.get(1).chainMs);
+        }
+        // Without notices: the turn flow's hold posts it, holds, and the
+        // year flips after it.
+        keys.boxes.clear();
+        keys.script.clear();
+        gui.congress = hallSeam(keys, log, true);
+        dutch.addFather(spec().getFoundingFather("model.foundingFather.laSalle"));
+        keys.then("X");
+        SwingUtilities.invokeAndWait(() -> {
+                assertTrue(gui.holdTurnStart());
+                assertTrue(gui.holdTurnStart());          // posted once
+            });
+        SwingUtilities.invokeAndWait(() -> { });          // the posted sequence
+        assertEquals(1, keys.boxes.size());
+        assertEquals("1:hall 9 [0, 2, 21]", log.get(2));
+        assertFalse(gui.holdTurnStart());
+    }
+
+    /**
+     * D8b's menu part: COLONIPAEDIE, Gruendervaeter shows the types' list,
+     * Enter a type's fathers, Enter a father's page; a key on the page
+     * brings his list back with the bar on him (a little later), Escape
+     * goes back to the types (the bar on that type), Escape again to the
+     * map.  A father's id opens his page alone; another part of the
+     * Colonopedia is still nothing.
+     */
+    public void testThePediaMenu() throws Exception {
+        final ClassicText t = texts("testThePediaMenu");
+        if (t == null || ClassicPedia.load(ClassicPackFiles.runtime()) == null) return;
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final FatherGUI gui = new FatherGUI(game, dutch);
+        final ScriptPrompter keys = new ScriptPrompter();
+        gui.prompter = keys;
+        keys.then("DOWN", "ENTER")                         // Erkundungs- Berater
+            .then("DOWN", "DOWN", "ENTER")                 // the third explorer
+            .then("X")                                     // his page
+            .then("ESC")                                   // his list: back
+            .then("ESC");                                  // the types: the map
+        SwingUtilities.invokeAndWait(() -> assertNull(gui.showColopediaPanel("colopediaAction.fathers")));
+        final List<String> ids = new ArrayList<>();
+        for (ClassicAdvisorBox.Request r : keys.boxes) ids.add(r.id);
+        final int third = ClassicPedia.fathersOfType(t, 1).get(2);
+        final String id = ClassicFathers.IDS.get(third);
+        assertEquals(Arrays.asList("PEDIA fathers", "PEDIA fathers 1", "pedia " + id,
+            "PEDIA fathers 1", "PEDIA fathers"), ids);
+        assertEquals(0, keys.boxes.get(0).defaultRow);
+        assertEquals(ClassicFathers.PAGE_CHAIN_MS, keys.boxes.get(2).chainMs);
+        assertEquals(2, keys.boxes.get(3).defaultRow);
+        assertEquals(ClassicFathers.REOPEN_CHAIN_MS, keys.boxes.get(3).chainMs);
+        assertEquals(1, keys.boxes.get(4).defaultRow);
+        // A father's id: his page alone; another part: nothing.
+        keys.boxes.clear();
+        keys.then("X");
+        SwingUtilities.invokeAndWait(() -> gui.showColopediaPanel("model.foundingFather.henryHudson"));
+        assertEquals(1, keys.boxes.size());
+        assertEquals("pedia model.foundingFather.henryHudson", keys.boxes.get(0).id);
+        SwingUtilities.invokeAndWait(() -> gui.showColopediaPanel("colopediaAction.units"));
+        SwingUtilities.invokeAndWait(() -> gui.showColopediaPanel("model.unit.freeColonist"));
+        gui.showColopediaPanel(null);
+        assertEquals(1, keys.boxes.size());
+    }
 }

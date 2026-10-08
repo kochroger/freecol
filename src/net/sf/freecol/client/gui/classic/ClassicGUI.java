@@ -33,10 +33,13 @@ import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 import java.util.logging.Level;
@@ -62,6 +65,7 @@ import net.sf.freecol.client.control.PreGameController;
 import net.sf.freecol.client.control.SoundController;
 import net.sf.freecol.client.gui.ChoiceItem;
 import net.sf.freecol.client.gui.action.ActionManager;
+import net.sf.freecol.client.gui.action.ColopediaAction;
 import net.sf.freecol.client.gui.DialogHandler;
 import net.sf.freecol.client.gui.GUI;
 import net.sf.freecol.client.gui.ImageLibrary;
@@ -1709,6 +1713,8 @@ public class ClassicGUI extends GUI {
                 installInGameHud();
                 // The woodcuts this game has seen (W9), before any can come.
                 loadWoodcuts();
+                // The fathers already in Congress do not join again (D8c).
+                noteFathers();
                 // Phase 0 at the first in-game view (fog-start #19).
                 this.waterCycle.start();
             }
@@ -1993,15 +1999,19 @@ public class ClassicGUI extends GUI {
         public void woodcutPalette(int k, int[] entries) {
             // The water stands still under the woodcut's palette (W6c's
             // hold); the recorder's frames take it, the arrow's grey too.
+            // The congress hall (D8c) holds the water too, but keeps the
+            // arrow's grey (clip008 #39775: index 7 stays #AAAAAA) and the
+            // recorder's palette (its own is not in the pack).
             final ClassicWaterCycle wc = waterCycle;
+            final boolean woodcut = k >= ClassicWoodcut.FIRST && k <= ClassicWoodcut.LAST;
             if (k > 0) {
                 if (wc != null) wc.hold("woodcut");
-                ClassicFrameRecorder.woodcutPalette(k, entries);
+                if (woodcut) ClassicFrameRecorder.woodcutPalette(k, entries);
             } else {
                 if (this.dimmed) ClassicFrameRecorder.woodcutPalette(0, null);
                 if (wc != null) wc.release("woodcut");
             }
-            this.dimmed = k > 0;
+            this.dimmed = woodcut;
             if (hudPane != null) hudPane.pointer().setDimmed(this.dimmed);
         }
 
@@ -4153,13 +4163,16 @@ public class ClassicGUI extends GUI {
         for (Unit ship : takeArrivalMessages(messages, game, myPlayer())) {
             this.voyages.consumed(ship);
         }
+        // A father's join is the original's sequence (D8c), not FreeCol's
+        // notice; it comes first, before the turn's other notices.
+        messages.removeIf(m -> ClassicCongress.JOINED_MESSAGE.equals(m.getId()));
         final List<Integer> unshown = new ArrayList<>();
         for (ModelMessage m : all) {
             if (messages.contains(m)) continue;
             final int k = messageWoodcut(game, m);
             if (k >= 0) unshown.add(k);
         }
-        if (messages.isEmpty() && unshown.isEmpty()) return;
+        if (messages.isEmpty() && unshown.isEmpty() && !joinsDue()) return;
         if (this.firstScenePending || this.sceneShowing) {
             this.heldMessages.add(new HeldMessages(all, titleKey));
             logger.info("ClassicGUI: " + messages.size()
@@ -4167,6 +4180,7 @@ public class ClassicGUI extends GUI {
             return;
         }
         if (game == null) return;
+        final List<FoundingFather> joins = takeJoins();
         // One box per notice, each after the one before (build spec W7):
         // the original has no paged report.  The original's words where
         // GAME.TXT has the notice (N1, ClassicNotices).
@@ -4197,6 +4211,7 @@ public class ClassicGUI extends GUI {
             }
         }
         onEventThread(() -> {
+                showJoins(joins);
                 for (int k : unshown) noticeWoodcut(k);
                 for (ClassicAdvisorBox.Request r : prices) this.prompter.ask(r);
                 if (fathers != null) askFathers(fathers);
@@ -4377,9 +4392,25 @@ public class ClassicGUI extends GUI {
      * for it as for any box, and wipes after it.  Then our ships' arrivals
      * (W13, {@link #holdForArrivals}).
      *
+     * A father's join that no notice brought (FreeCol's message options
+     * can drop its notice) comes before all that (D8c, {@link #showJoins}).
+     *
      * @return True if the turn start must wait.
      */
     boolean holdTurnStart() {
+        if (this.joinsPosted == null && !this.firstScenePending && !this.sceneShowing) {
+            final List<FoundingFather> j = takeJoins();
+            if (!j.isEmpty()) {
+                this.joinsPosted = j;
+                ClassicFrameRecorder.event("fathers-join-due", "before the turn start");
+                SwingUtilities.invokeLater(() -> {
+                        final List<FoundingFather> p = this.joinsPosted;
+                        this.joinsPosted = null;
+                        showJoins(p);
+                    });
+            }
+        }
+        if (this.joinsPosted != null) return true;
         if (this.pendingFathers == null) return holdForArrivals();
         if (!this.fathersPosted) {
             this.fathersPosted = true;
@@ -4452,9 +4483,21 @@ public class ClassicGUI extends GUI {
      */
     private void showFatherPage(ClassicPackFiles pack, ClassicText text,
                                 FoundingFather ff) {
-        final BufferedImage page = (pack == null) ? null : ClassicPedia.fatherPage(
-            ClassicPedia.load(pack), text, pack.font(ClassicFont.TINY),
-            pack.image(ClassicPedia.WOODPANL_KEY), ClassicFathers.index(ff));
+        showFatherPage(pack, text, ff, ClassicFathers.PAGE_CHAIN_MS);
+    }
+
+    /**
+     * {@link #showFatherPage(ClassicPackFiles, ClassicText, FoundingFather)}
+     * at a given distance after the box before it.
+     *
+     * @param pack The pack, or null.
+     * @param text The texts, or null.
+     * @param ff The father.
+     * @param chainMs The least time after the box before (ms).
+     */
+    private void showFatherPage(ClassicPackFiles pack, ClassicText text,
+                                FoundingFather ff, double chainMs) {
+        final BufferedImage page = fatherPageImage(pack, text, ff);
         if (page == null) {
             logger.info("Classic father page missing for " + ff.getId()
                 + " (re-run ant classic-assets).");
@@ -4462,8 +4505,223 @@ public class ClassicGUI extends GUI {
         }
         this.prompter.ask(ClassicAdvisorBox.Request.builder("pedia " + ff.getId())
             .freeColText(Messages.getName(ff)).picture(page)
-            .chain(ClassicFathers.PAGE_CHAIN_MS)
+            .chain(chainMs)
             .stopgap(Messages.getName(ff), null).build());
+    }
+
+    /**
+     * @param pack The pack, or null.
+     * @param text The texts, or null.
+     * @param ff The father.
+     * @return His Colonopedia page, or null without the pack's.
+     */
+    static BufferedImage fatherPageImage(ClassicPackFiles pack, ClassicText text,
+                                         FoundingFather ff) {
+        return (pack == null) ? null : ClassicPedia.fatherPage(
+            ClassicPedia.load(pack), text, pack.font(ClassicFont.TINY),
+            pack.image(ClassicPedia.WOODPANL_KEY), ClassicFathers.index(ff));
+    }
+
+    // The founding fathers' join (build spec D8c, ClassicCongress)
+
+    /**
+     * What shows the congress hall and the page after it:
+     * {@link #putCongress} in the game, a fake in the tests.  EDT only.
+     */
+    interface Congress {
+
+        /**
+         * Show the hall with {@code before}, {@code ff} dissolving in, then
+         * his page, and wait until the map is back.
+         *
+         * @param ff The new father.
+         * @param before The rows of the fathers already in Congress.
+         * @return When the map came back, or
+         *     {@link ClassicAdvisorLayer#NOT_SHOWN} (then the caller shows
+         *     the page alone).
+         */
+        long show(FoundingFather ff, List<Integer> before);
+    }
+
+    /** Shows the hall; replaced by the tests. */
+    Congress congress = this::putCongress;
+
+    /** Our player's fathers this view has seen (ids), or null before {@link #noteFathers}. */
+    private Set<String> knownFathers = null;
+
+    /** Joins the turn flow's hold posted and not yet shown, or null. */
+    private List<FoundingFather> joinsPosted = null;
+
+    /**
+     * Take our player's fathers as seen: at the view's build, before any
+     * turn can bring a join (a loaded game's fathers do not join again).
+     */
+    void noteFathers() {
+        this.knownFathers = new HashSet<>();
+        this.joinsPosted = null;
+        final Player me = myPlayer();
+        if (me != null) {
+            for (FoundingFather ff : me.getFoundingFathers()) this.knownFathers.add(ff.getId());
+        }
+        ClassicFrameRecorder.note("fathers", "known=" + this.knownFathers.size());
+    }
+
+    /** @return Whether our player has a father this view has not shown yet. */
+    boolean joinsDue() {
+        return !ClassicCongress.joined(this.knownFathers, myPlayer(), false).isEmpty();
+    }
+
+    /**
+     * The fathers who joined since the last look, taken as seen: the
+     * trigger of D8c is the father set growing.
+     *
+     * @return Them in NAMES order, possibly none.
+     */
+    List<FoundingFather> takeJoins() {
+        return ClassicCongress.joined(this.knownFathers, myPlayer(), true);
+    }
+
+    /**
+     * The original's join sequence for each father (EDT only, blocks):
+     * @FREEDOM ({@link ClassicCongress#freedom}; the first one
+     * {@link ClassicCongress#FREEDOM_AFTER_TURN_MS} after it is asked, at
+     * the turn start), then the congress hall with the fathers before him
+     * and his page ({@link #congress}); without the hall, his page alone.
+     *
+     * @param joins The fathers, or null.
+     */
+    void showJoins(List<FoundingFather> joins) {
+        if (joins == null || joins.isEmpty()) return;
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicText text = ClassicText.load(pack);
+        final Player me = myPlayer();
+        final List<FoundingFather> later = new ArrayList<>(joins);
+        boolean first = true;
+        for (FoundingFather ff : joins) {
+            later.remove(ff);
+            ClassicFrameRecorder.event("father-joined", ff.getId());
+            this.prompter.ask(ClassicCongress.freedom(text, me, ff,
+                (first) ? ClassicCongress.FREEDOM_AFTER_TURN_MS : 0.0));
+            first = false;
+            final List<Integer> before = new ArrayList<>();
+            if (me != null) {
+                for (FoundingFather f : me.getFoundingFathers()) {
+                    final int n = ClassicFathers.index(f);
+                    if (f != ff && !later.contains(f) && n >= 0) before.add(n);
+                }
+            }
+            Collections.sort(before);
+            if (this.congress.show(ff, before) == ClassicAdvisorLayer.NOT_SHOWN) {
+                showFatherPage(pack, text, ff, ClassicCongress.PAGE_AFTER_BLACK_MS);
+            }
+        }
+    }
+
+    /**
+     * Put the congress hall on the game's canvas, as {@link #putWoodcut}
+     * does: only when the map is what the player sees and the pack has the
+     * hall, his figure and his page.  EDT only.
+     *
+     * @param ff The new father.
+     * @param before The rows of the fathers already in Congress.
+     * @return When the map came back, or {@link ClassicAdvisorLayer#NOT_SHOWN}.
+     */
+    long putCongress(FoundingFather ff, List<Integer> before) {
+        final ClassicAdvisorLayer layer = this.boxLayer;
+        if (layer == null || this.sceneShowing || this.hudPane == null
+            || !this.hudPane.isShowing() || dialogOwner() != this.frame) {
+            ClassicFrameRecorder.event("hall-skipped", ff.getId() + " no game canvas");
+            return ClassicAdvisorLayer.NOT_SHOWN;
+        }
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final BufferedImage page = fatherPageImage(pack, ClassicText.load(pack), ff);
+        final ClassicWoodcut.Screen s = (page == null) ? null
+            : ClassicCongress.screen(pack, before, ClassicFathers.index(ff), page);
+        if (s == null) {
+            ClassicFrameRecorder.event("hall-skipped", ff.getId() + " no art");
+            return ClassicAdvisorLayer.NOT_SHOWN;
+        }
+        ClassicFrameRecorder.event("hall-ask", ff.getId() + " before=" + before);
+        return layer.showWoodcut(s, null, 0L, ClassicCongress.FOLLOW_MS);
+    }
+
+    // COLONIPÄDIE -> Gründerväter (build spec D8b's menu part)
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The founding fathers' part of the original's Colonopedia
+     * ({@link ClassicPedia#typeList}): from the menu row the list of the
+     * five types, then a type's fathers, then a father's page; a key on
+     * the page brings his list back (the bar on him), Escape goes back a
+     * list, and from the first list to the map.  A father's id opens his
+     * page at once.  The other parts are still FreeCol's no-op.
+     */
+    @Override
+    public FreeColPanel showColopediaPanel(String nodeId) {
+        if (nodeId == null) return null;
+        final boolean list = nodeId.equals(ClassicMenuModel.pedia(
+                ColopediaAction.PanelType.FATHERS))
+            || nodeId.equals(ColopediaAction.PanelType.FATHERS.getKey());
+        // Only a father's id (another type's id would not cast).
+        final FoundingFather one = (list || getGame() == null
+            || !nodeId.startsWith("model.foundingFather.")) ? null
+            : getGame().getSpecification().getFoundingFather(nodeId);
+        if (!list && one == null) return null;
+        final Runnable r = () -> {
+            final ClassicPackFiles pack = ClassicPackFiles.runtime();
+            final ClassicText text = ClassicText.load(pack);
+            if (one != null) {
+                showFatherPage(pack, text, one, ClassicFathers.PAGE_CHAIN_MS);
+            } else {
+                pediaFathers(pack, text);
+            }
+        };
+        if (SwingUtilities.isEventDispatchThread()) r.run();
+        else SwingUtilities.invokeLater(r);
+        return null;
+    }
+
+    /**
+     * The fathers' lists and pages (EDT only, blocks; class comment of
+     * {@link #showColopediaPanel}).
+     *
+     * @param pack The pack, or null.
+     * @param text The texts, or null.
+     */
+    void pediaFathers(ClassicPackFiles pack, ClassicText text) {
+        final ClassicPedia pedia = ClassicPedia.load(pack);
+        final Specification spec = (getGame() == null) ? null : getGame().getSpecification();
+        if (spec == null || ClassicPedia.typeList(pedia, text, 0) == null) {
+            logger.info("Classic Colonopedia: no fathers' list without the pack's"
+                + " PEDIA.TXT (re-run ant classic-assets).");
+            return;
+        }
+        int type = 0;
+        for (int round = 0; round < 1000; round++) {
+            final int t = this.prompter.ask(ClassicPedia.typeList(pedia, text, type));
+            if (t < 0 || t >= ClassicPedia.TYPES) return;   // Escape, a click beside
+            type = t;
+            final List<Integer> ns = ClassicPedia.fathersOfType(text, type);
+            int row = 0;
+            boolean again = false;
+            for (int inner = 0; inner < 1000; inner++) {
+                // Asked again after a page, it comes a little later (as the
+                // father box after its F1 page).
+                final ClassicAdvisorBox.Request r = ClassicPedia.fatherList(pedia, text,
+                    type, row, (again) ? ClassicFathers.REOPEN_CHAIN_MS : -1.0);
+                if (r == null) break;
+                final int f = this.prompter.ask(r);
+                if (f < 0 || f >= ns.size()) break;   // back to the types
+                row = f;
+                final FoundingFather ff = spec.getFoundingFather(
+                    ClassicFathers.IDS.get(ns.get(f)));
+                if (ff == null) break;
+                ClassicFrameRecorder.event("pedia-father", ff.getId());
+                showFatherPage(pack, text, ff, ClassicFathers.PAGE_CHAIN_MS);
+                again = true;
+            }
+        }
     }
 
     // First game scene (ClassicFirstScene)

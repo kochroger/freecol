@@ -354,4 +354,119 @@ final class ClassicPedia {
         }
         return on;
     }
+
+
+    // The menu's lists (COLONIPÄDIE -> Gründerväter, build spec D8b; I: no recording)
+
+    /** The lists' text width: the father box's {@code @width}. */
+    static final int LIST_WIDTH = 230;
+
+    /** The number of father types (NAMES {@code @FOUNDING}). */
+    static final int TYPES = 5;
+
+    /**
+     * A type's row: NAMES {@code @FOUNDING} and LABELS {@code @MISC} 102,
+     * as in the father box ("Handels- Berater").
+     *
+     * @param t The texts.
+     * @param type The type (0 trade ... 4 religion).
+     * @return The row, or null.
+     */
+    static String typeRow(ClassicText t, int type) {
+        final List<String[]> types = (t == null) ? null : t.names("FOUNDING");
+        final String advisor = (t == null) ? null : t.misc(ClassicFathers.MISC_ADVISOR);
+        if (types == null || advisor == null || type < 0 || type >= types.size()) {
+            return null;
+        }
+        return types.get(type)[0] + " " + advisor;
+    }
+
+    /**
+     * A type's fathers in NAMES {@code @FATHERS} order.
+     *
+     * @param t The texts.
+     * @param type The type.
+     * @return Their rows.
+     */
+    static List<Integer> fathersOfType(ClassicText t, int type) {
+        final List<Integer> out = new ArrayList<>();
+        for (int n = 0; n < ClassicFathers.IDS.size(); n++) {
+            if (ClassicFathers.type(t, n) == type) out.add(n);
+        }
+        return out;
+    }
+
+    /**
+     * The first list: the category ("Gründerväter", PEDIA {@code @PEDIA}
+     * 5) and one row per type.
+     *
+     * @param pedia The Colonopedia.
+     * @param t The texts.
+     * @param bar The barred row.
+     * @return The list box, or null without the texts.
+     */
+    static ClassicAdvisorBox.Request typeList(ClassicPedia pedia, ClassicText t, int bar) {
+        final String category = (pedia == null) ? null : pedia.category(CATEGORY_FATHERS);
+        if (category == null) return null;
+        final List<String> rows = new ArrayList<>();
+        for (int i = 0; i < TYPES; i++) {
+            final String r = typeRow(t, i);
+            if (r == null) return null;
+            rows.add(r);
+        }
+        return list("PEDIA fathers", category, rows, bar, -1.0);
+    }
+
+    /**
+     * The second list: "Gründerväter (Handels- Berater)" and the type's
+     * fathers by their names (NAMES {@code @FATHERS}).
+     *
+     * @param pedia The Colonopedia.
+     * @param t The texts.
+     * @param type The type.
+     * @param bar The barred row.
+     * @return The list box, or null without the texts.
+     */
+    static ClassicAdvisorBox.Request fatherList(ClassicPedia pedia, ClassicText t,
+                                                int type, int bar) {
+        return fatherList(pedia, t, type, bar, -1.0);
+    }
+
+    /**
+     * {@link #fatherList(ClassicPedia, ClassicText, int, int)} asked again
+     * after a page.
+     *
+     * @param pedia The Colonopedia.
+     * @param t The texts.
+     * @param type The type.
+     * @param bar The barred row.
+     * @param chainMs The least time after the page (ms), or negative.
+     * @return The list box, or null without the texts.
+     */
+    static ClassicAdvisorBox.Request fatherList(ClassicPedia pedia, ClassicText t,
+                                                int type, int bar, double chainMs) {
+        final String category = (pedia == null) ? null : pedia.category(CATEGORY_FATHERS);
+        final String head = typeRow(t, type);
+        if (category == null || head == null) return null;
+        final List<String> rows = new ArrayList<>();
+        for (int n : fathersOfType(t, type)) {
+            final String name = ClassicFathers.name(t, n);
+            if (name == null) return null;
+            rows.add(name);
+        }
+        if (rows.isEmpty()) return null;
+        return list("PEDIA fathers " + type, category + " (" + head + ")", rows, bar,
+                    chainMs);
+    }
+
+    /** A list box of the father box's form, Escape and a click beside it close it. */
+    private static ClassicAdvisorBox.Request list(String id, String prompt,
+                                                  List<String> rows, int bar,
+                                                  double chainMs) {
+        return ClassicAdvisorBox.Request.builder(id).chain(chainMs)
+            .gameText(Collections.singletonList(prompt)).width(LIST_WIDTH)
+            .rows(rows).defaultRow(Math.max(0, Math.min(bar, rows.size() - 1)))
+            .noCancelRow().rowIndent(ClassicMenuBox.LIST_INDENT)
+            .stopgap(prompt, null).build();
+    }
 }

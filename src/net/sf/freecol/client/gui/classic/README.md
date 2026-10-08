@@ -1851,18 +1851,63 @@ figures CC-nn through an explicit table (`ClassicFathers.IDS`).
   (Roger) and in the turn a father joined (the player's FOUNDING_FATHER
   history event of this turn: the original offers the next father a turn
   later; FreeCol offers it again then, while none is chosen).
-- **Not yet.** The music (M10); the join sequence @FREEDOM, the congress
-  hall and its page (D8c); COLONIPÄDIE → Gründerväter (D8b's menu part).
-  A father chosen before independence still joins (a server rule, N10).
+- **Not yet.** The music (M10). A father chosen before independence still
+  joins (a server rule, N10).
 - **Recorder events:** `fathers-offer <ids>`, `fathers-due` (the hold),
   `fathers-withheld <why>`, `fathers-chosen <id>`.
 
+**The join (`ClassicCongress`; build spec D8c, I5; clip008 #39296 -
+#40109).** The trigger is our player's father set growing (the ids seen at
+the view's build, `noteFathers`; `takeJoins`), not FreeCol's notice
+`model.player.foundingFatherJoinedCongress`, which is never shown (its
+message option could drop it). The sequence is the first thing of the turn
+start, before the price messages and the emigration notice (F A3): the
+turn report asks it first (`showMessagePopup`, any notice batch), a turn
+start without notices in the turn flow's hold before the year flips
+(`holdTurnStart`, posted once, `fathers-join-due`).
+- **@FREEDOM** (GAME.TXT, `%STRING1` NAMES @NATIONALITY "Holl.",
+  `{%STRING0}` the NAMES name in gold): (42,85) 236x30, no portrait,
+  342 ms after it is asked (V: 24 frames after the indicator). Any key.
+- **The congress hall**: a `ClassicWoodcut.Screen` of its own times on the
+  woodcuts' queue (`putCongress` -> `ClassicAdvisorLayer.showWoodcut`):
+  black 2 frames after the box went, CCBKGD.PIK 1 frame later with the
+  fathers before him at their CC-nn anchors, back to front by the anchor's
+  y (I), his figure dissolving in 3 frames after the hall over 55 frames
+  (the woodcuts' `revealed` and fixed order), the arrow hidden from the
+  hall to the dissolve's end and not dimmed (V: index 7 stays #AAAAAA),
+  the water held, nothing marked; held until a fresh key or click.
+- **Black 0.21 s** (15 frames), then **his page** (`ClassicPedia.fatherPage`)
+  in the same entry (no map in between); a fresh key or click: the map in
+  one paint. Without the hall's art or over another screen: his page alone
+  (the prompter's), 0.21 s after @FREEDOM.
+- The father offer of that turn stays withheld (`ClassicFathers.withheld`).
+- Recorder: `father-joined <id>`, `hall-ask <id> before=[..]`,
+  `hall-black/-frame/-done/-close/-palette/-page/-end congress_n`,
+  `hall-skipped`; probe `congress_n:<black|frame|dissolve|held|closing|page>`.
+
+**COLONIPÄDIE → Gründerväter (`ClassicGUI.showColopediaPanel`,
+`ClassicPedia.typeList`; build spec D8b's menu part, I: no recording).** Two
+list boxes of the father box's form (width 230, rows at + 13, no footer):
+"Gründerväter" (PEDIA @PEDIA 5) with the five types "Handels- Berater" ...
+(NAMES @FOUNDING + LABELS @MISC 102); Enter: "Gründerväter (Handels-
+Berater)" with the type's five fathers by their NAMES names; Enter: his
+page (142 ms later, as F1); a key: his list again, the bar on him (264 ms);
+Escape (or a click beside) goes back a list, from the first one to the map.
+A father's id (`showColopediaPanel("model.foundingFather.x")`) opens his
+page alone. The menu row is live now (`ClassicMenuModel.NOOP_SEAMS` lost
+`colopediaAction.fathers`); the other Colonopedia rows are still inert.
+
 Tests: `ClassicFathersTest` (the table, the rows, the box, PEDIA.TXT, when
 it is withheld, the turn start's order with Escape, a click beside, F1 and
-the page, the hold before the year flips; and the golden checks: the five
+the page, the hold before the year flips; the join sequence in its order and
+at the hold; the Colonopedia menu; and the golden checks: the five
 father boxes #12765, #13304, #48314, #49787, #50129 and the four pages
 #40109 Minuit, #48645 Stuyvesant, #49256 Hudson, #49900 Drake, 0 px off),
-`ClassicTurnFlowTest.testHeldTurnStart`, `ClassicAdvisorLayerTest.testF1AndThePage`.
+`ClassicCongressTest` (the trigger, @FREEDOM, the hall back to front, its
+screen, the lists; golden: @FREEDOM #39296, the empty hall #39719, the hall
+with Minuit #39775, 0 px off apart from the arrow's 82 px),
+`ClassicTurnFlowTest.testHeldTurnStart`, `ClassicAdvisorLayerTest.testF1AndThePage`,
+`ClassicAdvisorLayerTest.testCongressHallTimeline`.
 
 ### The landing (`ClassicGUI.askLandfall`; build spec W8b, master plan W18)
 
@@ -2304,12 +2349,12 @@ M4) and gets 0 px.
 | BEFEHLE | 0 `clearOrdersAction`, 1 `waitAction`, 2 `fortifyAction`, 3 (second fortify line: hidden, context unknown), 4 `sentryAction`, 5/6 `buildColonyAction` (no colony / colony on the tile), 7 `clearForestAction` (forest), 8 `plowAction` (no forest), 9 `roadAction`, 10 `loadAction` (carriers), 11 `unloadAction` (carrier in a colony), 12 — (armed land units), 13/14 `gotoAction` (ship / land, the destination list), 15 `assignTradeRouteAction`ⁿ (carriers), 16 `returnToEuropeAction` (ships, key R), 17 `skipUnitAction`, 18 `unloadAction` (ship at sea: dumps cargo), 19 `disbandUnitAction` |
 | BERICHTE | 0 —, 1 `reportReligionAction`, 2 `reportCongressAction`, 3 `reportLabourAction`, 4 `reportTradeAction`, 5 `reportColonyAction`, 6 `reportNavalAction`, 7 `reportForeignAction`, 8 `reportIndianAction`, 9 `reportHighScoresAction` (the hall of fame, not the live score: earlier README decision) |
 | HANDEL | 0-2 `tradeRouteAction`ⁿ (FreeCol's one panel does all three) |
-| COLONIPÄDIE | 0 `colopediaAction.goods`ⁿ, 1 `.units`ⁿ, 2 `.terrain`ⁿ, 3 —, 4 `.buildings`ⁿ, 5 `.fathers`ⁿ, 6 `.concepts`ⁿ, 7 — |
+| COLONIPÄDIE | 0 `colopediaAction.goods`ⁿ, 1 `.units`ⁿ, 2 `.terrain`ⁿ, 3 —, 4 `.buildings`ⁿ, 5 `.fathers` (D8b, I5), 6 `.concepts`ⁿ, 7 — |
 
 ⁿ = in `NOOP_SEAMS`: drawn in normal ink but **inert** until a classic screen
 exists (`showSaveDialog`, `showLoadSaveFileDialog`,
 `showDeclarationPanel`, `showFindSettlementPanel`,
-`showTradeRoutePanel`, `showColopediaPanel` are still the base `GUI` no-ops).
+`showTradeRoutePanel` are still the base `GUI` no-ops; `showColopediaPanel` has only the fathers, I5).
 — = **no engine equivalent**, drawn like the original (normal ink) and always
 inert: sound options, choose music, the four
 zoom-level presets, show hidden terrain, F1 terrain information, pillage,

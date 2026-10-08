@@ -252,7 +252,9 @@ public class ClassicMenuBarTest extends TestCase {
         assertFalse(ClassicMenuModel.isLive(music, id -> true));   // no action
         for (ClassicMenuModel.Item it : ClassicMenuModel.allItems()) {
             if (it.actionId != null && it.actionId.startsWith("colopediaAction.")) {
-                assertFalse(it.toString(), ClassicMenuModel.isLive(it, id -> true));
+                // Only the fathers have their classic screen (D8b).
+                assertEquals(it.toString(), it.actionId.equals("colopediaAction.fathers"),
+                             ClassicMenuModel.isLive(it, id -> true));
             }
         }
     }

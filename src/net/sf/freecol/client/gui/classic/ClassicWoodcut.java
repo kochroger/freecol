@@ -377,11 +377,38 @@ final class ClassicWoodcut {
     }
 
 
-    /** One woodcut on the screen: what it shows now (EDT only). */
+    /**
+     * One woodcut on the screen: what it shows now (EDT only).  The same
+     * steps show the congress hall of a father's join (build spec D8c,
+     * {@link ClassicCongress#screen}): the hall is the "frame", the new
+     * figure the dissolve, and its Colonopedia page follows the closing
+     * black instead of the map ({@link #page}).
+     */
     static final class Screen {
 
-        /** The entry. */
+        /** The entry ({@link ClassicCongress#HALL} for the congress hall). */
         final int k;
+
+        /** Whether it is one of the thirteen woodcuts (marked once per game, its palette dims the arrow). */
+        final boolean woodcut;
+
+        /** What the probe and the recorder call it ({@code woodcut_3}, {@code congress_2}). */
+        final String name;
+
+        /**
+         * Its steps (ms): black to the frame, the frame to the dissolve's
+         * first frame, the closing black to the map (or to the page).
+         */
+        final double frameAfterBlackMs, dissolveAfterFrameMs, closeMs;
+
+        /** The least time after the box before it (ms), or negative for the layer's chain. */
+        final double chainMs;
+
+        /** What a dissolve frame repaints (320x200 coordinates). */
+        final Rectangle dirty;
+
+        /** The page after the closing black (320x200), or null: then the map. */
+        private final int[] page;
 
         /** What is shown, 320x200 RGB, and its pixels (shared). */
         final BufferedImage image;
@@ -402,7 +429,38 @@ final class ClassicWoodcut {
          * @param finished {@link ClassicWoodcut#finished}.
          */
         Screen(int k, BufferedImage frameOnly, BufferedImage finished) {
+            this(k, true, "woodcut_" + k, frameOnly, finished, null,
+                 FRAME_AFTER_BLACK_MS, DISSOLVE_AFTER_FRAME_MS, MAP_BACK_MS,
+                 -1.0, PICTURE);
+        }
+
+        /**
+         * A screen of these steps (class comment).
+         *
+         * @param k The entry.
+         * @param woodcut Whether it is a woodcut.
+         * @param name Its name for the probe and the recorder.
+         * @param frameOnly The screen before the dissolve.
+         * @param finished The screen after it.
+         * @param page The page after the closing black, or null.
+         * @param frameAfterBlackMs Black to the frame.
+         * @param dissolveAfterFrameMs The frame to the dissolve.
+         * @param closeMs The closing black to the map or the page.
+         * @param chainMs The least time after the box before, or negative.
+         * @param dirty What a dissolve frame repaints.
+         */
+        Screen(int k, boolean woodcut, String name, BufferedImage frameOnly,
+               BufferedImage finished, BufferedImage page,
+               double frameAfterBlackMs, double dissolveAfterFrameMs,
+               double closeMs, double chainMs, Rectangle dirty) {
             this.k = k;
+            this.woodcut = woodcut;
+            this.name = name;
+            this.frameAfterBlackMs = frameAfterBlackMs;
+            this.dissolveAfterFrameMs = dissolveAfterFrameMs;
+            this.closeMs = closeMs;
+            this.chainMs = chainMs;
+            this.dirty = new Rectangle(dirty);
             this.image = new BufferedImage(W, H, BufferedImage.TYPE_INT_RGB);
             this.shown = ClassicDeparture.pixels(this.image);
             this.frameOnly = frameOnly.getRGB(0, 0, W, H, null, 0, W);
@@ -410,6 +468,12 @@ final class ClassicWoodcut {
             for (int i = 0; i < this.frameOnly.length; i++) {
                 this.frameOnly[i] &= 0xFFFFFF;
                 this.finished[i] &= 0xFFFFFF;
+            }
+            if (page != null) {
+                this.page = page.getRGB(0, 0, W, H, null, 0, W);
+                for (int i = 0; i < this.page.length; i++) this.page[i] &= 0xFFFFFF;
+            } else {
+                this.page = null;
             }
             this.order = ClassicDeparture.dissolveOrder(this.frameOnly, this.finished);
         }
@@ -422,6 +486,23 @@ final class ClassicWoodcut {
         static Screen of(Art a, int k) {
             if (a == null || !a.has(k)) return null;
             return new Screen(k, frameOnly(a, k), finished(a, k));
+        }
+
+        /** @return Its number for the recorder: k for a woodcut, else its name. */
+        String tag() {
+            return (this.woodcut) ? String.valueOf(this.k) : this.name;
+        }
+
+        /** @return Whether a page follows the closing black. */
+        boolean hasPage() {
+            return this.page != null;
+        }
+
+        /** The page after the closing black (none: nothing changes). */
+        void page() {
+            if (this.page != null) {
+                System.arraycopy(this.page, 0, this.shown, 0, this.shown.length);
+            }
         }
 
         /** Black, the whole screen. */
