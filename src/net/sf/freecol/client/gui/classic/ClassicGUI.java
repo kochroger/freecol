@@ -2621,11 +2621,21 @@ public class ClassicGUI extends GUI {
      * den Pionier klicke, ist er wieder frei"; opening_014 #4475: the flag's
      * F becomes "-" in the click's response): the server's state change
      * comes before the activation, so the unit cycle's cursor goes on it
-     * (I2) and the map's repaint shows the "-".
+     * (I2) and the map's repaint shows the "-".  A unit with a goto order
+     * (G) loses it the same way, first (Roger, 2026-10-08: "Wenn ich eine
+     * Entität mit G auf einen Weg geschickt habe, kann ich seinen Weg
+     * später unterbrechen, indem ich mit der Maus auf die Entität
+     * klicke"; part L): it stays where it is, keeps its moves and comes
+     * up as any unit clicked ({@link #cancelsGotoOnClick}).
      *
      * @param unit The unit clicked.
      */
     void unitClicked(Unit unit) {
+        if (cancelsGotoOnClick(unit)) {
+            ClassicFrameRecorder.event("click-goto-cancel", unit.getId()
+                + " moves=" + unit.getMovesLeft() + " to=" + unit.getDestination());
+            cancelGoto(unit);
+        }
         if (wakesOnClick(unit)) {
             ClassicFrameRecorder.event("click-wake", unit.getId() + " " + unit.getState());
             this.clickWaking = unit;
@@ -2636,6 +2646,34 @@ public class ClassicGUI extends GUI {
             }
         }
         changeView(unit, true, "click");
+    }
+
+    /**
+     * Whether a click on our own unit cancels its goto order
+     * ({@link #unitClicked}): a unit on the map, not aboard a ship, with a
+     * destination (G) or a trade route.  Its moves do not matter: the
+     * cancel costs nothing.
+     *
+     * @param unit The unit, or null.
+     * @return True to cancel its goto order.
+     */
+    static boolean cancelsGotoOnClick(Unit unit) {
+        return unit != null && unit.hasTile() && !unit.isOnCarrier()
+            && (unit.getDestination() != null || unit.getTradeRoute() != null);
+    }
+
+    /**
+     * Cancel a unit's goto order: the controller's
+     * {@code cancelGotoOrders}, on the server (its destination and trade
+     * route go; its moves and place stay), with no choice of the next
+     * unit (the click brings the unit up itself).  Overridden by the
+     * tests.
+     *
+     * @param unit The unit.
+     */
+    void cancelGoto(Unit unit) {
+        final FreeColClient fcc = getFreeColClient();
+        if (fcc != null) fcc.getInGameController().cancelGotoOrders(unit);
     }
 
     /**
@@ -2689,14 +2727,32 @@ public class ClassicGUI extends GUI {
      * is ignored as the rest of the map: it keeps them, and Enter or Space
      * still end the turn (before, the working pioneer came up with his
      * orders, Space could not skip him, Enter was refused while he was up
-     * and W found nothing).
+     * and W found nothing).  A goto unit is taken too: its order goes
+     * ({@link #cancelsGotoOnClick}, part L).
      *
      * @param unit The unit, or null.
      * @return True if the click brings it up.
      */
     boolean takesPromptClick(Unit unit) {
-        return wakesOnClick(unit)
+        return wakesOnClick(unit) || cancelsGotoOnClick(unit)
             || this.unitCycle.kind(unit) == ClassicUnitCycle.Kind.ORDERS;
+    }
+
+    /**
+     * A click in the Spielzugende mode on our own goto unit with no moves
+     * left ({@code ClassicMapViewer.clickOn}): its goto order goes, as
+     * outside the mode ({@link #unitClicked}), but it cannot come up; the
+     * mode stays (I: part L, so that a unit on its way can be stopped
+     * before the next turn's cycle runs it).  EDT only.
+     *
+     * @param unit The unit.
+     */
+    void gotoCancelledInPrompt(Unit unit) {
+        ClassicFrameRecorder.event("click-goto-cancel", unit.getId()
+            + " moves=" + unit.getMovesLeft() + " to=" + unit.getDestination()
+            + " (prompt)");
+        cancelGoto(unit);
+        if (this.mapViewer != null) this.mapViewer.repaint();
     }
 
     /**

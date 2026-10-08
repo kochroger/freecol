@@ -3243,6 +3243,25 @@ public final class InGameController extends FreeColClientHolder {
     }
 
     /**
+     * Clears the goto orders of the given unit (its destination and trade
+     * route) without choosing the next active unit: the Classic UI's
+     * click on a goto unit, which then brings the unit up itself, or in
+     * its Spielzugende mode leaves the view as it is.  The unit keeps its
+     * place and its moves.
+     *
+     * @param unit The {@code Unit} to clear the destination for.
+     * @return True if the unit has no destination.
+     */
+    public boolean cancelGotoOrders(Unit unit) {
+        if (!requireOurTurn() || unit == null) return false;
+
+        UnitWas unitWas = new UnitWas(unit);
+        boolean ret = askClearGotoOrders(unit);
+        if (ret) fireChanges(unitWas);
+        return ret;
+    }
+
+    /**
      * Clears the orders of the given unit.
      * Make the unit active and set a null destination and trade route.
      *

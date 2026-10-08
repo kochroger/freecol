@@ -2610,7 +2610,9 @@ final class ClassicMapViewer extends JPanel {
             // takes orders comes up (opening_014 #4475/#4477; the turn then
             // ends by itself after it, #4680); a unit with other orders (a
             // pioneer at work) or no moves keeps them, and the rest of the
-            // map is inert, as the arrows are (W17 item 6).
+            // map is inert, as the arrows are (W17 item 6).  A goto unit
+            // loses its order (part L): with moves it comes up, without
+            // them the mode stays.
             final Settlement s = (tile.isExplored()) ? tile.getSettlement() : null;
             final Unit u = (!tile.isExplored() || s != null) ? null : tile.getFirstUnit();
             if (s instanceof Colony && player != null && player.owns(s)) {
@@ -2619,6 +2621,11 @@ final class ClassicMapViewer extends JPanel {
             } else if (u != null && player != null && player.owns(u)
                 && u.getMovesLeft() > 0 && this.gui.takesPromptClick(u)) {
                 this.gui.unitClicked(u);
+            } else if (u != null && player != null && player.owns(u)
+                && ClassicGUI.cancelsGotoOnClick(u)) {
+                // A goto unit with no moves left: its order goes, the
+                // mode stays (part L).
+                this.gui.gotoCancelledInPrompt(u);
             } else {
                 ClassicFrameRecorder.event("click-ignored", "prompt " + xy(tile));
             }
@@ -2646,7 +2653,8 @@ final class ClassicMapViewer extends JPanel {
         final Unit unit = tile.getFirstUnit();
         if (unit != null && player != null && player.owns(unit)) {
             // Our unit active, freed first if it was fortified or sentried
-            // and can move (ClassicGUI.wakesOnClick); the unit cycle goes
+            // and can move (ClassicGUI.wakesOnClick), its goto order gone
+            // (ClassicGUI.cancelsGotoOnClick, part L); the unit cycle goes
             // on after it (W5f).
             this.gui.unitClicked(unit);
         } else if (unit != null) { // Someone else's unit: select the tile

@@ -324,8 +324,9 @@ public class MapGeneratorTest extends FreeColTestCase {
 
     /**
      * A square map (the Classic UI's) has the outer ring, which the
-     * Classic UI never draws: the European ships start in the column
-     * just inside it, on a tile that leads to Europe; nothing stands on
+     * Classic UI never draws: the European ships start inside it, on the
+     * innermost high seas tile of their row (part L; before, the column
+     * just inside the ring), a tile that leads to Europe; nothing stands on
      * the ring, and no native settlement or rumour is put there.  An
      * isometric map has no ring, and its ships start on FreeCol's
      * innermost high seas tile of their row, as before.
@@ -354,8 +355,9 @@ public class MapGeneratorTest extends FreeColTestCase {
                             assertEquals(at, t, p.getEntryTile());
                             final boolean east = t.getX() > map.getWidth() / 2;
                             if (square) {
-                                assertEquals(at, (east) ? map.getWidth() - 2
-                                    : 1, t.getX());
+                                // The original's start (part L): the
+                                // innermost high seas tile inside the ring.
+                                assertNull(at, notInnermost(t, east));
                             } else {
                                 // FreeCol's rule: the innermost high seas
                                 // tile of the row, counted from the edge.
@@ -488,13 +490,44 @@ public class MapGeneratorTest extends FreeColTestCase {
     }
 
     /**
+     * Whether a start tile is the innermost tile of its row's high seas
+     * band that reaches the column inside the outer ring (part L, the
+     * original's start: playthrough-1 #208, (53,28) "(Seeweg)" next to
+     * (52,28) "(Ozean)"): every tile from it to that column leads to
+     * Europe, the next one inwards does not, and it is not on the ring.
+     *
+     * @param t The start tile.
+     * @param east The ship starts on the east side.
+     * @return Null if it is, else what is wrong.
+     */
+    private static String notInnermost(Tile t, boolean east) {
+        final Map map = t.getMap();
+        final int edge = (east) ? map.getWidth() - 2 : 1;
+        final int step = (east) ? -1 : 1;
+        if (t.isOuterRing()) return "on the ring";
+        if ((east) ? t.getX() > edge : t.getX() < edge) return "outside";
+        for (int x = edge; x != t.getX() + step; x += step) {
+            if (!map.getTile(x, t.getY()).isDirectlyHighSeasConnected()) {
+                return "gap at x " + x;
+            }
+        }
+        final Tile in = map.getTile(t.getX() + step, t.getY());
+        if (in != null && in.isDirectlyHighSeasConnected()) {
+            return "not innermost: " + in;
+        }
+        return null;
+    }
+
+    /**
      * The fixed start order on the map (master plan N6): on a square map,
      * the Classic UI's, the ships of England, France, the Netherlands and
-     * Spain start from north to south, every one in the column inside the
-     * outer ring (C2).  Fewer nations keep their order, and the other
-     * nations of the freecol rules start south of Spain, the Russians on
-     * the west coast as before.  An isometric map keeps FreeCol's
-     * shuffled order.
+     * Spain start from north to south, every one on the westmost high
+     * seas tile of its row inside the outer ring (part L, the original's
+     * start; before, C2: always the column inside the ring).  Fewer
+     * nations keep their order, and the other nations of the freecol
+     * rules start south of Spain, the Russians on the west coast as
+     * before (the eastmost high seas tile of its row).  An isometric map
+     * keeps FreeCol's shuffled order.
      */
     public void testFixedStartOrderNorthToSouth() {
         final Topology saved = Topology.current();
@@ -515,7 +548,7 @@ public class MapGeneratorTest extends FreeColTestCase {
                 final String what = "levi seed " + seed + " " + starts;
                 assertTrue(what, northToSouth(starts));
                 for (Tile t : starts) {
-                    assertEquals(what, game.getMap().getWidth() - 2, t.getX());
+                    assertNull(what + " " + t, notInnermost(t, true));
                 }
             }
             // Two nations: the Netherlands north of Spain.
@@ -535,7 +568,10 @@ public class MapGeneratorTest extends FreeColTestCase {
                 final List<Tile> starts = startTiles(game, seed, eight);
                 final String what = "freecol seed " + seed + " " + starts;
                 assertTrue(what, northToSouth(starts.subList(0, all.size())));
-                assertEquals(what, 1, starts.get(all.size()).getX());
+                for (Tile t : starts.subList(0, all.size())) {
+                    assertNull(what + " " + t, notInnermost(t, true));
+                }
+                assertNull(what, notInnermost(starts.get(all.size()), false));
             }
 
             // Isometric: no ring, FreeCol's shuffle.
@@ -617,7 +653,7 @@ public class MapGeneratorTest extends FreeColTestCase {
                 server.getMapGenerator().generateMap(game, null, true,
                                                      new LogBuilder(-1));
                 prints[i] = fingerprint(game);
-                assertTrue(prints[i].contains("@56,"));
+                assertTrue(prints[i], prints[i].contains("model.nation.dutch@"));
                 ServerTestHelper.stopServer();
             }
             assertEquals("same seed, same map and start", prints[1], prints[2]);

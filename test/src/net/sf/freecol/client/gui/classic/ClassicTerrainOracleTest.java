@@ -363,9 +363,11 @@ public class ClassicTerrainOracleTest extends FreeColTestCase {
     /**
      * A real new game on the square grid with the classic rules: the
      * Dutch start ship's 3x3 is explored, the ring around it gets the
-     * server's types (the never-drawn column x = 57 is high seas, which
-     * the fog-ring blend of LF #341 needs), and every other unexplored
-     * tile stays unknown.
+     * server's types (high seas among them; when the ring reaches the
+     * never-drawn column x = 57 it is high seas, which the fog-ring blend
+     * of LF #341 needs), and every other unexplored tile stays unknown.
+     * Since part L the ship starts on the innermost high seas tile of its
+     * row (the original's start), so the ring is usually whole.
      */
     public void testNewGameStartRing() {
         final Topology saved = Topology.current();
@@ -422,11 +424,17 @@ public class ClassicTerrainOracleTest extends FreeColTestCase {
                 }
             }
             assertEquals(9, explored);
-            // N16: the start is at x = W - 2, so the ring is cut by the edge.
-            assertEquals(map.getWidth() - 2, sx);
-            assertEquals(11, ring);
-            assertTrue(o.census(), o.census().startsWith("server ring=11 known=11 "));
-            assertEquals(map.getWidth() * map.getHeight() - 9 - 11, o.refusals());
+            // Part L: the start is the innermost high seas tile of its row
+            // inside the never-drawn ring (N16), as the original's; only a
+            // start at x = W - 2 has its fog ring cut by the edge.
+            assertTrue("start " + sx, sx <= map.getWidth() - 2);
+            assertTrue(server.getMap().getTile(sx, sy).isDirectlyHighSeasConnected());
+            assertFalse(server.getMap().getTile(sx - 1, sy).isDirectlyHighSeasConnected());
+            final int wantRing = (sx + 2 <= map.getWidth() - 1) ? 16 : 11;
+            assertEquals(wantRing, ring);
+            assertTrue(o.census(), o.census().startsWith("server ring=" + wantRing
+                + " known=" + wantRing + " "));
+            assertEquals(map.getWidth() * map.getHeight() - 9 - wantRing, o.refusals());
             assertTrue(ringTypes.toString(), ringTypes.contains("model.tile.highSeas"));
         } finally {
             Topology.setCurrent(saved);

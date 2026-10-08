@@ -276,9 +276,12 @@ public class OuterRingTest extends FreeColTestCase {
     }
 
     /**
-     * Start tiles: with the ring, the column inside it on each row that
-     * leads to Europe (so the ship starts at the edge of the screen);
-     * without it, FreeCol's innermost high seas tile of each row.
+     * Start tiles: with the ring, as the original (part L, Roger
+     * 2026-10-08; playthrough-1 #208: (53,28) "(Seeweg)", (52,28)
+     * "(Ozean)"), the westmost tile of the high seas band that reaches
+     * the column inside the ring, on each row where that column leads to
+     * Europe, never the ring; without the ring, FreeCol's innermost high
+     * seas tile of each row (the same rule from the edge).
      */
     public void testStartingTiles() {
         Game game = getStandardGame();
@@ -287,10 +290,43 @@ public class OuterRingTest extends FreeColTestCase {
         map.collectStartingTiles(east, west);
         assertEquals(13, east.size());
         for (Tile t : east) {
-            assertEquals(t.toString(), 18, t.getX());
+            assertEquals(t.toString(), 15, t.getX());
             assertFalse(t.isOuterRing());
+            assertFalse(map.getTile(14, t.getY()).isDirectlyHighSeasConnected());
         }
         assertTrue("land in the west", west.isEmpty());
+
+        // Only the ring is high seas: the column inside it leads to
+        // Europe (moveToEurope) and is the start, not the ring.
+        map = makeMap(game, 19, true);
+        map.collectStartingTiles(east, west);
+        assertEquals(13, east.size());
+        for (Tile t : east) assertEquals(t.toString(), 18, t.getX());
+
+        // An irregular band (as the original's, 4-7 columns): row 3's
+        // starts at x 12, row 4's at x 17; a gap of ocean at (13,5) ends
+        // row 5's band at x 14.
+        MapBuilder builder = new MapBuilder(game);
+        builder.setDimensions(20, 15).setBaseTileType(ocean)
+            .setExploredByAll(true);
+        for (int y = 0; y < 15; y++) {
+            for (int x = 0; x < 5; x++) builder.setTileType(x, y, plains);
+            final int first = (y == 3) ? 12 : (y == 4) ? 17 : 10;
+            for (int x = first; x < 20; x++) {
+                builder.setTileType(x, y, (y == 5 && x == 13) ? ocean : highSeas);
+            }
+        }
+        map = builder.build();
+        game.changeMap(map);
+        map.setOuterRing(true);
+        map.resetHighSeasCount();
+        map.collectStartingTiles(east, west);
+        assertEquals(13, east.size());
+        for (Tile t : east) {
+            final int want = (t.getY() == 3) ? 12 : (t.getY() == 4) ? 17
+                : (t.getY() == 5) ? 14 : 10;
+            assertEquals(t.toString(), want, t.getX());
+        }
 
         map = makeMap(game, 15, false);
         map.collectStartingTiles(east, west);

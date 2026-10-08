@@ -2380,17 +2380,27 @@ ok:     while (!openMap.isEmpty()) {
         westTiles.clear();
         if (this.outerRing) {
             // A map with the outer ring starts its ships as the
-            // original does: in the outermost column a unit may use
-            // (the last one the Classic UI draws), on each row where
-            // that tile leads to Europe.  The view then clamps at the
-            // edge, and the ship sits at the right edge of the screen.
+            // original does (Roger, 2026-10-08: "Startplatz: ändert das
+            // aufs Original"; playthrough-1 #208/#412: the ship at
+            // (53,28) "(Seeweg)", (52,28) "(Ozean)"): on the westmost
+            // (on the west side the eastmost) tile of the high seas
+            // band that reaches the edge of its row, never on the ring
+            // itself.  The scan starts at the outermost column a unit
+            // may use (the last one the Classic UI draws), on each row
+            // where that tile leads to Europe; it is FreeCol's own
+            // innermost-tile rule inside the ring.  The view rule then
+            // puts the ship in cell (7,6), clamped at the edge (W4).
             final int west = 1;
             final int east = getWidth() - 2;
             for (int y = 1; y < getHeight() - 1; y++) {
                 Tile t = getTile(east, y);
-                if (t.isDirectlyHighSeasConnected()) eastTiles.add(t);
+                if (t.isDirectlyHighSeasConnected()) {
+                    eastTiles.add(innermostHighSeas(t, east, west, -1));
+                }
                 t = getTile(west, y);
-                if (t.isDirectlyHighSeasConnected()) westTiles.add(t);
+                if (t.isDirectlyHighSeasConnected()) {
+                    westTiles.add(innermostHighSeas(t, west, east, 1));
+                }
             }
             return;
         }
@@ -2421,6 +2431,27 @@ ok:     while (!openMap.isEmpty()) {
         }
     }
     
+    /**
+     * The innermost tile of a row's high seas band that reaches the
+     * edge ({@link #collectStartingTiles}): from {@code edge} towards
+     * {@code limit}, the last tile that still leads to Europe directly.
+     *
+     * @param first The tile at {@code edge}, which leads to Europe.
+     * @param edge Its column.
+     * @param limit The column the scan stops before.
+     * @param step -1 to scan west, 1 to scan east.
+     * @return The innermost such tile of the row.
+     */
+    private Tile innermostHighSeas(Tile first, int edge, int limit, int step) {
+        Tile ok = first;
+        for (int x = edge + step; x != limit; x += step) {
+            final Tile t = getTile(x, first.getY());
+            if (t == null || !t.isDirectlyHighSeasConnected()) break;
+            ok = t;
+        }
+        return ok;
+    }
+
     /**
      * Places the "high seas"-tiles on the border of this map.
      *

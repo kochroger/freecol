@@ -938,17 +938,21 @@ have it too. Isometric maps, and maps built otherwise (the tests'
   again, so the column inside the ring leads to Europe there too
   (`Map.checkIntegrity`; the C1 saves had an entry tile at (57,60)).
   `Unit.setLocation` logs a warning should anything still put a unit there.
-- **The start** (W4, landfall #340): on such a map
-  `Map.collectStartingTiles` takes the column inside the ring (x = W-2 = 56)
-  on every row whose tile there leads to Europe. The start view (activation
-  clamped, `viewFor`) then puts the ship in cell (14,6), at the right edge of
-  the screen as in the original: (56,42) gives the origin (42,36). FreeCol's
-  own rule, kept for maps without the ring, takes the innermost high seas
-  tile of the row: x 42-57 on our maps, whose high seas are several columns
-  wide, so the ship started anywhere from cell (7,6) to one column past the
-  clamp (FINAL F1). At the original's start the high seas are one column
-  wide: (56,42) is Seeweg, (55,42) is ocean (EUQ move M1), so there the
-  innermost high seas tile is the last drawn column.
+- **The start** (part L; Roger 2026-10-08: "Startplatz: Ja, ändert das aufs
+  Original (am Anfang zählt jeder Zug)"): on such a map
+  `Map.collectStartingTiles` takes, on every row whose tile in the column
+  inside the ring (x = W-2 = 56) leads to Europe, the innermost tile of the
+  high seas band that reaches that column (`innermostHighSeas`), never the
+  ring: FreeCol's own rule inside the ring. Playthrough-1 #208/#412: the
+  original's ship at (53,28) "(Seeweg)", (52,28) "(Ozean)"; the Seeweg band
+  there starts at x 50-53 (06-map-graphics §8, O1). The start view
+  (activation clamped, `viewFor`, W4) puts the ship in cell (7,6), clamped
+  at the east edge: (53,28) gives the origin (42,22), cell (11,6), as
+  #208; (56,42) still gives (42,36), cell (14,6), as the landfall clip.
+  Our high seas may reach 16 columns in from the edge where the land is far
+  (`MapGeneratorOptions.applyTopologyDefaults`), so such a row starts its
+  ship up to x 42 (cell (7,6)). Before part L (C2, N16) the ship always
+  started in the column inside the ring.
 - **The start order (N6).** With the classic starting positions (the
   default), the nations take the start tiles of such a map from north to
   south in a fixed order: England, France, the Netherlands, Spain
@@ -957,8 +961,9 @@ have it too. Isometric maps, and maps built otherwise (the tests'
   four) follow in the specification's order; fewer nations keep the order.
   FreeCol's sampling of the column's rows is unchanged: with four nations on
   our maps it gives the rows 9, 26, 43 and 60 (20 of 20 generated games), so
-  England starts at (56,9), France at (56,26), the Netherlands at (56,43) and
-  Spain at (56,60). Before, the same four tiles were dealt out in FreeCol's
+  England starts on row 9, France on 26, the Netherlands on 43 and Spain on
+  60 (each on the row's innermost high seas tile since part L; before, at
+  x 56). Before N6, the same four tiles were dealt out in FreeCol's
   shuffled order. A map without the ring (isometric) keeps the shuffle.
 - **Repeatable starts (N18).** `--seed N` now also seeds a new game's server
   random numbers (`FreeColServer`; before, only a loaded game's), and that one
@@ -1285,6 +1290,19 @@ still ends by itself 485 ms after the last change (#691, #1834, #4680).
   freeing's state change (its cycle head, with units left to move) goes back
   to its cycle instead of coming up for a moment before the clicked unit
   (`ClassicGUI.changeView(Unit, boolean)`, the fixer of part J).
+- **A click on an own goto unit** (part L, Roger 2026-10-08: "Wenn ich eine
+  Entität mit G auf einen Weg geschickt habe, kann ich seinen Weg später
+  unterbrechen, indem ich mit der Maus auf die Entität klicke") cancels its
+  goto order first (`ClassicGUI.cancelsGotoOnClick`: a unit on the map, not
+  aboard, with a destination or a trade route; `cancelGoto` ->
+  `InGameController.cancelGotoOrders`, the server's destination change with
+  no choice of the next unit); the unit stays where it is, keeps its moves
+  and comes up as any clicked unit, so the cycle no longer runs it. In the
+  Spielzugende mode the same with moves left (`takesPromptClick`); without
+  them the order goes and the mode stays (`gotoCancelledInPrompt`; I), so a
+  unit on its way can be stopped before the next turn's cycle runs it.
+  Recorder event `click-goto-cancel`. Tests:
+  `ClassicMapViewerTest.testAClickCancelsTheGotoOrder`.
 - **A load with nothing to move** (J3; the review of part I): the view opens
   with no unit when FreeCol's saved active unit (`restoreActiveUnit`, any
   state) is sentried, fortified or out of moves (`ClassicGUI.firstUnit`:
@@ -2377,7 +2395,13 @@ appearance: its "woodcut 2" is k = 3, its "woodcut 3" k = 7). Spec:
   founding, `noteFounding`) and that colony's screen; 3/4/5 in
   `showFirstContactDialog` before the box; 6 `showEventPanel` with FreeCol's
   Pacific picture (FreeCol sends it only to the first discoverer in the whole
-  game); 7 the key into a village (`villageEntryKey`, before the move), else
+  game; on the square maps the server asks for the Pacific's naming for the
+  first unit of any kind, ship, scout or colonist, whose move brings a
+  Pacific tile into its own sight or enters one, whether the tile was
+  explored or seen before or not: `ServerUnit.csCheckSightedPacific` with
+  `broughtIntoSight`, part L, Roger 2026-10-08, opening_017 #46351-#46373: a
+  seasoned scout's step on a map the cheat had revealed; before, only tiles
+  newly explored or out of sight counted); 7 the key into a village (`villageEntryKey`, before the move), else
   before the village seams' boxes and the learn question; 8/9/11/12/13 the
   notice funnel (`showMessagePopup`, by message id, also for a dropped
   notice; 8 also before the Fountain of Youth's recruit box); 10 a CONTACT

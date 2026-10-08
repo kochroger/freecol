@@ -450,6 +450,103 @@ public class ClassicPacificTest extends FreeColTestCase {
     }
 
     /**
+     * Part L (Roger, 2026-10-08; opening_017 #46351-#46373, a scout's step
+     * on a map the cheat had revealed): the trigger does not depend on
+     * what the player had explored or sees.  With the whole map explored
+     * beforehand (the cheat, a chief's tales) and (28,68) in sight of
+     * another ship of ours that did not move, the step (30,67) to (29,67)
+     * still brings (28,68) into the moving ship's own sight and sends the
+     * discovery (before part L: nothing, (28,68) was neither unexplored
+     * nor out of sight).
+     */
+    public void testWoodcutOnARevealedMap() {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            final Game game = getStandardGame();
+            final Map map = rogersMap(game, Topology.SQUARE);
+            final Region p = map.getRegionByKey("model.region.pacific");
+            final ServerUnit ship = ship(game, map);
+            final ServerPlayer dutch = (ServerPlayer)ship.getOwner();
+            final ServerUnit watcher = new ServerUnit(game, map.getTile(27, 67),
+                dutch, spec().getUnitType("model.unit.merchantman"));
+            dutch.exploreMap(true);
+            dutch.invalidateCanSeeTiles();
+            assertTrue(dutch.hasExplored(map.getTile(28, 68)));
+            assertTrue(dutch.canSee(map.getTile(28, 68)));
+
+            assertFalse(names(move(ship, 30, 67)));
+            final ChangeSet cs = move(ship, 29, 67);
+            assertTrue(cs.toString(), names(cs));
+            assertEquals(ship.getId(), p.getDiscoverer());
+            assertFalse(watcher.getId().equals(p.getDiscoverer()));
+        } finally {
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
+     * Part L (Roger, 2026-10-08: "Auch ein Siedler kann den Pazifik
+     * entdecken, nicht nur ein Schiff"): any unit of ours.  On land from
+     * x 10 to 20 (rows 30-40; the Pacific is x 1-9 there), a colonist's
+     * step (12,35) to (11,35) brings no Pacific tile into its 3x3, the
+     * step to (10,35) brings (9,34..36) and sends the discovery, also on
+     * a revealed map.  A scout (sight 2) at (12,35) sees x 10-14, nothing;
+     * its step to (11,35) brings (9,33..37) into its sight and sends the
+     * discovery.  Entering a Pacific tile sends it
+     * too, for a ship placed next to the Pacific (an older save) whose
+     * first move goes into it.
+     */
+    public void testAnyUnitDiscovers() {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            for (String kind : new String[] { "colonist", "scout" }) {
+                final Game game = getStandardGame();
+                final Map map = map(game, Topology.SQUARE, W, H, (x, y) ->
+                    x >= 10 && x <= 20 && y >= 30 && y <= 40);
+                assertTrue(pacific(map.getTile(9, 35)));
+                final Region p = map.getRegionByKey("model.region.pacific");
+                final ServerPlayer dutch = (ServerPlayer)game
+                    .getPlayerByNationId("model.nation.dutch");
+                final boolean scout = kind.equals("scout");
+                final ServerUnit u = new ServerUnit(game,
+                    map.getTile((scout) ? 13 : 12, 35), dutch,
+                    spec().getUnitType("model.unit.freeColonist"));
+                if (scout) {
+                    u.changeRole(spec().getRole("model.role.scout"), 1);
+                    assertEquals(2, u.getLineOfSight());
+                }
+                dutch.exploreMap(true);
+                dutch.invalidateCanSeeTiles();
+                assertFalse(kind, names(move(u, (scout) ? 12 : 11, 35)));
+                assertNull(kind, p.getDiscoverer());
+                final ChangeSet cs = move(u, (scout) ? 11 : 10, 35);
+                assertTrue(kind + " " + cs, names(cs));
+                assertEquals(kind, u.getId(), p.getDiscoverer());
+            }
+
+            // Entering: a ship placed at (29,67) sees (28,68) without a
+            // move; its step into (28,68) sends the discovery once.
+            final Game game = getStandardGame();
+            final Map map = rogersMap(game, Topology.SQUARE);
+            final ServerPlayer dutch = (ServerPlayer)game
+                .getPlayerByNationId("model.nation.dutch");
+            final ServerUnit ship = new ServerUnit(game, map.getTile(29, 67),
+                dutch, spec().getUnitType("model.unit.merchantman"));
+            dutch.exploreForUnit(ship);
+            dutch.invalidateCanSeeTiles();
+            final ChangeSet cs = move(ship, 28, 68);
+            final String s = cs.toString();
+            assertTrue(s, names(cs));
+            assertEquals(s, s.indexOf("[" + NewRegionNameMessage.TAG),
+                         s.lastIndexOf("[" + NewRegionNameMessage.TAG));
+        } finally {
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
      * FreeCol's isometric maps keep FreeCol's trigger: the step to (29,67)
      * sends nothing, the discovery comes on entering FreeCol's Pacific.
      */

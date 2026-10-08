@@ -392,18 +392,20 @@ public class ClassicViewRuleTest extends FreeColTestCase {
     }
 
     /**
-     * The start of new games (N16, build spec W4 #340): on a square map
-     * from the map generator every European ship starts in the last
-     * drawn column, so the start view (activation, then the focus, as
-     * {@code ClassicGUI.reconnectGUI}) clamps at the east edge with the
-     * ship in cell (14,6); for a ship at (56,42) that is the origin
-     * (42,36) of the original.
+     * The start of new games (N16, build spec W4 #340; part L): on a square
+     * map from the map generator every European ship starts on the
+     * innermost high seas tile of its row inside the ring, and the start
+     * view (activation, then the focus, as {@code ClassicGUI.reconnectGUI})
+     * puts it in cell (7,6), clamped at the east edge: a ship at (56,42)
+     * has the origin (42,36) of the landfall clip (cell (14,6)), one at
+     * (53,28) the origin (42,22) of playthrough-1 #208 (cell (11,6)).
      */
-    public void testNewGamesStartInCell14x6() {
+    public void testNewGamesStartView() {
         final Topology saved = Topology.current();
         try {
             Topology.setCurrent(Topology.SQUARE);
             int ships = 0;
+            final java.util.Set<Integer> cells = new java.util.TreeSet<>();
             for (int seed = 1; seed <= 3; seed++) {
                 Specification spec = FreeCol.loadSpecification(
                     FreeColRules.getFreeColRulesFile("freecol"), null,
@@ -437,13 +439,22 @@ public class ClassicViewRuleTest extends FreeColTestCase {
                         final String at = "seed " + seed + " " + p.getNationId()
                             + " at " + t.getX() + "," + t.getY()
                             + " view " + Arrays.toString(v);
-                        assertEquals(at, 14, t.getX() - v[0]);
+                        // Part L: the ship on the innermost high seas
+                        // tile of its row, in cell (7,6) clamped at the
+                        // east edge (W4): (56,y) in cell 14, (53,y) in
+                        // cell 11 (playthrough-1 #208), x <= 49 in cell 7.
+                        final int cell = t.getX() - Math.max(1,
+                            Math.min(W - 16, t.getX() - 7));
+                        assertEquals(at, cell, t.getX() - v[0]);
                         assertEquals(at, 6, t.getY() - v[1]);
+                        cells.add(cell);
                         ships++;
                     }
                 }
             }
             assertTrue("ships " + ships, ships >= 12);
+            assertTrue("not all at the edge: " + cells,
+                       cells.stream().anyMatch(c -> c < 14));
         } finally {
             Topology.setCurrent(saved);
         }

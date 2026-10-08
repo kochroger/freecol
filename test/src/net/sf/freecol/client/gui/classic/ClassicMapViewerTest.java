@@ -432,6 +432,108 @@ public class ClassicMapViewerTest extends FreeColTestCase {
     }
 
     /**
+     * Part L (Roger, 2026-10-08: "Wenn ich eine Entität mit G auf einen
+     * Weg geschickt habe, kann ich seinen Weg später unterbrechen, indem
+     * ich mit der Maus auf die Entität klicke"): a click on our own unit
+     * with a goto order cancels the order first (the controller's
+     * cancelGotoOrders) and the unit comes up where it is, its moves
+     * kept; in the Spielzugende mode the same, and there a goto unit with
+     * no moves left loses its order but does not come up (the mode
+     * stays).  A unit aboard its ship is not taken.
+     */
+    public void testAClickCancelsTheGotoOrder() {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile land = map.getTile(5, 7), sea = map.getTile(15, 7);
+        final Tile target = map.getTile(2, 7);
+        final Unit scout = new ServerUnit(game, land, dutch,
+            spec().getUnitType("model.unit.seasonedScout"));
+        final Unit ship = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final Unit aboard = new ServerUnit(game, ship, dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        aboard.setDestination(target);
+
+        // Who loses a goto order by a click.
+        assertFalse(ClassicGUI.cancelsGotoOnClick(null));
+        assertFalse(ClassicGUI.cancelsGotoOnClick(scout));      // no order
+        assertFalse(ClassicGUI.cancelsGotoOnClick(aboard));     // on its ship
+        scout.setDestination(target);
+        assertTrue(ClassicGUI.cancelsGotoOnClick(scout));
+        scout.setMovesLeft(0);
+        assertTrue(ClassicGUI.cancelsGotoOnClick(scout));       // costs nothing
+        final int moves = scout.getInitialMovesLeft();
+        scout.setMovesLeft(moves);
+
+        final List<String> log = new ArrayList<>();
+        final boolean[] prompt = { false };
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                boolean turnPrompt() {
+                    return prompt[0];
+                }
+
+                @Override
+                void cancelGoto(Unit u) {   // the server's change
+                    log.add("cancel " + u.getDestination() + " active="
+                            + mapViewer.getActiveUnit());
+                    u.setDestination(null);
+                }
+            };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        try {
+            mv.setFocus(sea);
+            mv.changeToMoveUnits(ship);
+            // Outside the mode, another unit up: the order goes, then up.
+            mv.clickOn(land, dutch);
+            assertEquals(List.of("cancel " + target + " active=" + ship), log);
+            assertNull(scout.getDestination());
+            assertSame(land, scout.getTile());
+            assertEquals(moves, scout.getMovesLeft());
+            assertSame(scout, mv.getActiveUnit());
+
+            // In the mode, with moves: the same.
+            mv.changeToEndTurn();
+            scout.setDestination(target);
+            log.clear();
+            prompt[0] = true;
+            mv.clickOn(land, dutch);
+            assertEquals(List.of("cancel " + target + " active=null"), log);
+            assertNull(scout.getDestination());
+            assertEquals(moves, scout.getMovesLeft());
+            assertSame(scout, mv.getActiveUnit());
+
+            // In the mode, no moves left: the order goes, the mode stays.
+            mv.changeToEndTurn();
+            scout.setDestination(target);
+            scout.setMovesLeft(0);
+            log.clear();
+            mv.clickOn(land, dutch);
+            assertEquals(List.of("cancel " + target + " active=null"), log);
+            assertNull(scout.getDestination());
+            assertNull(mv.getActiveUnit());
+            assertSame(land, scout.getTile());
+
+            // A unit with no order: no cancel (the J2 click as before).
+            scout.setMovesLeft(moves);
+            prompt[0] = false;
+            log.clear();
+            mv.clickOn(land, dutch);
+            assertTrue(log.toString(), log.isEmpty());
+            assertSame(scout, mv.getActiveUnit());
+            // The passenger keeps its order: the click takes the ship.
+            mv.clickOn(sea, dutch);
+            assertTrue(log.toString(), log.isEmpty());
+            assertSame(target, aboard.getDestination());
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /**
      * J2 (opening_014 #4288 -&gt; #4309 -&gt; #4311; live run voyage): the
      * square the end command froze stays through our next turn's start,
      * also through FreeCol's fallback terrain view there, until the next

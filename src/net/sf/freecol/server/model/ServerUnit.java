@@ -762,6 +762,9 @@ public class ServerUnit extends Unit implements TurnTaker {
             return;
         }
         Set<Tile> oldTiles = getVisibleTileSet();
+        // This unit's own sight before the move, whatever the player had
+        // explored or sees (the original's Pacific, below).
+        final Set<Tile> sightBefore = new HashSet<>(oldTiles);
         Set<Tile> newTiles = ((ServerPlayer)owner).collectNewTiles(newTile, getLineOfSight());
 
         // Update unit state.
@@ -881,36 +884,66 @@ public class ServerUnit extends Unit implements TurnTaker {
 
         // The original's Pacific is discovered on sight, the other
         // regions (and FreeCol's Pacific) when a unit enters them.
-        final Region sighted = csCheckSightedPacific(newTiles, cs);
+        final Region sighted = csCheckSightedPacific(
+            broughtIntoSight(sightBefore, newTile), cs);
         if (sighted == null || newTile.getDiscoverableRegion() != sighted) {
             csCheckDiscoverRegion(newTile, cs);
         }
     }
 
     /**
-     * Check for the original's Pacific coming into sight
-     * ({@link ServerRegion#hasClassicPacific}): its woodcut 6 came when
-     * a ship's move brought a Pacific tile at the edge of its 3x3 into
-     * view, the ship itself staying outside (I-prep pacific.md, Roger's
-     * clip opening_012 #290: (30,67) to (29,67), the new tile (28,68)).
+     * The tiles a move brought into this unit's own sight, and the tile
+     * it entered ({@link #csCheckSightedPacific}): its sight now less its
+     * sight before the move, whether the player had explored those tiles
+     * or sees them through another unit or not (Roger, 2026-10-08: "Auch
+     * ein Siedler kann den Pazifik entdecken, nicht nur ein Schiff";
+     * opening_017 #46351-#46373: the woodcut on a scout's step on a map
+     * the cheat had revealed).
      *
-     * Only the tiles newly in sight count: {@link Region#checkDiscover}
-     * answers true again for the same unit until the region is named (its
-     * desynch work-around), so a check of all the tiles in sight would
-     * send the naming again on every move until the answer came.  A move
-     * that brings a new Pacific tile into sight before the answer still
-     * sends it again (one per such move), and the server refuses a second
-     * answer ("No discoverable region").  The client answers once: a
-     * move's reply is handled on its event thread, where
+     * @param sightBefore The unit's sight before the move (empty when it
+     *     came from off the map).
+     * @param entered The tile the unit moved to.
+     * @return The tiles.
+     */
+    private Set<Tile> broughtIntoSight(Set<Tile> sightBefore, Tile entered) {
+        final Set<Tile> brought = getVisibleTileSet();
+        brought.removeAll(sightBefore);
+        if (entered != null) brought.add(entered);
+        return brought;
+    }
+
+    /**
+     * Check for the original's Pacific coming into sight
+     * ({@link ServerRegion#hasClassicPacific}): woodcut 6 comes for the
+     * first unit of a nation, of any kind (ship, scout, colonist), whose
+     * move brings a Pacific tile into its own sight or enters one,
+     * whether the tile was explored or seen before or not (Roger,
+     * 2026-10-08; part L).  Roger's clips: opening_012 #290, a ship's
+     * step (30,67) to (29,67) brought the new tile (28,68) into its 3x3,
+     * the ship itself staying outside (I-prep pacific.md); opening_017
+     * #46351-#46373, a seasoned scout's first step of its turn, (11,25)
+     * south to (11,26), on a map the cheat had revealed, the woodcut 5
+     * frames after the slide.
+     *
+     * Only the tiles the move brought into the unit's sight (and the
+     * tile entered) count: {@link Region#checkDiscover} answers true again
+     * for the same unit until the region is named (its desynch
+     * work-around), so a check of all the tiles in sight would send the
+     * naming again on every move until the answer came.  A move that
+     * brings a Pacific tile into sight before the answer still sends it
+     * again (one per such move), and the server refuses a second answer
+     * ("No discoverable region").  The client answers once: a move's
+     * reply is handled on its event thread, where
      * {@code newRegionNameHandler} runs at once, so woodcut 6 and the
      * answer come inside the move that brought the request and a goto
      * run's next step finds the Pacific discovered; a request handled
      * after the answer is dropped there (no longer discoverable), also
      * the first one after its woodcut 6 when a repeat run while the
-     * woodcut was up has answered.
+     * woodcut was up has answered.  Once per game: the region is then
+     * no longer discoverable, and the client shows woodcut 6 once.
      *
-     * @param newTiles The tiles newly in this unit's sight (explored now,
-     *     or not visible before), or null.
+     * @param newTiles The tiles the move brought into this unit's sight,
+     *     and the tile it entered, or null.
      * @param cs A {@code ChangeSet} to update.
      * @return The Pacific if its discovery was sent, else null.
      */
