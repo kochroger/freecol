@@ -84,10 +84,13 @@ import net.sf.freecol.common.model.Unit;
  *   <li>A black row at y = 49 (x 240..319); the season line at (242,51) and
  *       the gold line at (242,58), FONTTINY in the green ink
  *       {@code 0x559634}.  The gold line is exactly {@code goldLabel + gold +
- *       "$" + two spaces + taxLabel + " " + tax} -- no space after the
+ *       "$" + two spaces + taxLabel + " " + tax + "%"} -- no space after the
  *       colon (120/120 ink pixels; with a space 101/120), and FONTTINY's '$'
- *       is the small coin glyph.  It is clipped only by the screen edge
- *       (Steam 000 cuts it inside the tax label at x = 319).</li>
+ *       is the small coin glyph ("Gold:44¤  Steuer: 0%", playthrough-1
+ *       #23934 on).  A glyph that would not end by x = 319 is not drawn at
+ *       all ({@link #fitting}): with 4-digit gold the "%" would start at
+ *       x 318 and x 318-319 stay empty ("Gold:1000¤  Steuer: 0", #2436,
+ *       #20153; gap list Q3).</li>
  * </ul>
  */
 final class ClassicHud {
@@ -1104,19 +1107,46 @@ final class ClassicHud {
         paintMinimap(g, m);
     }
 
-    /** The season and gold lines, clipped at the screen's right edge. */
+    /**
+     * The season and gold lines: only the glyphs that end by the screen's
+     * right edge ({@link #fitting}), and clipped there.
+     */
     static void paintStatus(Graphics2D g, ClassicFont font, String season,
                             String gold) {
         final Graphics2D gg = (Graphics2D) g.create();
         try {
             gg.clipRect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H);
-            ClassicMenuBox.text(gg, font, season, STATUS_X, SEASON_Y,
-                                ClassicMenuBox.GAME, false);
-            ClassicMenuBox.text(gg, font, gold, STATUS_X, GOLD_Y,
-                                ClassicMenuBox.GAME, false);
+            final int right = PANEL_X + PANEL_W;
+            ClassicMenuBox.text(gg, font, fitting(font, season, STATUS_X, right),
+                                STATUS_X, SEASON_Y, ClassicMenuBox.GAME, false);
+            ClassicMenuBox.text(gg, font, fitting(font, gold, STATUS_X, right),
+                                STATUS_X, GOLD_Y, ClassicMenuBox.GAME, false);
         } finally {
             gg.dispose();
         }
+    }
+
+    /**
+     * The start of a plain line whose glyphs all end by {@code right}: the
+     * original draws a glyph whole or not at all (Q3, playthrough-1 #2436:
+     * the "%" that would start at x 318 leaves x 318-319 empty, though its
+     * first column has ink).  A glyph's end is its advance (I: the one
+     * case seen does not tell advance from ink).
+     *
+     * @param font FONTTINY, or null (the line as it is).
+     * @param s The line, or null.
+     * @param x Where it starts.
+     * @param right The first x it must not reach (320).
+     * @return The glyphs that fit.
+     */
+    static String fitting(ClassicFont font, String s, int x, int right) {
+        if (font == null || s == null) return s;
+        int end = x;
+        for (int i = 0; i < s.length(); i++) {
+            end += font.charWidth(s.charAt(i));
+            if (end > right) return s.substring(0, i);
+        }
+        return s;
     }
 
     /**
@@ -2533,7 +2563,7 @@ final class ClassicHud {
         final String g = t.label("CTITLE", CTITLE_GOLD);
         final String x = t.label("CTITLE", CTITLE_TAX);
         if (g == null || x == null) return null;
-        return g.trim() + gold + "$  " + x.trim() + " " + tax;
+        return g.trim() + gold + "$  " + x.trim() + " " + tax + "%";
     }
 
 

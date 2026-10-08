@@ -591,8 +591,9 @@ map-fidelity slice, and its crux was **asset shape, not code**:
   hills `48`, forest `64`. Roads are composited instead: frame `80` is the
   centre hub and `81..88` the eight directional spokes (N…NW clockwise), one
   drawn per neighbour with a road. `103` is the lost-city rumour, `149` the
-  plowed field, `89..102` the resource markers (a provisional read pending the
-  expert's validation).
+  plowed field, `89..102` the resource markers, `89 + NAMES.TXT @RESOURCE row`
+  (L3/Q4: V for 7 of them in playthrough-1, oasis 90 and sugar 94 among them;
+  grain 91, cotton 92, tobacco 93, game 98 and ore 102 by the rule, I).
 - **Connectivity is over *raw-grid* neighbours** (the cells drawn directly
   up/down/left/right and at the corners), not FreeCol's isometric
   `Direction`s, so a feature blends with whatever is *visually* adjacent on the
@@ -1733,14 +1734,18 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
   union of both is centred (`ClassicFirstScene.place`): admiral MSS0 at
   (-4, -71), soldier MSS1 at (w - 55, -77), trade advisor MSS2, frontiersman
   MSS3, priest MSS4 and colonist MSS5 centred, `(w - pw + 1) div 2`, at -78,
-  -87, -52 and -62. A chief stands at the right UNDER the box:
-  `chief.x = min(246, 317 - pw)`, `chief.y = (197 - ph) div 2`, the box's
+  -87, -52 and -62. A chief stands UNDER the box, on his tribe's side
+  (`Portrait.chiefLeft`, L3/Q11), at `chief.y = (198 - ph) div 2` (it fits
+  all five portraits measured; an even height is 1 px lower than with 197,
+  the Apache at 28). At the right: `chief.x = min(246, 317 - pw)`, the box's
   right edge 3 px left of him, at least x 0 (Arawak (246,8) and box x 7,
-  Sioux (210,10) and box x 0; the vertical rule and the 3 px are I). The
-  King is the exception: at the left, `(0, (197 - ph) div 2)` = (0,18),
-  under the box, which is flush right, `x = 320 - w` (84,68,236,64). The
-  chiefs' sprites are `IND<n>A0` in NAMES.TXT @TRIBES order (Inca 0 ...
-  Tupi 7, `ClassicGUI.TRIBES`).
+  Sioux (210,10) and box x 0; the 3 px are I). At the left, as the King
+  ((0,18), clip005/006 (84,68,236,64)): x 0, the box flush right,
+  `x = 320 - w` (Iroquois (0,11) and Apache (0,28) with box x 84,
+  playthrough-1). The side: V for Iroquois and Apache (left), Arawak and
+  Sioux (right); Aztec and Tupi left, Inca and Cherokee right by the index
+  parity that fits those four (I). The chiefs' sprites are `IND<n>A0` in
+  NAMES.TXT @TRIBES order (Inca 0 ... Tupi 7, `ClassicGUI.TRIBES`).
 - **The bar (V, Roger).** It starts on GAME.TXT's `@default=n` (1-based),
   else on row 1 (@SAILHOME, @LANDFALL, @ABANDON's 2, @BUYME1, every box
   without one); in a FreeCol box on the row FreeCol makes the default.
@@ -1797,7 +1802,7 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
   `defaultOk`'s row, Escape "no"); the event boxes through `askEvent`: the
   King's (the King at the left; the tax rise opens on "kiss the ring", the
   mercenaries on their "no", listed first), the first contact (the tribe's
-  chief at the right; "Ja" first and barred; FreeCol's words until W8c),
+  chief on its side; "Ja" first and barred; FreeCol's words until W8c),
   the natives' demands (the refusal first and barred); `sailHomeKey`
   (GAME.TXT @SAILHOME with the admiral); `askLandfall` (GAME.TXT @LANDFALL
   with the frontiersman, in both landing seams); `modalChoiceDialog` (one row per
@@ -2220,7 +2225,8 @@ are woken and offered one by one; Space keeps a unit aboard.
   the box closed (`ClassicMapViewer.LANDING_SLIDE_MS`; the clips 86-128 ms,
   6-9 frames), and its offset 0 shows it instead of the ship. The ship keeps
   its moves; the landed unit has none (FreeCol's disembark).
-- **"Bei den Schiffen bleiben"** (and Escape) lands nothing; the ship stays
+- **"Bei den Schiffen bleiben"** (and Escape, and S, the sentry key: L3/Q1,
+  Roger) lands nothing; the ship stays
   the active unit with its moves. The passengers FreeCol woke before the
   question stay awake (**I**: never chosen in a clip, Roger's question F2).
 - **The panel** keeps the block it showed when the ship was ordered (the
@@ -3899,7 +3905,12 @@ otherwise a reassuring picture:
   overloads in `GUI` are `final` and delegate here, so every confirm in the game
   lands on this one override. A dismissed popup (Escape, close) answers no
   (W0e; until 2026-10-06 it fell back to `defaultOk`), and FreeCol's
-  `highseas.text` is answered no without a box (W0f).
+  `highseas.text` is answered no without a box (W0f). FreeCol's question
+  before every rumour, `exploreLostCityRumour.text`, is answered yes without a
+  box (L3/Q2: the original has none, C32); its burial mounds question
+  `exploreMoundsRumour.text` is the original's @LOSTCITY4 with the frontiersman
+  (row 1 digs, row 2 and Escape leave them; FreeCol then takes the mounds away
+  and the unit keeps its place and moves; the original asks after the slide, I).
   Window title is `colony(tile)` — the tile's colony, else **"FreeCol"**.
 - `showErrorPanel(String, Runnable)` — the audit's find. All five `showErrorPanel`
   overloads are `final` and funnel into this one non-final seam, so a no-op meant

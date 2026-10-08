@@ -129,7 +129,8 @@ public class ClassicHudTest extends TestCase {
             assertNull(t.label("CTITLE", 10));
             assertNull(t.label("NOPE", 0));
             assertEquals("m0", t.misc(0));
-            assertEquals("Coin:1000$  Levy: 0", ClassicHud.goldLine(t, 1000, 0));
+            assertEquals("Coin:1000$  Levy: 0%", ClassicHud.goldLine(t, 1000, 0));
+            assertEquals("Coin:44$  Levy: 12%", ClassicHud.goldLine(t, 44, 12));
             assertEquals("SeasonA 1492", ClassicHud.seasonLine(t, -1, 1492));
             assertEquals("SeasonA 1600", ClassicHud.seasonLine(t, 0, 1600));
             assertEquals("SeasonB 1600", ClassicHud.seasonLine(t, 1, 1600));
@@ -140,6 +141,96 @@ public class ClassicHudTest extends TestCase {
         } finally {
             dir.delete();
         }
+    }
+
+    /**
+     * Q3: a glyph is drawn whole or not at all; the line keeps the glyphs
+     * whose advance ends by the right edge.  Without FONTTINY the line is
+     * as it is.
+     */
+    public void testFittingGlyphs() {
+        final FfDecoder.Font ff = FfDecoder.decodePart(ClassicAssetDecoderTest.ffPart(
+            1, 4, new int[][] { { 'a', 3, 1, 1, 1 }, { '%', 4, 1, 1, 1, 1 } }));
+        final ClassicFont font = ClassicFont.fromAtlas(FfDecoder.toAtlas(ff),
+                                                       FfDecoder.metrics(ff));
+        assertEquals(3, font.charWidth('a'));
+        assertEquals(4, font.charWidth('%'));
+        assertEquals("aa%", ClassicHud.fitting(font, "aa%", 310, 320));   // ends 320
+        assertEquals("aa", ClassicHud.fitting(font, "aa%", 311, 320));    // % to 321
+        assertEquals("", ClassicHud.fitting(font, "%", 317, 320));
+        assertEquals("aa%", ClassicHud.fitting(null, "aa%", 317, 320));
+        assertNull(ClassicHud.fitting(font, null, 0, 320));
+        // Painted: x 318-319 stay as they were when the '%' does not fit.
+        final BufferedImage img = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+        final Graphics2D g = img.createGraphics();
+        ClassicHud.paintStatus(g, font, null, "aaaaaaaaaaaaaaaaaaaaaaaaa%");  // 25 a: 242..316
+        g.dispose();
+        for (int x = 317; x < 320; x++) {
+            for (int y = ClassicHud.GOLD_Y; y < ClassicHud.GOLD_Y + 1; y++) {
+                assertEquals(x + "," + y, 0, img.getRGB(x, y) & 0xFFFFFF);
+            }
+        }
+        assertTrue(0 != (img.getRGB(242, ClassicHud.GOLD_Y) & 0xFFFFFF));
+    }
+
+    /**
+     * Q3 golden (the pack and {@code -Dclassic.clips}): the gold line over
+     * playthrough-1's panel, its rows y 58-63 from x 241, 0 px off:
+     * "Gold:1000¤  Steuer: 0" with the "%" left out (#2436, #20153: x
+     * 318-319 empty), "Gold:0¤  Steuer: 0%" (#23934) and "Gold:144¤
+     * Steuer: 0%" (#50406).  The original's mouse arrow (indices 0, 7, 15
+     * where we differ) is counted and excused.
+     */
+    public void testGoldLineAgainstPlaythrough1() throws Exception {
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        final File dir = (clips == null) ? null : new File(clips, "playthrough-1");
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicText t = (pack == null) ? null : ClassicText.load(pack);
+        final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
+        final BufferedImage wood = (pack == null) ? null : pack.image(ClassicMenuBar.WOOD_KEY);
+        if (dir == null || !dir.isDirectory() || t == null || tiny == null || wood == null) {
+            System.err.println("testGoldLineAgainstPlaythrough1 skipped: no recordings or no pack");
+            return;
+        }
+        final int[][] cases = { { 2436, 1000 }, { 20153, 1000 }, { 23934, 0 }, { 50406, 144 } };
+        final StringBuilder fails = new StringBuilder();
+        int compared = 0, arrow = 0;
+        for (int[] c : cases) {
+            final String line = ClassicHud.goldLine(t, c[1], 0);
+            assertTrue(line, line.endsWith(" 0%"));
+            final BufferedImage frame = javax.imageio.ImageIO.read(new File(dir,
+                String.format("frame_%06d.png", c[0])));
+            assertNotNull("#" + c[0], frame);
+            final BufferedImage canvas = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+            final Graphics2D g = canvas.createGraphics();
+            ClassicHud.paintChrome(g, wood);
+            ClassicHud.paintStatus(g, tiny, null, line);
+            g.dispose();
+            final java.awt.image.Raster idx
+                = (frame.getColorModel() instanceof java.awt.image.IndexColorModel)
+                ? frame.getRaster() : null;
+            int diff = 0;
+            for (int y = ClassicHud.GOLD_Y; y < 64; y++) {
+                for (int x = 241; x < 320; x++) {
+                    compared++;
+                    if ((frame.getRGB(x, y) & 0xFFFFFF) == (canvas.getRGB(x, y) & 0xFFFFFF)) {
+                        continue;
+                    }
+                    final int i = (idx == null) ? -1 : idx.getSample(x, y, 0);
+                    if (i == 0 || i == 7 || i == 15) {
+                        arrow++;
+                    } else {
+                        diff++;
+                    }
+                }
+            }
+            if (diff > 0) fails.append(" #").append(c[0]).append('=').append(diff);
+        }
+        System.err.println("testGoldLineAgainstPlaythrough1: " + cases.length + " frames, "
+            + compared + " px, off:" + ((fails.length() == 0) ? " none" : fails.toString())
+            + ", arrow " + arrow);
+        assertEquals("pixels off:" + fails, 0, fails.length());
+        assertTrue("arrow " + arrow, arrow <= 30);
     }
 
     /** The scene layer's canvas: largest whole scale, centred. */

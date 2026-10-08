@@ -414,26 +414,34 @@ final class ClassicTileArt {
         return false;
     }
 
+    /** {@code PHYS0.SS}: the resource markers, 89 + the NAMES.TXT row. */
+    static final int RESOURCE_BASE = 89;
+
     /**
      * Map a {@link Resource} to its {@code PHYS0.SS} marker frame, or -1 when
-     * unmapped.  <b>Provisional</b> — the sprite-to-resource identification is a
-     * best-effort visual read of the extracted frames, pending the expert's
-     * validation against the original game.
+     * unmapped: {@link #RESOURCE_BASE} + its NAMES.TXT {@code @RESOURCE} row
+     * ({@link ClassicHud#resourceRow}), the row the panel names it by (gap
+     * list Q4, playthrough-1 06 section 4.1: every resource word seen
+     * matched exactly one frame, V for Oase 90, Bester Zucker 94,
+     * Mineralien 95, Fischerei 96, Biber 97, Bestes Holz 99 and
+     * Silbervorkommen 101; grain 91, cotton 92, tobacco 93, game 98 and
+     * ore 102 by the same rule, I).
+     *
+     * @param resource The resource, or null.
+     * @return The frame, or -1.
      */
-    private static int resourceFrame(Resource resource) {
+    static int resourceFrame(Resource resource) {
         if (resource == null || resource.getType() == null) return -1;
-        switch (resource.getType().getId()) {
-        case "model.resource.fish":     return 96;
-        case "model.resource.game":     return 98;
-        case "model.resource.furs":     return 97;
-        case "model.resource.minerals": return 95;
-        case "model.resource.ore":      return 102;
-        case "model.resource.silver":   return 101;
-        case "model.resource.lumber":   return 99;
-        case "model.resource.tobacco":  return 91;
-        case "model.resource.cotton":   return 92;
-        case "model.resource.sugar":    return 93;
-        default:                        return -1;
-        }
+        return resourceFrame(resource.getType().getId());
+    }
+
+    /**
+     * @param resourceTypeId A FreeCol resource type id.
+     * @return Its marker frame ({@link #resourceFrame(Resource)}), or -1.
+     */
+    static int resourceFrame(String resourceTypeId) {
+        final int row = (resourceTypeId == null) ? -1
+            : ClassicHud.resourceRow(resourceTypeId);
+        return (row > 0) ? RESOURCE_BASE + row : -1;
     }
 }

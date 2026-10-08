@@ -350,6 +350,26 @@ public class ClassicAdvisorLayerTest extends TestCase {
     // Tests
 
     /**
+     * Q1: a letter the box names answers its row through the layer's keys
+     * (S at the landing box: "Bei den Schiffen bleiben"), with the bar
+     * elsewhere; another letter does nothing.
+     */
+    public void testLetterKeyAnswersItsRow() throws Exception {
+        final Answer a = ask(ClassicAdvisorBox.Request.builder("land")
+            .freeColText("a a a").rows("a", "a a").defaultRow(0).cancelRow(0)
+            .letterRow('S', 0).build());
+        flush();
+        assertTrue(up());
+        key(KeyEvent.VK_DOWN);
+        assertEquals(1, bar());
+        key(KeyEvent.VK_A);
+        assertFalse(a.isDone());
+        key(KeyEvent.VK_S);
+        assertEquals(0, a.get());
+        assertFalse(up());
+    }
+
+    /**
      * A box comes at once and blocks its caller while the event queue
      * pumps; the keys move the bar one row each and Enter answers the
      * barred row; the layer is idle again after it.

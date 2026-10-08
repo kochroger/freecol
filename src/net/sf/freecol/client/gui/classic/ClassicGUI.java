@@ -5844,7 +5844,7 @@ public class ClassicGUI extends GUI {
      * dearly (major tension, a mission ban for that nation, the offered
      * land; the original's {@code @INDIANSHUN}: war).  Escape still answers
      * "no" (W0e, Roger's rule; an open question for him).  In the advisor
-     * box (W7) the tribe's chief stands at the right under the box
+     * box (W7) the tribe's chief stands under the box on its side
      * ({@link ClassicAdvisorBox.Portrait#chief}); the words are still
      * FreeCol's (the original's chain {@code @INDIANWELCOME},
      * {@code @INDIANPEACE}, {@code @INDIANCOME} is W8c).
@@ -6563,6 +6563,14 @@ public class ClassicGUI extends GUI {
             ClassicFrameRecorder.event("dialog-silent", template.getId() + " no");
             return false;
         }
+        if (silentYes(template)) {
+            ClassicFrameRecorder.event("dialog-silent", template.getId() + " yes");
+            return true;
+        }
+        if (isMounds(template)) {
+            final Boolean dig = askMounds(tile);
+            if (dig != null) return dig;
+        }
         if (isLandfall(template)) {
             final Unit carrier = landingCarrier((this.mapViewer == null) ? null
                 : this.mapViewer.getActiveUnit(), tile);
@@ -6632,6 +6640,80 @@ public class ClassicGUI extends GUI {
      */
     static boolean silentNo(StringTemplate template) {
         return template != null && HIGH_SEAS_QUESTION.equals(template.getId());
+    }
+
+    /** FreeCol's question before every rumour ({@code moveExplore}). */
+    static final String RUMOUR_QUESTION = "exploreLostCityRumour.text";
+
+    /** FreeCol's second question before burial mounds. */
+    static final String MOUNDS_QUESTION = "exploreMoundsRumour.text";
+
+    /** GAME.TXT's burial mounds question (611). */
+    static final String MOUNDS_SECTION = "LOSTCITY4";
+
+    /**
+     * Whether a confirm is answered "yes" without a box: FreeCol's question
+     * before every rumour (gap list Q2; the original has none: the unit
+     * slides onto the rumour and the result follows, C32 playthrough-1
+     * #49467-#49506, clip004 and landfall).
+     *
+     * @param template The question.
+     * @return True if it is never shown.
+     */
+    static boolean silentYes(StringTemplate template) {
+        return template != null && RUMOUR_QUESTION.equals(template.getId());
+    }
+
+    /**
+     * @param template The question.
+     * @return Whether it is FreeCol's burial mounds question.
+     */
+    static boolean isMounds(StringTemplate template) {
+        return template != null && MOUNDS_QUESTION.equals(template.getId());
+    }
+
+    /**
+     * FreeCol's burial mounds question as the original's @LOSTCITY4 with
+     * the frontiersman (Q2; box V landfall #19737, (42,124,236,40)): row 1
+     * "Laßt uns nach Schätzen suchen!" (the bar's, no {@code @default})
+     * digs, row 2 "Haltet Euch davon fern!" and Escape (Roger: Esc is
+     * Nein) do not.  FreeCol's "no" then takes the mounds away and the
+     * unit keeps its place and its moves (I: the original asks after the
+     * slide, so its unit already stands there).
+     *
+     * @param tile The unit's tile.
+     * @return Whether to dig, or null without the pack's text (FreeCol's
+     *     words then).
+     */
+    private Boolean askMounds(Tile tile) {
+        final ClassicAdvisorBox.Request r = moundsRequest(
+            ClassicText.load(ClassicPackFiles.runtime()), colony(tile));
+        if (r == null) return null;
+        final int chosen = onEventThread(() -> this.prompter.ask(r),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        final boolean dig = confirmed(chosen);
+        ClassicFrameRecorder.event("mounds", MOUNDS_SECTION + " chosen=" + chosen
+            + ((dig) ? " dig" : " leave"));
+        return dig;
+    }
+
+    /**
+     * The @LOSTCITY4 box: GAME.TXT's two rows, the bar on row 1, Escape on
+     * row 2, the frontiersman.
+     *
+     * @param t The original texts, or null.
+     * @param title The stopgap's window title.
+     * @return The box, or null without the text.
+     */
+    static ClassicAdvisorBox.Request moundsRequest(ClassicText t, String title) {
+        final ClassicText.Message m = (t == null) ? null : t.message(MOUNDS_SECTION);
+        if (m == null || m.text.isEmpty() || m.options.size() < 2) return null;
+        final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText(
+            MOUNDS_SECTION, m, new HashMap<>());
+        return (b == null) ? null
+            : b.defaultRow(ClassicHud.clamp(ClassicAdvisorBox.defaultRow(m), 0, 1))
+                .cancelRow(1).portrait(ClassicAdvisorBox.Portrait.SCOUT)
+                .stopgap(title, null).build();
     }
 
     /**
@@ -7414,7 +7496,9 @@ public class ClassicGUI extends GUI {
      * The landing box: GAME.TXT {@code @LANDFALL} from the pack, its rows
      * "Bei den Schiffen bleiben" (the bar's, Escape's) and "An Land gehen",
      * the frontiersman at the box; else FreeCol's question with its
-     * "Abbrechen" and "OK" in the same order.
+     * "Abbrechen" and "OK" in the same order.  S, the sentry key, takes
+     * "Bei den Schiffen bleiben" as Enter on it would (Roger; gap list Q1,
+     * C12: the colonist stays aboard).
      *
      * @param t The original texts, or null.
      * @param showAtNanos When the box should be on screen
@@ -7430,17 +7514,21 @@ public class ClassicGUI extends GUI {
             : ClassicAdvisorBox.fromGameText(LANDFALL_SECTION, m, new HashMap<>());
         if (b != null) {
             return b.defaultRow(ClassicHud.clamp(ClassicAdvisorBox.defaultRow(m), 0, 1))
-                .cancelRow(0).portrait(ClassicAdvisorBox.Portrait.SCOUT)
+                .cancelRow(0).letterRow(LANDFALL_STAY_KEY, 0)
+                .portrait(ClassicAdvisorBox.Portrait.SCOUT)
                 .showAt(showAtNanos).stopgap(colony(null), null).build();
         }
         return ClassicAdvisorBox.Request.builder(LANDFALL_SECTION)
             .freeColText(Messages.message(DISEMBARK_QUESTION))
             .rows(ClassicAdvisorBox.literal(Messages.message("cancel")),
                   ClassicAdvisorBox.literal(Messages.message("ok")))
-            .defaultRow(0).cancelRow(0)
+            .defaultRow(0).cancelRow(0).letterRow(LANDFALL_STAY_KEY, 0)
             .portrait(ClassicAdvisorBox.Portrait.SCOUT)
             .showAt(showAtNanos).stopgap(colony(null), null).build();
     }
+
+    /** The landing box's key for "Bei den Schiffen bleiben" (Q1). */
+    static final char LANDFALL_STAY_KEY = 'S';
 
     /**
      * From the move key to the landing box's display when the

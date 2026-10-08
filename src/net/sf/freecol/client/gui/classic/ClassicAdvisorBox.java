@@ -27,6 +27,7 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -62,14 +63,17 @@ import java.util.Map;
  *       advisor ({@link Portrait#over}) the union of box and portrait is
  *       centred the same way ({@link ClassicFirstScene#place}) and the
  *       portrait is drawn OVER the box at the advisor's offset.  A chief
- *       ({@link Portrait#chief}) stands at the right, under the box:
- *       {@code chief.x = min(246, 317 - pw)}, {@code chief.y = (197 - ph)
- *       div 2} (Arawak (246,8), Sioux (210,10)), box right edge 3 px left
- *       of him, at least x = 0 (box x 7 and 0), the box drawn over him.  The
- *       King ({@link Portrait#KING}) is the exception the other way round:
- *       he stands at the left, {@code (0, (197 - ph) div 2)} = (0,18), the
- *       box flush right, {@code x = 320 - w} (clip005/006: (84,68,236,64)).
- *       The box is centred vertically in all three.</li>
+ *       ({@link Portrait#chief}) stands under the box on his tribe's side
+ *       ({@link Portrait#chiefLeft}), {@code chief.y = (198 - ph) div 2}
+ *       on both sides (playthrough-1: the Apache, 142 high, at y 28; an
+ *       even height is 1 px lower than {@code (197 - ph) div 2}).  At the
+ *       right (Arawak (246,8), Sioux (210,10)): {@code chief.x = min(246,
+ *       317 - pw)}, the box's right edge 3 px left of him, at least x = 0
+ *       (box x 7 and 0).  At the left (Iroquois (0,11), Apache (0,28)):
+ *       {@code x = 0}, the box flush right, {@code x = 320 - w} = 84, as
+ *       the King ({@link Portrait#KING}, (0,18); clip005/006:
+ *       (84,68,236,64)).  The box is drawn over him and centred vertically
+ *       in all of them.</li>
  *   <li><b>Bar (V).</b>  It starts on GAME.TXT's {@code @default=n}
  *       (1-based), else on row 1; it moves one row per key and is redrawn in
  *       one paint; Enter takes the row it is on, Escape the box's cancel
@@ -138,7 +142,7 @@ final class ClassicAdvisorBox {
         enum Kind {
             /** An advisor: over the box, at an offset from it. */
             OVER,
-            /** A native chief: at the right, under the box. */
+            /** A native chief: under the box, on his tribe's side. */
             CHIEF,
             /** The King: at the left, under the box, the box flush right. */
             KING
@@ -197,18 +201,28 @@ final class ClassicAdvisorBox {
         /** The offset from the box's top-left (OVER only). */
         private final int dx, dy;
 
+        /** A chief at the left, the box flush right (CHIEF only). */
+        final boolean left;
+
         private Portrait(String sprite, Kind kind, Anchor anchor, int dx, int dy) {
+            this(sprite, kind, anchor, dx, dy, false);
+        }
+
+        private Portrait(String sprite, Kind kind, Anchor anchor, int dx, int dy,
+                         boolean left) {
             this.sprite = sprite;
             this.kind = kind;
             this.anchor = anchor;
             this.dx = dx;
             this.dy = dy;
+            this.left = left;
         }
 
         /**
          * The chief of an original tribe: {@code IND<n>A0.SS.000}, NAMES.TXT
          * {@code @TRIBES} order (Inca 0, Aztec 1, Arawak 2, Iroquois 3,
-         * Cherokee 4, Apache 5, Sioux 6, Tupi 7).
+         * Cherokee 4, Apache 5, Sioux 6, Tupi 7), on his tribe's side
+         * ({@link #chiefLeft}).
          *
          * @param tribe The tribe's index.
          * @return The portrait, {@link #NONE} out of range.
@@ -216,7 +230,36 @@ final class ClassicAdvisorBox {
         static Portrait chief(int tribe) {
             if (tribe < 0 || tribe > 7) return NONE;
             return new Portrait("IND" + tribe + "A0.SS.000", Kind.CHIEF,
-                                Anchor.LEFT, 0, 0);
+                                Anchor.LEFT, 0, 0, chiefLeft(tribe));
+        }
+
+        /**
+         * Whether a tribe's chief stands at the left (gap list Q11).  The
+         * side belongs to the tribe, not to where its village is (V:
+         * playthrough-1, the Iroquois left with the village right of the
+         * map's centre, #9449, and with Base near it, #80739).  V for four
+         * tribes: Iroquois (3) and Apache (5) left, Arawak (2; landfall,
+         * clip008) and Sioux (6; clip004) right.  The other four were never
+         * seen and follow the index parity that fits those four (I): Aztec
+         * (1) and Tupi (7) left, Inca (0) and Cherokee (4) right.
+         *
+         * @param tribe The tribe's NAMES.TXT {@code @TRIBES} index.
+         * @return True for the left side.
+         */
+        static boolean chiefLeft(int tribe) {
+            return (tribe & 1) == 1;
+        }
+
+        /**
+         * A chief's or the King's top: {@code (198 - ph) div 2}, which fits
+         * all five portraits measured (Arawak 8, Sioux 10, Iroquois 11,
+         * Apache 28, the King 18; playthrough-1 01 section 3).
+         *
+         * @param ph The portrait's height.
+         * @return Its y.
+         */
+        static int underY(int ph) {
+            return (198 - ph) / 2;
         }
 
         /**
@@ -595,6 +638,13 @@ final class ClassicAdvisorBox {
         /** The field's label ("Name:"), markup kept; "" without a field. */
         final String fieldLabel;
 
+        /**
+         * Letters that take a row as Enter on it would (the original's
+         * order key in a box, Q1: S at the landing is "Bei den Schiffen
+         * bleiben"), upper case; empty for none.
+         */
+        final Map<Character, Integer> letters;
+
         private Request(Builder b) {
             this.id = b.id;
             final List<List<String>> ps = new ArrayList<>();
@@ -639,6 +689,11 @@ final class ClassicAdvisorBox {
             this.list = b.list;
             this.field = b.field;
             this.fieldLabel = (b.fieldLabel == null) ? "" : b.fieldLabel;
+            final Map<Character, Integer> ls = new HashMap<>();
+            for (Map.Entry<Character, Integer> e : b.letters.entrySet()) {
+                if (e.getValue() >= 0 && e.getValue() < n) ls.put(e.getKey(), e.getValue());
+            }
+            this.letters = Collections.unmodifiableMap(ls);
         }
 
         /** @return Whether it has a name field ({@link #field}). */
@@ -755,6 +810,7 @@ final class ClassicAdvisorBox {
         private boolean list = false;
         private Field field = null;
         private String fieldLabel = null;
+        private final Map<Character, Integer> letters = new HashMap<>();
 
         private Builder(String id) {
             this.id = (id == null) ? "box" : id;
@@ -898,6 +954,18 @@ final class ClassicAdvisorBox {
         /** Escape's row (0-based); without one Escape is the last row. */
         Builder cancelRow(int i) {
             this.cancelRow = i;
+            return this;
+        }
+
+        /**
+         * A letter key that takes a row, as Enter on it would (Q1).
+         *
+         * @param letter The letter (either case).
+         * @param row The row (0-based).
+         * @return This builder.
+         */
+        Builder letterRow(char letter, int row) {
+            this.letters.put(Character.toUpperCase(letter), row);
             return this;
         }
 
@@ -1308,15 +1376,16 @@ final class ClassicAdvisorBox {
             boxAt = new Point((r.x != null) ? r.x : (VW - w + 1) / 2,
                 (r.y != null) ? r.y : (VH - h + 1) / 2);
             picAt = null;
-        } else if (who.kind == Portrait.Kind.CHIEF) {
+        } else if (who.kind == Portrait.Kind.CHIEF && !who.left) {
             final int cx = Math.min(246, 317 - sprite.getWidth());
-            final int cy = (197 - sprite.getHeight()) / 2;
             boxAt = new Point(Math.max(0, cx - 3 - w), (VH - h + 1) / 2);
-            picAt = new Point(cx, cy);
+            picAt = new Point(cx, Portrait.underY(sprite.getHeight()));
             under = true;
-        } else if (who.kind == Portrait.Kind.KING) {
+        } else if (who.kind == Portrait.Kind.CHIEF
+                   || who.kind == Portrait.Kind.KING) {
+            // A chief at the left stands as the King does (Q11).
             boxAt = new Point(VW - w, (VH - h + 1) / 2);
-            picAt = new Point(0, (197 - sprite.getHeight()) / 2);
+            picAt = new Point(0, Portrait.underY(sprite.getHeight()));
             under = true;
         } else {
             final Point off = who.offset(w, sprite.getWidth());
@@ -1887,14 +1956,22 @@ final class ClassicAdvisorBox {
         /**
          * A letter key: in a checkbox box the row whose gold {@code ~} letter
          * it is gets the bar and flips (I, never seen; @GAMEOPTIONS marks
-         * I F S E A C Y T, @COLONYOPTIONS marks none); elsewhere
-         * {@link #otherKey}.
+         * I F S E A C Y T, @COLONYOPTIONS marks none); a letter the box
+         * names ({@link Builder#letterRow}) takes its row as Enter on it
+         * would (Q1); elsewhere {@link #otherKey}.
          *
          * @param letter The letter, upper case.
          * @return The answer.
          */
         int letter(char letter) {
-            if (this.checks == null) return otherKey();
+            if (this.checks == null) {
+                final Integer r = this.request.letters.get(letter);
+                if (r == null || this.text != null || !this.request.enabled(r)) {
+                    return otherKey();
+                }
+                this.row = r;
+                return r;
+            }
             for (int i = 0; i < this.request.rows.size(); i++) {
                 if (ClassicMenuModel.hotkey(this.request.rows.get(i)) == letter
                     && this.request.enabled(i)) {

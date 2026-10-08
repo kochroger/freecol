@@ -110,7 +110,9 @@ public class ClassicAdvisorBoxTest extends TestCase {
             k = ClassicAdvisorBox.Portrait.KING,
             n = ClassicAdvisorBox.Portrait.NONE,
             arawak = ClassicAdvisorBox.Portrait.chief(2),
-            sioux = ClassicAdvisorBox.Portrait.chief(6);
+            sioux = ClassicAdvisorBox.Portrait.chief(6),
+            iroquois = ClassicAdvisorBox.Portrait.chief(3),
+            apache = ClassicAdvisorBox.Portrait.chief(5);
         final Object[][] boxes = {
             // who, pw, ph, @width, P, R, @y, box x, y, w, h, pic x, y
             { "TUTORIAL1", a, 75, 91, 230, 5, 0, null, 44, 112, 236, 48, 40, 41 },
@@ -139,6 +141,19 @@ public class ClassicAdvisorBoxTest extends TestCase {
             { "KINGSTAMPACT", k, 79, 161, 230, 5, 2, null, 84, 68, 236, 64, 0, 18 },
             { "TEAPARTY", so, 72, 139, 220, 6, 0, null, 39, 112, 226, 54, 210, 35 },
             { "ABANDON", co, 60, 68, 230, 2, 2, null, 42, 108, 236, 46, 130, 46 },
+            // Q11, playthrough-1 (01 section 3): the Iroquois and the Apache
+            // chief at the left, the box flush right, y = (198 - ph) div 2.
+            { "Iroquois WELCOME #4742", iroquois, 87, 175, 230, 5, 2, null,
+              84, 68, 236, 64, 0, 11 },
+            { "Iroquois LEARNSTAY", iroquois, 87, 175, 230, 3, 2, null,
+              84, 74, 236, 52, 0, 11 },
+            { "Iroquois GIVESTUFF #80739", iroquois, 87, 175, 230, 4, 0, null,
+              84, 79, 236, 42, 0, 11 },
+            { "Apache WELCOME #44344", apache, 114, 142, 230, 5, 2, null,
+              84, 68, 236, 64, 0, 28 },
+            { "Apache CHIEFHOWDY #47458", apache, 114, 142, 230, 4, 0, null,
+              84, 79, 236, 42, 0, 28 },
+            { "Apache 3 lines", apache, 114, 142, 230, 3, 0, null, 84, 82, 236, 36, 0, 28 },
         };
         final ClassicFont f = font();
         for (Object[] b : boxes) {
@@ -718,6 +733,64 @@ public class ClassicAdvisorBoxTest extends TestCase {
         assertSame(ClassicAdvisorBox.Portrait.NONE, ClassicAdvisorBox.Portrait.chief(8));
         assertSame(ClassicAdvisorBox.Portrait.NONE, ClassicAdvisorBox.Portrait.chief(-1));
         assertNull(ClassicAdvisorBox.Portrait.NONE.sheet());
+        // Q11: the chief's side by tribe (V 2, 3, 5, 6; the parity I).
+        final boolean[] left = { false, true, false, true, false, true, false, true };
+        for (int tribe = 0; tribe < 8; tribe++) {
+            final ClassicAdvisorBox.Portrait p = ClassicAdvisorBox.Portrait.chief(tribe);
+            assertEquals("tribe " + tribe, left[tribe], p.left);
+            assertEquals("tribe " + tribe, left[tribe],
+                         ClassicAdvisorBox.Portrait.chiefLeft(tribe));
+            assertSame(ClassicAdvisorBox.Portrait.Kind.CHIEF, p.kind);
+        }
+        assertFalse(ClassicAdvisorBox.Portrait.KING.left);
+        // The height (198 - ph) div 2: odd heights as before, even ones 1 px lower.
+        assertEquals(8, ClassicAdvisorBox.Portrait.underY(181));
+        assertEquals(10, ClassicAdvisorBox.Portrait.underY(177));
+        assertEquals(11, ClassicAdvisorBox.Portrait.underY(175));
+        assertEquals(28, ClassicAdvisorBox.Portrait.underY(142));
+        assertEquals(18, ClassicAdvisorBox.Portrait.underY(161));
+        // A right chief keeps x = min(246, 317 - pw), now with the new height.
+        final ClassicAdvisorBox.Layout cherokee = ClassicAdvisorBox.layout(
+            request(230, 3, 0, ClassicAdvisorBox.Portrait.chief(4), null), font(),
+            sprite(100, 146));
+        assertEquals(new Point(217, 26), cherokee.portraitAt);
+        assertEquals(new Rectangle(0, 82, 236, 36), cherokee.box);
+        final ClassicAdvisorBox.Layout aztec = ClassicAdvisorBox.layout(
+            request(230, 3, 0, ClassicAdvisorBox.Portrait.chief(1), null), font(),
+            sprite(100, 160));
+        assertEquals(new Point(0, 19), aztec.portraitAt);
+        assertEquals(new Rectangle(84, 82, 236, 36), aztec.box);
+    }
+
+    /**
+     * Q1: a letter the box names takes its row as Enter would (S at the
+     * landing: "Bei den Schiffen bleiben"), also in lower case; every
+     * other letter is any other key; a disabled row is not taken; a box
+     * with a name field ignores it.
+     */
+    public void testLetterRow() {
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request.builder("land")
+            .gameText(Arrays.asList("^a a")).rows("a.", "b.").defaultRow(0)
+            .cancelRow(0).letterRow('s', 0).build();
+        assertEquals(Integer.valueOf(0), r.letters.get('S'));
+        ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, bar.letter('A'));
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, bar.down());
+        assertEquals(1, bar.row());
+        assertEquals(0, bar.letter('S'));
+        assertEquals(0, bar.row());
+        // Not on a disabled row.
+        final ClassicAdvisorBox.Request d = ClassicAdvisorBox.Request.builder("off")
+            .gameText(Arrays.asList("^a a")).rows("a.", "b.").disabled(new boolean[] { true, false })
+            .letterRow('S', 0).build();
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, new ClassicAdvisorBox.Bar(d).letter('S'));
+        // A row out of range is dropped.
+        assertTrue(ClassicAdvisorBox.Request.builder("x").gameText(Arrays.asList("^a a"))
+            .rows("a.").letterRow('S', 3).build().letters.isEmpty());
+        // The landing box as the game asks for it.
+        final ClassicAdvisorBox.Request land = ClassicGUI.landfallRequest(null, 0L);
+        assertEquals(0, new ClassicAdvisorBox.Bar(land).letter('S'));
+        assertEquals(ClassicAdvisorBox.Bar.OPEN, new ClassicAdvisorBox.Bar(land).letter('L'));
     }
 
     /**
@@ -1445,6 +1518,101 @@ public class ClassicAdvisorBoxTest extends TestCase {
         }
         System.out.println(getClass().getSimpleName() + ": clip008 tips," + out);
         assertEquals("pixels off:" + out, 0, bad);
+    }
+
+    /**
+     * Q11 golden (the pack and {@code -Dclassic.clips}): the chiefs at the
+     * left over the playthrough-1 frames, each box drawn from the pack's
+     * GAME.TXT with the values the frame shows: the Iroquois at
+     * @INDIANWELCOME #4742 and @INDIANGIVESTUFF #80739, the Apache at
+     * @INDIANWELCOME #44344 and @CHIEFHOWDY #47458.  The box and the
+     * chief's opaque pixels must be the frame's, 0 px off; the original's
+     * mouse arrow (frame indices 0, 7, 15 where we differ) is counted and
+     * excused.
+     */
+    public void testChiefsAgainstPlaythrough1() throws Exception {
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        final File dir = (clips == null) ? null : new File(clips, "playthrough-1");
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicText t = ClassicText.load(pack);
+        final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
+        if (dir == null || !dir.isDirectory() || t == null || tiny == null) {
+            System.err.println(getClass().getSimpleName()
+                + ": playthrough-1 chiefs skipped, no recordings or no pack");
+            return;
+        }
+        final BufferedImage wood = pack.image(ClassicMenuBar.WOOD_KEY);
+        final Object[][] cases = {
+            // frame, section, values, tribe, bar, box, chief
+            { 4742, "INDIANWELCOME", "STRING0=Irokesen;NUMBER0=18;STRING1=Dörfer", 3, 0,
+              new Rectangle(84, 68, 236, 64), new Point(0, 11) },
+            { 80739, "INDIANGIVESTUFF", "STRING0=Irokesen;STRING1=Base;NUMBER0=9;STRING2=Felle",
+              3, -1, new Rectangle(84, 79, 236, 42), new Point(0, 11) },
+            { 44344, "INDIANWELCOME", "STRING0=Apachen;NUMBER0=13;STRING1=Lager", 5, 0,
+              new Rectangle(84, 68, 236, 64), new Point(0, 28) },
+            { 47458, "CHIEFHOWDY", "STRING0=Kampferprobte Späher;STRING1=Rum;"
+              + "STRING2=Nahrungsmittel;STRING3=Pferde", 5, -1,
+              new Rectangle(84, 79, 236, 42), new Point(0, 28) },
+        };
+        final StringBuilder out = new StringBuilder();
+        int bad = 0, compared = 0, arrow = 0;
+        for (Object[] c : cases) {
+            final String name = "#" + c[0] + " " + c[1];
+            final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText(
+                (String) c[1], t.message((String) c[1]), values((String) c[2]));
+            assertNotNull(name, b);
+            final ClassicAdvisorBox.Portrait who
+                = ClassicAdvisorBox.Portrait.chief((Integer) c[3]);
+            final ClassicAdvisorBox.Request r = b.portrait(who).build();
+            final BufferedImage pic = pack.image(ClassicPackFiles.ssKey(who.sprite));
+            assertNotNull(name, pic);
+            final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(r, tiny, pic);
+            assertNotNull(name, l);
+            assertEquals(name, c[5], l.box);
+            assertEquals(name, c[6], l.portraitAt);
+            assertTrue(name, l.under);
+            final BufferedImage frame = ImageIO.read(new File(dir,
+                String.format("frame_%06d.png", (Integer) c[0])));
+            assertNotNull(name, frame);
+            final Raster idx = (frame.getColorModel() instanceof IndexColorModel)
+                ? frame.getRaster() : null;
+            final BufferedImage canvas = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+            final Graphics2D g = canvas.createGraphics();
+            g.drawImage(frame, 0, 0, null);
+            ClassicAdvisorBox.paint(g, l, (Integer) c[4], wood, tiny);
+            g.dispose();
+            int diff = 0, arrowHere = 0;
+            final Rectangle where = new Rectangle(), pointer = new Rectangle();
+            for (int y = 0; y < 200; y++) {
+                for (int x = 0; x < 320; x++) {
+                    if (!l.box.contains(x, y) && !opaque(l, x, y)) continue;
+                    compared++;
+                    if ((frame.getRGB(x, y) & 0xFFFFFF) == (canvas.getRGB(x, y) & 0xFFFFFF)) {
+                        continue;
+                    }
+                    final int i = (idx == null) ? -1 : idx.getSample(x, y, 0);
+                    final boolean isArrow = i == 0 || i == 7 || i == 15;
+                    final Rectangle hit = (isArrow) ? pointer : where;
+                    if (isArrow) arrowHere++; else diff++;
+                    if (hit.isEmpty()) {
+                        hit.setBounds(x, y, 1, 1);
+                    } else {
+                        hit.add(new Rectangle(x, y, 1, 1));
+                    }
+                }
+            }
+            out.append(' ').append(name).append(" off ").append(diff);
+            if (diff > 0) out.append(" in ").append(where);
+            if (arrowHere > 0) out.append(", arrow ").append(arrowHere).append(" in ").append(pointer);
+            // The excused pixels are one mouse arrow (at most 12 x 20).
+            assertTrue(name + " arrow " + pointer, pointer.width <= 12 && pointer.height <= 20);
+            arrow += arrowHere;
+            bad += diff;
+        }
+        System.out.println(getClass().getSimpleName() + ": playthrough-1 chiefs, "
+            + compared + " px," + out + ", arrow " + arrow);
+        assertEquals("pixels off:" + out, 0, bad);
+        assertTrue("arrow pixels " + arrow, arrow <= 4 * 60);
     }
 
     /** @return The box and the portrait, as the crops cut them. */

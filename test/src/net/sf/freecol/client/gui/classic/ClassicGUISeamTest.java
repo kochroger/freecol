@@ -214,10 +214,11 @@ public class ClassicGUISeamTest extends FreeColTestCase {
     /**
      * W0e: Escape (and the close button) answers "no" in every classic
      * confirm, whichever option Enter takes; Enter still takes the
-     * controller's default.  The confirms of the learn question, the rumour
-     * and the hostile action, with their controller's {@code defaultOk}
-     * (the landing has its own box, {@link #testLandfallBox}; the site
-     * warnings theirs, {@link #testTheFoundingAsTheOriginal}).
+     * controller's default.  The confirms of the learn question and the
+     * hostile action, with their controller's {@code defaultOk} (the
+     * landing has its own box, {@link #testLandfallBox}; the site warnings
+     * theirs, {@link #testTheFoundingAsTheOriginal}; the rumours theirs,
+     * {@link #testRumourQuestions}).
      */
     public void testEscapeAnswersNo() {
         final ClassicGUI gui = new ClassicGUI(null);
@@ -229,8 +230,6 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             { StringTemplate.template("learnSkill.text")
                   .addName("%skill%", "Pelzjäger"),
               "learnSkill.yes", "learnSkill.no", true },
-            { StringTemplate.key("exploreLostCityRumour.text"),
-              "exploreLostCityRumour.yes", "exploreLostCityRumour.no", true },
             { StringTemplate.template("confirmHostile.peace")
                   .addStringTemplate("%nation%", arawak.getNationLabel()),
               "confirmHostile.yes", "cancel", false },
@@ -380,9 +379,70 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertFalse(ClassicGUI.silentNo(StringTemplate.key("learnSkill.text")));
         assertFalse(ClassicGUI.silentNo(null));
         assertTrue(gui.modalConfirmDialog(null,
-                StringTemplate.key("exploreLostCityRumour.text"), (ImageIcon) null,
-                "exploreLostCityRumour.yes", "exploreLostCityRumour.no", true));
+                StringTemplate.template("learnSkill.text").addName("%skill%", "x"),
+                (ImageIcon) null, "learnSkill.yes", "learnSkill.no", true));
         assertEquals(1, fake.asked.size());
+    }
+
+    /**
+     * Q2: FreeCol's question before every rumour is answered yes without a
+     * box (the original has none, C32), whatever a box would have said;
+     * its burial mounds question is GAME.TXT's @LOSTCITY4 with the
+     * frontiersman: row 1 digs (the bar's), row 2, Escape and a box that
+     * could not open do not.  Without the pack's text FreeCol's words
+     * stay.
+     */
+    public void testRumourQuestions() {
+        final ClassicGUI gui = new ClassicGUI(null);
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        final StringTemplate rumour = StringTemplate.key(ClassicGUI.RUMOUR_QUESTION),
+            mounds = StringTemplate.key(ClassicGUI.MOUNDS_QUESTION);
+        assertTrue(ClassicGUI.silentYes(rumour));
+        assertFalse(ClassicGUI.silentYes(mounds));
+        assertFalse(ClassicGUI.silentYes(null));
+        assertFalse(ClassicGUI.silentNo(rumour));
+        assertTrue(ClassicGUI.isMounds(mounds));
+        assertFalse(ClassicGUI.isMounds(rumour));
+        assertFalse(ClassicGUI.isMounds(null));
+        for (int a : new int[] { -1, 0, 1 }) {
+            fake.answer = a;
+            assertTrue("rumour, a box would say " + a, gui.modalConfirmDialog(null,
+                    rumour, (ImageIcon) null, "exploreLostCityRumour.yes",
+                    "exploreLostCityRumour.no", true));
+        }
+        assertTrue(fake.asked.isEmpty());
+
+        assertNull(ClassicGUI.moundsRequest(null, "t"));
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final boolean pack = t != null && t.message(ClassicGUI.MOUNDS_SECTION) != null;
+        final Object[][] answers = { { 0, true }, { 1, false }, { -1, false } };
+        for (Object[] c : answers) {
+            fake.answer = (Integer) c[0];
+            assertEquals("mounds " + c[0], c[1], gui.modalConfirmDialog(null, mounds,
+                    (ImageIcon) null, "exploreLostCityRumour.yes",
+                    "exploreLostCityRumour.no", true));
+            final ClassicAdvisorBox.Request r = last(fake.boxes);
+            assertEquals(0, r.defaultRow);
+            assertEquals(1, r.escapeAnswer());
+            if (pack) {
+                assertEquals(ClassicGUI.MOUNDS_SECTION, r.id);
+                assertSame(ClassicAdvisorBox.Portrait.SCOUT, r.portrait);
+                assertEquals(List.of("\"Laßt uns nach Schätzen suchen!\"",
+                                     "\"Haltet Euch davon fern!\""), List.of(r.plainRows()));
+                assertTrue(r.plainText(), r.plainText()
+                    .startsWith("Ihre Expedition trifft auf merkwürdige"));
+                assertEquals(230, r.width);
+            } else {
+                assertEquals(Messages.message("exploreLostCityRumour.yes"),
+                             r.plainRows()[0]);
+            }
+        }
+        assertEquals(3, fake.asked.size());
+        if (!pack) {
+            System.err.println(getClass().getSimpleName()
+                + ": no pack texts, @LOSTCITY4's rows are not checked");
+        }
     }
 
     /**
@@ -1581,6 +1641,10 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertSame(ClassicAdvisorBox.Portrait.SCOUT, fallback.portrait);
         assertEquals(0L, fallback.showAtNanos);
         assertEquals(123L, ClassicGUI.landfallRequest(null, 123L).showAtNanos);
+        // Q1: S stays aboard as Enter on row 1 would.
+        assertEquals(0, new ClassicAdvisorBox.Bar(fallback).letter('S'));
+        assertEquals(ClassicAdvisorBox.Bar.OPEN,
+                     new ClassicAdvisorBox.Bar(fallback).letter('A'));
 
         final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
         if (t != null && t.message("LANDFALL") != null) {
@@ -1592,6 +1656,9 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             assertEquals(0, r.escapeAnswer());
             assertSame(ClassicAdvisorBox.Portrait.SCOUT, r.portrait);
             assertEquals(190, r.width);
+            final ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+            bar.down();
+            assertEquals(0, bar.letter('S'));
         } else {
             System.err.println(getClass().getSimpleName()
                 + ": no pack texts, the GAME.TXT rows are not checked");

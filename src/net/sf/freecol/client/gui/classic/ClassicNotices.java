@@ -45,7 +45,7 @@ import net.sf.freecol.common.model.StringTemplate;
  *       section 4): @CHIEFGIFT (V #51430: the tribe, "Holl."
  *       {@code @NATIONABBREV}, the beads' worth with the coin),
  *       @CHIEFGUIDES (V #46396), @CHIEFAREA, @CHIEFBORED, @CHIEFKILL (I),
- *       with the tribe's chief at the right.  @CHIEFHOWDY before them and
+ *       with the tribe's chief on its side (Q11).  @CHIEFHOWDY before them and
  *       @WELLSEASONED after the guides are D11's.</li>
  *   <li>A village that teaches no more (@LEARNALREADY, V text clip008
  *       08:50), one that sends the colonist away (@LEARNMAD) or kills him

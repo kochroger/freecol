@@ -1639,6 +1639,91 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         }
     }
 
+    /**
+     * Q4: a resource's marker is {@code PHYS0} 89 + its NAMES.TXT
+     * {@code @RESOURCE} row, for every resource type of the rules
+     * (playthrough-1 06 section 4.1: oasis 90, sugar 94, minerals 95,
+     * fish 96, furs 97, lumber 99, silver 101 seen); a tile's overlay
+     * frames carry it before the rumour.
+     */
+    public void testResourceMarkers() {
+        final String[][] expected = {
+            { "oasis", "90" }, { "grain", "91" }, { "cotton", "92" },
+            { "tobacco", "93" }, { "sugar", "94" }, { "minerals", "95" },
+            { "fish", "96" }, { "furs", "97" }, { "game", "98" },
+            { "lumber", "99" }, { "silver", "101" }, { "ore", "102" },
+        };
+        for (String[] e : expected) {
+            final String id = "model.resource." + e[0];
+            assertNotNull(id, spec().getResourceType(id));
+            assertEquals(id, Integer.parseInt(e[1]), ClassicTileArt.resourceFrame(id));
+        }
+        assertEquals(expected.length, spec().getResourceTypeList().size());
+        assertEquals(-1, ClassicTileArt.resourceFrame("model.resource.unknown"));
+        assertEquals(-1, ClassicTileArt.resourceFrame((String) null));
+        assertEquals(-1, ClassicTileArt.resourceFrame((net.sf.freecol.common.model.Resource) null));
+        final Game game = getStandardGame();
+        final Map map = getTestMap(spec().getTileType("model.tile.savannah"));
+        game.changeMap(map);
+        final Tile t = map.getTile(5, 5);
+        t.addResource(new net.sf.freecol.common.model.Resource(game, t,
+            spec().getResourceType("model.resource.sugar")));
+        final List<Integer> frames = new ArrayList<>();
+        ClassicTileArt.overlayFrames(map, t, ClassicTileArt.modelTypes(map), frames::add);
+        assertTrue(frames.toString(), frames.contains(94));
+        assertFalse(frames.toString(), frames.contains(93));
+    }
+
+    /**
+     * Q4 golden (the pack and {@code -Dclassic.clips}): the markers as the
+     * playthrough-1 frames show them on the blink-OFF frames, every opaque
+     * pixel exact: "Bester Zucker" {@code PHYS0} 94 at (32,120) #29983,
+     * "Oase" 90 at (112,104) #20497 (06 Checker); the old sugar frame 93
+     * does not fit there.
+     */
+    public void testResourceMarkersAgainstPlaythrough1() throws Exception {
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        final java.io.File dir = (clips == null) ? null : new java.io.File(clips, "playthrough-1");
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        if (dir == null || !dir.isDirectory() || pack == null
+            || pack.image(ClassicPackFiles.ssKey("PHYS0.SS.094")) == null) {
+            System.err.println("testResourceMarkersAgainstPlaythrough1 skipped: no recordings or no pack");
+            return;
+        }
+        final int[][] cases = {
+            // frame, PHYS0 frame, x, y, whether it must match
+            { 29983, ClassicTileArt.resourceFrame("model.resource.sugar"), 32, 120, 1 },
+            { 20497, ClassicTileArt.resourceFrame("model.resource.oasis"), 112, 104, 1 },
+            { 29983, 93, 32, 120, 0 },
+        };
+        final StringBuilder out = new StringBuilder();
+        for (int[] c : cases) {
+            final java.awt.image.BufferedImage frame = javax.imageio.ImageIO.read(
+                new java.io.File(dir, String.format("frame_%06d.png", c[0])));
+            final java.awt.image.BufferedImage marker = pack.image(
+                ClassicPackFiles.ssKey(String.format("PHYS0.SS.%03d", c[1])));
+            assertNotNull("#" + c[0], frame);
+            assertNotNull("PHYS0 " + c[1], marker);
+            int opaque = 0, same = 0;
+            for (int y = 0; y < marker.getHeight(); y++) {
+                for (int x = 0; x < marker.getWidth(); x++) {
+                    final int argb = marker.getRGB(x, y);
+                    if ((argb >>> 24) == 0) continue;
+                    opaque++;
+                    if ((argb & 0xFFFFFF) == (frame.getRGB(c[2] + x, c[3] + y) & 0xFFFFFF)) same++;
+                }
+            }
+            out.append(String.format(" #%d PHYS0.%03d %d/%d", c[0], c[1], same, opaque));
+            assertTrue(out.toString(), opaque > 0);
+            if (c[4] == 1) {
+                assertEquals(out.toString(), opaque, same);
+            } else {
+                assertTrue(out.toString(), same < opaque / 2);
+            }
+        }
+        System.err.println("testResourceMarkersAgainstPlaythrough1:" + out);
+    }
+
     /** The road frames ({@code PHYS0} 80 the hub, 81-88 the spokes) a tile shows. */
     private static List<Integer> roadFrames(Map map, Tile t) {
         final List<Integer> out = new java.util.ArrayList<>();
