@@ -694,10 +694,12 @@ cell-fitted sprites (`drawCentered`, `UNIT_CELL_FRACTION`).
   (ACTIVE, moves left, in no building), is not sliding and has no hand-over
   to another unit pending is drawn **in the settlement's place** while its
   blink is ON, the settlement while OFF (clip008 #35590 the merchantman up in
-  Base, #35613 Base, 23 frames each); a visit's unit (W5f) is drawn there
-  until the next unit or the Spielzugende mode (I). As soon as the unit is
+  Base, #35613 Base, 23 frames each). As soon as the unit is
   done the settlement comes back: its last move (the final draw, #50603 ->
-  #50610), Space, or the cycle moving past it (W, F, S). Those changes have no
+  #50610), Space, or the cycle moving past it (W, F, S). A visit's unit (W5f)
+  is not drawn there: it is done with the completion, and drawn it flashed for
+  one frame before the end (live K2 L2); the original's visit in a colony is
+  not recorded (I). Those changes have no
   blink change, so `refreshCover` repaints the cell (from `rearmBlink`,
   `holdBlink`, `enterPrompt` and every hand-over's start,
   `ClassicTurnFlow.Host.handOverStarted`), not after a view move (the whole

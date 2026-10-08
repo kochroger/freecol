@@ -1631,7 +1631,7 @@ public class ClassicMapViewerTest extends FreeColTestCase {
      * merchantman up in Base (clip008 #35590 ON, #35613 OFF); the colony
      * as soon as the unit is done or the cycle moved past it (its last
      * move: #50603 -&gt; #50610), and under every unit there that is not
-     * up, the colony's workers included (#32928).
+     * up, the colony's workers and a visited unit included (#32928).
      */
     public void testAUnitUpOnItsColonyTile() {
         final Game game = getStandardGame();
@@ -1712,26 +1712,28 @@ public class ClassicMapViewerTest extends FreeColTestCase {
             mv.changeToMoveUnits(worker);
             assertNull(mv.unitOverSettlement(base));
             assertFalse(mv.isShownAt(worker, base));
+            worker.setState(Unit.UnitState.ACTIVE);         // not even so
+            worker.setMovesLeft(moves);
+            assertTrue(worker.isInColony());
+            assertNull(mv.unitOverSettlement(base));
+            worker.setState(Unit.UnitState.IN_COLONY);
 
             // Another unit up elsewhere: Base.
             mv.changeToMoveUnits(other);
             assertNull(mv.unitOverSettlement(base));
             assertTrue(mv.isShownAt(other, other.getTile()));
 
-            // The visit of his completed fortification (W5f): drawn for it
-            // (I), not in the Spielzugende mode, gone with the next unit.
+            // The visit of his completed fortification (W5f): Base stays
+            // (he is done with the completion; drawn, he flashed for one
+            // frame before the end, live K2 L2), also in the mode.
             soldier.setState(Unit.UnitState.FORTIFYING);
             soldier.setState(Unit.UnitState.FORTIFIED);
             assertEquals(0, soldier.getMovesLeft());
             mv.visit(soldier);
-            assertSame(soldier, mv.unitOverSettlement(base));
+            assertNull(mv.unitOverSettlement(base));
+            assertFalse(mv.isShownAt(soldier, base));
             mv.enterPrompt(base);
             assertNull(mv.unitOverSettlement(base));
-            mv.freezePrompt();                      // the end: the square frozen
-            assertSame(soldier, mv.unitOverSettlement(base));
-            mv.changeToMoveUnits(other);
-            assertNull(mv.unitOverSettlement(base));
-            mv.visit(soldier);
             mv.changeToEndTurn();
             assertNull(mv.unitOverSettlement(base));
             soldier.setState(Unit.UnitState.ACTIVE);

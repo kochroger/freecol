@@ -1986,16 +1986,6 @@ final class ClassicMapViewer extends JPanel {
     }
 
     /**
-     * Whether the Spielzugende mode waits now: its square is live, not the
-     * frozen one a turn start keeps until a unit comes up.
-     *
-     * @return True in the live mode.
-     */
-    private boolean promptLive() {
-        return this.promptTile != null && !this.promptFrozen;
-    }
-
-    /**
      * A toggle of the square's clock (the event thread): OFF for odd
      * {@code n}, ON for even, while nothing holds it; a hold freezes the
      * phase (landing-slow #4731-#5320, clip004 #4028-#4726), and the first
@@ -2804,17 +2794,15 @@ final class ClassicMapViewer extends JPanel {
      * in Base, #35613 Base, 23 frames each), and the colony as soon as the
      * unit is done (#50603 -&gt; #50610: the farmer's last move into Base,
      * the colony at the final draw); a unit there that is not up is never
-     * drawn (#32928).  So:
-     * <ul>
-     *   <li>the active unit, while it is up -- it takes orders with moves
-     *   left ({@link Unit.UnitState#ACTIVE}, not working in the colony),
-     *   no slide moves it, and no hand-over to another unit is pending
-     *   (the cycle moved past it: W, F, S) -- and its blink is ON;</li>
-     *   <li>else the unit of a visit (W5f; inferred: its completion is
-     *   shown on the unit), until the next unit or the Spielzugende
-     *   mode.</li>
-     * </ul>
-     * A land unit up there is not recorded; the rule is the ship's (I).
+     * drawn (#32928).  So: the active unit while it is up -- it takes
+     * orders with moves left ({@link Unit.UnitState#ACTIVE}, not working
+     * in the colony), no slide moves it, and no hand-over to another unit
+     * is pending (the cycle moved past it: W, F, S) -- and its blink is
+     * ON.  A land unit up there is not recorded; the rule is the ship's
+     * (I).  The unit of a visit (W5f) is not drawn there: it is done with
+     * the completion, and when no unit follows the end comes 16 ms later
+     * (live K2 L2: drawn, it flashed for one frame); the original's visit
+     * in a colony is not recorded (I).
      *
      * @param tile The tile.
      * @return The unit, or null when the settlement is drawn (or the tile
@@ -2826,9 +2814,6 @@ final class ClassicMapViewer extends JPanel {
         if (a != null && a.getTile() == tile && isUp(a)) {
             return (this.blinkOff) ? null : a;
         }
-        final Unit v = this.visitedUnit;
-        if (v != null && v != this.animUnit && v.getTile() == tile
-            && !v.isDisposed() && !v.isInColony() && !promptLive()) return v;
         return null;
     }
 
