@@ -980,7 +980,8 @@ public class ClassicAdvisorBoxTest extends TestCase {
     /**
      * W10: the field's keys.  The first character replaces the selected
      * default (V clip008 #3134), the next ones are added; Backspace takes
-     * the selected default as a whole, else the last character; Enter
+     * the last character, also of the selected default, whose selection
+     * it drops (V playthrough-1 #54434, gap list Q7); Enter
      * takes the text (empty, or only blanks: the default); Escape keeps
      * the default (Roger) whatever was typed.  Refused: characters that
      * are no name's, the 24th, one that would leave the field.
@@ -1012,9 +1013,17 @@ public class ClassicAdvisorBoxTest extends TestCase {
         assertEquals(ClassicAdvisorBox.Bar.DISMISSED, bar.escape());
         assertEquals("Neuholland", r.field.answer());
         assertFalse(r.field.taken());
-        // Backspace on the selection empties the field; Enter on it: the default.
+        // Backspace on the selected default takes its last character and
+        // drops the selection: the next key is added, it replaces nothing.
         bar = new ClassicAdvisorBox.Bar(r);
         assertTrue(bar.backspace());
+        assertEquals("Neuhollan", bar.fieldText());
+        assertFalse(bar.fieldSelected());
+        assertTrue(bar.type('d', null));
+        assertEquals("Neuholland", bar.fieldText());
+        // Emptied by Backspace, or only blanks: Enter gives the default.
+        bar = new ClassicAdvisorBox.Bar(r);
+        for (int i = 0; i < "Neuholland".length(); i++) assertTrue(bar.backspace());
         assertEquals("", bar.fieldText());
         assertFalse(bar.backspace());
         assertTrue(bar.type(' ', null));
@@ -1047,6 +1056,124 @@ public class ClassicAdvisorBoxTest extends TestCase {
         assertFalse(plain.type('a', null));
         assertFalse(plain.backspace());
         assertNull(plain.fieldText());
+    }
+
+    /** An amount box (@HOWMUCH4's shape): two prompt lines, "Menge:", the field. */
+    private static ClassicAdvisorBox.Request amountBox(int max, int preset) {
+        return ClassicAdvisorBox.Request.builder("HOWMUCH4")
+            .gameText(Arrays.asList("^a a", "^a a")).width(230).rows("a.")
+            .amountField(max, preset).build();
+    }
+
+    /**
+     * B1: the @HOWMUCH boxes' amount field "Menge:" (V playthrough-1
+     * #54344): no portrait, the box (42,79,236,43) with two prompt lines,
+     * the field 36 x 10 at box + (33, 24), its preset selected on the
+     * dark block, the label at box + 5.  Only digits, never past the
+     * "(0-max)"; the first digit replaces the preset; Backspace takes one
+     * character and drops the selection ("100" -&gt; "10" -&gt; "1" -&gt;
+     * "", then "5", "50": V #54434 to #54556); Enter takes the number (an
+     * empty field: 0), Escape gives -1; the preset is clamped to 0..max.
+     */
+    public void testAmountField() {
+        final ClassicFont f = font();
+        final ClassicAdvisorBox.Request r = amountBox(100, 100);
+        assertTrue(r.hasField());
+        assertTrue(r.field.isAmount());
+        assertFalse(new ClassicAdvisorBox.Field("x").isAmount());
+        assertEquals("100", r.field.initial);
+        assertEquals("a.", r.fieldLabel);
+        assertTrue(r.rows.isEmpty());
+        assertFalse(r.outsideCancels);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, r.escapeAnswer());
+        final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(r, f, null);
+        assertEquals(2, l.promptLines());
+        assertEquals(new Rectangle(42, 79, 236, 43), l.box);
+        assertNull(l.portraitAt);
+        assertEquals(new Rectangle(75, 103, 36, 10), l.field);
+        assertEquals(new Point(78, 106), l.fieldText());
+        assertEquals(47, l.fieldLabel.x);
+        assertEquals(106, l.fieldLabel.y);
+        final int ink = ClassicMenuBox.GAME.ink.getRGB();
+        final BufferedImage img = ClassicAdvisorBox.render(l, -1, null, f);
+        assertEquals(ink, img.getRGB(75, 103));
+        assertEquals(ink, img.getRGB(110, 103));
+        assertEquals(ink, img.getRGB(75, 112));
+        assertEquals(ink, img.getRGB(110, 112));
+        assertTrue(ink != img.getRGB(111, 107));
+
+        ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+        assertTrue(bar.fieldSelected());
+        assertEquals(-1, r.field.amount());               // not answered yet
+        for (char c : "a -.'".toCharArray()) assertFalse(bar.type(c, null));
+        assertEquals("100", bar.fieldText());
+        assertTrue(bar.fieldSelected());
+        assertTrue(bar.backspace());
+        assertEquals("10", bar.fieldText());
+        assertFalse(bar.fieldSelected());
+        assertTrue(bar.backspace());
+        assertEquals("1", bar.fieldText());
+        assertTrue(bar.backspace());
+        assertEquals("", bar.fieldText());
+        assertFalse(bar.backspace());
+        assertTrue(bar.type('5', null));
+        assertTrue(bar.type('0', null));
+        assertEquals("50", bar.fieldText());
+        assertFalse("past the max", bar.type('0', null));
+        assertEquals(0, bar.enter());
+        assertEquals(50, r.field.amount());
+        assertTrue(r.field.taken());
+
+        // The first digit replaces the preset; one past the max is refused.
+        ClassicAdvisorBox.Request q = amountBox(72, 72);
+        bar = new ClassicAdvisorBox.Bar(q);
+        assertTrue(bar.type('8', null));
+        assertEquals("8", bar.fieldText());
+        assertFalse(bar.type('0', null));
+        assertFalse(bar.type('2', null));
+        assertEquals("8", bar.fieldText());
+        assertTrue(bar.backspace());
+        assertTrue(bar.type('7', null));
+        assertTrue(bar.type('2', null));
+        assertEquals("72", bar.fieldText());
+        assertFalse("no third digit for 72", bar.type('0', null));
+        assertEquals(0, bar.enter());
+        assertEquals(72, q.field.amount());
+        // Enter on the untouched preset: the preset.
+        q = amountBox(100, 72);
+        bar = new ClassicAdvisorBox.Bar(q);
+        assertEquals("72", bar.fieldText());
+        assertEquals(0, bar.enter());
+        assertEquals(72, q.field.amount());
+        // An emptied field: 0 (nothing is traded).
+        q = amountBox(100, 7);
+        bar = new ClassicAdvisorBox.Bar(q);
+        assertTrue(bar.backspace());
+        assertEquals("", bar.fieldText());
+        assertEquals(0, bar.enter());
+        assertEquals(0, q.field.amount());
+        // A leading zero is a digit like any other.
+        q = amountBox(100, 100);
+        bar = new ClassicAdvisorBox.Bar(q);
+        assertTrue(bar.type('0', null));
+        assertTrue(bar.type('7', null));
+        assertEquals(0, bar.enter());
+        assertEquals(7, q.field.amount());
+        // Escape: -1, whatever was typed.
+        q = amountBox(100, 100);
+        bar = new ClassicAdvisorBox.Bar(q);
+        bar.type('5', null);
+        assertEquals(ClassicAdvisorBox.Bar.DISMISSED, bar.escape());
+        assertEquals(-1, q.field.amount());
+        assertFalse(q.field.taken());
+        // The preset clamped to 0..max.
+        assertEquals("100", amountBox(100, 150).field.initial);
+        assertEquals("0", amountBox(100, -5).field.initial);
+        assertEquals("0", amountBox(0, 0).field.initial);
+        // A name field has no amount.
+        final ClassicAdvisorBox.Request n = nameBox("ab");
+        new ClassicAdvisorBox.Bar(n).enter();
+        assertEquals(-1, n.field.amount());
     }
 
 

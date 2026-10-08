@@ -80,7 +80,8 @@ import net.sf.freecol.common.model.Unit;
  *       #30059); {@code %STRING0} the colony.  D10 builds the docking.</li>
  * </ul>
  * {@code @TUTORIAL1} is the first scene's ({@link ClassicFirstScene}),
- * {@code @TUTORIAL17} the Europe screen's ({@link ClassicBands}).
+ * {@code @TUTORIAL17} the Europe screen's ({@link ClassicBands}),
+ * {@code @TUTORIAL18} a buy there the gold cannot pay ({@link ClassicTrade}).
  */
 final class ClassicTips {
 
@@ -96,6 +97,12 @@ final class ClassicTips {
     /** The tips' numbers (GAME.TXT {@code @TUTORIALk}). */
     static final int LAND_HO = 2, SITE = 3, COLONY = 4, UNREST = 5,
         SHIP = 11, DOCK = 12, PIONEER = 13, SOLDIER = 14;
+
+    /**
+     * {@code @TUTORIAL18}: a full buy in Europe the gold cannot pay (V
+     * playthrough-1 #52789, no portrait; {@link ClassicTrade}).
+     */
+    static final int PART = 18;
 
     /** The unit tips, in the order they are tried. */
     static final int[] UNIT_TIPS = { SHIP, PIONEER, SOLDIER, SITE };
@@ -135,6 +142,7 @@ final class ClassicTips {
         case SITE: case PIONEER: return ClassicAdvisorBox.Portrait.SCOUT;
         case SOLDIER: return ClassicAdvisorBox.Portrait.SOLDIER;
         case COLONY: case DOCK: return ClassicAdvisorBox.Portrait.COLONIST;
+        case PART: return ClassicAdvisorBox.Portrait.NONE;
         default: return ClassicAdvisorBox.Portrait.ADMIRAL;
         }
     }
@@ -376,8 +384,17 @@ final class ClassicTips {
         return cell(t, "CARGO", row, 0);
     }
 
+    /**
+     * @param t The original texts, or null.
+     * @param u A unit.
+     * @return Its NAMES.TXT {@code @UNIT} name ("Handelsschiff"), or null.
+     */
+    static String unitName(ClassicText t, Unit u) {
+        return cell(t, "UNIT", ClassicHud.unitRow(u), 0);
+    }
+
     /** NAMES.TXT {@code @HOMEPORT} of a player, or null. */
-    private static String homePort(ClassicText t, Player p) {
+    static String homePort(ClassicText t, Player p) {
         return cell(t, "HOMEPORT", ClassicDestinations.nation(p), 0);
     }
 

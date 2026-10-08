@@ -146,6 +146,21 @@ final class ClassicScriptDriver {
         }
 
         /**
+         * {@link #screenClick(int, int)} with Shift held or not (a part of
+         * a hold, gap list B1).
+         *
+         * @param x Screen canvas x.
+         * @param y Screen canvas y.
+         * @param shift Whether Shift is held.
+         * @exception ScriptException if no such screen is open, or a Shift
+         *     click is not supported.
+         */
+        default void screenClick(int x, int y, boolean shift) throws ScriptException {
+            if (shift) throw new ScriptException("no Shift click on a classic screen");
+            screenClick(x, y);
+        }
+
+        /**
          * Click the left button on a map tile as the map shows it now
          * ({@link ClassicScriptDriver#tileCanvasPoint}).
          *
@@ -296,7 +311,7 @@ final class ClassicScriptDriver {
             this.host.move((int)c.number, c.y);
             break;
         case SCREEN_CLICK:
-            this.host.screenClick((int)c.number, c.y);
+            this.host.screenClick((int)c.number, c.y, c.value);
             Thread.sleep(KEY_HOLD_MS);
             break;
         case TILE_CLICK:

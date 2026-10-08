@@ -204,8 +204,16 @@ public class ClassicFoundingTest extends FreeColTestCase {
         // An emptied field: the default.
         r = ClassicFounding.colonyRequest(t, "New Amsterdam", "x");
         b = new ClassicAdvisorBox.Bar(r);
-        b.backspace();
+        while (b.backspace()) {
+            // Backspace takes one character at a time (gap list Q7).
+        }
+        assertEquals("", b.fieldText());
         assertEquals("New Amsterdam", ClassicFounding.answered(r, b.enter()));
+        // One Backspace on the selected default: its last character goes.
+        r = ClassicFounding.colonyRequest(t, "New Amsterdam", "x");
+        b = new ClassicAdvisorBox.Bar(r);
+        assertTrue(b.backspace());
+        assertEquals("New Amsterda", ClassicFounding.answered(r, b.enter()));
     }
 
     /**

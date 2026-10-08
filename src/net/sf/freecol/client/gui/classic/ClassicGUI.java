@@ -171,6 +171,13 @@ public class ClassicGUI extends GUI {
     /** The Europe panel inside {@link #europeFrame}, kept so it can be repainted. */
     private ClassicEuropePanel europePanel;
 
+    /**
+     * The wood boxes over the Europe screen ({@link #europeFrame}'s glass
+     * pane, gap list B1: {@code @HOWMUCH4}, {@code @HOWMUCH5},
+     * {@code @TUTORIAL18}), or null.
+     */
+    private ClassicAdvisorLayer europeBoxes;
+
     /** When Europe was last asked for and is not open yet (0: not), clock ns. */
     private long europeAskedAt = 0L;
 
@@ -2078,18 +2085,162 @@ public class ClassicGUI extends GUI {
     }
 
     /**
+     * What the wood boxes over the Europe screen need ({@link #europeBoxes},
+     * gap list B1): the font and the wood; no portraits (the @HOWMUCH boxes
+     * and @TUTORIAL18 have none); the keys back to the screen when they
+     * are gone.
+     */
+    private final class EuropeBoxHost implements ClassicAdvisorLayer.Host {
+
+        private final ClassicFont tiny;
+        private final BufferedImage wood;
+        private final ClassicEuropePanel panel;
+
+        EuropeBoxHost(ClassicPackFiles pack, ClassicEuropePanel panel) {
+            this.tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
+            this.wood = (pack == null) ? null : pack.image(ClassicMenuBar.WOOD_KEY);
+            this.panel = panel;
+        }
+
+        @Override
+        public ClassicFont font() {
+            return this.tiny;
+        }
+
+        @Override
+        public BufferedImage wood() {
+            return this.wood;
+        }
+
+        @Override
+        public BufferedImage portrait(String sprite) {
+            return null;
+        }
+
+        @Override
+        public int[] portraitPalette(ClassicAdvisorBox.Portrait p) {
+            return null;
+        }
+
+        @Override
+        public void opened() {
+            ClassicDialog.popupOpened();
+        }
+
+        @Override
+        public void closed() {
+            ClassicDialog.popupClosed();
+        }
+
+        @Override
+        public void idle() {
+            this.panel.requestFocusInWindow();
+        }
+
+        @Override
+        public boolean isAutoRepeat(KeyEvent e) {
+            return ClassicGUI.this.isAutoRepeat(e);
+        }
+    }
+
+    /** The Europe screen's boxes (gap list B1, {@link ClassicEuropePanel.Boxes}). */
+    private final class EuropeBoxes implements ClassicEuropePanel.Boxes {
+
+        @Override
+        public int ask(ClassicAdvisorBox.Request r) {
+            return europeBox(r);
+        }
+
+        @Override
+        public void cannotPay(GoodsType type) {
+            europeCannotPay(type);
+        }
+    }
+
+    /**
+     * A box over the Europe screen: the wood box on its glass pane
+     * ({@link #europeBoxes}), else (no font, no screen) the stopgap, which
+     * answers an amount box with nothing ({@link #stopgapBox}).  EDT only.
+     *
+     * @param r The box.
+     * @return The answer ({@link Prompter#ask}).
+     */
+    int europeBox(ClassicAdvisorBox.Request r) {
+        final ClassicAdvisorLayer layer = this.europeBoxes;
+        if (layer != null && isOpen(this.europeFrame)) {
+            final int got = layer.show(r);
+            if (got != ClassicAdvisorLayer.UNAVAILABLE) return got;
+        }
+        return stopgapBox(r);
+    }
+
+    /**
+     * A buy in Europe the gold cannot pay (gap list B1; V playthrough-1
+     * #52751 -&gt; #52789): {@code @TUTORIAL18} {@link ClassicTrade#TIP_MS}
+     * after the click, once per game, with Tutortips on (kept in the save,
+     * {@code Player.classicTips}); else nothing (the original's red line
+     * "... zu teuer!" is W22).  Nothing is bought either way.  EDT only.
+     *
+     * @param type The goods.
+     */
+    void europeCannotPay(GoodsType type) {
+        final Player me = myPlayer();
+        final FreeColClient fcc = getFreeColClient();
+        final ClassicAdvisorBox.Request r = cannotPayTip(
+            ClassicText.load(ClassicPackFiles.runtime()), me, type,
+            fcc != null && fcc.tutorialMode(),
+            waitClock().now() + ClassicVoyages.nanos(ClassicTrade.TIP_MS));
+        if (r == null) {
+            ClassicFrameRecorder.event("europe-too-dear", type + " no tip");
+            return;
+        }
+        markTip(me, ClassicTips.PART);
+        ClassicFrameRecorder.event("tip", ClassicTips.section(ClassicTips.PART));
+        europeBox(r);
+    }
+
+    /**
+     * {@code @TUTORIAL18}'s box for a buy the gold cannot pay
+     * ({@link #europeCannotPay}): its values the goods, the price of one
+     * and our gold.
+     *
+     * @param t The original texts, or null.
+     * @param me Our player, or null.
+     * @param type The goods, or null.
+     * @param tutorial Whether Tutortips is on.
+     * @param showAt When it comes (clock ns).
+     * @return The box, or null: Tutortips off, shown in this game
+     *     already, no market, no pack.
+     */
+    static ClassicAdvisorBox.Request cannotPayTip(ClassicText t, Player me,
+                                                 GoodsType type, boolean tutorial,
+                                                 long showAt) {
+        if (me == null || type == null || !tutorial || me.getMarket() == null
+            || tipShown(me, ClassicTips.PART)) return null;
+        return ClassicTips.request(t, ClassicTips.PART,
+            ClassicTrade.tipValues(t, type, me.getMarket().getCostToBuy(type),
+                                   me.getGold()), showAt);
+    }
+
+    /**
      * Whether an advisor box is up or due (build spec W7).  EDT only.
      *
      * @return True if so.
      */
     boolean boxBusy() {
         return (this.boxLayer != null && this.boxLayer.isBusy())
+            || (this.europeBoxes != null && this.europeBoxes.isBusy())
             || this.woodcutsPosted > 0;
     }
 
     /** @return The advisor boxes' layer, or null (the harness, tests). */
     ClassicAdvisorLayer boxLayer() {
         return this.boxLayer;
+    }
+
+    /** @return The wood boxes over the Europe screen, or null (the harness). */
+    ClassicAdvisorLayer europeBoxLayer() {
+        return this.europeBoxes;
     }
 
     /**
@@ -3695,11 +3846,18 @@ public class ClassicGUI extends GUI {
                 closeEuropePanel();
                 final ClassicEuropePanel panel = new ClassicEuropePanel(
                     getFreeColClient(), this.imageLibrary, player.getEurope(),
-                    this::europeClosed, this::europeShipSailed);
+                    this::europeClosed, this::europeShipSailed, new EuropeBoxes());
                 final JFrame f = new JFrame(Messages.message(player.getEurope()
                         .getNameKey()));
                 this.europeFrame = f;
                 this.europePanel = panel;
+                // The wood boxes over the screen (B1), on its glass pane:
+                // the same 320x200 canvas, scale and letterbox as the panel.
+                final ClassicPackFiles pack = ClassicPackFiles.runtime();
+                this.europeBoxes = new ClassicAdvisorLayer(
+                    new EuropeBoxHost(pack, panel), waitClock(),
+                    SwingUtilities::invokeLater, true);
+                f.setGlassPane(this.europeBoxes);
                 f.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
                 f.addWindowListener(new WindowAdapter() {
                         @Override
@@ -3786,9 +3944,13 @@ public class ClassicGUI extends GUI {
      */
     private void closeEuropePanel() {
         final JFrame f = this.europeFrame;
+        final ClassicAdvisorLayer boxes = this.europeBoxes;
         this.europeFrame = null;
         this.europePanel = null;
+        this.europeBoxes = null;
         if (this.europeCloseTimer != null) this.europeCloseTimer.cancel();
+        // A box still up answers "dismissed": no trade (B1).
+        if (boxes != null) boxes.dispose();
         if (f != null) f.dispose();
     }
 
@@ -6477,6 +6639,11 @@ public class ClassicGUI extends GUI {
         if (r.isNotice()) {
             ClassicDialog.showMessages(owner, r.title, List.of(page));
             return 0;
+        }
+        if (r.hasField() && r.field.isAmount()) {
+            // An amount (B1) is never answered by itself: no trade.
+            ClassicFrameRecorder.event("box-close", r.id + " stopgap: no amount box");
+            return ClassicAdvisorBox.Bar.DISMISSED;
         }
         if (r.hasField()) {
             // A name box off the map (I: no screen asks one there): its

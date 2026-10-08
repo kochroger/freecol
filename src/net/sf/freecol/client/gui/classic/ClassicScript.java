@@ -51,7 +51,8 @@ import javax.swing.KeyStroke;
  *   <li>{@code sclick <x> <y>}: a left click at a point of the open
  *       classic screen's own 320x200 canvas (the Europe screen: its ship
  *       in port, its Set Sail; also in a minimized run, whose screen never
- *       painted).</li>
+ *       painted); {@code sclick <x> <y> shift} with Shift held
+ *       (a part of a hold, gap list B1).</li>
  *   <li>{@code tclick <x> <y>}: a left click on map tile (x, y) as the
  *       map shows it now: the canvas point at its cell's centre in the
  *       15x12 view (a unit in the Spielzugende mode, J2); an error if the
@@ -200,10 +201,15 @@ final class ClassicScript {
         }
         case "sclick": {
             final String[] xy = rest.split("\\s+");
-            if (xy.length != 2) throw new IllegalArgumentException(cmd + " needs x and y");
+            if (xy.length < 2 || xy.length > 3) {
+                throw new IllegalArgumentException(cmd + " needs x and y");
+            }
+            if (xy.length == 3 && !"shift".equalsIgnoreCase(xy[2])) {
+                throw new IllegalArgumentException(cmd + ": only shift after x and y");
+            }
             final int x = integer(xy[0], ClassicFrameRecorder.W);
             final int y = integer(xy[1], ClassicFrameRecorder.H);
-            return new Command(Op.SCREEN_CLICK, n, s, x, y, null, null, false);
+            return new Command(Op.SCREEN_CLICK, n, s, x, y, null, null, xy.length == 3);
         }
         case "tclick": {
             final String[] xy = rest.split("\\s+");

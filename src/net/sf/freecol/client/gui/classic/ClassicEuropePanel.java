@@ -104,6 +104,9 @@ import net.sf.freecol.common.model.UnitType;
  * ({@link #boardSelected}); select a ship in port to buy and load goods from
  * the market ({@link #loadMarketGood}), sell goods already in its hold
  * ({@link #sellCargo}), or set sail for the New World ({@link #setSail}).
+ * Shift with a click on a market slot or on a good in the hold trades a
+ * part of a hold in the original's {@code @HOWMUCH} boxes over the screen
+ * ({@link ClassicTrade}, {@link Boxes}; gap list B1).
  * Escape or a click on the red exit button closes the screen.
  */
 final class ClassicEuropePanel extends JPanel {
@@ -155,6 +158,33 @@ final class ClassicEuropePanel extends JPanel {
      * last ship in port closes the screen by itself (ClassicGUI), or null.
      */
     private final java.util.function.Consumer<Unit> onSailed;
+
+    /**
+     * What the screen's boxes need from the game's GUI (gap list B1): the
+     * {@code @HOWMUCH} boxes over the screen, {@code @TUTORIAL18}.
+     */
+    interface Boxes {
+
+        /**
+         * Put a box over the Europe screen and wait for its answer
+         * ({@code ClassicGUI.Prompter#ask}).
+         *
+         * @param r The box.
+         * @return The answer; {@link ClassicAdvisorBox.Bar#DISMISSED} if
+         *     it could not open.
+         */
+        int ask(ClassicAdvisorBox.Request r);
+
+        /**
+         * A plain buy the gold cannot pay ({@link ClassicTrade.Trader#cannotPay}).
+         *
+         * @param type The goods.
+         */
+        void cannotPay(GoodsType type);
+    }
+
+    /** The boxes over the screen, or null (then no partial trade). */
+    private final Boxes boxes;
 
     /** The three action buttons, rebuilt each paint (virtual-space bounds + label). */
     private final List<Rectangle> buttonBounds = new ArrayList<>();
@@ -208,7 +238,7 @@ final class ClassicEuropePanel extends JPanel {
 
     ClassicEuropePanel(FreeColClient freeColClient, ImageLibrary lib,
                        Europe europe, Runnable onClose) {
-        this(freeColClient, lib, europe, onClose, null);
+        this(freeColClient, lib, europe, onClose, null, null);
     }
 
     /**
@@ -218,15 +248,18 @@ final class ClassicEuropePanel extends JPanel {
      * @param onClose Run when the screen is dismissed.
      * @param onSailed Told of a ship that sailed for the New World, or
      *     null.
+     * @param boxes The boxes over the screen (B1), or null.
      */
     ClassicEuropePanel(FreeColClient freeColClient, ImageLibrary lib,
                        Europe europe, Runnable onClose,
-                       java.util.function.Consumer<Unit> onSailed) {
+                       java.util.function.Consumer<Unit> onSailed,
+                       Boxes boxes) {
         this.freeColClient = freeColClient;
         this.lib = lib;
         this.europe = europe;
         this.onClose = onClose;
         this.onSailed = onSailed;
+        this.boxes = boxes;
         setOpaque(true);
         setBackground(Color.BLACK);
         setPreferredSize(new Dimension(VW * 3, VH * 3));
@@ -272,17 +305,30 @@ final class ClassicEuropePanel extends JPanel {
     private void onClick(MouseEvent e) {
         if (this.scale <= 0) return;
         clickAt((e.getX() - this.originX) / this.scale,
-                (e.getY() - this.originY) / this.scale);
+                (e.getY() - this.originY) / this.scale, e.isShiftDown());
     }
 
     /**
-     * A click at a point of the 320&times;200 canvas: the mouse's, and the
-     * scripted harness's {@code sclick} ({@link #paintTargets} first).
+     * A click at a point of the 320&times;200 canvas, no Shift.
      *
      * @param vx Canvas x.
      * @param vy Canvas y.
      */
     void clickAt(int vx, int vy) {
+        clickAt(vx, vy, false);
+    }
+
+    /**
+     * A click at a point of the 320&times;200 canvas: the mouse's, and the
+     * scripted harness's {@code sclick} ({@link #paintTargets} first).
+     * With Shift on a market slot or a good in the hold: a part of it
+     * ({@link ClassicTrade}, gap list B1).
+     *
+     * @param vx Canvas x.
+     * @param vy Canvas y.
+     * @param shift Whether Shift was held.
+     */
+    void clickAt(int vx, int vy, boolean shift) {
         // The exit button ("E") at the bottom right, as in the original art.
         if (vx >= EXIT_X && vy >= MARKET_Y) {
             close();
@@ -296,7 +342,7 @@ final class ClassicEuropePanel extends JPanel {
         }
         for (int i = 0; i < this.cargoBounds.size(); i++) {
             if (this.cargoBounds.get(i).contains(vx, vy)) {
-                sellCargo(this.cargoGoods.get(i));
+                sellCargo(this.cargoGoods.get(i), shift);
                 return;
             }
         }
@@ -314,7 +360,7 @@ final class ClassicEuropePanel extends JPanel {
         }
         for (int i = 0; i < this.marketBounds.size(); i++) {
             if (this.marketBounds.get(i).contains(vx, vy)) {
-                loadMarketGood(this.marketTypes.get(i));
+                loadMarketGood(this.marketTypes.get(i), shift);
                 return;
             }
         }
@@ -358,11 +404,71 @@ final class ClassicEuropePanel extends JPanel {
      * Europe, routes to {@code sellGoods} internally (the same call
      * {@code GoodsLabel}/{@code MarketPanel} make when a cargo icon is
      * dragged off a carrier in the standard UI). The ship stays selected so
-     * several goods types can be sold in one visit.
+     * several goods types can be sold in one visit.  With Shift,
+     * {@code @HOWMUCH5} asks how much ({@link ClassicTrade#sell}).
      */
-    private void sellCargo(Goods goods) {
-        igc().unloadCargo(goods, false);
+    private void sellCargo(Goods goods, boolean shift) {
+        final int n = ClassicTrade.sell(this.freeColClient.getMyPlayer(), goods,
+                                        shift, trader());
+        ClassicFrameRecorder.event("europe-sell", goods.getType().getSuffix()
+            + " shift=" + shift + " sold=" + n + " gold=" + gold());
         refresh();
+    }
+
+    /** @return Our gold (the recorder's trade events). */
+    private int gold() {
+        final Player me = this.freeColClient.getMyPlayer();
+        return (me == null) ? 0 : me.getGold();
+    }
+
+    /** The trades' boxes and controller calls ({@link ClassicTrade.Trader}). */
+    private ClassicTrade.Trader trader() {
+        return new ClassicTrade.Trader() {
+            @Override
+            public int ask(boolean buying, GoodsType type, int max, int preset) {
+                return askAmount(buying, type, max, preset);
+            }
+
+            @Override
+            public boolean buy(GoodsType type, int amount, Unit ship) {
+                return igc().buyGoods(type, amount, ship);
+            }
+
+            @Override
+            public boolean sell(Goods goods) {
+                return igc().unloadCargo(goods, false);
+            }
+
+            @Override
+            public void cannotPay(GoodsType type) {
+                if (boxes != null) boxes.cannotPay(type);
+            }
+        };
+    }
+
+    /**
+     * A {@code @HOWMUCH} box over the screen ({@link ClassicTrade#howMuchRequest}).
+     *
+     * @param buying True for {@code @HOWMUCH4}, false for {@code @HOWMUCH5}.
+     * @param type The goods.
+     * @param max The "(0-max)".
+     * @param preset The field's preset.
+     * @return The amount Enter took, or -1 (Escape, no box, no pack).
+     */
+    private int askAmount(boolean buying, GoodsType type, int max, int preset) {
+        final Player me = this.freeColClient.getMyPlayer();
+        final Market market = (me == null) ? null : me.getMarket();
+        if (this.boxes == null || market == null) return -1;
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final java.util.Map<String, String> values = (buying)
+            ? ClassicTrade.buyValues(t, type, market.getCostToBuy(type),
+                                     this.selectedUnit, max)
+            : ClassicTrade.sellValues(t, type, market.getPaidForSale(type), me, max);
+        final ClassicAdvisorBox.Request r
+            = ClassicTrade.howMuchRequest(t, buying, values, max, preset);
+        if (r == null) return -1;
+        this.boxes.ask(r);
+        return r.field.amount();
     }
 
     /**
@@ -377,15 +483,17 @@ final class ClassicEuropePanel extends JPanel {
      * live-testing this slice; {@code buyGoods} needs no such object.)
      * Capped at one cargo hold ({@link GoodsContainer#CARGO_SIZE}) per click,
      * mirroring that drag; the ship stays selected so several goods types can
-     * be bought in one visit.
+     * be bought in one visit.  One the gold cannot pay buys nothing and
+     * brings {@code @TUTORIAL18} instead of FreeCol's "nicht genug Gold"
+     * notice; with Shift, {@code @HOWMUCH4} asks how much
+     * ({@link ClassicTrade#buy}, gap list B1).
      */
-    private void loadMarketGood(GoodsType type) {
+    private void loadMarketGood(GoodsType type, boolean shift) {
         if (this.selectedUnit == null || !this.selectedUnit.isNaval()) return;
-        final Unit ship = this.selectedUnit;
-        int loadable = ship.getLoadableAmount(type);
-        if (loadable <= 0) return;
-        if (loadable > GoodsContainer.CARGO_SIZE) loadable = GoodsContainer.CARGO_SIZE;
-        igc().buyGoods(type, loadable, ship);
+        final int n = ClassicTrade.buy(this.freeColClient.getMyPlayer(),
+            this.selectedUnit, type, shift, trader());
+        ClassicFrameRecorder.event("europe-buy", type.getSuffix() + " shift=" + shift
+            + " bought=" + n + " gold=" + gold());
         refresh();
     }
 

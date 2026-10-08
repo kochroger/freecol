@@ -155,6 +155,49 @@ public class ClassicScriptTest extends TestCase {
     }
 
     /**
+     * B1: {@code sclick x y shift} is a screen click with Shift held (a
+     * part of a hold in Europe); anything else after x and y is refused;
+     * a host that has no Shift click fails the script there.
+     */
+    public void testScreenClickWithShift() throws IOException {
+        final ClassicScript s = parse("sclick 275 190 shift", "sclick 275 190",
+                                      "SCLICK 1 2 SHIFT");
+        assertTrue(s.commands.get(0).value);
+        assertFalse(s.commands.get(1).value);
+        assertTrue(s.commands.get(2).value);
+        assertEquals(275L, s.commands.get(0).number);
+        assertEquals(190, s.commands.get(0).y);
+        assertBad("sclick 1 2 ctrl", "only shift after x and y");
+        assertBad("sclick 1 2 shift x", "sclick needs x and y");
+        final FakeHost h = new FakeHost() {
+                @Override
+                public void screenClick(int x, int y, boolean shift) {
+                    this.calls.add("sclick " + x + "," + y + (shift ? " shift" : ""));
+                }
+            };
+        File r = resultFile();
+        new ClassicScriptDriver(parse("sclick 17 133 shift", "sclick 17 133", "quit"),
+                                h, r).run();
+        assertEquals(Arrays.asList("sclick 17,133 shift", "sclick 17,133", "quit"),
+                     h.calls);
+        assertEquals("ok", result(r));
+        // A host with only the plain click: a plain one goes there, Shift fails.
+        final FakeHost plain = new FakeHost() {
+                @Override
+                public void screenClick(int x, int y) {
+                    this.calls.add("sclick " + x + "," + y);
+                }
+            };
+        r = resultFile();
+        new ClassicScriptDriver(parse("sclick 17 133", "sclick 17 133 shift", "log never"),
+                                plain, r).run();
+        assertEquals("the error ends the game", Arrays.asList("sclick 17,133", "quit"),
+                     plain.calls);
+        assertTrue(result(r), result(r).startsWith("error line 2"));
+        assertTrue(result(r), result(r).contains("no Shift click"));
+    }
+
+    /**
      * J2: {@code tclick x y} clicks a map tile as the map shows it now
      * (a unit in the Spielzugende mode): the cell's centre on the canvas,
      * under the 8-px menu strip; a tile out of the 15x12 view, or no map,

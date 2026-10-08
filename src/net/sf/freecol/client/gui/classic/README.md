@@ -5404,7 +5404,7 @@ woke late in 25 (> 5 ms in 17, at most 12.4 ms), the new one never (at most
 
 **Input script** (`-Dfreecol.classic.script=<file>`, format in
 `ClassicScript`'s class comment): `wait <ms>`, `key <KeyStroke>` (e.g. `LEFT`,
-`NUMPAD7`, `ENTER`, `alt G`), `click <x> <y>` (canvas pixels), `sclick <x> <y>` (the open Europe screen's own 320x200 canvas, also minimized),
+`NUMPAD7`, `ENTER`, `alt G`), `click <x> <y>` (canvas pixels), `sclick <x> <y> [shift]` (the open Europe screen's own 320x200 canvas, also minimized; `shift`: with Shift held, B1),
 `tclick <x> <y>` (map tile (x, y) as the map shows it now: its cell's centre
 on the canvas, an error out of the view; J2), `waitGame`,
 `waitIdle`, `waitTurn [timeoutMs [key]]` (with a key, every box on screen

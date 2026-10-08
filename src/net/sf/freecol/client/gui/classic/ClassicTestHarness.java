@@ -219,6 +219,9 @@ final class ClassicTestHarness {
         // An advisor box takes the keys while it is up or due (W7).
         final ClassicAdvisorLayer boxes = this.gui.boxLayer();
         if (boxes != null && boxes.isBusy() && boxes.isShowing()) return boxes;
+        // So do the wood boxes over the Europe screen (B1).
+        final ClassicAdvisorLayer europe = this.gui.europeBoxLayer();
+        if (europe != null && europe.isBusy() && europe.isShowing()) return europe;
         // So does the first scene: it holds the focus in a real game, but
         // a window minimized without activation has no focus owner, and
         // the keys would reach the map viewer behind it.
@@ -394,6 +397,12 @@ final class ClassicTestHarness {
         @Override
         public void screenClick(int x, int y)
             throws ClassicScriptDriver.ScriptException {
+            screenClick(x, y, false);
+        }
+
+        @Override
+        public void screenClick(int x, int y, boolean shift)
+            throws ClassicScriptDriver.ScriptException {
             final boolean[] found = { false };
             try {
                 SwingUtilities.invokeAndWait(() -> {
@@ -404,7 +413,7 @@ final class ClassicTestHarness {
                         found[0] = true;
                         final ClassicEuropePanel ep = (ClassicEuropePanel)cp;
                         ep.paintTargets();
-                        ClassicFrameRecorder.event("sclick", x + "," + y + " -> Europe");
+                        ClassicFrameRecorder.event("sclick", x + "," + y + (shift ? " shift" : "") + " -> Europe");
                     });
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -422,7 +431,7 @@ final class ClassicTestHarness {
                     final java.awt.Container cp = (s instanceof JFrame)
                         ? ((JFrame) s).getContentPane() : null;
                     if (cp instanceof ClassicEuropePanel) {
-                        ((ClassicEuropePanel)cp).clickAt(x, y);
+                        ((ClassicEuropePanel)cp).clickAt(x, y, shift);
                     } else {
                         ClassicFrameRecorder.event("sclick", x + "," + y + " lost");
                     }

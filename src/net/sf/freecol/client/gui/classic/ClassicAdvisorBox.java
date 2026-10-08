@@ -112,7 +112,8 @@ import java.util.Map;
  *       @LANDHO and @COLONY: GAME.TXT's option row is the label of a name
  *       field ({@link Field}) with the default name selected; no rows, no
  *       bar; typed characters edit it, Enter takes it, Escape keeps the
- *       default.</li>
+ *       default.  The @HOWMUCH boxes' "Menge:" is an amount field
+ *       ({@link Field#amount}, V playthrough-1 #54344, gap list B1).</li>
  * </ul>
  */
 final class ClassicAdvisorBox {
@@ -291,15 +292,26 @@ final class ClassicAdvisorBox {
      * 7.4 s nothing changes (#2665-#3184).  The label (GAME.TXT's option
      * row, "Name:") at box + 5, glyph top field + 3.  The first key
      * replaces the selected name (V clip008 #3134 "B", then "Ba", "Bas",
-     * "Base"); Backspace and the length limits are I.
+     * "Base"); Backspace deletes one character and drops the selection
+     * (V playthrough-1 #54434: @HOWMUCH4's selected "100" -&gt; "10", gap
+     * list Q7); the length limits are I.
+     *
+     * <p>The <b>amount field</b> ({@link #amount}, gap list B1) of the
+     * @HOWMUCH boxes, "Menge:": V playthrough-1 #54344, @HOWMUCH4's
+     * (75,103,36,10) in the box (42,79,236,43), so box + (33, 24), 36 wide,
+     * the same ink, block and text offset; its preset selected, the first
+     * key replaces it.  Only digits, never more than its "(0-max)" (I).
      */
     static final class Field {
 
-        /** The field's size (V: 144 x 10 in both clips). */
+        /** The name field's size (V: 144 x 10 in both clips). */
         static final int W = 144, H = 10;
 
-        /** The field's left edge from the box's (V: + 29 in both clips). */
+        /** The name field's left edge from the box's (V: + 29 in both clips). */
         static final int X = 29;
+
+        /** The amount field's left edge from the box's and its width (V: #54344). */
+        static final int AMOUNT_X = 33, AMOUNT_W = 36;
 
         /** The text's offset in the field (V: + 3, + 3). */
         static final int TEXT_DX = 3, TEXT_DY = 3;
@@ -313,6 +325,12 @@ final class ClassicAdvisorBox {
         /** The name the field opens with, selected. */
         final String initial;
 
+        /** The field's left edge from the box's and its width. */
+        final int x, w;
+
+        /** An amount field's largest number ("(0-max)"), or -1 for a name field. */
+        final int max;
+
         /** The name taken (Enter), or null: then {@link #initial}. */
         private volatile String entered = null;
 
@@ -323,7 +341,78 @@ final class ClassicAdvisorBox {
          * @param initial The default name, selected when the box opens.
          */
         Field(String initial) {
+            this(initial, X, W, -1);
+        }
+
+        private Field(String initial, int x, int w, int max) {
             this.initial = (initial == null) ? "" : initial;
+            this.x = x;
+            this.w = w;
+            this.max = max;
+        }
+
+        /**
+         * An amount field ("Menge:", the @HOWMUCH boxes).
+         *
+         * @param max The largest amount, the box's "(0-max)".
+         * @param preset The amount it opens with, selected (clamped to
+         *     0..max).
+         * @return The field.
+         */
+        static Field amount(int max, int preset) {
+            final int m = Math.max(0, max);
+            return new Field(Integer.toString(Math.max(0, Math.min(m, preset))),
+                             AMOUNT_X, AMOUNT_W, m);
+        }
+
+        /** @return Whether it is an amount field ({@link #amount}). */
+        boolean isAmount() {
+            return this.max >= 0;
+        }
+
+        /**
+         * @return An amount field's answer: the number Enter took (an
+         *     empty field: 0), or -1 for Escape, no answer yet, or a name
+         *     field.
+         */
+        int amount() {
+            if (!isAmount() || !this.typed) return -1;
+            final String e = this.entered;
+            final String s = (e == null) ? "" : e.trim();
+            if (s.isEmpty()) return 0;
+            try {
+                return Math.min(this.max, Integer.parseInt(s));
+            } catch (NumberFormatException ex) {
+                return 0;
+            }
+        }
+
+        /**
+         * Whether a field may hold this text after a key: a name of
+         * {@link #typable} characters, at most {@link #MAX_CHARS}; an
+         * amount of digits no larger than {@link #max} (I).  The width is
+         * checked by the caller.
+         *
+         * @param next The text.
+         * @return True if it may.
+         */
+        boolean accepts(String next) {
+            if (!isAmount()) return next.length() <= MAX_CHARS;
+            if (next.isEmpty() || next.length() > Integer.toString(this.max).length()) {
+                return next.isEmpty();
+            }
+            for (int i = 0; i < next.length(); i++) {
+                if (next.charAt(i) < '0' || next.charAt(i) > '9') return false;
+            }
+            return Integer.parseInt(next) <= this.max;
+        }
+
+        /**
+         * @param c A typed character.
+         * @return Whether it can go into this field at all.
+         */
+        boolean typableHere(char c) {
+            return (isAmount()) ? (c >= '0' && c <= '9') : typable(c);
         }
 
         /**
@@ -886,6 +975,19 @@ final class ClassicAdvisorBox {
             return this;
         }
 
+        /**
+         * An amount field ({@link Field#amount}, the @HOWMUCH boxes) with
+         * its preset selected, as {@link #field}.
+         *
+         * @param max The largest amount ("(0-max)").
+         * @param preset The amount it opens with.
+         */
+        Builder amountField(int max, int preset) {
+            this.field = Field.amount(max, preset);
+            this.outsideCancels = false;
+            return this;
+        }
+
         /** @return The request. */
         Request build() {
             if (this.field != null) {
@@ -1260,9 +1362,10 @@ final class ClassicAdvisorBox {
         ClassicTextLayout.Line label = null;
         if (r.hasField()) {
             // V (landfall #2664, clip008 #2789): the field at box + (29,
-            // 12 + 6P), the label at box + 5 on the field's text line.
-            field = new Rectangle(box.x + Field.X,
-                box.y + FIELD_TOP + ClassicMenuBox.PROMPT_PITCH * p, Field.W, Field.H);
+            // 12 + 6P), the label at box + 5 on the field's text line; an
+            // amount field at box + 33, 36 wide (playthrough-1 #54344).
+            field = new Rectangle(box.x + r.field.x,
+                box.y + FIELD_TOP + ClassicMenuBox.PROMPT_PITCH * p, r.field.w, Field.H);
             label = new ClassicTextLayout.Line(ClassicMenuBox.promptX(box),
                 field.y + Field.TEXT_DY, r.fieldLabel);
         }
@@ -1619,23 +1722,27 @@ final class ClassicAdvisorBox {
         }
 
         /**
-         * A typed character in a box with a name field: the first replaces
-         * the selected default (V clip008 #3134), the others are added at
-         * the end (no caret).  Refused (I): a character that is not
-         * {@link Field#typable}, one past {@link Field#MAX_CHARS}, or one
-         * that would leave the field ({@code tiny}'s advance wider than the
-         * field's inside, when the font is known).
+         * A typed character in a box with a name or amount field: the
+         * first replaces the selected default (V clip008 #3134,
+         * playthrough-1 #54533), the others are added at the end (no
+         * caret).  Refused (I): a character that is not
+         * {@link Field#typable} (an amount's: not a digit), a name past
+         * {@link Field#MAX_CHARS}, an amount past its "(0-max)"
+         * ({@link Field#accepts}), or one that would leave the field
+         * ({@code tiny}'s advance wider than the field's inside, when the
+         * font is known).
          *
          * @param c The character.
          * @param tiny FONTTINY, or null (then only the count limits).
          * @return Whether the text changed.
          */
         boolean type(char c, ClassicFont tiny) {
-            if (this.text == null || !Field.typable(c)) return false;
+            final Field f = this.request.field;
+            if (this.text == null || f == null || !f.typableHere(c)) return false;
             final String next = (this.selected ? "" : this.text.toString()) + c;
-            if (next.length() > Field.MAX_CHARS) return false;
+            if (!f.accepts(next)) return false;
             if (tiny != null && tiny.stringWidth(next)
-                > Field.W - 2 * Field.TEXT_DX) return false;
+                > f.w - 2 * Field.TEXT_DX) return false;
             this.text.setLength(0);
             this.text.append(next);
             this.selected = false;
@@ -1643,19 +1750,17 @@ final class ClassicAdvisorBox {
         }
 
         /**
-         * Backspace in a box with a name field (I): the selected default
-         * goes as a whole, else the last character.
+         * Backspace in a box with a name or amount field: the last
+         * character goes, and a selected default is no longer selected
+         * (V playthrough-1 #54344 -&gt; #54434: @HOWMUCH4's selected "100"
+         * -&gt; "10", "1", ""; gap list Q7, also the name boxes).
          *
          * @return Whether the text changed.
          */
         boolean backspace() {
             if (this.text == null || this.text.length() == 0) return false;
-            if (this.selected) {
-                this.text.setLength(0);
-                this.selected = false;
-            } else {
-                this.text.setLength(this.text.length() - 1);
-            }
+            this.text.setLength(this.text.length() - 1);
+            this.selected = false;
             return true;
         }
 
