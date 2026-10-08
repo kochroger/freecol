@@ -101,6 +101,14 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         @Override public boolean blocked() { return this.blocked; }
         @Override public boolean hasNextActiveUnit() { return this.nextActive; }
 
+        /** The units whose hand-over started (W11), with its base. */
+        final List<String> coming = new ArrayList<>();
+
+        @Override
+        public void unitComing(Unit unit, long baseNanos) {
+            this.coming.add(unit.getId() + "@" + baseNanos);
+        }
+
         @Override
         public ClassicUnitCycle.Kind dueKind(Unit unit) {
             return (this.real != null) ? this.real.kind(unit) : this.kinds.get(unit);
@@ -736,6 +744,45 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(0, r.count("activate " + c.getId()));
         r.advanceMs(0.2);
         assertEquals(1, r.count("activate " + c.getId()));
+    }
+
+    /**
+     * W11: a hand-over tells the host which unit comes, from the last
+     * change (its tip shows at the switch, the unit with the tip's close);
+     * a goto run's hand-over does not.
+     */
+    public void testUnitComingAtTheSwitch() {
+        final Unit a = ship(5, 5), b = ship(7, 5);
+        final Rig r = new Rig(this.game);
+        r.host.active = a;
+        a.setMovesLeft(0);
+        r.flow.screenChanged();                    // a's last final draw
+        final long base = r.clock.now();
+        r.clock.advanceMs(2);
+        assertNull(r.flow.comingUnit());
+        assertTrue(r.flow.unitChosen(b, a));
+        assertEquals(List.of(b.getId() + "@" + base), r.host.coming);
+        assertSame(b, r.flow.comingUnit());
+        assertTrue(r.flow.unitChosen(b, a));       // kept: not told again
+        assertEquals(1, r.host.coming.size());
+        r.advanceMs(100);
+        r.host.blocked = true;                     // the tip at the switch
+        r.advanceMs(400);
+        assertSame(b, r.flow.comingUnit());
+        r.host.blocked = false;
+        r.flow.boxClosed();                        // b with the tip's close
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertNull(r.flow.comingUnit());
+        // A goto run: no tip at its switch.
+        final Unit g = ship(9, 5);
+        r.host.kinds.put(g, ClassicUnitCycle.Kind.GOTO);
+        r.host.cycle = x -> (x == b) ? g : null;
+        b.setMovesLeft(0);
+        r.flow.screenChanged();
+        r.clock.advanceMs(2);
+        assertTrue(r.flow.unitChosen(b, b) || r.flow.unitChosen(a, b));
+        assertSame(g, r.flow.pending().unit);
+        assertEquals(1, r.host.coming.size());
     }
 
     /** A box up when the next unit is due: it comes up with the close. */

@@ -219,6 +219,16 @@ final class ClassicTurnFlow {
         boolean hasNextActiveUnit();
 
         /**
+         * A hand-over to {@code unit} has started (W11): its tutorial tip
+         * comes at the switch, before the unit, which comes up with the
+         * tip's close (landfall 03 section 6).
+         *
+         * @param unit The unit coming.
+         * @param baseNanos The pause's base (the last change).
+         */
+        default void unitComing(Unit unit, long baseNanos) {}
+
+        /**
          * @param unit A unit.
          * @return Why the unit cycle has it due now, or null
          *     ({@link ClassicUnitCycle#kind}).
@@ -1462,6 +1472,15 @@ final class ClassicTurnFlow {
     }
 
     /**
+     * @return The unit a pending hand-over brings, or null (W11: its tip
+     *     shows at the switch, before it).
+     */
+    Unit comingUnit() {
+        final Pending p = this.pending;
+        return (p != null && p.kind == Kind.HANDOVER) ? p.unit : null;
+    }
+
+    /**
      * Whether the controller's view changes are dropped now: a goto unit
      * runs (W5f) and FreeCol asks for a view change after each of its
      * steps and for the next unit after its run, which the cycle decides.
@@ -1625,6 +1644,12 @@ final class ClassicTurnFlow {
 
     private void start(Pending p) {
         this.pending = p;
+        // The unit's tutorial tip at the switch (W11), from the last change;
+        // not for a goto run or a visit (their last stage is not ACTIVATE).
+        if (p.kind == Kind.HANDOVER && p.unit != null && p.base != 0L
+            && p.stages.length > 0 && p.stages[p.stages.length - 1].action == Action.ACTIVATE) {
+            this.host.unitComing(p.unit, p.base);
+        }
         if (p.base == 0L) {
             this.timer.cancel();
             ClassicFrameRecorder.event("endturn-timer-start", p + " waits for the wipe");

@@ -1109,6 +1109,10 @@ public class ClassicAdvisorBoxTest extends TestCase {
      * from 5 on are checked.
      */
     private static final String WRAP_EXCEPTION = "12_TUTORIAL13_frontiersman";
+
+    /** The crops' tips drawn from {@link ClassicTips#request} (W11). */
+    private static final List<String> TIPS = List.of("TUTORIAL2", "TUTORIAL3",
+        "TUTORIAL5", "TUTORIAL11", "TUTORIAL13", "TUTORIAL14");
     private static final int WRAP_EXCEPTION_Y0 = 104, WRAP_EXCEPTION_Y1 = 129;
 
     private static ClassicAdvisorBox.Portrait portrait(String name) {
@@ -1184,6 +1188,10 @@ public class ClassicAdvisorBoxTest extends TestCase {
                 : ClassicDestinations.SAIL_PORT_SECTION.equals(c[1])
                 ? ClassicDestinations.request(t, true, List.of(new ClassicDestinations.Row(
                     ClassicDestinations.homePortLabel(t, 3), null)))
+                // The tips as the game asks for them (W11), their advisor included.
+                : TIPS.contains(c[1])
+                ? ClassicTips.request(t, Integer.parseInt(((String) c[1]).substring(8)),
+                                      values((String) c[2]))
                 : b.build();
             final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(req, tiny, pic);
             assertNotNull(name, l);
@@ -1235,6 +1243,81 @@ public class ClassicAdvisorBoxTest extends TestCase {
         assertEquals("pixels off:" + fails, 0, fails.length());
         assertTrue(compared > 400000);
         assertTrue("arrow pixels " + arrow, arrow <= 20);
+    }
+
+    /**
+     * W11: the colonist's tips over the colony screen against clip008's
+     * frames (needs the pack and {@code -Dclassic.clips}): @TUTORIAL4 at
+     * #4068, box (10,95,236,72) ({@code @x=10}), "Felle" / "Nutzholz";
+     * @TUTORIAL12 at #30059, box (47,89,226,84), "Base".  The box and the
+     * portrait's opaque pixels are compared; the mouse arrow, where it
+     * covers them, is counted apart.
+     */
+    public void testColonyTipsAgainstClip008() throws Exception {
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        final File dir = (clips == null) ? null : new File(clips, "clip008");
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicText t = ClassicText.load(pack);
+        final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
+        if (dir == null || !dir.isDirectory() || t == null || tiny == null) {
+            System.err.println(getClass().getSimpleName()
+                + ": clip008 tips skipped, no recordings or no pack");
+            return;
+        }
+        final BufferedImage wood = pack.image(ClassicMenuBar.WOOD_KEY);
+        final Object[][] tips = {
+            { "frame_004068.png", ClassicTips.COLONY, "STRING0=Felle;STRING1=Nutzholz",
+              new Rectangle(10, 95, 236, 72), new Rectangle(163, 48, 10, 14) },
+            { "frame_030059.png", ClassicTips.DOCK, "STRING0=Base",
+              new Rectangle(47, 89, 226, 84), new Rectangle(198, 124, 10, 14) },
+        };
+        final StringBuilder out = new StringBuilder();
+        int bad = 0;
+        for (Object[] c : tips) {
+            final ClassicAdvisorBox.Request r = ClassicTips.request(t, (Integer) c[1],
+                values((String) c[2]));
+            final ClassicAdvisorBox.Portrait who = r.portrait;
+            final BufferedImage pic = pack.image(ClassicPackFiles.ssKey(who.sprite));
+            final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(r, tiny, pic);
+            assertEquals((String) c[0], c[3], l.box);
+            // The colonist over where the centred box would be (x 130 both times).
+            assertEquals((String) c[0], new Point(130, l.box.y - 62), l.portraitAt);
+            final BufferedImage frame = ImageIO.read(new File(dir, (String) c[0]));
+            assertNotNull((String) c[0], frame);
+            final BufferedImage canvas = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+            final Graphics2D g = canvas.createGraphics();
+            g.drawImage(frame, 0, 0, null);
+            ClassicAdvisorBox.paint(g, l, -1, wood, tiny);
+            g.dispose();
+            int compared = 0, diff = 0, arrowPx = 0;
+            final Rectangle where = new Rectangle();
+            for (int y = 0; y < 200; y++) {
+                for (int x = 0; x < 320; x++) {
+                    if (!l.box.contains(x, y) && !opaque(l, x, y)) continue;
+                    compared++;
+                    if ((frame.getRGB(x, y) & 0xFFFFFF) != (canvas.getRGB(x, y) & 0xFFFFFF)
+                        && ((Rectangle) c[4]).contains(x, y)) {
+                        arrowPx++;
+                    } else if ((frame.getRGB(x, y) & 0xFFFFFF) != (canvas.getRGB(x, y) & 0xFFFFFF)) {
+                        diff++;
+                        if (where.isEmpty()) {
+                            where.setBounds(x, y, 1, 1);
+                        } else {
+                            where.add(new Rectangle(x, y, 1, 1));
+                        }
+                    }
+                }
+            }
+            if (diff > 0) out.append(" [off in ").append(where).append(']');
+            out.append(' ').append(c[0]).append(' ').append(compared).append(" px, off ")
+               .append(diff).append(", portrait at ").append(l.portraitAt.x).append(',')
+               .append(l.portraitAt.y);
+            out.append(", arrow ").append(arrowPx);
+            assertTrue((String) c[0] + " arrow " + arrowPx, arrowPx <= 140);
+            bad += diff;
+        }
+        System.out.println(getClass().getSimpleName() + ": clip008 tips," + out);
+        assertEquals("pixels off:" + out, 0, bad);
     }
 
     /** @return The box and the portrait, as the crops cut them. */

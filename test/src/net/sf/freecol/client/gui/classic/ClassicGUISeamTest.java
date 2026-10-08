@@ -2568,6 +2568,242 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertEquals(2, fake.boxes.size());
     }
 
+    /** A {@link WoodcutGUI} with Tutortips, the map and a colony screen it can switch. */
+    private static class TipGUI extends WoodcutGUI {
+
+        boolean on = true, map = true, colonyOpen = true, busy = false;
+        long closedAt = Long.MIN_VALUE;
+        Unit active = null, coming = null;
+
+        TipGUI(Game game, Player me) {
+            super(game, me);
+        }
+
+        @Override
+        boolean tipsOn() {
+            return this.on;
+        }
+
+        @Override
+        boolean mapShowing() {
+            return this.map;
+        }
+
+        @Override
+        boolean colonyScreenOpen(Colony colony) {
+            return this.colonyOpen;
+        }
+
+        @Override
+        boolean boxBusy() {
+            return this.busy;
+        }
+
+        @Override
+        long boxClosedAt() {
+            return this.closedAt;
+        }
+
+        @Override
+        public Unit getActiveUnit() {
+            return this.active;
+        }
+
+        @Override
+        Unit comingUnit() {
+            return this.coming;
+        }
+    }
+
+    private static final long MS = 1_000_000L;
+
+    /**
+     * W11: each tip 457 ms after its trigger (@TUTORIAL4 514, @TUTORIAL12
+     * 542), once per game, only with Tutortips on: @TUTORIAL2 after the
+     * @LANDHO box, the unit tips after the unit became the active one (not
+     * when another unit is up by then: then it comes at a later
+     * activation), @TUTORIAL5 after the notice of the unrest's colonist
+     * (through the notices' funnel), @TUTORIAL4 over the new colony's
+     * screen (not when it closed meanwhile).  A box up holds a tip; a box
+     * closed after the trigger puts it 457 ms after that close.
+     */
+    public void testTheTipsAtTheirMoments() throws Exception {
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t == null) {
+            System.err.println("testTheTipsAtTheirMoments: no pack texts, skipped");
+            return;
+        }
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final net.sf.freecol.common.model.UnitType colonist
+            = spec().getUnitType("model.unit.freeColonist");
+        final Tile land = map.getTile(4, 7);
+        final Unit pioneer = new ServerUnit(game, land, dutch, colonist,
+            spec().getRole("model.role.pioneer"));
+        final Unit soldier = new ServerUnit(game, land, dutch, colonist,
+            spec().getRole("model.role.soldier"));
+        final Unit ship = new ServerUnit(game, map.getTile(12, 7), dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final TipGUI gui = new TipGUI(game, dutch);
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = r -> {
+            gui.order.add(r.id);
+            return fake.ask(r);
+        };
+        dutch.setClassicTips(0);
+        // @TUTORIAL2: 457 ms after the @LANDHO box closed.
+        onEdt(() -> gui.landNamed(1000 * MS));
+        assertEquals(1, gui.pendingTips().size());
+        assertEquals(1457 * MS, gui.pendingTips().get(0).due);
+        onEdt(() -> gui.runTips(1456 * MS));
+        assertTrue(gui.order.isEmpty());
+        onEdt(() -> gui.runTips(1457 * MS));
+        assertEquals(List.of("TUTORIAL2"), gui.order);
+        assertSame(ClassicAdvisorBox.Portrait.ADMIRAL, fake.boxes.get(0).portrait);
+        assertTrue(ClassicGUI.tipShown(dutch, 2));
+        onEdt(() -> gui.landNamed(2000 * MS));                // once per game
+        assertTrue(gui.pendingTips().isEmpty());
+        // Tutortips off: nothing on its way.
+        gui.on = false;
+        dutch.setClassicTips(0);
+        onEdt(() -> gui.landNamed(3000 * MS));
+        onEdt(() -> gui.unitUp(pioneer, 3000 * MS));
+        assertTrue(gui.pendingTips().isEmpty());
+        gui.on = true;
+        dutch.setClassicTips(1 << 2);
+        gui.order.clear();
+        // The pioneer up: @TUTORIAL13 457 ms later, while it is still up.
+        gui.active = pioneer;
+        onEdt(() -> gui.unitUp(pioneer, 4000 * MS));
+        assertEquals(4457 * MS, gui.pendingTips().get(0).due);
+        // Activated again (the same unit): the same moment.
+        onEdt(() -> gui.unitUp(pioneer, 4200 * MS));
+        assertEquals(4457 * MS, gui.pendingTips().get(0).due);
+        // A box up holds it; when it closed after the activation, 457 ms after.
+        gui.busy = true;
+        onEdt(() -> gui.runTips(4500 * MS));
+        assertTrue(gui.order.isEmpty());
+        gui.busy = false;
+        gui.closedAt = 4600 * MS;
+        onEdt(() -> gui.runTips(4700 * MS));
+        assertTrue(gui.order.isEmpty());
+        onEdt(() -> gui.runTips(5057 * MS));
+        assertEquals(List.of("TUTORIAL13"), gui.order);
+        gui.closedAt = Long.MIN_VALUE;
+        // The soldier up, but the pioneer up again by its moment: dropped, not marked.
+        onEdt(() -> gui.unitUp(soldier, 6000 * MS));
+        assertEquals(ClassicTips.SOLDIER, gui.pendingTips().get(0).k);
+        onEdt(() -> gui.runTips(6457 * MS));
+        assertEquals(List.of("TUTORIAL13"), gui.order);
+        assertFalse(ClassicGUI.tipShown(dutch, ClassicTips.SOLDIER));
+        // Another unit up meanwhile drops it too.
+        onEdt(() -> gui.unitUp(soldier, 7000 * MS));
+        onEdt(() -> gui.unitUp(ship, 7100 * MS));             // the ship carries nobody: 11
+        assertEquals(1, gui.pendingTips().size());
+        assertEquals(ClassicTips.SHIP, gui.pendingTips().get(0).k);
+        gui.active = soldier;
+        onEdt(() -> gui.unitUp(soldier, 8000 * MS));
+        assertEquals(ClassicTips.SOLDIER, gui.pendingTips().get(0).k);
+        // Not over another screen.
+        gui.map = false;
+        onEdt(() -> gui.runTips(8457 * MS));
+        assertFalse(ClassicGUI.tipShown(dutch, ClassicTips.SOLDIER));
+        gui.map = true;
+        onEdt(() -> gui.unitUp(soldier, 9000 * MS));
+        onEdt(() -> gui.runTips(9457 * MS));
+        assertEquals(List.of("TUTORIAL13", "TUTORIAL14"), gui.order);
+        assertSame(ClassicAdvisorBox.Portrait.SOLDIER, fake.boxes.get(fake.boxes.size() - 1).portrait);
+        // The ship: its name and the home port.
+        gui.active = ship;
+        onEdt(() -> gui.unitUp(ship, 10000 * MS));
+        onEdt(() -> gui.runTips(10457 * MS));
+        assertEquals("TUTORIAL11", gui.order.get(gui.order.size() - 1));
+        assertTrue(fake.texts.get(fake.texts.size() - 1).contains("Handelsschiff"));
+        assertTrue(fake.texts.get(fake.texts.size() - 1).contains("Amsterdam"));
+        // A unit of another player, a null unit: nothing.
+        onEdt(() -> gui.unitUp(null, 11000 * MS));
+        assertTrue(gui.pendingTips().isEmpty());
+        // At the switch (the turn flow's hand-over): 457 ms after the last
+        // change, while the unit is still coming; at its activation then
+        // no second tip, at the next one the next tip (here the site's:
+        // the game next to it, no colony yet).
+        final Tile north = land.getNeighbourOrNull(Direction.N);
+        north.addResource(new net.sf.freecol.common.model.Resource(game, north,
+            spec().getResourceType("model.resource.game")));
+        dutch.setClassicTips(dutch.getClassicTips() & ~(1 << ClassicTips.PIONEER));
+        gui.active = soldier;
+        gui.coming = pioneer;
+        onEdt(() -> gui.unitComing(pioneer, 20000 * MS));
+        assertEquals(20457 * MS, gui.pendingTips().get(0).due);
+        onEdt(() -> gui.runTips(20457 * MS));
+        assertEquals("TUTORIAL13", gui.order.get(gui.order.size() - 1));
+        gui.coming = null;
+        gui.active = pioneer;
+        onEdt(() -> gui.unitUp(pioneer, 20600 * MS));
+        assertTrue(gui.pendingTips().isEmpty());
+        onEdt(() -> gui.unitUp(pioneer, 21000 * MS));
+        assertEquals(ClassicTips.SITE, gui.pendingTips().get(0).k);
+        onEdt(() -> gui.runTips(21457 * MS));
+        assertEquals("TUTORIAL3", gui.order.get(gui.order.size() - 1));
+        assertTrue(fake.texts.get(fake.texts.size() - 1).contains("Felle"));
+        // A unit going by itself (a destination) brings none.
+        gui.active = ship;
+        ship.setDestination(dutch.getEurope());
+        dutch.setClassicTips(dutch.getClassicTips() & ~(1 << ClassicTips.SHIP));
+        onEdt(() -> gui.unitUp(ship, 22000 * MS));
+        assertTrue(gui.pendingTips().isEmpty());
+        ship.setDestination(null);
+        dutch.setClassicTips(dutch.getClassicTips() | (1 << ClassicTips.SHIP));
+        // @TUTORIAL5 after the notice of the colonist the unrest brought.
+        final Unit farmer = new ServerUnit(game, dutch.getEurope(), dutch,
+            spec().getUnitType("model.unit.expertFarmer"));
+        gui.order.clear();
+        onEdt(() -> gui.showModelMessages(List.of(dutch.getEmigrationMessage(farmer))));
+        onEdt(() -> { });
+        assertEquals(1, gui.order.size());                     // the notice
+        assertEquals(1, gui.pendingTips().size());
+        final ClassicGUI.Tip unrest = gui.pendingTips().get(0);
+        assertEquals(ClassicTips.UNREST, unrest.k);
+        assertEquals(unrest.asked + 457 * MS, unrest.due);
+        onEdt(() -> gui.runTips(unrest.due));
+        assertEquals("TUTORIAL5", gui.order.get(1));
+        assertTrue(fake.texts.get(fake.texts.size() - 1).contains("Erfahrene Farmer"));
+        // @TUTORIAL4: 514 ms after the founded colony's screen, while it is open.
+        final Colony colony = createStandardColony(1, 1, 1);
+        onEdt(() -> gui.colonyScreenShown(colony, 12000 * MS, false));
+        assertTrue(gui.pendingTips().isEmpty());
+        onEdt(() -> gui.colonyScreenShown(colony, 12000 * MS, true));
+        assertEquals(12514 * MS, gui.pendingTips().get(0).due);
+        gui.colonyOpen = false;
+        onEdt(() -> gui.runTips(12514 * MS));
+        assertFalse(ClassicGUI.tipShown(dutch, ClassicTips.COLONY));
+        gui.colonyOpen = true;
+        onEdt(() -> gui.colonyScreenShown(colony, 13000 * MS, true));
+        onEdt(() -> gui.runTips(13514 * MS));
+        assertEquals("TUTORIAL4", gui.order.get(gui.order.size() - 1));
+        assertSame(ClassicAdvisorBox.Portrait.COLONIST, fake.boxes.get(fake.boxes.size() - 1).portrait);
+        // D10's seam: @TUTORIAL12 542 ms after the docking's screen.
+        onEdt(() -> gui.shipDocked(colony, 14000 * MS));
+        assertEquals(14542 * MS, gui.pendingTips().get(0).due);
+        onEdt(() -> gui.runTips(14542 * MS));
+        assertEquals("TUTORIAL12", gui.order.get(gui.order.size() - 1));
+        assertTrue(fake.texts.get(fake.texts.size() - 1).contains(colony.getName()));
+        // All once: the bits are kept on the player (the save).
+        final int all = (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 11) | (1 << 12)
+            | (1 << 13) | (1 << 14);
+        assertEquals(all, dutch.getClassicTips());
+        final int boxes = gui.order.size();
+        onEdt(() -> gui.colonyScreenShown(colony, 15000 * MS, true));
+        onEdt(() -> gui.unrestClosed(farmer, 15000 * MS));
+        gui.active = pioneer;
+        onEdt(() -> gui.unitUp(pioneer, 15000 * MS));
+        assertTrue(gui.pendingTips().isEmpty());
+        onEdt(() -> gui.runTips(16000 * MS));
+        assertEquals(boxes, gui.order.size());
+    }
+
     /**
      * A classic GUI without a client whose woodcuts and boxes are fakes:
      * it keeps the order in which they came ("woodcut k", the box's id).

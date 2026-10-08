@@ -2138,13 +2138,58 @@ appearance: its "woodcut 2" is k = 3, its "woodcut 3" k = 7). Spec:
   the @LANDHO box comes then. FreeCol's `buildColony.tutorial` is dropped
   (`withoutStartMessage`). Regions stay silent with their default names.
 - **@TUTORIAL2** comes 0.457 s after the box's close with Tutortips on
-  (V #3185 -> #3217): the seam `landNamed` for W11 (I4), empty here.
+  (V #3185 -> #3217): `landNamed` (W11, below).
 - Recorder: `box-open LANDHO ... field=Neuholland`, `box-field`, `land-named`,
   `land-name-sent`, `land-name-client`.
 - Tests: `ClassicAdvisorBoxTest.testNameField*` and its golden crop
   `03_LANDHO_naming` (0 px), `ClassicAdvisorLayerTest.testANameField`,
   `ClassicGUISeamTest.testLandHoAtTheSighting`, `testTheLandingSendsTheName`,
   `testRegionNamedAtOnce`, `PlayerTest.testClassicLandName`.
+
+### The tutorial tips (master plan W11; I4)
+
+`ClassicTips` (which tip, its values, its box) and `ClassicGUI`'s
+"tutorial tips" section (`scheduleTip`, `runTips`, `showTip`, the timer
+`adviceTimer`). Each tip once per game (`Player.classicTips`, bit k, the
+classicWoodcuts pattern, as @TUTORIAL17), only with Tutortips on (the
+options box's row = FreeCol's `model.option.guiShowTutorial`). FreeCol's own
+`TUTORIAL` messages are dropped (`withoutStartMessage`).
+
+| Tip | Advisor | Trigger | When |
+|---|---|---|---|
+| 2 | admiral | the @LANDHO box closed (`landNamed`) | +457 ms (V LF #3185 -> #3217) |
+| 5 | admiral | the notice of FreeCol's `model.player.emigrate` / `autoRecruit` closed (`unrestClosed`; W8e's @UNREST later) | +457 ms (V @UNREST #18247 -> #18279) |
+| 11 | admiral | an empty ship (no units, no goods) on the map | at the switch (below) |
+| 13 | frontiersman | a pioneer on land | at the switch |
+| 14 | soldier | a soldier on land | at the switch |
+| 3 | frontiersman | before the first colony, a unit that can found one where it may (natives' land too), a resource on one of the 8 tiles around (not on its own: LF turn 8); `%STRING0` the goods ("Felle" for game and beaver) | at the switch |
+| 4 | colonist, `@x=10` | the screen of a colony just founded opened (`colonyScreenShown`); `%STRING0` the colonist's goods, `%STRING1` the goods his tile gives him most of (I) | +514 ms (V c8 #4032 -> #4068) |
+| 12 | colonist | **seam** `shipDocked` for D10 (FreeCol opens no screen on a docking) | +542 ms (V c8 #30022 -> #30059) |
+| 17 | none | the first Europe screen (H3, `europeTip`, its own timer) | +557 ms |
+
+- **At the switch:** the unit tips come 457 ms after the last change of the
+  unit before (the turn flow's hand-over base, `Host.unitComing`), while the
+  hand-over is pending; the turn flow holds its activation while the box is
+  up and brings the unit with the close (V landfall 03 section 6: the block
+  1 frame after the tip's close). A unit made active without a hand-over
+  (a click, the view's first unit, the turn start, `bringNow`) gets its tip
+  457 ms after it came up; a unit whose tip came at its switch gets none at
+  its activation. Order when several fit: 11, 13, 14, 3; one per switch.
+- **Dropped, not marked** (it comes at its next trigger): a unit tip when
+  another unit is up or coming by then, or the map is not what the player
+  sees; a colony tip when its screen closed. A box up holds a tip (polled);
+  a box that closed after the trigger puts it 457 ms after that close.
+- `ClassicAdvisorBox.Builder.x`: GAME.TXT's `@x` moves the box only, the
+  advisor stays over the centred box (V c8 #4068: box x 10, colonist x 130);
+  only the tips set it (@TUTORIAL1's `@x` is not used).
+- Over the colony screen @TUTORIAL4 is the stopgap popup (as @TUTORIAL17
+  over Europe).
+- Recorder: `tip-asked TUTORIALk in N ms`, `tip TUTORIALk`, `tip-dropped`.
+- Tests: `ClassicTipsTest` (7), `ClassicGUISeamTest.testTheTipsAtTheirMoments`,
+  `ClassicTurnFlowTest.testUnitComingAtTheSwitch`, the landfall golden crops
+  04, 11, 12, 17, 19, 22 drawn from `ClassicTips.request` (0 px) and
+  `ClassicAdvisorBoxTest.testColonyTipsAgainstClip008` (#4068, #30059: 0 px
+  apart from the mouse arrow).
 
 ## In-game HUD (menu strip, dropdowns, right panel)
 

@@ -182,6 +182,16 @@ public class ClassicGUI extends GUI {
     /** The arrival chain's next step, the timed band's end, the Europe tip. */
     private ClassicOneShot voyageTimer = null, bandTimer = null, tipTimer = null;
 
+    /** The tutorial tips' timer (W11), and the tips on their way (EDT). */
+    private ClassicOneShot adviceTimer = null;
+    private final List<Tip> pendingTips = new ArrayList<>();
+
+    /** The colony whose screen was opened last ({@link #colonyScreenShown}). */
+    private Colony colonyShown = null;
+
+    /** The unit whose tip came at its switch, until it is up ({@link #unitUp}). */
+    private Unit switchTipUnit = null;
+
     /** The report screen's window, while one is open (see {@link #showReportColonyPanel}). */
     private JFrame reportFrame;
 
@@ -1229,10 +1239,12 @@ public class ClassicGUI extends GUI {
         // No band, chain or tip of this game outlives it (W13).
         this.voyageChain = null;
         for (ClassicOneShot t : new ClassicOneShot[] {
-                this.voyageTimer, this.bandTimer, this.tipTimer }) {
+                this.voyageTimer, this.bandTimer, this.tipTimer, this.adviceTimer }) {
             if (t != null) t.close();
         }
-        this.voyageTimer = this.bandTimer = this.tipTimer = null;
+        this.voyageTimer = this.bandTimer = this.tipTimer = this.adviceTimer = null;
+        this.pendingTips.clear();
+        this.colonyShown = null;
         this.voyages.clear();
         if (this.menuStrip != null) this.menuStrip.setBand(null);
         // FreeCol's goto batch again for whatever comes next (W5f), and
@@ -1706,6 +1718,7 @@ public class ClassicGUI extends GUI {
             if (first != null) {
                 this.mapViewer.changeToMoveUnits(first);
                 cycleActivated(first);
+                unitUp(first, waitClock().now());
                 if (fromCursor(first) && this.turnFlow != null) this.turnFlow.cycleUnitUp(first);
             } else if (tile != null) {
                 this.mapViewer.changeToTerrain(tile);
@@ -1871,6 +1884,9 @@ public class ClassicGUI extends GUI {
             SwingUtilities::invokeLater, true, "ClassicBand");
         this.tipTimer = new ClassicOneShot(waitClock(),
             SwingUtilities::invokeLater, true, "ClassicEuropeTip");
+        this.adviceTimer = new ClassicOneShot(waitClock(),
+            SwingUtilities::invokeLater, true, "ClassicTips");
+        this.pendingTips.clear();
         this.turnPoll = new javax.swing.Timer(ClassicTurnFlow.POLL_MS, e -> {
                 if (turnFlow != null) {
                     turnFlow.tick();
@@ -2428,6 +2444,7 @@ public class ClassicGUI extends GUI {
         if (this.infoPanel != null) this.infoPanel.releaseBlock();
         this.mapViewer.changeToMoveUnits(unit);
         cycleActivated(unit);
+        unitUp(unit, waitClock().now());
     }
 
     /**
@@ -2808,6 +2825,11 @@ public class ClassicGUI extends GUI {
         }
 
         @Override
+        public void unitComing(Unit unit, long baseNanos) {
+            ClassicGUI.this.unitComing(unit, baseNanos);
+        }
+
+        @Override
         public boolean hasNextActiveUnit() {
             final Player p = getMyPlayer();
             return p != null && p.hasNextActiveUnit();
@@ -2892,6 +2914,7 @@ public class ClassicGUI extends GUI {
             if (infoPanel != null) infoPanel.releaseBlock();
             mapViewer.changeToMoveUnits(unit);
             cycleActivated(unit);
+            unitUp(unit, waitClock().now());
             // The block now, on time, in ONE panel paint: it is the panel
             // refresh the blink's first OFF is timed from (W3), and a second
             // one queued behind it would shift that phase.  So the actions
@@ -3260,6 +3283,9 @@ public class ClassicGUI extends GUI {
         }
         SwingUtilities.invokeLater(() -> {
             try {
+                // A colony just founded brings @TUTORIAL4 over its screen (W11).
+                final boolean founding = this.foundingTile != null
+                    && colony.getTile() == this.foundingTile;
                 // The first colony's woodcut, before its screen (W9).
                 if (!foundingWoodcut(colony)) return;
                 closeColonyPanel();
@@ -3275,6 +3301,7 @@ public class ClassicGUI extends GUI {
                 prepareChildWindow(f, this.frame, true);
                 f.setVisible(true);
                 f.getContentPane().requestFocusInWindow();
+                colonyScreenShown(colony, waitClock().now(), founding);
             } catch (Exception e) {
                 logger.log(Level.WARNING, "ClassicGUI: could not show colony "
                     + "screen for " + colony.getId(), e);
@@ -4154,6 +4181,7 @@ public class ClassicGUI extends GUI {
         final List<ClassicAdvisorBox.Request> prices = new ArrayList<>();
         final List<ClassicAdvisorBox.Request> boxes = new ArrayList<>();
         final List<Integer> woodcutsOf = new ArrayList<>();
+        final List<Unit> unrestOf = new ArrayList<>();
         for (ModelMessage m : messages) {
             final FreeColObject display = game.getMessageDisplay(m);
             final ClassicAdvisorBox.Request r = ClassicNotices.request(text,
@@ -4165,6 +4193,7 @@ public class ClassicGUI extends GUI {
             } else {
                 boxes.add(r);
                 woodcutsOf.add(messageWoodcut(game, m));
+                unrestOf.add(unrestUnit(m, display, me));
             }
         }
         onEventThread(() -> {
@@ -4174,6 +4203,8 @@ public class ClassicGUI extends GUI {
                 for (int i = 0; i < boxes.size(); i++) {
                     noticeWoodcut(woodcutsOf.get(i));
                     this.prompter.ask(boxes.get(i));
+                    // A colonist the unrest brought: @TUTORIAL5 after it (W11).
+                    if (unrestOf.get(i) != null) unrestClosed(unrestOf.get(i), lastBoxClose());
                 }
                 return null;
             }, null);
@@ -4439,7 +4470,8 @@ public class ClassicGUI extends GUI {
 
     /**
      * The notices of {@link #showMessagePopup} that come up: without
-     * FreeCol's start message and its tip after the first landing (W10),
+     * FreeCol's start message, its tip after the first landing (W10) and its
+     * other tutorial messages (W11),
      * and without the colony reports whose row of "Koloniebericht-Optionen"
      * is off (W14).
      *
@@ -4481,7 +4513,8 @@ public class ClassicGUI extends GUI {
 
     /**
      * {@code messages} without FreeCol's start message, without its tip
-     * after the first landing ({@link #BUILD_COLONY_TUTORIAL}) and without
+     * after the first landing ({@link #BUILD_COLONY_TUTORIAL}), without any
+     * other of its {@code TUTORIAL} messages (W11) and without
      * nulls, in their order.
      *
      * @param messages The messages, or null.
@@ -4491,10 +4524,28 @@ public class ClassicGUI extends GUI {
         final List<ModelMessage> rest = new ArrayList<>();
         if (messages == null) return rest;
         for (ModelMessage m : messages) {
+            // FreeCol's tutorial messages: the original's tips instead (W11).
             if (m != null && !START_GAME_MESSAGE.equals(m.getId())
-                && !BUILD_COLONY_TUTORIAL.equals(m.getId())) rest.add(m);
+                && !BUILD_COLONY_TUTORIAL.equals(m.getId())
+                && m.getMessageType() != ModelMessage.MessageType.TUTORIAL) rest.add(m);
         }
         return rest;
+    }
+
+    /**
+     * The colonist of FreeCol's notice that the religious unrest brought one
+     * to the docks ({@link ClassicTips#EMIGRATE}, {@link ClassicTips#AUTO_RECRUIT}).
+     *
+     * @param m The message.
+     * @param display Its display object.
+     * @param me Our player.
+     * @return Our unit, or null for another message.
+     */
+    static Unit unrestUnit(ModelMessage m, FreeColObject display, Player me) {
+        return (m != null && (ClassicTips.EMIGRATE.equals(m.getId())
+                              || ClassicTips.AUTO_RECRUIT.equals(m.getId()))
+                && display instanceof Unit && me != null
+                && ((Unit) display).getOwner() == me) ? (Unit) display : null;
     }
 
     /**
@@ -6701,19 +6752,312 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * The seam of @TUTORIAL2 (master plan W11, I4): called when the
-     * @LANDHO box has closed; the original shows the admiral's tip
-     * 0.457 s later, with Tutortips on (V: landfall #3185 -&gt; #3217).
-     * Nothing yet.  EDT only.
+     * The @LANDHO box has closed: the admiral's {@code @TUTORIAL2}
+     * {@link #LANDHO_TIP_MS} later, with Tutortips on (master plan W11;
+     * V: landfall #3185 -&gt; #3217).  EDT only.
      *
      * @param closedNanos When the box closed ({@link #waitClock}).
      */
     void landNamed(long closedNanos) {
-        // I4 (W11): @TUTORIAL2 here, LANDHO_TIP_MS after closedNanos.
+        scheduleTip(new Tip(ClassicTips.LAND_HO,
+            closedNanos + ClassicVoyages.nanos(LANDHO_TIP_MS), closedNanos,
+            null, null, new HashMap<>()));
     }
 
     /** @TUTORIAL2's distance from the @LANDHO box's close (V: 32 frames, landfall #3185 -&gt; #3217). */
-    static final double LANDHO_TIP_MS = 457.0;
+    static final double LANDHO_TIP_MS = ClassicTips.TIP_MS;
+
+
+    // The tutorial tips (master plan W11; ClassicTips)
+
+    /** A tip on its way: shown at {@link #due}, if it still fits then. */
+    static final class Tip {
+
+        /** The tip's number ({@code @TUTORIALk}). */
+        final int k;
+
+        /** When it is due, and when it was asked ({@link #waitClock}). */
+        final long due, asked;
+
+        /** The unit it is about (a unit tip), or null. */
+        final Unit unit;
+
+        /** The colony whose screen it is for (4, 12), or null. */
+        final Colony colony;
+
+        /** Its values when they were taken at the trigger (2, 5), or null. */
+        final Map<String, String> values;
+
+        Tip(int k, long due, long asked, Unit unit, Colony colony,
+            Map<String, String> values) {
+            this.k = k;
+            this.due = due;
+            this.asked = asked;
+            this.unit = unit;
+            this.colony = colony;
+            this.values = values;
+        }
+    }
+
+    /**
+     * @return Whether Tutortips is on (the options box's row, FreeCol's
+     *     {@code model.option.guiShowTutorial}).
+     */
+    boolean tipsOn() {
+        final FreeColClient fcc = getFreeColClient();
+        return fcc != null && fcc.tutorialMode();
+    }
+
+    /** @return Whether the player looks at the map (a tip over it goes in the canvas). */
+    boolean mapShowing() {
+        return this.boxLayer != null && !this.sceneShowing && this.hudPane != null
+            && this.hudPane.isShowing() && dialogOwner() == this.frame;
+    }
+
+    /**
+     * @param colony A colony.
+     * @return Whether its screen is open.
+     */
+    boolean colonyScreenOpen(Colony colony) {
+        return isOpen(this.colonyFrame) && this.colonyPanel != null
+            && this.colonyShown == colony;
+    }
+
+    /** @return When the box layer's last box closed, or {@code Long.MIN_VALUE}. */
+    long boxClosedAt() {
+        final ClassicAdvisorLayer layer = this.boxLayer;
+        return (layer == null) ? Long.MIN_VALUE : layer.lastCloseNanos();
+    }
+
+    /** @return The tips on their way, earliest first (tests). */
+    List<Tip> pendingTips() {
+        final List<Tip> out = new ArrayList<>(this.pendingTips);
+        out.sort((a, b) -> Long.compare(a.due, b.due));
+        return out;
+    }
+
+    /**
+     * Put a tip on its way, with Tutortips on and when this game has not
+     * shown it and it is not on its way already.  EDT only.
+     *
+     * @param tip The tip.
+     */
+    void scheduleTip(Tip tip) {
+        final Player me = myPlayer();
+        if (me == null || !tipsOn() || tipShown(me, tip.k)) return;
+        for (Tip p : this.pendingTips) if (p.k == tip.k) return;
+        this.pendingTips.add(tip);
+        if (ClassicFrameRecorder.on()) {
+            ClassicFrameRecorder.event("tip-asked", ClassicTips.section(tip.k)
+                + " in " + ((tip.due - tip.asked) / 1_000_000L) + " ms");
+        }
+        armTips();
+    }
+
+    /** Set the tips' timer to the earliest tip's moment. */
+    private void armTips() {
+        final ClassicOneShot timer = this.adviceTimer;
+        if (timer == null) return;
+        final List<Tip> tips = pendingTips();
+        if (tips.isEmpty()) {
+            timer.cancel();
+        } else {
+            timer.schedule(tips.get(0).due, () -> runTips(waitClock().now()));
+        }
+    }
+
+    /**
+     * Show the earliest tip when it is due: after a box that is up (polled),
+     * and {@link ClassicTips#TIP_MS} after a box that closed since it was
+     * asked; then the next one.  EDT only.
+     *
+     * @param now The moment ({@link #waitClock}).
+     */
+    void runTips(long now) {
+        final List<Tip> tips = pendingTips();
+        if (tips.isEmpty()) return;
+        final Tip next = tips.get(0);
+        if (next.due > now) {
+            armTips();
+            return;
+        }
+        if (boxBusy() || modalDialogShowing()) {
+            if (this.adviceTimer != null) {
+                this.adviceTimer.schedule(now + ClassicVoyages.nanos(ClassicVoyages.POLL_MS),
+                                          () -> runTips(waitClock().now()));
+            }
+            return;
+        }
+        final long closed = boxClosedAt();
+        if (closed != Long.MIN_VALUE && closed > next.asked) {
+            final long after = closed + ClassicVoyages.nanos(ClassicTips.TIP_MS);
+            if (after > now) {
+                if (this.adviceTimer != null) {
+                    this.adviceTimer.schedule(after, () -> runTips(waitClock().now()));
+                }
+                return;
+            }
+        }
+        this.pendingTips.remove(next);
+        showTip(next);
+        armTips();
+    }
+
+    /**
+     * Show a due tip if it still fits: a unit tip only while its unit is
+     * the active one on the map and still brings it, a colony tip only
+     * while its screen is open; else it is dropped, not marked, and comes
+     * at its next trigger.  EDT only.
+     *
+     * @param tip The tip.
+     */
+    private void showTip(Tip tip) {
+        final Player me = myPlayer();
+        if (me == null || !tipsOn() || tipShown(me, tip.k)) return;
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final Map<String, String> values;
+        if (tip.unit != null) {
+            final boolean coming = comingUnit() == tip.unit;
+            if ((!coming && getActiveUnit() != tip.unit) || !mapShowing()
+                || !ClassicTips.fits(tip.unit, tip.k)) {
+                ClassicFrameRecorder.event("tip-dropped", ClassicTips.section(tip.k)
+                    + " unit=" + tip.unit.getId());
+                return;
+            }
+            // At the switch: the unit comes with the tip's close, no second tip then.
+            if (coming) this.switchTipUnit = tip.unit;
+            values = ClassicTips.unitValues(t, tip.unit, tip.k);
+        } else if (tip.colony != null) {
+            if (!colonyScreenOpen(tip.colony)) {
+                ClassicFrameRecorder.event("tip-dropped", ClassicTips.section(tip.k)
+                    + " screen closed");
+                return;
+            }
+            values = (tip.k == ClassicTips.DOCK) ? ClassicTips.dockValues(tip.colony)
+                : ClassicTips.colonyValues(t, tip.colony);
+        } else {
+            values = tip.values;
+        }
+        final ClassicAdvisorBox.Request r = ClassicTips.request(t, tip.k, values);
+        if (r == null) return;   // no pack: FreeCol has no such tip
+        markTip(me, tip.k);
+        ClassicFrameRecorder.event("tip", ClassicTips.section(tip.k));
+        this.prompter.ask(r);
+    }
+
+    /**
+     * A unit became the active one (the cycle's choice, the hand-over, a
+     * click, the view's first unit; not a goto run or a visit): its tip
+     * ({@link ClassicTips#unitTip}) {@link ClassicTips#TIP_MS} later.  A
+     * unit tip still on its way for another unit is dropped; the same one
+     * for the same unit (activated again) keeps its moment.  EDT only.
+     *
+     * @param unit The unit, or null.
+     * @param nowNanos Now ({@link #waitClock}).
+     */
+    void unitUp(Unit unit, long nowNanos) {
+        // Its tip came at its switch already: none at its activation.
+        final boolean tipped = unit != null && unit == this.switchTipUnit;
+        this.switchTipUnit = null;
+        if (tipped) return;
+        unitTip(unit, nowNanos);
+    }
+
+    /**
+     * A hand-over to a unit has started (the turn flow's
+     * {@code unitComing}): its tip {@link ClassicTips#TIP_MS} after the
+     * last change, at the switch, before the unit, which the turn flow
+     * brings with the tip's close (V: landfall 03 section 6, @TUTORIAL11,
+     * 13 and 14 open at the switch, the unit's block 1 frame after their
+     * close).  EDT only.
+     *
+     * @param unit The unit coming.
+     * @param baseNanos The last change ({@link #waitClock}).
+     */
+    void unitComing(Unit unit, long baseNanos) {
+        unitTip(unit, baseNanos);
+    }
+
+    /**
+     * @return The unit a pending hand-over brings, or null.
+     */
+    Unit comingUnit() {
+        final ClassicTurnFlow tf = this.turnFlow;
+        return (tf == null) ? null : tf.comingUnit();
+    }
+
+    /**
+     * A unit's tip on its way from {@code fromNanos}; other unit tips on
+     * their way dropped, the same one for the same unit kept.
+     */
+    private void unitTip(Unit unit, long fromNanos) {
+        final Player me = myPlayer();
+        final int k = (unit == null || me == null || unit.getOwner() != me || !tipsOn())
+            ? -1 : ClassicTips.unitTip(unit, me.getClassicTips());
+        boolean kept = false;
+        for (Iterator<Tip> it = this.pendingTips.iterator(); it.hasNext();) {
+            final Tip p = it.next();
+            if (p.unit == null) continue;
+            if (p.unit == unit && p.k == k) {
+                kept = true;
+            } else {
+                it.remove();
+            }
+        }
+        armTips();
+        if (k < 0 || kept) return;
+        scheduleTip(new Tip(k, fromNanos + ClassicVoyages.nanos(ClassicTips.TIP_MS),
+                            fromNanos, unit, null, null));
+    }
+
+    /**
+     * The notice of a colonist the unrest brought has closed:
+     * {@code @TUTORIAL5} {@link ClassicTips#TIP_MS} later (V: @UNREST
+     * landfall #18247 -&gt; #18279).  EDT only.
+     *
+     * @param unit The colonist, or null.
+     * @param closedNanos When the notice closed.
+     */
+    void unrestClosed(Unit unit, long closedNanos) {
+        final Player me = myPlayer();
+        if (me == null) return;
+        scheduleTip(new Tip(ClassicTips.UNREST,
+            closedNanos + ClassicVoyages.nanos(ClassicTips.TIP_MS), closedNanos, null, null,
+            ClassicTips.unrestValues(ClassicText.load(ClassicPackFiles.runtime()), me, unit)));
+    }
+
+    /**
+     * A colony screen opened: for a colony just founded {@code @TUTORIAL4}
+     * {@link ClassicTips#COLONY_TIP_MS} later (V: clip008 #4032 -&gt;
+     * #4068), over the screen.  EDT only.
+     *
+     * @param colony The colony.
+     * @param shownNanos When the screen was shown.
+     * @param founding Whether the colony was just founded.
+     */
+    void colonyScreenShown(Colony colony, long shownNanos, boolean founding) {
+        this.colonyShown = colony;
+        if (!founding) return;
+        scheduleTip(new Tip(ClassicTips.COLONY,
+            shownNanos + ClassicVoyages.nanos(ClassicTips.COLONY_TIP_MS), shownNanos,
+            null, colony, null));
+    }
+
+    /**
+     * The seam of D10: a ship docked and its colony screen opened:
+     * {@code @TUTORIAL12} {@link ClassicTips#DOCK_TIP_MS} later (V:
+     * clip008 #30022 -&gt; #30059).  Nobody calls it yet (D10 is not
+     * built: FreeCol opens no screen on a docking).  EDT only.
+     *
+     * @param colony The colony.
+     * @param shownNanos When its screen was shown.
+     */
+    void shipDocked(Colony colony, long shownNanos) {
+        this.colonyShown = colony;
+        scheduleTip(new Tip(ClassicTips.DOCK,
+            shownNanos + ClassicVoyages.nanos(ClassicTips.DOCK_TIP_MS), shownNanos,
+            null, colony, null));
+    }
 
     /** @return When the last box closed on the box layer's clock, else now. */
     private long lastBoxClose() {

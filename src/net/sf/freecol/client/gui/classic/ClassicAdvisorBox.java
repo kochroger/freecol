@@ -384,6 +384,9 @@ final class ClassicAdvisorBox {
         /** GAME.TXT's {@code @width}: the box is 6 wider. */
         final int width;
 
+        /** GAME.TXT's {@code @x}, or null to centre: set only for the tips (@TUTORIAL4, W11). */
+        final Integer x;
+
         /** GAME.TXT's {@code @y}, or null to centre. */
         final Integer y;
 
@@ -511,6 +514,7 @@ final class ClassicAdvisorBox {
             }
             this.paragraphs = Collections.unmodifiableList(ps);
             this.width = b.width;
+            this.x = b.x;
             this.y = b.y;
             this.rows = Collections.unmodifiableList(new ArrayList<>(b.rows));
             this.disabled = Arrays.copyOf(b.disabled, this.rows.size());
@@ -636,6 +640,7 @@ final class ClassicAdvisorBox {
         private final String id;
         private final List<List<String>> paragraphs = new ArrayList<>();
         private int width = FREECOL_WIDTH;
+        private Integer x = null;
         private Integer y = null;
         private final List<String> rows = new ArrayList<>();
         private boolean[] disabled = new boolean[0];
@@ -764,6 +769,17 @@ final class ClassicAdvisorBox {
         /** @param yy GAME.TXT's {@code @y}, or null. */
         Builder y(Integer yy) {
             this.y = yy;
+            return this;
+        }
+
+        /**
+         * @param xx GAME.TXT's {@code @x}, or null: the box's left edge, an
+         *     advisor stays over the centred box (clip008 #4068: @TUTORIAL4 at x 10).
+         *     Only the tips set it; other boxes ignore GAME.TXT's @x (V:
+         *     @TUTORIAL1's @x=10 is not used).
+         */
+        Builder x(Integer xx) {
+            this.x = xx;
             return this;
         }
 
@@ -1187,7 +1203,7 @@ final class ClassicAdvisorBox {
         final Point boxAt, picAt;
         boolean under = false;
         if (sprite == null) {
-            boxAt = new Point((VW - w + 1) / 2,
+            boxAt = new Point((r.x != null) ? r.x : (VW - w + 1) / 2,
                 (r.y != null) ? r.y : (VH - h + 1) / 2);
             picAt = null;
         } else if (who.kind == Portrait.Kind.CHIEF) {
@@ -1204,7 +1220,10 @@ final class ClassicAdvisorBox {
             final Point off = who.offset(w, sprite.getWidth());
             final Point[] at = ClassicFirstScene.place(w, h, sprite.getWidth(),
                 sprite.getHeight(), off.x, off.y);
-            boxAt = at[0];
+            // A tip's @x moves the box only; the advisor stays where the
+            // centred box would have him (V: clip008 #4068, box x 10,
+            // the colonist at x 130 = centred over a box at x 42).
+            boxAt = new Point((r.x == null) ? at[0].x : r.x, at[0].y);
             picAt = at[1];
         }
         final Rectangle box = new Rectangle(boxAt.x, boxAt.y, w, h);
