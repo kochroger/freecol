@@ -949,9 +949,16 @@ final class ClassicAdvisorLayer extends JComponent {
             answer = p.bar.help();
             break;
         case KeyEvent.VK_BACK_SPACE:
-            if (predates(e.getWhen()) || !p.request.hasField()) return;
-            if (p.bar.backspace()) fieldChanged(p);
-            return;
+            if (predates(e.getWhen())) return;
+            if (p.request.hasField()) {
+                if (p.bar.backspace()) fieldChanged(p);
+                return;
+            }
+            // A box without a name field: any other key (a notice goes on
+            // any key, G1; the review of part I: since I3 Backspace kept it).
+            if (repeat) return;
+            answer = p.bar.otherKey();
+            break;
         default:
             if (predates(e.getWhen()) || repeat) return;
             answer = (code >= KeyEvent.VK_A && code <= KeyEvent.VK_Z)

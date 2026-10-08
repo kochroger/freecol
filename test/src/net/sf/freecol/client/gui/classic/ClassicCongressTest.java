@@ -105,6 +105,49 @@ public class ClassicCongressTest extends FreeColTestCase {
     }
 
     /**
+     * The fixer of part J (the review of part I, regress lens): the turn
+     * start's poll asks while the connection thread clears and refills the
+     * player's live set of fathers (Player.copyIn).  The question never
+     * throws; a father it misses meanwhile comes at a later poll, and none
+     * is reported twice.
+     */
+    public void testJoinedWhileTheSetIsRefilled() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final List<FoundingFather> all = new ArrayList<>(spec().getFoundingFathers());
+        final java.util.Set<FoundingFather> live = dutch.getFoundingFathers();
+        final java.util.concurrent.atomic.AtomicBoolean stop
+            = new java.util.concurrent.atomic.AtomicBoolean(false);
+        final Thread copyIn = new Thread(() -> {
+                while (!stop.get()) {
+                    live.clear();
+                    live.addAll(all);
+                }
+            }, "copyIn");
+        final Set<String> known = new HashSet<>();
+        final List<String> seen = new ArrayList<>();
+        copyIn.start();
+        try {
+            final long end = System.nanoTime() + 300_000_000L;
+            while (System.nanoTime() < end) {
+                for (FoundingFather ff : ClassicCongress.joined(known, dutch, true)) {
+                    seen.add(ff.getId());
+                }
+            }
+        } finally {
+            stop.set(true);
+            copyIn.join(5_000L);
+        }
+        live.clear();
+        live.addAll(all);
+        for (FoundingFather ff : ClassicCongress.joined(known, dutch, true)) {
+            seen.add(ff.getId());
+        }
+        assertEquals(all.size(), seen.size());
+        assertEquals(all.size(), new HashSet<>(seen).size());
+    }
+
+    /**
      * @FREEDOM: GAME.TXT's words, "Holl." and the father's NAMES name in
      * gold, centred at (42,85) 236x30 without a portrait, a notice, 342 ms
      * after it is asked at the turn start; FreeCol's notice without the

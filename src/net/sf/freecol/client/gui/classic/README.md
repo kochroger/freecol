@@ -505,7 +505,12 @@ minimap box.
     `SkipUnitAction` (`changeState(unit, SKIPPED)` then `nextActiveUnit()`). With no
     active unit (or one off the map), Space ends the turn instead, under Enter's
     condition (as in the original, where Space advances the turn once every unit
-    is done).
+    is done). A unit up with orders FreeCol cannot skip (only an ACTIVE unit can
+    be SKIPPED: a click brought up a pioneer at work, or a fortified or sentried
+    unit with no moves left) keeps its orders and the next unit comes, or the
+    turn ends by itself 485 ms later (`ClassicMapViewer.keepsOrdersOnSkip`,
+    `ClassicGUI.nextUnitAfterSkip`; the fixer of part J: before, Space did
+    nothing there, and with nothing else to move Enter was refused too).
   - **W** → wait: the next unit of the original's unit cycle comes at once
     (`ClassicGUI.waitUnit`, `ClassicTurnFlow.waited`, W5f), and this one again
     after the wrap (I: never recorded); without the turn flow
@@ -1219,18 +1224,30 @@ still ends by itself 485 ms after the last change (#691, #1834, #4680).
   hand-over of its own, so FreeCol's own choice of the unit after the state
   change is kept). The unit then plays as any other; after its last move the
   turn ends by itself (#4646 -> #4680) and the mode does not come back. A
-  unit with no moves left takes no click in the mode (it keeps its orders).
+  unit with no moves left takes no click in the mode (it keeps its orders),
+  nor does a unit with orders a click does not free, such as a pioneer at
+  work (`ClassicGUI.takesPromptClick`: freed by the click, or one that takes
+  orders; the fixer of part J: before, the working pioneer came up with his
+  orders, Space could not skip him, Enter was refused and W found nothing).
   The same freeing on a click outside the mode (`ClassicMapViewer.clickOn`,
-  both branches).
+  both branches); there FreeCol's choice of another unit from inside the
+  freeing's state change (its cycle head, with units left to move) goes back
+  to its cycle instead of coming up for a moment before the clicked unit
+  (`ClassicGUI.changeView(Unit, boolean)`, the fixer of part J).
 - **A load with nothing to move** (J3; the review of part I): the view opens
   with no unit when FreeCol's saved active unit (`restoreActiveUnit`, any
   state) is sentried, fortified or out of moves (`ClassicGUI.firstUnit`:
-  then the cycle's first unit that takes orders, else none; before, the
-  saved sentried ship blinked, Enter was ignored and Space could not skip
-  it), and `reconnectGUI` tells the turn flow (`noUnitLeft`): a due goto
-  unit or visit comes, else the mode **485 ms** after the last change (no
-  wipe at a load, I) and waits. Before, a load with no unit waited for a
-  key with no mode (G acceptance A5).
+  then the cycle's first due unit if it takes orders, else none; before,
+  the saved sentried ship blinked, Enter was ignored and Space could not
+  skip it), and `reconnectGUI` hands over to the turn flow after the
+  view's focus (`openedWithNoUnit`, as the controller's end view: the
+  flow's `dueInstead`, else `noUnitLeft`): a due goto unit or visit comes,
+  and after it the units that take orders, else the mode **485 ms** after
+  the last change (no wipe at a load, I) and waits. Before, a load with no
+  unit waited for a key with no mode (G acceptance A5); until the fixer of
+  part J a goto unit first in the cycle and another unit that could move
+  left the view with nothing up and nothing coming (Enter and Space
+  refused).
 - **The levi rules keep the moves of a completed fortification**
   (`model.option.fortifyKeepsMoves`, "The rules"): FreeCol takes the turn's
   moves when FORTIFYING becomes FORTIFIED at the turn start; the original's
@@ -1272,8 +1289,16 @@ still ends by itself 485 ms after the last change (#691, #1834, #4680).
   at our next turn's start, which no longer clears a frozen square; opening_014
   #4309 -> #4311, J2).
 - **Other input** in the mode: the arrows are inert; a map click does
-  something only on an own unit that can still move, which comes up as above
-  (opening_014 1512; W17 item 6); the menus and the minimap work.
+  something only on an own unit that a click frees or that takes orders,
+  which comes up as above (opening_014 1512; W17 item 6), and on our own
+  colony, whose screen opens as outside the mode (the original's manual,
+  p. 10: the player "may continue to perform management functions" while it
+  flashes; I: no clip); the mode stays and goes on when the screen closes.
+  A unit on a colony's tile (its guard, a ship in its port), which the map
+  does not draw there, is never freed or brought up by the click (the fixer
+  of part J: before, the click freed the fortified guard, who lost his
+  orders, and the colony did not open). E opens Europe; the menus and the
+  minimap work.
 - **Not built / I:** the colony block and "+ Weiter +" of a colony tile (W21),
   the meaning of the number after the position, Enter vs. click (both work),
   what arrows do; the turn-start visit's block ("Befestigen", black F, #2177:
@@ -1296,7 +1321,11 @@ what clears it, the minimap pixel), `testAClickFreesTheUnit`,
 `testPromptClickKeepsTheWordUntilTheBlock`, `ClassicHudTest.testTileMode*`
 (lines, layout, word and square pixels, live tile facts), `ClassicBlinkTest.
 testArmDelayed`, `ServerUnitTest.testFortifyKeepsMoves`,
-`LeviRulesTest.testFortifyKeepsMoves`.
+`LeviRulesTest.testFortifyKeepsMoves`; the fixer of part J:
+`ClassicTurnFlowTest.testWhatAClickTakesInTheMode` (a pioneer at work
+ignored, our colony opens, its guard kept, Enter still ends),
+`testSpaceOnAUnitThatKeepsItsOrders`, `testATerrainViewClickBringsOnlyTheClickedUnit`,
+`ClassicGUISeamTest.testLoadWithAGotoUnitFirstAndAUnitThatCanMove`.
 
 ### Escape, the high seas and the Europe question (build spec W0e, W0f, W8a; house rule D1)
 
@@ -1537,8 +1566,10 @@ and units at sea or in Europe never count as movable. Now as the original:
 - **Europe closes by itself** 357 ms after the last ship in its port sailed
   (`ClassicEuropePanel` Set Sail -> `ClassicGUI.europeShipSailed`,
   `ClassicVoyages.closesAfterSailing`, `EUROPE_CLOSE_MS`; opening_013 #3958 ->
-  #3983, opening_014 #3669 -> #3695; Roger, 2026-10-08), also with colonists
-  waiting on the dock; not if a ship is in port again by then; a modal list or
+  #3983, opening_014 #3669 -> #3695, opening_015 #1682 -> #1707; Roger,
+  2026-10-08), also with colonists waiting on the dock (those marked "S" have
+  boarded the ship before it sailed, opening_015 #1686; the fixer of part J);
+  not if a ship is in port again by then; a modal list or
   a box up: after it. It is the player's close for the turn flow: the arrival
   hold ends (the wipe) and the unit whose turn it is comes through the unit
   cycle, or, with nothing to move, the Spielzugende mode 328 ms after the wipe
@@ -3113,10 +3144,15 @@ undrawn, unless a ship is currently selected.
   EuropePanel.DestinationPanel"). Mirrors the standard (non-classic) Europe screen's own Set Sail
   button (`EuropePanel#sailAction`, key `S`) down to reusing its `setSail` i18n key, since no screenshot
   of the original's own set-sail affordance has surfaced — a placeholder in the same vein as the
-  build-queue picker, open for the expert. It also mirrors that button's one safety check: if
-  auto-load-emigrants is off and a colonist is still waiting on the dock, it confirms first (the classic
-  UI's own wired `modalConfirmDialog`, same `europePanel.leaveColonists` template) before leaving them
-  behind. Loading and selling keep the ship selected, so several goods types can be bought or sold in
+  build-queue picker, open for the expert. **Since the fixer of part J** (the review of part J; Roger's
+  clip opening_015 #1683 -> #1686, V) the colonists on the dock marked "S" (FreeCol's SENTRY, which every
+  land unit gets on the dock) board the ship by themselves first, as many as fit, in the dock's order
+  (`ClassicEuropePanel.sail` / `boarders`, `InGameController.boardShip`; FreeCol's `moveAutoload` with
+  `Unit.sentryPred`), and a colonist marked "-" stays; there is no question any more (before, FreeCol's
+  "... und die Kolonisten zurücklassen?" box, `europePanel.leaveColonists`, came up with the bar on
+  "Okay", and Enter left the colonist behind unseen). The original's @SAILAWAY box and the dock's
+  option box ("Nicht aufs nächste Schiff gehen" = "-") are not built yet, so every colonist on our
+  dock boards. Loading and selling keep the ship selected, so several goods types can be bought or sold in
   one visit — a deliberate difference from boarding/work-assignment's clear-after-one-click convention,
   since cargo is inherently a multi-item action even in the standard UI's own drag interface.
 

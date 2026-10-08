@@ -1744,15 +1744,8 @@ public class ClassicGUI extends GUI {
                     this.turnFlow.unitShown(first);
                     if (fromCursor(first)) this.turnFlow.cycleUnitUp(first);
                 }
-            } else {
-                if (tile != null) this.mapViewer.changeToTerrain(tile);
-                // Nothing up at the load (every unit fortified, sentried or
-                // done, FreeCol's saved active unit among them): the turn
-                // flow brings a due goto unit or visit, else the
-                // Spielzugende mode comes by itself and waits (Roger
-                // 2026-10-08; the review of part I, J3).  It used to wait
-                // for a key with no mode (G acceptance A5).
-                if (this.turnFlow != null) this.turnFlow.noUnitLeft();
+            } else if (tile != null) {
+                this.mapViewer.changeToTerrain(tile);
             }
             // Prefer an active unit for the initial view: the original
             // always opens looking at the piece that is up, centred and
@@ -1775,6 +1768,9 @@ public class ClassicGUI extends GUI {
             }
             this.mapViewer.requestFocusInWindow();
             this.mapViewer.repaint();
+            // Nothing up at the load: the turn flow takes over, with the
+            // view's focus set (a due unit's jump is decided from it).
+            if (first == null) openedWithNoUnit();
             repaintInfo();
             updateActions();
             logger.info("ClassicGUI: in-game map installed.");
@@ -2425,7 +2421,19 @@ public class ClassicGUI extends GUI {
         // The controller's choice of the unit a click is freeing, from
         // inside the state change (its updateGUI runs at once on the event
         // thread): that is the click itself (J2 live check, run click4).
-        changeView(unit, unit != null && unit == this.clickWaking, "unit");
+        final Unit waking = this.clickWaking;
+        if (waking != null && unit != null && unit != waking) {
+            // Its choice of another unit there (the terrain view with units
+            // left to move: FreeCol's cycle head) is dropped and goes back
+            // to FreeCol's cycle: the click's own activation follows at
+            // once (the review of part J: the other unit flashed up first).
+            ClassicFrameRecorder.event("handover", "dropped " + unit.getId()
+                + " during the click on " + waking.getId());
+            final Player p = myPlayer();
+            if (p != null && unit.getOwner() == p) p.putBackActiveUnit(unit);
+            return;
+        }
+        changeView(unit, unit != null && unit == waking, "unit");
     }
 
     /**
@@ -2482,6 +2490,37 @@ public class ClassicGUI extends GUI {
         default:
             return false;
         }
+    }
+
+    /**
+     * Space on a unit up with orders it keeps (a pioneer at work or a
+     * fortified unit with no moves, brought up by a click;
+     * {@code ClassicMapViewer.keepsOrdersOnSkip}): the controller's next
+     * unit, as after a skip; with none, its end view and the turn flow's
+     * end (the fixer of part J).  EDT only.
+     */
+    void nextUnitAfterSkip() {
+        final FreeColClient fcc = getFreeColClient();
+        if (fcc != null) fcc.getInGameController().nextActiveUnit();
+    }
+
+    /**
+     * Whether a click in the Spielzugende mode takes an own unit
+     * ({@code ClassicMapViewer.clickOn}; the review of part J): one a click
+     * frees ({@link #wakesOnClick}) or one the unit cycle would bring up
+     * (it takes orders).  A unit with orders a click does not free (a
+     * pioneer at work, whom FreeCol gives his moves at every turn start)
+     * is ignored as the rest of the map: it keeps them, and Enter or Space
+     * still end the turn (before, the working pioneer came up with his
+     * orders, Space could not skip him, Enter was refused while he was up
+     * and W found nothing).
+     *
+     * @param unit The unit, or null.
+     * @return True if the click brings it up.
+     */
+    boolean takesPromptClick(Unit unit) {
+        return wakesOnClick(unit)
+            || this.unitCycle.kind(unit) == ClassicUnitCycle.Kind.ORDERS;
     }
 
     /**
@@ -2559,10 +2598,12 @@ public class ClassicGUI extends GUI {
      * first one), but only one the cycle would bring up: FreeCol's saved
      * unit sentried, fortified or with no moves left is never up (the
      * review of part I: the saved sentried ship blinked, Enter was ignored
-     * and Space could not skip it; J3).  Then the cycle's first unit that
-     * takes orders (from the cursor, else from the head), or none, so a
-     * load with nothing to move opens with no unit and the turn flow
-     * brings a due goto unit or visit, or the Spielzugende mode.
+     * and Space could not skip it; J3).  Then the cycle's first due unit
+     * (from the cursor, else from the head) if it takes orders; if it is a
+     * goto unit or a visit, or nothing is due, none: the view opens with
+     * no unit and the turn flow brings the due goto unit or visit (and the
+     * units that take orders after it), or the Spielzugende mode
+     * ({@link #openedWithNoUnit}; the review of part J).
      *
      * @param active FreeCol's unit, or null.
      * @return The unit to open with, or null.
@@ -2579,6 +2620,25 @@ public class ClassicGUI extends GUI {
             return next;
         }
         return (canComeUp) ? active : null;
+    }
+
+    /**
+     * The game view opened with no unit up ({@link #reconnectGUI}, a load:
+     * every unit fortified, sentried or done, or FreeCol's saved active
+     * unit cannot come up and the cycle's first due unit is a goto unit or
+     * a visit).  Nobody else asks for a unit at a load
+     * ({@code ConnectController.login}: {@code restoreGUI}, then the
+     * messages), so the turn flow takes over as at the controller's end
+     * view ({@link #changeView()}): the cycle's due goto unit or visit
+     * comes, and after it the units that take orders; with none due, the
+     * Spielzugende mode comes by itself and waits (Roger 2026-10-08; the
+     * review of part I, J3; the review of part J: a goto unit first and a
+     * unit that could move left the view with nothing up and nothing
+     * coming).  EDT only.
+     */
+    void openedWithNoUnit() {
+        if (this.turnFlow == null) return;
+        if (!this.turnFlow.dueInstead(null)) this.turnFlow.noUnitLeft();
     }
 
     /**

@@ -670,6 +670,18 @@ final class ClassicMapViewer extends JPanel {
                 + " at=" + xy(unit.getTile()) + " moves=" + unit.getMovesLeft()
                 + (unit.isOnCarrier() ? " aboard=" + unit.getCarrier().getId() : ""));
         }
+        if (this.gui != null && keepsOrdersOnSkip(unit)) {
+            // Up with orders a skip cannot take (SKIPPED only from
+            // ACTIVE): a click brought a pioneer at work, or a fortified or
+            // sentried unit with no moves left.  Space goes on as after a
+            // skip, and the unit keeps its orders (the fixer of part J:
+            // before, Space did nothing, and with nothing else to move
+            // Enter was refused while the unit was up).
+            ClassicFrameRecorder.event("skip", "keeps " + unit.getState());
+            skipped();
+            this.gui.nextUnitAfterSkip();
+            return;
+        }
         if (unit.getState() != Unit.UnitState.SKIPPED
             && this.freeColClient.getInGameController()
                 .changeState(unit, Unit.UnitState.SKIPPED)) {
@@ -680,6 +692,19 @@ final class ClassicMapViewer extends JPanel {
             skipped();
             this.freeColClient.getInGameController().nextActiveUnit();
         }
+    }
+
+    /**
+     * Whether Space leaves a unit's orders as they are and goes on to the
+     * next unit ({@link #skipActiveUnitOrEndTurn}): a unit up that is
+     * neither active nor skipped (FreeCol skips only an active one).
+     *
+     * @param unit The unit up.
+     * @return True if it keeps its orders.
+     */
+    static boolean keepsOrdersOnSkip(Unit unit) {
+        return unit != null && unit.getState() != Unit.UnitState.ACTIVE
+            && unit.getState() != Unit.UnitState.SKIPPED;
     }
 
     /**
@@ -2506,14 +2531,26 @@ final class ClassicMapViewer extends JPanel {
      */
     void clickOn(Tile tile, Player player) {
         if (this.gui != null && this.gui.turnPrompt()) {
-            // The Spielzugende mode: only an own unit that can still move
-            // takes a click, also a fortified or sentried one, which is
-            // freed, and it comes up (opening_014 #4475/#4477; the turn
-            // then ends by itself after it, #4680); the rest of the map is
-            // inert, as the arrows are (W17 item 6).
-            final Unit u = (tile.isExplored()) ? tile.getFirstUnit() : null;
-            if (u != null && player != null && player.owns(u)
-                && u.getMovesLeft() > 0) {
+            // The Spielzugende mode.  Our own colony opens as outside the
+            // mode (the original's manual, p. 10: the player "may continue
+            // to perform management functions" while it flashes, as E opens
+            // Europe); the mode stays and goes on after the colony screen
+            // closes.  A unit on a settlement's tile, which the map does
+            // not draw there, is never freed or brought up by the click
+            // (the review of part J: the colony's fortified guard lost its
+            // orders).  Elsewhere only an own unit that a click frees
+            // (fortified, fortifying or sentried, with moves left) or that
+            // takes orders comes up (opening_014 #4475/#4477; the turn then
+            // ends by itself after it, #4680); a unit with other orders (a
+            // pioneer at work) or no moves keeps them, and the rest of the
+            // map is inert, as the arrows are (W17 item 6).
+            final Settlement s = (tile.isExplored()) ? tile.getSettlement() : null;
+            final Unit u = (!tile.isExplored() || s != null) ? null : tile.getFirstUnit();
+            if (s instanceof Colony && player != null && player.owns(s)) {
+                ClassicFrameRecorder.event("click-colony", "prompt " + xy(tile));
+                this.gui.showColonyPanel((Colony) s, null);
+            } else if (u != null && player != null && player.owns(u)
+                && u.getMovesLeft() > 0 && this.gui.takesPromptClick(u)) {
                 this.gui.unitClicked(u);
             } else {
                 ClassicFrameRecorder.event("click-ignored", "prompt " + xy(tile));

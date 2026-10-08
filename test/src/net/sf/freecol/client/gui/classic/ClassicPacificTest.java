@@ -75,9 +75,14 @@ public class ClassicPacificTest extends FreeColTestCase {
 
     private static final int W = 58, H = 72;
 
-    /** The original's install folder (as for {@code ant classic-assets}). */
-    private static final String INSTALL = System.getProperty("col.install",
-        "C:/Program Files (x86)/Steam/steamapps/common/Sid Meier's Colonization/MPS/COLONIZE");
+    /**
+     * The original's install folder (as for {@code ant classic-assets}),
+     * only when given ({@code -Dcol.install}): the golden test reads the
+     * saves Roger plays on in DOSBox (COLONY08/09 were overwritten on
+     * 2026-10-08), so the suites do not depend on their content (the review
+     * of part I; the fixer of part J).  Null: the golden test is skipped.
+     */
+    private static final String INSTALL = System.getProperty("col.install");
 
 
     /** A W x H map of ocean with land where asked, its fixed regions made. */
@@ -209,8 +214,15 @@ public class ClassicPacificTest extends FreeColTestCase {
      * header's record counts ({@link #terrainOffset}) and is checked by the
      * units' tiles, so a save Roger plays on again still checks; a file
      * whose header does not fit is skipped with a note, as a missing one.
+     * Only with {@code -Dcol.install} ({@link #INSTALL}); the always-on
+     * guards are {@link #testRowScan} and the generated square map's test.
      */
     public void testGoldenAgainstTheOriginalSaves() throws IOException {
+        if (INSTALL == null) {
+            System.err.println("ClassicPacificTest: golden check skipped, it runs only"
+                + " with -Dcol.install=<the original's COLONIZE folder>");
+            return;
+        }
         final String[] saves = { "COLONY09.SAV", "COLONY08.SAV",
                                  "COLONY01.SAV", "COLONY00.SAV" };
         for (int i = 0; i < saves.length; i++) {

@@ -3332,19 +3332,196 @@ public class ClassicGUISeamTest extends FreeColTestCase {
                 b.setDestination(null);
             }
             // reconnectGUI hands a view with no first unit to the turn
-            // flow (its noUnitLeft: the due unit or the mode), before the
-            // view's focus.
+            // flow (openedWithNoUnit: the due unit or the mode), after the
+            // view's focus (a due unit's jump is decided from it); the
+            // fixer's testLoadWithAGotoUnitFirstAndAUnitThatCanMove runs it.
             final String src = new String(Files.readAllBytes(new File(
                 "src/net/sf/freecol/client/gui/classic/ClassicGUI.java").toPath()),
                 StandardCharsets.UTF_8);
             final int at = src.indexOf("final Unit first = firstUnit(active);");
-            final int none = src.indexOf("} else {", at);
-            final int call = src.indexOf("this.turnFlow.noUnitLeft();", none);
-            final int focus = src.indexOf("final Unit viewerActive", at);
-            assertTrue(at > 0 && none > at && call > none && call < focus);
+            final int focus = src.indexOf("this.mapViewer.setFocus(focusTile);", at);
+            final int call = src.indexOf("if (first == null) openedWithNoUnit();", at);
+            final int end = src.indexOf("logger.info(\"ClassicGUI: in-game map installed.\");", at);
+            assertTrue(at > 0 && focus > at && call > focus && call < end);
         } finally {
             ServerTestHelper.stopServerGame();
         }
+    }
+
+    /**
+     * The fixer of part J (the review of part J, play lens): a load whose
+     * view opens with no unit because the cycle's first due unit is a goto
+     * unit, while another unit could still move.  FreeCol's saved active
+     * unit cannot come up (sentried, fortified, no moves left: a save made
+     * with no unit up keeps the last saved unit's id).  Nobody but the view
+     * asks for a unit at a load, and the turn flow's idle decision left it
+     * to "the controller" (another unit can move): no unit, no goto run, no
+     * mode, Enter and Space refused.  Now the view hands over as the
+     * controller's end view does: the goto unit runs, then the unit that
+     * takes orders comes up.  The real game, the real unit cycle and the
+     * real turn flow; only the flow's host is a stand-in.
+     */
+    public void testLoadWithAGotoUnitFirstAndAUnitThatCanMove() throws Exception {
+        final Game game = ServerTestHelper.startServerGame(getTestMap(true));
+        try {
+            final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+            final net.sf.freecol.common.model.UnitType colonist
+                = spec().getUnitType("model.unit.freeColonist");
+            final Map map = game.getMap();
+            final Unit a = new ServerUnit(game, map.getTile(5, 5), dutch, colonist);
+            final Unit g = new ServerUnit(game, map.getTile(6, 5), dutch, colonist);
+            final Unit c = new ServerUnit(game, map.getTile(7, 5), dutch, colonist);
+            for (String variant : new String[] { "sentried", "fortified", "no moves" }) {
+                for (long cursor : new long[] { -1L, ClassicUnitCycle.cursorPast(a) }) {
+                    final String why = variant + " cursor " + cursor;
+                    a.setState(Unit.UnitState.ACTIVE);
+                    a.setMovesLeft(a.getInitialMovesLeft());
+                    if ("sentried".equals(variant)) {
+                        a.setState(Unit.UnitState.SENTRY);
+                    } else if ("fortified".equals(variant)) {
+                        a.setState(Unit.UnitState.FORTIFYING);
+                        a.setState(Unit.UnitState.FORTIFIED);
+                        a.setMovesLeft(a.getInitialMovesLeft());
+                    } else {
+                        a.setMovesLeft(0);
+                    }
+                    for (Unit u : new Unit[] { g, c }) {
+                        u.setState(Unit.UnitState.ACTIVE);
+                        u.setMovesLeft(u.getInitialMovesLeft());
+                    }
+                    g.setDestination(map.getTile(9, 9));
+                    dutch.setClassicCycleCursor(cursor);
+                    final LoadGUI gui = new LoadGUI(game, dutch);
+                    assertEquals(why, ClassicUnitCycle.Kind.GOTO, gui.unitCycle.kind(g));
+                    assertEquals(why, ClassicUnitCycle.Kind.ORDERS, gui.unitCycle.kind(c));
+                    assertNull(why, gui.unitCycle.kind(a));
+                    assertSame(why, g, gui.unitCycle.next(null, dutch));
+                    assertTrue(why, dutch.hasNextActiveUnit());   // c can move
+                    assertNull(why, gui.firstUnit(a));             // no unit up
+
+                    gui.openedWithNoUnit();                        // reconnectGUI
+                    gui.run(5_000);
+                    assertEquals(why, List.of("activate " + g.getId(), "goto " + g.getId(),
+                                              "activate " + c.getId()), gui.host.calls);
+                    assertSame(why, c, gui.host.active);
+                    assertTrue(why, gui.turnFlow.cameUpThisTurn());
+                    assertNull(why, gui.turnFlow.pending());
+                    assertFalse(why, gui.turnFlow.isPrompt());
+                    assertFalse(why, gui.turnFlow.isInputBlocked());
+                    gui.turnFlow.dispose();
+                }
+            }
+            // Nothing due and nothing to move: the mode, as J3 (485 ms
+            // after the last change, no wipe at a load).
+            g.setDestination(null);
+            for (Unit u : new Unit[] { g, c }) u.setMovesLeft(0);
+            assertFalse(dutch.hasNextActiveUnit());
+            final LoadGUI gui = new LoadGUI(game, dutch);
+            assertNull(gui.firstUnit(a));
+            gui.openedWithNoUnit();
+            gui.run(484);
+            assertFalse(gui.turnFlow.isPrompt());
+            gui.run(2);
+            assertTrue(gui.turnFlow.isPrompt());
+            assertEquals(List.of("prompt"), gui.host.calls);
+            gui.turnFlow.dispose();
+        } finally {
+            ServerTestHelper.stopServerGame();
+        }
+    }
+
+    /** A view at a load ({@link #testLoadWithAGotoUnitFirstAndAUnitThatCanMove}). */
+    private static final class LoadGUI extends WoodcutGUI {
+
+        final LoadHost host;
+        final List<Runnable> edt = new ArrayList<>();
+        long now = 1_000_000_000L;
+
+        LoadGUI(Game game, Player me) {
+            super(game, me);
+            this.host = new LoadHost(me, this.unitCycle);
+            this.turnFlow = new ClassicTurnFlow(this.host, new ClassicSlide.Clock() {
+                    @Override
+                    public long now() {
+                        return LoadGUI.this.now;
+                    }
+
+                    @Override
+                    public void waitUntil(long due) {
+                        if (due > LoadGUI.this.now) LoadGUI.this.now = due;
+                    }
+                }, this.edt::add, false);
+        }
+
+        /** Run the flow's timer, its posts and its poll for {@code ms}. */
+        void run(int ms) {
+            for (int t = 0; t < ms; t++) {
+                this.now += 1_000_000L;
+                this.turnFlow.runDue();
+                while (!this.edt.isEmpty() || !this.host.posted.isEmpty()) {
+                    final List<Runnable> now = new ArrayList<>(this.edt);
+                    now.addAll(this.host.posted);
+                    this.edt.clear();
+                    this.host.posted.clear();
+                    for (Runnable r : now) r.run();
+                }
+                if (t % 50 == 49) this.turnFlow.tick();
+            }
+        }
+    }
+
+    /**
+     * The turn flow's host at a load: the real player's
+     * {@code hasNextActiveUnit} and the real unit cycle; a goto run uses
+     * the unit's moves.  Nobody else asks for a unit.
+     */
+    private static final class LoadHost implements ClassicTurnFlow.Host {
+        final Player me;
+        final ClassicUnitCycle cycle;
+        final List<String> calls = new ArrayList<>();
+        final List<Runnable> posted = new ArrayList<>();
+        Unit active = null;
+
+        LoadHost(Player me, ClassicUnitCycle cycle) {
+            this.me = me;
+            this.cycle = cycle;
+        }
+
+        @Override public boolean myTurn() { return true; }
+        @Override public boolean blocked() { return false; }
+        @Override public boolean hasNextActiveUnit() { return this.me.hasNextActiveUnit(); }
+        @Override public ClassicUnitCycle.Kind dueKind(Unit u) { return this.cycle.kind(u); }
+        @Override public Unit cycleNext(Unit anchor) { return this.cycle.next(anchor, this.me); }
+        @Override public void finished(Unit u) { this.cycle.finished(u, this.me); }
+        @Override public boolean anyDue() { return this.cycle.anyDue(this.me); }
+        @Override public void putBack(Unit u) { this.calls.add("putBack " + u.getId()); }
+        @Override public int turnNumber() { return this.me.getGame().getTurn().getNumber(); }
+        @Override public boolean promptPref() { return false; }
+        @Override public Unit activeUnit() { return this.active; }
+        @Override public boolean wouldJump(Unit u) { return false; }
+        @Override public void jumpTo(Unit u) { this.calls.add("jump " + u.getId()); }
+        @Override public void activate(Unit u) {
+            this.active = u;
+            this.calls.add("activate " + u.getId());
+        }
+        @Override public void wipe() { this.calls.add("wipe"); }
+        @Override public void paintIndicator() { }
+        @Override public boolean endTurn() { this.calls.add("endTurn"); return true; }
+        @Override public void runGoto(Unit u) {
+            this.calls.add("goto " + u.getId());
+            this.cycle.ran(u);
+            u.setMovesLeft(0);   // its steps
+        }
+        @Override public void visit(Unit u) { this.calls.add("visit " + u.getId()); }
+        @Override public void visitShown(Unit u) { this.calls.add("shown " + u.getId()); }
+        @Override public void nextActiveUnit() { this.calls.add("next"); }
+        @Override public void enterPrompt(Tile village) { this.calls.add("prompt"); }
+        @Override public void freezePrompt() { this.calls.add("freeze"); }
+        @Override public void leavePrompt() { this.calls.add("leave"); }
+        @Override public Player currentPlayer() { return this.me; }
+        @Override public Player myPlayer() { return this.me; }
+        @Override public Player nextPlayer() { return this.me; }
+        @Override public void post(Runnable r) { this.posted.add(r); }
     }
 
     /**

@@ -245,8 +245,19 @@ final class ClassicCongress {
     static List<FoundingFather> joined(Set<String> known, Player p, boolean take) {
         final List<FoundingFather> out = new ArrayList<>();
         if (known == null || p == null) return out;
-        for (FoundingFather ff : p.getFoundingFathers()) {
-            if (!known.contains(ff.getId())) out.add(ff);
+        // The player's live set: the connection thread clears and refills
+        // it when the server's update of our player comes (Player.copyIn),
+        // while the turn start's poll asks here on the event thread.  A
+        // copy taken meanwhile can throw (or miss fathers): then none now,
+        // the next poll asks again (the review of part I; new in I5).
+        final List<FoundingFather> all;
+        try {
+            all = new ArrayList<>(p.getFoundingFathers());
+        } catch (RuntimeException concurrent) {
+            return out;
+        }
+        for (FoundingFather ff : all) {
+            if (ff != null && !known.contains(ff.getId())) out.add(ff);
         }
         out.sort(Comparator.comparingInt((FoundingFather ff) -> {
                     final int i = ClassicFathers.index(ff);

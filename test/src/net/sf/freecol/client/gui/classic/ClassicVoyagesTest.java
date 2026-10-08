@@ -229,6 +229,82 @@ public class ClassicVoyagesTest extends FreeColTestCase {
     }
 
     /**
+     * The fixer of part J (the review of part J, fidelity lens; Roger's
+     * clip opening_015 #1683 -&gt; #1686, V): Set Sail takes the colonists
+     * on the dock marked "S" (SENTRY) aboard first, as many as fit, in the
+     * dock's order, and asks nothing; a colonist marked "-" stays; then the
+     * ship sails, and with no ship left in port Europe still closes by
+     * itself.  The controller is a stand-in that does what the server's
+     * embark and move do to the model.
+     */
+    public void testSetSailTakesTheDockColonistsMarkedS() {
+        for (Unit u : new ArrayList<>(this.dutch.getUnitSet())) u.dispose();
+        final Europe europe = this.dutch.getEurope();
+        final Unit ship = new ServerUnit(this.game, europe, this.dutch, merchantman);
+        final Unit carpenter = new ServerUnit(this.game, europe, this.dutch, colonist);
+        final Unit farmer = new ServerUnit(this.game, europe, this.dutch, colonist);
+        final Unit third = new ServerUnit(this.game, europe, this.dutch, colonist);
+        assertEquals("FreeCol: S on the dock", Unit.UnitState.SENTRY, carpenter.getState());
+        farmer.setState(Unit.UnitState.ACTIVE);                // "-": stays
+        final List<String> calls = new ArrayList<>();
+        assertEquals(List.of(carpenter, third), ClassicEuropePanel.boarders(europe, ship));
+        assertTrue(ClassicEuropePanel.sail(
+                (unit, carrier) -> {                      // the server's embark
+                    calls.add("board " + unit.getId());
+                    unit.setLocation(carrier);
+                    return true;
+                },
+                (unit, dest) -> {                         // the server's move
+                    calls.add("sail " + unit.getId() + " aboard=" + unit.getUnitCount());
+                    unit.setLocation(unit.getOwner().getHighSeas());
+                    unit.setDestination(dest);
+                    return true;
+                }, europe, ship, this.map));
+        assertEquals(List.of("board " + carpenter.getId(), "board " + third.getId(),
+                             "sail " + ship.getId() + " aboard=2"), calls);
+        assertSame(ship, carpenter.getLocation());
+        assertSame(ship, third.getLocation());
+        assertTrue("the farmer stays", farmer.isInEurope());
+        assertTrue("Europe closes", ClassicVoyages.closesAfterSailing(europe));
+
+        // Only as many as fit: a full hold takes none, a ship with one
+        // place left takes the first one marked S.
+        assertEquals(List.of(), ClassicEuropePanel.boarders(europe, null));
+        assertEquals(List.of(), ClassicEuropePanel.boarders(null, ship));
+        final Unit small = new ServerUnit(this.game, europe, this.dutch,
+            spec().getUnitType("model.unit.caravel"));
+        final int cap = small.getCargoCapacity();
+        assertTrue(cap >= 2);
+        final List<Unit> s = new ArrayList<>();
+        for (int i = 0; i <= cap; i++) {                       // one more than fit
+            s.add(new ServerUnit(this.game, europe, this.dutch, colonist));
+        }
+        assertEquals(s.subList(0, cap), ClassicEuropePanel.boarders(europe, small));
+        s.remove(0).setLocation(small);                        // one place taken
+        assertEquals(s.subList(0, cap - 1), ClassicEuropePanel.boarders(europe, small));
+        for (Unit u : new ArrayList<>(s.subList(0, cap - 1))) u.setLocation(small);
+        assertEquals(0, small.getSpaceLeft());
+        assertEquals(List.of(), ClassicEuropePanel.boarders(europe, small));
+        assertTrue(farmer.isInEurope());
+
+        // No question any more: setSail has no colonist box.
+        final String src;
+        try {
+            src = new String(java.nio.file.Files.readAllBytes(new java.io.File(
+                "src/net/sf/freecol/client/gui/classic/ClassicEuropePanel.java").toPath()),
+                java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+        final int at = src.indexOf("private void setSail()");
+        final int end = src.indexOf("static boolean sail(", at);
+        assertTrue(at > 0 && end > at);
+        assertFalse(src.substring(at, end).contains("modalConfirmDialog"));
+        assertTrue(src.substring(at, end).contains(
+            "sail(igc()::boardShip, igc()::moveTo, this.europe, ship, map);"));
+    }
+
+    /**
      * A timed band's end (europe-voyage D1): while the player has the turn
      * it goes at its time; after our end it stays through the AI phase,
      * the first unit of our next turn takes it away 2 frames later (once);

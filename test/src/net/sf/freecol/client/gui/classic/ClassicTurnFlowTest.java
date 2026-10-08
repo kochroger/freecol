@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import net.sf.freecol.common.model.Colony;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Player;
@@ -814,6 +815,270 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
             assertNull(r.flow.pending());
             gui.changeView(f, false);
             assertNull(r.flow.pending());
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /**
+     * The fixer of part J (the review of part J: play, fidelity and
+     * regress lenses): what a click takes in the Spielzugende mode, through
+     * the real {@code ClassicGUI} and map viewer on a real flow.
+     * <ol>
+     * <li>A pioneer at work, with the moves FreeCol gives him at every turn
+     *     start, is ignored as the rest of the map: he keeps his work, the
+     *     mode stays and Enter still ends the turn (before, he came up with
+     *     his orders, and Space, Enter and W did nothing).</li>
+     * <li>Our own colony opens as outside the mode; its fortified guard,
+     *     whom the map does not draw on the colony's tile, is neither freed
+     *     nor brought up (before, the click freed him and he lost his
+     *     orders), also with a ship in its port and with nobody on the tile;
+     *     the mode stays.</li>
+     * <li>A fortified unit elsewhere is still freed and comes up
+     *     (opening_014 #4475/#4477).</li>
+     * </ol>
+     */
+    public void testWhatAClickTakesInTheMode() {
+        final Game g = getStandardGame();
+        final Map m = getTestMap(true);
+        g.changeMap(m);
+        final Colony colony = createStandardColony();
+        final Player dutch = colony.getOwner();
+        assertSame(g.getPlayerByNationId("model.nation.dutch"), dutch);
+        final Tile ct = colony.getTile(), pt = m.getTile(2, 2), st = m.getTile(9, 9);
+        final Unit guard = new ServerUnit(g, ct, dutch,
+            spec().getUnitType("model.unit.veteranSoldier"));
+        guard.setState(Unit.UnitState.FORTIFYING);
+        guard.setState(Unit.UnitState.FORTIFIED);
+        guard.setMovesLeft(guard.getInitialMovesLeft());   // a later turn
+        assertSame(guard, ct.getFirstUnit());
+        final Unit pioneer = new ServerUnit(g, pt, dutch,
+            spec().getUnitType("model.unit.hardyPioneer"));
+        pioneer.setState(Unit.UnitState.IMPROVING);
+        pioneer.setMovesLeft(pioneer.getInitialMovesLeft());   // the turn's moves
+        final Unit soldier = new ServerUnit(g, st, dutch,
+            spec().getUnitType("model.unit.veteranSoldier"));
+        soldier.setState(Unit.UnitState.FORTIFYING);
+        soldier.setState(Unit.UnitState.FORTIFIED);
+        soldier.setMovesLeft(soldier.getInitialMovesLeft());
+        for (Unit u : dutch.getUnitSet()) {
+            assertFalse(u.getId(), u.isCandidateForNextActiveUnit());   // nothing to move
+        }
+
+        final Rig r = new Rig(g);
+        final List<String> log = new ArrayList<>();
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                void wake(Unit u) {   // the server's state change
+                    log.add("wake " + u.getId() + " " + u.getState());
+                    u.setState(Unit.UnitState.ACTIVE);
+                }
+
+                @Override
+                public net.sf.freecol.client.gui.panel.FreeColPanel showColonyPanel(
+                    Colony c, Unit u) {
+                    log.add("colony " + c.getName());
+                    return null;
+                }
+
+                @Override
+                protected Player getMyPlayer() {
+                    return dutch;
+                }
+            };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        gui.turnFlow = r.flow;
+        try {
+            mv.setFocus(st);
+            r.flow.noUnitLeft();
+            r.advanceMs(ClassicTurnFlow.END_TURN_MS);
+            assertTrue(r.flow.isPrompt());
+            assertTrue(gui.turnPrompt());
+            r.host.calls.clear();
+
+            // 1. The pioneer at work: ignored.
+            assertFalse(gui.takesPromptClick(pioneer));
+            mv.clickOn(pt, dutch);
+            r.advanceMs(100);
+            assertTrue(log.toString(), log.isEmpty());
+            assertEquals(List.of(), r.host.calls);
+            assertNull(mv.getActiveUnit());
+            assertEquals(Unit.UnitState.IMPROVING, pioneer.getState());
+            assertTrue(r.flow.isPrompt());
+            assertTrue(gui.mayEndTurnByKey());
+
+            // 2. Our colony: its screen, the guard keeps his orders.
+            mv.clickOn(ct, dutch);
+            final Unit ship = new ServerUnit(g, ct, dutch,
+                spec().getUnitType("model.unit.merchantman"));   // in its port
+            ship.setState(Unit.UnitState.SENTRY);
+            mv.clickOn(ct, dutch);
+            r.advanceMs(100);
+            assertEquals(Unit.UnitState.FORTIFIED, guard.getState());
+            assertEquals(Unit.UnitState.SENTRY, ship.getState());
+            assertNull(mv.getActiveUnit());
+            guard.setLocation(dutch.getEurope());
+            ship.setLocation(dutch.getEurope());
+            assertNull(ct.getFirstUnit());
+            mv.clickOn(ct, dutch);                         // nobody on the tile
+            r.advanceMs(100);
+            assertEquals(List.of("colony " + colony.getName(), "colony " + colony.getName(),
+                                 "colony " + colony.getName()), log);
+            assertNull(mv.getActiveUnit());
+            assertEquals(List.of(), r.host.calls);
+            assertTrue(r.flow.isPrompt());
+
+            // 3. A fortified soldier elsewhere: freed, up 2 frames later.
+            log.clear();
+            assertTrue(gui.takesPromptClick(soldier));
+            mv.clickOn(st, dutch);
+            assertEquals(List.of("wake " + soldier.getId() + " FORTIFIED"), log);
+            assertFalse(r.flow.isPrompt());
+            r.advanceMs(ClassicTurnFlow.PROMPT_CLICK_MS);
+            assertEquals(List.of("promptClicked", "activate " + soldier.getId()),
+                         r.host.calls);
+
+            // Enter in the mode ends the turn (as 1. left it).
+            final Rig e = new Rig(g);
+            gui.turnFlow = e.flow;
+            e.flow.noUnitLeft();
+            e.advanceMs(ClassicTurnFlow.END_TURN_MS);
+            mv.clickOn(pt, dutch);
+            assertTrue(e.flow.isPrompt());
+            assertTrue(gui.mayEndTurnByKey());
+            gui.turnFlow.endTurnNow("key");
+            e.advanceMs(ClassicTurnFlow.PROMPT_END_MS);
+            assertEquals(1, e.count("endTurn"));
+            assertEquals(Unit.UnitState.IMPROVING, pioneer.getState());
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /**
+     * The fixer of part J (with the review of part J's working pioneer):
+     * outside the mode a click still brings up a pioneer at work, or a
+     * fortified unit with no moves left, with their orders.  Space cannot
+     * skip such a unit (FreeCol skips only an active one); it now goes on
+     * as after a skip and the unit keeps its orders: with nothing else to
+     * move the turn ends by itself 485 ms later (before, Space did
+     * nothing, Enter was refused while the unit was up, and W found
+     * nothing).
+     */
+    public void testSpaceOnAUnitThatKeepsItsOrders() {
+        final Game g = getStandardGame();
+        final Map m = getTestMap(true);
+        g.changeMap(m);
+        final Player dutch = g.getPlayerByNationId("model.nation.dutch");
+        final Tile pt = m.getTile(2, 2), st = m.getTile(9, 9);
+        final Unit pioneer = new ServerUnit(g, pt, dutch,
+            spec().getUnitType("model.unit.hardyPioneer"));
+        pioneer.setState(Unit.UnitState.IMPROVING);
+        pioneer.setMovesLeft(pioneer.getInitialMovesLeft());
+        final Unit soldier = new ServerUnit(g, st, dutch,
+            spec().getUnitType("model.unit.veteranSoldier"));
+        soldier.setState(Unit.UnitState.FORTIFYING);
+        soldier.setState(Unit.UnitState.FORTIFIED);             // FreeCol: no moves now
+        assertTrue(ClassicMapViewer.keepsOrdersOnSkip(pioneer));
+        assertTrue(ClassicMapViewer.keepsOrdersOnSkip(soldier));
+        final Unit other = new ServerUnit(g, m.getTile(4, 4), dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        assertFalse(ClassicMapViewer.keepsOrdersOnSkip(other));    // ACTIVE
+        other.setState(Unit.UnitState.SKIPPED);
+        assertFalse(ClassicMapViewer.keepsOrdersOnSkip(other));
+        assertFalse(ClassicMapViewer.keepsOrdersOnSkip(null));
+        other.dispose();
+
+        for (Unit clicked : new Unit[] { pioneer, soldier }) {
+            final Rig r = new Rig(g);
+            final List<String> log = new ArrayList<>();
+            final ClassicGUI gui = new ClassicGUI(null) {
+                    @Override
+                    public boolean isDialogShowing() {
+                        return false;
+                    }
+
+                    @Override
+                    protected Player getMyPlayer() {
+                        return dutch;
+                    }
+
+                    @Override
+                    void nextUnitAfterSkip() {
+                        log.add("next");
+                        changeView((Tile) null);   // FreeCol: no unit left
+                    }
+                };
+            final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+            gui.mapViewer = mv;
+            gui.turnFlow = r.flow;
+            try {
+                mv.clickOn(clicked.getTile(), dutch);       // outside the mode
+                assertSame(clicked, mv.getActiveUnit());
+                assertFalse(gui.mayEndTurnByKey());          // a unit is up
+                r.advanceMs(1000);
+                assertEquals(0, r.count("endTurn"));         // nothing by itself
+                final Unit.UnitState kept = clicked.getState();
+                mv.getActionMap().get("classic_skip").actionPerformed(null);
+                assertEquals(List.of("next"), log);
+                assertEquals(kept, clicked.getState());
+                assertNull(mv.getActiveUnit());
+                r.advanceMs(ClassicTurnFlow.END_TURN_MS - 1);
+                assertEquals(0, r.count("endTurn"));
+                r.advanceMs(1);
+                assertEquals(clicked.getId(), 1, r.count("endTurn"));
+                assertEquals(kept, clicked.getState());
+            } finally {
+                mv.dispose();
+            }
+        }
+    }
+
+    /**
+     * The fixer of part J (the review of part J, regress lens): a click on
+     * a sentried unit in the terrain view with units left to move.  Its
+     * freeing's state change makes FreeCol choose its cycle head (another
+     * unit) at once on the event thread; that choice goes back instead of
+     * coming up for a moment before the clicked unit (before: "up x, up f",
+     * a flash or a jump of the view to x and back).
+     */
+    public void testATerrainViewClickBringsOnlyTheClickedUnit() {
+        final Unit x = ship(7, 5), f = ship(5, 5);
+        f.setState(Unit.UnitState.SENTRY);
+        final Rig r = new Rig(this.game);
+        r.flow.unitShown(x);                 // a unit came up this turn
+        r.host.nextActive = true;            // units left to move
+        r.flow.noUnitLeft();                 // the terrain view (selectTile)
+        assertNull(r.flow.pending());
+        assertFalse(r.flow.isInputBlocked());
+        final List<String> log = new ArrayList<>();
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                void wake(Unit u) {
+                    log.add("wake " + u.getId());
+                    u.setState(Unit.UnitState.ACTIVE);
+                    changeView(x, false);   // FreeCol's next active unit: x
+                }
+
+                @Override
+                void cycleActivated(Unit u) {
+                    log.add("up " + u.getId());
+                }
+            };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        gui.turnFlow = r.flow;
+        try {
+            gui.unitClicked(f);
+            assertEquals(List.of("wake " + f.getId(), "up " + f.getId()), log);
+            assertSame(f, mv.getActiveUnit());
+            // Outside a click's freeing the controller's choice comes as
+            // before.
+            log.clear();
+            gui.changeView(x, false);
+            assertEquals(List.of("up " + x.getId()), log);
+            assertSame(x, mv.getActiveUnit());
         } finally {
             mv.dispose();
         }

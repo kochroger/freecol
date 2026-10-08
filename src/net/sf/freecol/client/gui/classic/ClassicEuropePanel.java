@@ -41,7 +41,6 @@ import javax.swing.JPanel;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
-import net.sf.freecol.client.ClientOptions;
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.control.InGameController;
 import net.sf.freecol.client.gui.ImageLibrary;
@@ -391,38 +390,72 @@ final class ClassicEuropePanel extends JPanel {
     }
 
     /**
-     * Set sail for the New World with the selected ship via
-     * {@link InGameController#moveTo} — the literal "set sail" seam
-     * (Javadoc: "Called from EuropePanel.DestinationPanel"), mirroring the
-     * standard Europe screen's own Set Sail button ({@code
-     * EuropePanel#sailAction}, which drops the selected ship onto its
-     * "sail to America" destination target). Mirrors that button's one
-     * safety check too: if a colonist is still waiting on the dock and
-     * auto-load-emigrants is off, confirm before leaving them behind (the
-     * same {@code europePanel.leaveColonists} template, through the classic
-     * UI's own wired {@code modalConfirmDialog}).
+     * Set sail for the New World with the selected ship ({@link #sail}).
+     * The last ship closes the screen by itself afterwards, colonists on
+     * the dock or not (Roger, 2026-10-08).
      */
     private void setSail() {
         if (this.selectedUnit == null || !this.selectedUnit.isNaval()) return;
         final Unit ship = this.selectedUnit;
         final Map map = this.freeColClient.getGame().getMap();
-        if (!this.freeColClient.getClientOptions()
-                .getBoolean(ClientOptions.AUTOLOAD_EMIGRANTS)
-            && !this.dockUnits.isEmpty()
-            && ship.hasSpaceLeft()) {
-            final StringTemplate locName
-                = map.getLocationLabelFor(this.freeColClient.getMyPlayer());
-            if (!this.freeColClient.getGUI().modalConfirmDialog(null,
-                    StringTemplate.template("europePanel.leaveColonists")
-                        .addStringTemplate("%newWorld%", locName),
-                    ship, "ok", "cancel", true)) return;
-        }
-        igc().moveTo(ship, map);
+        sail(igc()::boardShip, igc()::moveTo, this.europe, ship, map);
         this.selectedUnit = null;
         refresh();
         // Sailed (the server took it out of port): the last ship closes the
         // screen by itself, colonists on the dock or not (Roger, 2026-10-08).
         if (!ship.isInEurope() && this.onSailed != null) this.onSailed.accept(ship);
+    }
+
+    /**
+     * Set sail for the New World as the original does (clip opening_015
+     * #1683 -&gt; #1686, V): first the colonists on the dock marked "S"
+     * (FreeCol's SENTRY, which every land unit gets on the dock) board the
+     * ship by themselves, as many as fit, in the dock's order
+     * ({@link #boarders}; {@link InGameController#boardShip}, FreeCol's
+     * {@code moveAutoload} with {@code Unit.sentryPred}); a colonist marked
+     * "-" stays.  Then the ship sails ({@link InGameController#moveTo}, the
+     * standard screen's own Set Sail seam).  No question: FreeCol's
+     * "... und die Kolonisten zurücklassen?" box ({@code
+     * europePanel.leaveColonists}) is gone, its Enter left the colonist
+     * behind unseen (the review of part J).  The original's @SAILAWAY box
+     * is not built yet.
+     *
+     * @param board The controller's boarding ({@link InGameController#boardShip}).
+     * @param move The controller's move ({@link InGameController#moveTo}).
+     * @param europe Our Europe.
+     * @param ship The ship in port.
+     * @param map The map, the destination.
+     * @return True if the ship sailed.
+     */
+    static boolean sail(java.util.function.BiPredicate<Unit, Unit> board,
+                        java.util.function.BiPredicate<Unit, Location> move,
+                        Europe europe, Unit ship, Map map) {
+        for (Unit u : boarders(europe, ship)) board.test(u, ship);
+        return move.test(ship, map);
+    }
+
+    /**
+     * The colonists on the dock who board a ship when it sails
+     * ({@link #sail}): the land units marked "S" (SENTRY) that fit into its
+     * space left, in the dock's order; one that does not fit stays, and so
+     * does every other one.
+     *
+     * @param europe Our Europe, or null.
+     * @param ship The ship, or null.
+     * @return The colonists, in boarding order.
+     */
+    static List<Unit> boarders(Europe europe, Unit ship) {
+        final List<Unit> out = new ArrayList<>();
+        if (europe == null || ship == null || !ship.canCarryUnits()) return out;
+        int space = ship.getSpaceLeft();
+        for (Unit u : europe.getUnitList()) {
+            if (!Unit.sentryPred.test(u) || u.isDisposed()) continue;
+            final int need = u.getSpaceTaken();
+            if (need > space) continue;
+            out.add(u);
+            space -= need;
+        }
+        return out;
     }
 
     /** @return The Europe this screen shows. */

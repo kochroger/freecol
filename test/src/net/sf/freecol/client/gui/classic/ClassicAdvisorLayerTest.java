@@ -736,6 +736,16 @@ public class ClassicAdvisorLayerTest extends TestCase {
         assertTrue(up());
         key(KeyEvent.VK_A);
         assertEquals(0, a.get());
+        // Backspace closes a notice as any other key (G1; the review of
+        // part I: since I3 it kept the notice up).
+        this.clock.advanceMs(1000);
+        final Answer b = ask(ClassicAdvisorBox.Request.builder("n2")
+                             .freeColText("a a").build());
+        flush();
+        assertTrue(up());
+        key(KeyEvent.VK_BACK_SPACE);
+        assertEquals(0, b.get());
+        assertFalse(up());
         this.host.font = null;
         assertEquals(ClassicAdvisorLayer.UNAVAILABLE,
                      (int) edt(() -> this.layer.show(question("q"))));
