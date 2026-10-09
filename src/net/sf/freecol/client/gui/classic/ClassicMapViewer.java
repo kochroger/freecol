@@ -849,9 +849,11 @@ final class ClassicMapViewer extends JPanel {
                         + " unit=" + u.getId() + " at=" + xy(u.getTile())
                         + " moves=" + u.getMovesLeft());
                 }
-                // Roger's Europe question takes a ship's order east past
-                // the last drawn column, or west past the first, instead
-                // of a move (build spec W8a, E1).
+                // The Europe question comes before a ship's eastward step
+                // along the east lane (the original's rule, N2): its "Nein"
+                // lets the step go on to the controller below.  Its order
+                // east past the last drawn column, or west past the first,
+                // is the question's alone (build spec W8a, E1).
                 if (this.gui != null && this.gui.sailHomeKey(u, d)) {
                     if (ClassicFrameRecorder.on()) {
                         ClassicFrameRecorder.event("move-done", "unit=" + u.getId()

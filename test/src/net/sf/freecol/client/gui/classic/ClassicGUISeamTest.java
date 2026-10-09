@@ -580,10 +580,15 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertFalse(gui.sailHomeKey(ship, Direction.W));
         assertEquals(3, fake.asked.size());
 
-        // One column before the edge, on light water: plain moves.
+        // One column before the edge, on light water: the eastward steps
+        // onto the lane ask (the original's rule, N2), but they are no
+        // edge step; every other step is a plain move.
         ship.setLocation(inner);
         for (Direction d : Direction.values()) {
-            assertFalse(d.toString(), ClassicGUI.asksSailHome(ship, d));
+            final boolean east = d == Direction.E || d == Direction.NE
+                || d == Direction.SE;
+            assertEquals(d.toString(), east, ClassicGUI.asksSailHome(ship, d));
+            assertFalse(d.toString(), ClassicGUI.sailsPastView(ship, d));
         }
         // At the edge but on ordinary ocean: plain moves.
         final Tile coast = map.getTile(18, 3);
@@ -602,6 +607,160 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertFalse(ClassicGUI.asksSailHome(colonist, Direction.E));
         assertFalse(ClassicGUI.asksSailHome(null, Direction.E));
         assertFalse(ClassicGUI.asksSailHome(ship, null));
+    }
+
+    /**
+     * N2, the original's rule (Roger, 2026-10-09 10:00: "Du hast recht,
+     * bitte ändern"; playthrough-1 C14 and its Checker: 3 of 3 questions
+     * at x = 50 for E, NE or SE, 6 of 6 southward Seeweg steps without
+     * one, "Nein" carried the SE step out, #70519 -&gt; #70571): a ship on
+     * the east lane ordered E, NE or SE onto another lane tile gets
+     * @SAILHOME; "Nein" and Escape let the step go on to the controller as
+     * a plain move, "Jawohl" sails home; it asks again on the next such
+     * step.  N, S, W, NW and SW steps along the lane, entering it, leaving
+     * it, a step onto a foreign ship and every step on the west lane short
+     * of its edge are plain moves; the edge keeps its "Nein" = nothing.
+     */
+    public void testEuropeQuestionOnTheEastLane() {
+        Topology.setCurrent(Topology.SQUARE);
+        final Game game = getStandardGame();
+        final MapBuilder builder = new MapBuilder(game);
+        builder.setDimensions(20, 15).setBaseTileType(ocean)
+            .setExploredByAll(true);
+        for (int y = 0; y < 15; y++) {
+            for (int x = 0; x < 4; x++) builder.setTileType(x, y, highSeas);
+            for (int x = 12; x < 20; x++) builder.setTileType(x, y, highSeas);
+        }
+        final Map map = builder.build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        final Tile lane = map.getTile(14, 7);
+        final Unit ship = new ServerUnit(game, lane, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final int moves = ship.getMovesLeft();
+        assertTrue(moves > 0);
+        assertNotNull(dutch.getEurope());
+
+        // On the lane, six columns inside the edge: E, NE and SE ask, the
+        // other five directions are plain moves; none is an edge step.
+        for (Direction d : Direction.values()) {
+            final boolean east = d == Direction.E || d == Direction.NE
+                || d == Direction.SE;
+            assertEquals(d.toString(), east, ClassicGUI.sailsEastOnLane(ship, d));
+            assertEquals(d.toString(), east, ClassicGUI.asksSailHome(ship, d));
+            assertFalse(d.toString(), ClassicGUI.sailsPastView(ship, d));
+        }
+
+        final SailingGUI gui = new SailingGUI();
+        final FakePrompter fake = new FakePrompter();
+        gui.prompter = fake;
+        // "Nein": the step goes on to the controller (false), nothing else
+        // happened yet; the box is @SAILHOME's, the bar on "Jawohl".
+        fake.answer = 1;
+        assertFalse(gui.sailHomeKey(ship, Direction.E));
+        assertEquals(1, fake.asked.size());
+        assertEquals(2, last(fake.asked).length);
+        assertEquals(Integer.valueOf(0), last(fake.defaults));
+        assertTrue(gui.sailed.isEmpty());
+        assertSame(lane, ship.getTile());
+        assertEquals(moves, ship.getMovesLeft());
+        // Escape (and a click outside) is "Nein": the step too.
+        fake.answer = -1;
+        assertFalse(gui.sailHomeKey(ship, Direction.SE));
+        assertEquals(2, fake.asked.size());
+        assertTrue(gui.sailed.isEmpty());
+        // The next eastward step asks again; "Jawohl" sails home.
+        fake.answer = 0;
+        assertTrue(gui.sailHomeKey(ship, Direction.NE));
+        assertEquals(3, fake.asked.size());
+        assertEquals(List.of(ship), gui.sailed);
+        // N, S and the westward steps: plain moves with no question.
+        for (Direction d : new Direction[] { Direction.N, Direction.S,
+                Direction.W, Direction.NW, Direction.SW }) {
+            assertFalse(d.toString(), gui.sailHomeKey(ship, d));
+        }
+        assertEquals(3, fake.asked.size());
+
+        // The edge keeps Roger's rule: "Nein" there does nothing (true).
+        ship.setLocation(map.getTile(18, 7));
+        fake.answer = 1;
+        assertTrue(gui.sailHomeKey(ship, Direction.E));
+        assertEquals(4, fake.asked.size());
+        assertSame(map.getTile(18, 7), ship.getTile());
+
+        // Entering the lane from ordinary ocean: a plain move.
+        ship.setLocation(map.getTile(11, 7));
+        assertFalse(ClassicGUI.asksSailHome(ship, Direction.E));
+        // Leaving it eastward onto ordinary ocean: a plain move.
+        map.getTile(15, 3).setType(ocean);
+        ship.setLocation(map.getTile(14, 3));
+        assertFalse(ClassicGUI.asksSailHome(ship, Direction.E));
+        assertTrue(ClassicGUI.asksSailHome(ship, Direction.NE));
+        // A foreign ship on the lane tile: no question (the controller
+        // or the refusal says what happens there).
+        final Unit other = new ServerUnit(game, map.getTile(15, 8), french,
+            spec().getUnitType("model.unit.merchantman"));
+        ship.setLocation(lane);
+        assertFalse(ClassicGUI.asksSailHome(ship, Direction.SE));
+        assertTrue(ClassicGUI.asksSailHome(ship, Direction.E));
+        other.setLocation(map.getTile(16, 12));
+        assertTrue(ClassicGUI.asksSailHome(ship, Direction.SE));
+        // No moves left: no question.
+        ship.setMovesLeft(0);
+        assertFalse(ClassicGUI.asksSailHome(ship, Direction.E));
+        ship.setMovesLeft(moves);
+        // The west lane short of its edge: plain moves, also eastward.
+        ship.setLocation(map.getTile(2, 7));
+        for (Direction d : Direction.values()) {
+            assertFalse(d.toString(), ClassicGUI.asksSailHome(ship, d));
+        }
+        // A land unit is never asked.
+        final Unit colonist = new ServerUnit(game, ship, dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        assertFalse(ClassicGUI.sailsEastOnLane(colonist, Direction.E));
+        assertFalse(ClassicGUI.sailsEastOnLane(null, Direction.E));
+        assertFalse(ClassicGUI.sailsEastOnLane(ship, null));
+    }
+
+    /**
+     * N2 on the isometric map: E always steps east on the drawn grid and
+     * asks; a NE or SE step asks only on the rows where it changes column
+     * (on the others it goes straight up or down, as 8 and 2, which never
+     * ask), and N and S never ask.
+     */
+    public void testEuropeQuestionOnTheEastLaneIsometric() {
+        Topology.setCurrent(Topology.ISOMETRIC);
+        final Game game = getStandardGame();
+        final MapBuilder builder = new MapBuilder(game);
+        builder.setDimensions(20, 15).setBaseTileType(ocean)
+            .setExploredByAll(true);
+        for (int y = 0; y < 15; y++) {
+            for (int x = 12; x < 20; x++) builder.setTileType(x, y, highSeas);
+        }
+        final Map map = builder.build();
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Unit ship = new ServerUnit(game, map.getTile(14, 6), dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        int asking = 0, plain = 0;
+        for (int y = 5; y <= 8; y++) {
+            final Tile from = map.getTile(14, y);
+            ship.setLocation(from);
+            assertTrue("E at y=" + y, ClassicGUI.asksSailHome(ship, Direction.E));
+            for (Direction d : new Direction[] { Direction.NE, Direction.SE }) {
+                final Tile to = from.getNeighbourOrNull(d);
+                final boolean east = to != null && to.getX() > from.getX();
+                if (east) asking++; else plain++;
+                assertEquals(d + " at y=" + y, east, ClassicGUI.asksSailHome(ship, d));
+            }
+            for (Direction d : new Direction[] { Direction.N, Direction.S,
+                    Direction.W, Direction.NW, Direction.SW }) {
+                assertFalse(d + " at y=" + y, ClassicGUI.asksSailHome(ship, d));
+            }
+        }
+        assertTrue(asking > 0);
+        assertTrue(plain > 0);
     }
 
     /**

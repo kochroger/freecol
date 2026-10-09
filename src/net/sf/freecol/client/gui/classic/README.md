@@ -1574,11 +1574,35 @@ ignored, our colony opens, its guard kept, Enter still ends),
   tile with no slide, as in the original (c8 #44179), and the controller
   brings the next unit. The second row and Escape do nothing: the ship keeps
   its moves and stays the active unit; the box's close restarts its blink ON
-  and the turn flow's clock. Every other move is a plain one: entering the
-  light water, leaving it, and moving along it. The original also asks one
-  column earlier (EUQ, C5 #21226); we do not (master plan section 10).
+  and the turn flow's clock. Entering the light water and leaving it are
+  plain moves, and so is moving along it, except the eastward step along
+  the east lane, which asks by the original's rule (N2, next item).
   Recorder event: `sail-home unit=.. at=x,y <dir> chosen=<0|1|-1>`, and the
   key's `move-done ... question`.
+- **The Europe question on the east lane, by the original's rule (N2).**
+  Roger, 2026-10-09 10:00 ("Du hast recht, bitte ändern"; it replaces his
+  edge-only rule of 2026-10-07 for the lane): a ship with moves on a high
+  seas tile ("Seeweg") in the east half of the map, ordered E, NE or SE
+  (6, 9, 3) onto a high seas tile further east that it can sail onto as a
+  plain step (`Unit.MoveType.MOVE_HIGH_SEAS`: no foreign unit there, not the
+  ring), gets the same @SAILHOME box before the step
+  (`ClassicGUI.sailsEastOnLane`, part of `asksSailHome`). Evidence:
+  playthrough-1 C14 and its Checker: 3 of 3 questions at x = 50, 6 columns
+  inside the drawn edge; 6 of 6 southward Seeweg steps without one; after
+  "Nein" (#70519) the box went at #70570 and the ordered SE step slid from
+  #70571. "Jawohl" sails the ship to Europe as at the edge. "Nein", Escape
+  and a click outside carry the step out as a plain move at once (it costs
+  what any step costs): `sailHomeKey` returns false and
+  `ClassicMapViewer.handleMoveKey` hands the order to the controller. The
+  next eastward lane step asks again (I: the clip shows no second step after
+  a "Nein"). N, S, W, NW and SW steps along the lane, entering the light
+  water and leaving it are plain moves; a G order through the lane never
+  asks (the controller's goto never comes through `handleMoveKey`). In
+  isometric mode a NE or SE step that stays in its column (every other row:
+  straight up or down on the drawn grid, as 8 and 2) asks nothing. The west
+  lane is unchanged (no clip shows it; the Pedia's `@TERRAIN26` only says a
+  ship heads east or west from a sea lane): there only the west edge asks.
+  Recorder event: `sail-home ... chosen=<n> lane|edge home|step|stay`.
 - **The same question at the west edge (E1, Roger's rule mirrored).** A ship
   on the high seas in the first column the view shows
   (`ClassicHud.firstViewColumn`: x = 1, the west clamp; column 0 is the
@@ -1609,7 +1633,8 @@ ignored, our colony opens, its guard kept, Enter still ends),
 
 Tests: `ClassicGUISeamTest` (`testEscapeAnswersNo`, `testEscapeCancelsAChoice`,
 `testHighSeasQuestionIsSilent`, `testEastPastView`,
-`testEuropeQuestionAtTheEastEdge`, `testWestPastView`,
+`testEuropeQuestionAtTheEastEdge`, `testEuropeQuestionOnTheEastLane`,
+`testEuropeQuestionOnTheEastLaneIsometric`, `testWestPastView`,
 `testEuropeQuestionAtTheWestEdge`, `testSailHomeText`,
 `testKingsBoxEnterKissesTheRing`, `testNativeDemandEnterRefuses`,
 `testReturnToEuropeOrder`, `testShipAtSeaGivesTheEndView`,

@@ -6911,8 +6911,9 @@ public class ClassicGUI extends GUI {
      * <p>FreeCol's own question on sailing from coastal water onto the high
      * seas ({@code InGameController.moveHighSeas}) is never shown: it is
      * answered "no" at once, so that move is a plain one (W0f).  The
-     * Europe question comes only at the map's east and west edges
-     * ({@link #sailHomeKey}).
+     * Europe question comes on an eastward step along the east lane and
+     * at the map's east and west edges ({@link #sailHomeKey}), never on
+     * entering the light water.
      *
      * <p>FreeCol's landing question for a ship with one passenger that can
      * go ashore is the original's @LANDFALL box ({@link #askLandfall},
@@ -7369,29 +7370,78 @@ public class ClassicGUI extends GUI {
         return choice;
     }
 
-    // The Europe question, by Roger's rule (build spec W8a), in the
-    // original's advisor box (W7).
+    // The Europe question, by the original's rule (Roger, 2026-10-09; part
+    // N2) and Roger's edge rule (build spec W8a, E1), in the original's
+    // advisor box (W7).
 
     /** GAME.TXT's Europe question (@SAILHOME). */
     static final String SAIL_HOME_SECTION = "SAILHOME";
 
     /**
-     * Whether a move order gets the Europe question instead of a move, by
-     * Roger's rule (master plan section 1): a ship on the high seas in the
-     * last column the view shows, ordered east (6, 9 or 3) past it
-     * ({@link ClassicHud#eastPastView}); and, the mirror at the west edge
-     * (Roger, E1), a ship on the high seas in the first column the view
-     * shows, ordered west (4, 7 or 1) past it
-     * ({@link ClassicHud#westPastView}).  Entering the light water, leaving
-     * it and moving along it are plain moves.
+     * Whether a move order gets the Europe question, before any move.
+     * <ul>
+     *   <li>The original's rule (Roger, 2026-10-09 10:00: "Du hast recht,
+     *   bitte ändern"; playthrough-1 C14 and its Checker: 3 of 3 questions
+     *   at x = 50, 6 of 6 southward Seeweg steps without one): a ship on
+     *   the east lane ordered E, NE or SE onto another lane tile
+     *   ({@link #sailsEastOnLane}).  Its "Nein" carries the step out
+     *   ({@link #sailHomeKey}).</li>
+     *   <li>The edges (Roger's rule of 2026-10-07, kept): a ship on the
+     *   high seas in the last column the view shows, ordered east (6, 9 or
+     *   3) past it ({@link ClassicHud#eastPastView}); and, the mirror at the
+     *   west edge (Roger, E1), a ship on the high seas in the first column
+     *   the view shows, ordered west (4, 7 or 1) past it
+     *   ({@link ClassicHud#westPastView}).  Its "Nein" does nothing.</li>
+     * </ul>
+     * Entering the light water, leaving it, and N, S, W, NW and SW steps
+     * along it are plain moves; so is every step on the west lane short of
+     * the west edge (no clip shows the west lane; the Pedia's
+     * {@code @TERRAIN26} says only "Kurs auf ... Westen", Roger decides).
      *
      * @param unit The unit ordered.
      * @param direction The direction ordered.
      * @return True if the order asks the question.
      */
     static boolean asksSailHome(Unit unit, Direction direction) {
-        return sailsPastView(unit, direction)
+        return (sailsPastView(unit, direction)
+                || sailsEastOnLane(unit, direction))
             && unit.getOwner().getEurope() != null;
+    }
+
+    /**
+     * Whether a ship's order is an eastward step along the east lane, the
+     * original's Europe question (playthrough-1 C14, Checker corrections 1
+     * and 2: a ship on Seeweg ordered E, NE or SE onto Seeweg gets
+     * @SAILHOME; after "Nein" the step is carried out, #70519 -&gt; #70571;
+     * N and S steps never ask): a ship with moves on a high seas tile in
+     * the east half of the map, ordered E, NE or SE onto a high seas tile
+     * further east that it can sail onto as a plain step
+     * ({@code Unit.MoveType.MOVE_HIGH_SEAS}: no foreign unit there, not the
+     * never-drawn ring).  On the isometric map a NE or SE step that stays
+     * in its column (every other row) is no step east on the drawn grid,
+     * as the key 8 or 2 there: no question.  The step past the drawn edge
+     * is {@link #sailsPastView}'s.
+     *
+     * @param unit The unit ordered.
+     * @param direction The direction ordered.
+     * @return True for an eastward lane step.
+     */
+    static boolean sailsEastOnLane(Unit unit, Direction direction) {
+        if (direction != Direction.E && direction != Direction.NE
+            && direction != Direction.SE) return false;
+        if (unit == null || !unit.isNaval() || !unit.hasTile()
+            || unit.getMovesLeft() <= 0
+            || !unit.getType().canMoveToHighSeas()
+            || unit.getOwner() == null) {
+            return false;
+        }
+        final Tile tile = unit.getTile();
+        if (!tile.isDirectlyHighSeasConnected() || tile.getMap() == null
+            || tile.getX() < tile.getMap().getWidth() / 2) return false;
+        final Tile target = tile.getNeighbourOrNull(direction);
+        return target != null && target.getX() > tile.getX()
+            && target.isDirectlyHighSeasConnected()
+            && unit.getMoveType(direction) == Unit.MoveType.MOVE_HIGH_SEAS;
     }
 
     /**
@@ -7425,29 +7475,47 @@ public class ClassicGUI extends GUI {
      * (build spec W7): GAME.TXT {@code @SAILHOME} with the admiral, the bar
      * on {@code @default=1}, "Jawohl" (landfall #7720, c5 #21226).  "Jawohl"
      * sails the ship to Europe ({@link #sailHome}): it leaves the map with
-     * no slide, as in the original.  "Nein" and Escape do nothing: the ship
-     * keeps its moves and stays the active unit, and the box's close
-     * restarts its blink and the turn flow's clock
-     * ({@link ClassicDialog.Watcher}).  EDT only.
+     * no slide, as in the original.  "Nein" and Escape (and a click outside
+     * the box):
+     * <ul>
+     *   <li>on the east lane ({@link #sailsEastOnLane}) the ordered step is
+     *   carried out as a plain move, at once after the box (playthrough-1
+     *   #120: "Nein" at #70519, the box gone #70570, the SE slide from
+     *   #70571); it costs what any step costs.  The next eastward lane
+     *   step asks again.</li>
+     *   <li>past the drawn edge ({@link #sailsPastView}) nothing happens:
+     *   the ship keeps its moves and stays the active unit.</li>
+     * </ul>
+     * Either way the box's close restarts the blink and the turn flow's
+     * clock ({@link ClassicDialog.Watcher}).  EDT only.
      *
      * @param unit The unit ordered.
      * @param direction The direction ordered.
-     * @return True if the order was the question's (whatever the answer),
-     *     false if it is a plain move.
+     * @return True if the order is done with (it was the question's and
+     *     "Jawohl" or the edge's "Nein"), false if the controller is to
+     *     take it as a plain move (no question, or the lane's "Nein").
      */
     boolean sailHomeKey(Unit unit, Direction direction) {
         if (!asksSailHome(unit, direction)) return false;
         final Tile from = unit.getTile();
+        final boolean edge = sailsPastView(unit, direction);
         final ClassicAdvisorBox.Request r = sailHomeRequest(
             ClassicText.load(ClassicPackFiles.runtime()), unit);
         final int chosen = this.prompter.ask(r);
+        final boolean home = confirmed(chosen);
+        // The lane's "Nein": the step, unless the ship is no longer where
+        // and as it was asked (a game gone while the box was up).
+        final boolean step = !home && !edge && unit.getTile() == from
+            && unit.getMovesLeft() > 0;
         if (ClassicFrameRecorder.on()) {
             ClassicFrameRecorder.event("sail-home", "unit=" + unit.getId()
                 + ((from == null) ? "" : " at=" + from.getX() + "," + from.getY())
-                + " " + direction + " chosen=" + chosen);
+                + " " + direction + " chosen=" + chosen
+                + ((edge) ? " edge" : " lane")
+                + ((home) ? " home" : (step) ? " step" : " stay"));
         }
-        if (confirmed(chosen)) sailHome(unit);
-        return true;
+        if (home) sailHome(unit);
+        return !step;
     }
 
     // "Gehe zu" (G; R2, master plan W8e, N11; ClassicDestinations).
