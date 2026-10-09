@@ -473,6 +473,28 @@ public class InGameControllerTest extends FreeColTestCase {
         assertFalse(what, dutch.canClaimForSettlement(west));
         frenchSoldier.setLocation(map.getTile(16, 8));
         assertTrue(what, dutch.canClaimForSettlement(west));
+
+        // A native occupier at war (the review of part M): our worker is
+        // evicted as in FreeCol, and the tile loses its owner, with the
+        // rule too (it speaks of Europeans only): never Sioux land that
+        // our colony would have to buy back.
+        final ServerPlayer sioux = getServerPlayer(game, "model.nation.sioux");
+        dutch.setStance(sioux, Stance.WAR);
+        sioux.setStance(dutch, Stance.WAR);
+        final Tile east2 = base.getTile().getNeighbourOrNull(Direction.E);
+        assertSame(what, base, east2.getOwningSettlement());
+        final Unit ourOther = first(transform(base.getUnitList(),
+                                              u -> u != ourWorker));
+        ourOther.setLocation(base.getColonyTile(east2));
+        assertTrue(what, base.isTileInUse(east2));
+        final ServerUnit brave = new ServerUnit(game, east2, sioux, braveType);
+        igc.changeState(sioux, brave, UnitState.FORTIFYING);
+        assertFalse(what, base.isTileInUse(east2));
+        assertNull(what, east2.getOwner());
+        assertNull(what, east2.getOwningSettlement());
+        brave.setLocation(map.getTile(16, 9));
+        assertEquals(what, 0, dutch.getLandPrice(east2));
+        assertTrue(what, dutch.canClaimForSettlement(east2));
     }
 
     public void testCreateMission() {

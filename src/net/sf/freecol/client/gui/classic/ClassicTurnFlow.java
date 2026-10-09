@@ -646,6 +646,16 @@ final class ClassicTurnFlow {
     /** The wipe's own paint is under way ({@link #wipe}). */
     private boolean wiping = false;
 
+    /**
+     * The unit «Befehle aufheben.» freed in the colony screen
+     * ({@link #unitFreed}), until the first poll with nothing blocking
+     * ({@link #bringFreed}); null for none.
+     */
+    private Unit freed = null;
+
+    /** The turn {@link #freed} was freed in. */
+    private int freedTurn = NO_TURN;
+
     /** The state for the recorder's probe (another thread). */
     private volatile String probeState = "idle";
 
@@ -969,6 +979,79 @@ final class ClassicTurnFlow {
     void unitShown(Unit unit) {
         if (this.disposed) return;
         cameUp(unit, "shown");
+    }
+
+    /**
+     * «Befehle aufheben.» freed {@code unit} in the colony screen (clip
+     * 019), and the controller's choice of it, made inside the state
+     * change, was dropped there ({@code ClassicGUI.colonyWaking}).  Noted
+     * until the screen is gone ({@link #catchUp}, {@link #bringFreed}):
+     * with a unit up or on its way, that unit stays up (V #1554) and the
+     * freed one comes later by itself; with none (the end view after the
+     * turn's last unit, whose idle end the screen holds, or the
+     * Spielzugende mode) nothing else would bring it, and the turn would
+     * stand still with a unit that can move (the review of part M): it
+     * comes as the controller's next unit.  FreeCol's own colony panel
+     * asks the controller for its next unit at its close too.
+     *
+     * @param unit The unit freed.
+     */
+    void unitFreed(Unit unit) {
+        if (this.disposed || unit == null) return;
+        this.freed = unit;
+        this.freedTurn = this.host.turnNumber();
+        ClassicFrameRecorder.event("handover", "freed " + unit.getId()
+            + " in the colony screen" + ((this.prompt) ? " (Spielzugende)" : ""));
+    }
+
+    /**
+     * Whether a unit of ours is up for orders (on the map with moves
+     * left, not skipped), or one is on its way: a hand-over or the turn
+     * start pending, a goto unit running.
+     *
+     * @return True if so.
+     */
+    private boolean unitUpOrComing() {
+        final Pending p = this.pending;
+        if (this.gotoRuns > 0 || (p != null
+                && (p.kind == Kind.HANDOVER || p.kind == Kind.TURN_START))) {
+            return true;
+        }
+        final Unit a = this.host.activeUnit();
+        return usable(a) && !ranOut(a);
+    }
+
+    /**
+     * The unit freed in the colony screen ({@link #unitFreed}), once
+     * nothing blocks (our turn, our end not out): with no unit up or
+     * coming the controller's next unit comes (the freed one, which went
+     * back to the front of FreeCol's cycle), at once as any choice with no
+     * unit up; the Spielzugende mode and an idle end, pending or held, go
+     * with that choice ({@link #unitChosen(Unit, Unit, boolean, boolean)}).
+     * Not when a unit is up or coming (it stays up, clip 019 #1554), in
+     * another turn, or when nothing can move any more.  One try: the
+     * record goes either way.
+     *
+     * @return True if the controller was asked.
+     */
+    private boolean bringFreed() {
+        final Unit u = this.freed;
+        final int turn = this.freedTurn;
+        this.freed = null;
+        this.freedTurn = NO_TURN;
+        final Pending p = this.pending;
+        if (turn != this.host.turnNumber() || unitUpOrComing()
+            || (p != null && p.kind == Kind.PROMPT_END)
+            || !this.host.hasNextActiveUnit()) {
+            ClassicFrameRecorder.event("handover", "freed " + id(u)
+                + ": not brought (a unit up or coming, another turn, or none can move)");
+            return false;
+        }
+        ClassicFrameRecorder.event("handover", "freed " + id(u)
+            + ": the controller's next unit"
+            + ((this.prompt) ? " (the Spielzugende mode ends)" : ""));
+        nextUnitOrIdle("freed in the colony screen");
+        return true;
     }
 
     /**
@@ -1479,7 +1562,12 @@ final class ClassicTurnFlow {
     /**
      * Do what a box, a menu or a screen held up, once none is up: the
      * wipe a waiting turn start needs, the wipe and idle end of a turn
-     * start with no unit, an idle end that could not fire.
+     * start with no unit, the unit freed in the colony screen with none
+     * up ({@link #bringFreed}), an idle end that could not fire, or, if a
+     * unit can move again since it was held and no choice of it reached
+     * the flow, the controller's next unit, as the held end's own fire
+     * would have asked ({@link #idleDecision}: "kept"; before, the turn
+     * stood still with no unit up, the review of part M).
      */
     private void catchUp() {
         if (!this.host.myTurn() || this.ending || this.host.blocked()) return;
@@ -1508,8 +1596,15 @@ final class ClassicTurnFlow {
             }
             return;
         }
+        if (this.freed != null && bringFreed()) return;
         if (this.idleWanted && p == null && !this.prompt
             && this.host.activeUnit() == null && !endHeld()) {
+            if (this.host.hasNextActiveUnit()) {
+                ClassicFrameRecorder.event("handover", "caught up: a unit can move again");
+                this.idleWanted = false;
+                nextUnitOrIdle("caught up");
+                return;
+            }
             armIdle(lastChangeBase());
         }
     }

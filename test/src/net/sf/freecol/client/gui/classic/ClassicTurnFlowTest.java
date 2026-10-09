@@ -24,14 +24,19 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import net.sf.freecol.client.FreeColClient;
+import net.sf.freecol.client.control.InGameController;
 import net.sf.freecol.common.model.Colony;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Unit;
+import net.sf.freecol.common.networking.Connection;
+import net.sf.freecol.common.networking.ServerAPI;
 import net.sf.freecol.server.model.ServerUnit;
 import net.sf.freecol.util.test.FreeColTestCase;
+import net.sf.freecol.util.test.FreeColTestUtils;
 
 
 /**
@@ -100,7 +105,13 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
 
         @Override public boolean myTurn() { return this.myTurn; }
         @Override public boolean blocked() { return this.blocked; }
-        @Override public boolean hasNextActiveUnit() { return this.nextActive; }
+        /** The game's own answer (a real player's units), or null for {@link #nextActive}. */
+        java.util.function.BooleanSupplier nextActiveFrom = null;
+
+        @Override public boolean hasNextActiveUnit() {
+            return (this.nextActiveFrom != null) ? this.nextActiveFrom.getAsBoolean()
+                : this.nextActive;
+        }
 
         /** The units whose hand-over started (W11), with its base. */
         final List<String> coming = new ArrayList<>();
@@ -3370,6 +3381,445 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         r.flow.indicatorShown(r.flow.indicatorRgb());
         r.flow.tick();
         assertEquals(1, r.count("indicator"));
+    }
+
+    /** The GUI's part of a controller's choice: the flow takes it, else it is active at once. */
+    private static void choose(Rig r, Unit unit) {
+        if (!r.flow.unitChosen(unit, r.host.active)) r.host.activate(unit);
+    }
+
+    /**
+     * The review of part M: «Befehle aufheben.» in the colony screen with
+     * no unit up.  The turn's last unit is done (the controller's end
+     * view), the colony screen holds the idle end, and the unit freed there
+     * can move; the controller's choice of it was dropped during the
+     * change ({@code ClassicGUI.colonyWaking}).  Before, nothing asked
+     * again once the screen had closed: no unit, no end, Enter refused.
+     * Now the freed unit comes as the controller's next unit as soon as
+     * the screen is gone ({@link ClassicTurnFlow#unitFreed}), once, also
+     * out of the Spielzugende mode, which ends with it; an idle end held
+     * while a unit became able to move asks the controller by itself
+     * ("caught up"); a unit up, or on its way, stays up (clip 019 #1554).
+     */
+    public void testAUnitFreedInTheColonyScreenComes() {
+        // 1. The idle end held under the screen (the review's sequence).
+        final Unit freed = ship(5, 5);
+        final Rig a = new Rig(this.game);
+        a.flow.unitShown(ship(4, 5));      // a unit came up this turn
+        a.flow.noUnitLeft();               // the last one is done
+        a.host.blocked = true;             // its colony screen
+        a.advanceMs(485);                  // the end fires under it: held
+        assertEquals(0, a.count("endTurn"));
+        assertNull(a.flow.pending());
+        a.host.nextActive = true;          // «Befehle aufheben.»; its choice dropped
+        a.flow.unitFreed(freed);
+        a.host.onNext = () -> choose(a, freed);
+        a.advanceMs(3000);
+        a.flow.tick();                     // the screen still up: nothing
+        assertEquals(0, a.count("next"));
+        a.host.blocked = false;            // E: the screen is gone
+        a.flow.tick();
+        assertEquals(1, a.count("next"));
+        assertSame(freed, a.host.active);
+        assertEquals(1, a.count("activate " + freed.getId()));
+        assertNull(a.flow.pending());
+        assertFalse(a.flow.isInputBlocked());
+        assertFalse(a.flow.isPrompt());
+        a.advanceMs(20000);
+        a.flow.tick();
+        assertEquals(1, a.count("next"));  // once
+        assertEquals(0, a.count("endTurn"));
+        // Its last move: the automatic end, as after any unit.
+        a.host.nextActive = false;
+        freed.setMovesLeft(0);
+        a.host.active = null;
+        a.flow.noUnitLeft();
+        a.advanceMs(485);
+        assertEquals(1, a.count("endTurn"));
+
+        // 2. Without the record (a unit able to move again under any
+        // screen, no choice of it seen): the held end asks by itself, once,
+        // also when the controller brings nothing (no poll loop).
+        for (boolean brings : new boolean[] { true, false }) {
+            final Unit u = ship(6, 5);
+            final Rig b = new Rig(this.game);
+            b.flow.unitShown(ship(4, 6));
+            b.flow.noUnitLeft();
+            b.host.blocked = true;
+            b.advanceMs(485);
+            b.host.nextActive = true;
+            if (brings) b.host.onNext = () -> choose(b, u);
+            b.advanceMs(3000);
+            b.host.blocked = false;
+            b.flow.tick();
+            assertEquals(1, b.count("next"));
+            assertSame((brings) ? u : null, b.host.active);
+            b.advanceMs(20000);
+            b.flow.tick();
+            b.flow.tick();
+            assertEquals(1, b.count("next"));
+            assertEquals(0, b.count("endTurn"));
+        }
+
+        // 3. The screen gone before the idle end fired: the freed unit at
+        // once, the end's pause goes with the choice.
+        final Unit c3 = ship(7, 5);
+        final Rig c = new Rig(this.game);
+        c.flow.unitShown(ship(4, 7));
+        c.flow.noUnitLeft();
+        c.host.blocked = true;
+        c.advanceMs(200);
+        c.host.nextActive = true;
+        c.flow.unitFreed(c3);
+        c.host.onNext = () -> choose(c, c3);
+        c.host.blocked = false;
+        c.flow.tick();
+        assertEquals(1, c.count("next"));
+        assertSame(c3, c.host.active);
+        assertNull(c.flow.pending());
+        c.advanceMs(485);
+        assertEquals(0, c.count("endTurn"));
+        assertEquals(1, c.count("next"));
+
+        // 4. The Spielzugende mode (nothing came up, or the pref): a click
+        // on Base opens its screen; the freed unit comes when it is gone
+        // and the mode ends with it.  If the controller brings nothing the
+        // mode stays, and Enter still ends the turn.
+        for (boolean pref : new boolean[] { false, true }) {
+            for (boolean brings : new boolean[] { true, false }) {
+                final Unit m4 = ship(8, 5);
+                final Rig m = new Rig(this.game);
+                m.host.promptPref = pref;
+                nextTurn(m, 2);
+                m.flow.noUnitLeft();
+                m.advanceMs(328);
+                assertTrue(m.flow.isPrompt());
+                final int ends = m.count("endTurn");
+                m.host.blocked = true;
+                m.host.nextActive = true;
+                m.flow.unitFreed(m4);
+                if (brings) m.host.onNext = () -> choose(m, m4);
+                m.advanceMs(2000);
+                m.flow.tick();
+                assertTrue(m.flow.isPrompt());
+                assertEquals(0, m.count("next"));
+                m.host.blocked = false;
+                m.flow.tick();
+                assertEquals(1, m.count("next"));
+                assertEquals(!brings, m.flow.isPrompt());
+                assertEquals((brings) ? 1 : 0, m.count("leave"));
+                assertSame((brings) ? m4 : null, m.host.active);
+                m.advanceMs(20000);
+                m.flow.tick();
+                assertEquals(1, m.count("next"));
+                assertEquals(ends, m.count("endTurn"));
+                if (!brings) {
+                    m.flow.endTurnNow("key");
+                    m.advanceMs(20);
+                    assertEquals(ends + 1, m.count("endTurn"));
+                }
+            }
+            // Enter in the mode before the first poll after the close:
+            // the end goes out, the freed unit does not cancel it.
+            final Unit q4 = ship(8, 6);
+            final Rig q = new Rig(this.game);
+            q.host.promptPref = pref;
+            nextTurn(q, 2);
+            q.flow.noUnitLeft();
+            q.advanceMs(328);
+            assertTrue(q.flow.isPrompt());
+            final int ends = q.count("endTurn");
+            q.host.blocked = true;
+            q.host.nextActive = true;
+            q.flow.unitFreed(q4);
+            q.host.onNext = () -> choose(q, q4);
+            q.host.blocked = false;
+            q.flow.endTurnNow("key");
+            q.flow.tick();
+            assertEquals(0, q.count("next"));
+            q.advanceMs(20);
+            assertEquals(ends + 1, q.count("endTurn"));
+            assertNull(q.host.active);
+        }
+
+        // 5. A unit up stays up (clip 019 #1554): nothing recorded, nothing asked.
+        final Unit up = ship(9, 5);
+        final Unit e5 = ship(9, 6);
+        final Rig e = new Rig(this.game);
+        e.flow.unitShown(up);
+        e.host.active = up;
+        e.host.blocked = true;
+        e.host.nextActive = true;
+        e.flow.unitFreed(e5);
+        e.host.onNext = () -> choose(e, e5);
+        e.advanceMs(3000);
+        e.host.blocked = false;
+        e.flow.tick();
+        e.advanceMs(20000);
+        e.flow.tick();
+        assertEquals(0, e.count("next"));
+        assertSame(up, e.host.active);
+
+        // ... and so does a hand-over on its way: its unit comes, not the freed one.
+        final Unit h1 = ship(10, 5), h2 = ship(10, 6), h3 = ship(10, 7);
+        final Rig h = new Rig(this.game);
+        h.flow.unitShown(h1);
+        h.host.active = h1;
+        h1.setMovesLeft(0);
+        h.flow.screenChanged();
+        assertTrue(h.flow.unitChosen(h2, h1));
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, h.flow.pending().kind);
+        h.host.blocked = true;
+        h.host.nextActive = true;
+        h.flow.unitFreed(h3);
+        h.host.onNext = () -> choose(h, h3);
+        h.advanceMs(600);                  // the hand-over held
+        assertEquals(0, h.count("activate " + h2.getId()));
+        h.host.blocked = false;
+        h.flow.tick();
+        assertEquals(1, h.count("activate " + h2.getId()));
+        h.flow.tick();
+        h.advanceMs(20000);
+        h.flow.tick();
+        assertEquals(0, h.count("next"));
+        assertSame(h2, h.host.active);
+        // The screen gone before the hand-over came due: nothing asked
+        // meanwhile, its unit comes at its time.
+        final Unit k1 = ship(12, 5), k2 = ship(12, 6), k3 = ship(12, 7);
+        final Rig k = new Rig(this.game);
+        k.flow.unitShown(k1);
+        k.host.active = k1;
+        k1.setMovesLeft(0);
+        k.flow.screenChanged();
+        assertTrue(k.flow.unitChosen(k2, k1));
+        k.host.blocked = true;
+        k.host.nextActive = true;
+        k.flow.unitFreed(k3);
+        k.host.onNext = () -> choose(k, k3);
+        k.advanceMs(200);
+        k.host.blocked = false;
+        k.flow.tick();
+        assertEquals(0, k.count("next"));
+        assertEquals(0, k.count("activate " + k2.getId()));
+        k.advanceMs(300);
+        assertEquals(1, k.count("activate " + k2.getId()));
+        k.flow.tick();
+        assertEquals(0, k.count("next"));
+
+        // 6. A record of another turn is never brought.
+        final Unit n6 = ship(11, 5);
+        final Rig n = new Rig(this.game);
+        n.flow.unitShown(ship(4, 9));
+        n.flow.noUnitLeft();
+        n.host.blocked = true;
+        n.host.nextActive = true;
+        n.flow.unitFreed(n6);
+        n.host.onNext = () -> choose(n, n6);
+        n.host.turn = 2;
+        n.host.blocked = false;
+        n.flow.tick();
+        assertEquals(0, n.count("next"));
+        assertEquals(0, n.count("activate " + n6.getId()));
+    }
+
+    /**
+     * The same through the real client controller and the real ClassicGUI
+     * (the @COLONYUNIT box answered with Enter, FreeCol's clearOrders and
+     * updateGUI; only the server's state change is faked; the map's part
+     * of a choice as {@link #choose}): the turn's last unit stands in Base
+     * with no moves and its screen holds the idle end, or the Spielzugende
+     * mode is on, or another unit is up.  «Befehle aufheben.» frees the
+     * fortified soldier, and the controller's choices of him inside the
+     * change are dropped.  Once the screen is gone the flow asks the
+     * controller, which brings him: up with his moves, no end, the mode
+     * gone.  With another unit up nothing is asked (clip 019 #1554).
+     */
+    public void testAUnitFreedInTheColonyScreenThroughTheController()
+        throws Exception {
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t == null || t.message(ClassicColonyUnits.UNIT_SECTION) == null) {
+            System.err.println(getClass().getSimpleName()
+                + ".testAUnitFreedInTheColonyScreenThroughTheController:"
+                + " no pack texts (ant classic-assets), skipped");
+            return;
+        }
+        for (String c : new String[] { "end", "mode", "up" }) {
+            final Game g = getStandardGame();
+            final Map land = getTestMap(spec().getTileType("model.tile.plains"));
+            g.changeMap(land);
+            final Player dutch = g.getPlayerByNationId("model.nation.dutch");
+            g.setCurrentPlayer(dutch);
+            final Colony base = FreeColTestUtils.getColonyBuilder().player(dutch)
+                .colonyTile(land.getTile(5, 8)).initialColonists(1).build();
+            final Unit soldier = new ServerUnit(g, base.getTile(), dutch,
+                spec().getUnitType("model.unit.veteranSoldier"),
+                spec().getRole("model.role.soldier"));
+            soldier.setState(Unit.UnitState.FORTIFYING);
+            soldier.setState(Unit.UnitState.FORTIFIED);
+            soldier.setMovesLeft(soldier.getInitialMovesLeft());
+            final Unit last = new ServerUnit(g, base.getTile(), dutch,
+                spec().getUnitType("model.unit.freeColonist"));
+            last.setMovesLeft(0);   // the turn's last unit, gone into Base
+            final Unit other = ("up".equals(c))
+                ? new ServerUnit(g, land.getTile(3, 8), dutch,
+                                 spec().getUnitType("model.unit.seasonedScout"),
+                                 spec().getRole("model.role.scout"))
+                : null;
+            if (other != null) other.setMovesLeft(other.getInitialMovesLeft());
+            assertEquals(c, other != null, dutch.hasNextActiveUnit());
+
+            final List<String> log = new ArrayList<>();
+            final Rig r = new Rig(g);
+            final FreeColClient fcc = wakeClient(g, dutch);
+            final ClassicGUI gui = new ClassicGUI(fcc) {
+                    @Override
+                    public void changeView(Unit unit, boolean force) {
+                        final boolean waking = colonyWaking() != null;
+                        log.add("changeView " + ((unit == null) ? "-" : unit.getId())
+                            + ((waking) ? " waking" : ""));
+                        super.changeView(unit, force);
+                        if (!waking && unit != null) choose(r, unit);   // the map's part
+                    }
+
+                    @Override
+                    public Unit getActiveUnit() {
+                        return r.host.active;   // the map's active unit
+                    }
+                };
+            setField(fcc, "gui", gui);
+            final ClassicGUISeamTest.KeyPrompter keys = new ClassicGUISeamTest.KeyPrompter();
+            gui.colonyPrompter = keys;
+            gui.unitArt = u -> null;
+            gui.turnFlow = r.flow;
+            r.host.nextActiveFrom = dutch::hasNextActiveUnit;
+            r.host.onNext = () -> fcc.getInGameController().nextActiveUnit();
+            final Throwable[] err = { null };
+            javax.swing.SwingUtilities.invokeAndWait(() -> {
+                    try {
+                        if ("mode".equals(c)) {
+                            r.host.promptPref = true;
+                            r.flow.unitShown(last);
+                            r.flow.noUnitLeft();
+                            r.advanceMs(500);
+                            assertTrue(r.flow.isPrompt());
+                            r.host.blocked = true;   // a click on Base in the mode
+                        } else if ("up".equals(c)) {
+                            r.host.activate(other);  // up with his moves
+                            r.flow.unitShown(other);
+                            r.host.blocked = true;   // Base opened from the map
+                        } else {
+                            r.flow.unitShown(last);
+                            r.flow.noUnitLeft();     // the controller's end view
+                            r.host.blocked = true;   // Base's screen, opened by the move
+                            r.advanceMs(485);        // the idle end held
+                        }
+                        final int ends = r.count("endTurn");
+                        keys.press("ENTER");         // «Befehle aufheben.»
+                        gui.colonyUnitOptions(soldier, true);
+                        assertEquals(c, Unit.UnitState.ACTIVE, soldier.getState());
+                        // The controller chose him inside the change and the
+                        // choice was dropped; with a unit up it keeps that one
+                        // (FreeCol's updateGUI) and chooses nobody.
+                        assertEquals(c + " " + log, "up".equals(c), log.isEmpty());
+                        for (String l : log) {
+                            assertEquals(c, "changeView " + soldier.getId() + " waking", l);
+                        }
+                        assertTrue(dutch.hasNextActiveUnit());
+                        assertNull(gui.colonyWaking());
+                        r.advanceMs(2000);
+                        r.flow.tick();               // the screen still up
+                        assertEquals(c, 0, r.count("next"));
+                        log.clear();
+                        r.host.blocked = false;      // E: the screen is gone
+                        r.flow.tick();
+                        r.advanceMs(20000);
+                        r.flow.tick();
+                        assertEquals(c, ends, r.count("endTurn"));
+                        if ("up".equals(c)) {
+                            assertEquals(c, 0, r.count("next"));
+                            assertTrue(c + " " + log, log.isEmpty());
+                            assertSame(c, other, r.host.active);
+                            return;
+                        }
+                        assertEquals(c, 1, r.count("next"));
+                        assertEquals(c, List.of("changeView " + soldier.getId()), log);
+                        assertSame(c, soldier, r.host.active);
+                        assertFalse(c, r.flow.isPrompt());
+                        assertNull(c, r.flow.pending());
+                        // His turn is done: the turn ends by itself (with
+                        // the pref, its mode comes again and Enter ends it).
+                        soldier.setMovesLeft(0);
+                        r.host.active = null;
+                        r.flow.noUnitLeft();
+                        r.advanceMs(500);
+                        if ("mode".equals(c)) {
+                            assertTrue(c, r.flow.isPrompt());
+                            r.flow.endTurnNow("key");
+                            r.advanceMs(20);
+                        }
+                        assertEquals(c, ends + 1, r.count("endTurn"));
+                    } catch (Throwable e) {
+                        err[0] = e;
+                    }
+                });
+            if (err[0] instanceof Error) throw (Error)err[0];
+            if (err[0] != null) throw new AssertionError(err[0]);
+        }
+    }
+
+    private static void setField(FreeColClient fcc, String name, Object value)
+        throws Exception {
+        final java.lang.reflect.Field f = FreeColClient.class.getDeclaredField(name);
+        f.setAccessible(true);
+        f.set(fcc, value);
+    }
+
+    /**
+     * A client of the test's game with FreeCol's real controller: its
+     * server API sets the unit state it is asked to and notes it.  FreeCol's
+     * constructor would start a game of its own, so the object is made
+     * without it (as MoveTest's and ClassicPacificTest's clients).
+     */
+    private static FreeColClient wakeClient(Game game, Player me)
+        throws Exception {
+        final Class<?> uc = Class.forName("sun.misc.Unsafe");
+        final java.lang.reflect.Field theUnsafe = uc.getDeclaredField("theUnsafe");
+        theUnsafe.setAccessible(true);
+        final FreeColClient fcc = (FreeColClient)uc
+            .getMethod("allocateInstance", Class.class)
+            .invoke(theUnsafe.get(null), FreeColClient.class);
+        setField(fcc, "serverAPI", new ServerAPI() {
+                @Override
+                public boolean changeState(Unit unit, Unit.UnitState state) {
+                    unit.setState(state);
+                    return true;
+                }
+
+                @Override
+                public Connection connect(String name, String host, int port) {
+                    return null;
+                }
+
+                @Override
+                public boolean disconnect() {
+                    return true;
+                }
+
+                @Override
+                public Connection reconnect() {
+                    return null;
+                }
+
+                @Override
+                public Connection getConnection() {
+                    return null;
+                }
+            });
+        setField(fcc, "inGameController", new InGameController(fcc));
+        fcc.setGame(game);
+        fcc.setMyPlayer(me);
+        setField(fcc, "inGame", Boolean.TRUE);
+        return fcc;
     }
 
     /** The one-shot timer: replace, cancel, stale posts dropped, the thread. */

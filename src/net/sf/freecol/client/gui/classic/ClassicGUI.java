@@ -2381,7 +2381,10 @@ public class ClassicGUI extends GUI {
      * {@link ClassicColonyUnits}): its @COLONYUNIT box over the colony
      * screen, and what the answer does.  «Befehle aufheben.» frees the
      * unit, which stays in the colony, selected, and does not come up on
-     * the map ({@link #colonyWaking}); «Wache» and «Befestigen.» give it
+     * the map while the screen is open ({@link #colonyWaking}); with a
+     * unit up that one stays up, with none (the end view, the
+     * Spielzugende mode) the freed unit comes once the screen is gone
+     * ({@link ClassicTurnFlow#unitFreed}); «Wache» and «Befestigen.» give it
      * those orders; «Nach vorne bewegen.» moves it to the front of the
      * row; «Keine Veränderungen.» and Escape do nothing.  Without the
      * pack's texts nothing is asked.  EDT only.
@@ -2415,6 +2418,10 @@ public class ClassicGUI extends GUI {
             } finally {
                 this.colonyWaking = null;
             }
+            // With no unit up (the end view, the Spielzugende mode) the
+            // turn flow brings it once the screen is gone: nothing else
+            // would, its choice above was dropped (the review of part M).
+            if (done && this.turnFlow != null) this.turnFlow.unitFreed(unit);
             break;
         case SENTRY:
             done = this.unitOrders.changeState(unit, Unit.UnitState.SENTRY);
@@ -2901,8 +2908,10 @@ public class ClassicGUI extends GUI {
     @Override
     public void changeView(Unit unit, boolean force) {
         // The unit «Befehle aufheben.» frees in the colony screen does not
-        // come up (clip 019 #1554): the controller's choice of it, from
-        // inside the state change, goes back to its cycle.
+        // come up there (clip 019 #1554): the controller's choice of it,
+        // from inside the state change, goes back to its cycle (with no
+        // unit up, the turn flow asks again once the screen is gone,
+        // ClassicTurnFlow.unitFreed).
         if (freedInColony(unit, this.colonyWaking)) {
             ClassicFrameRecorder.event("handover", "dropped " + unit.getId()
                 + ": freed in the colony screen");

@@ -1138,9 +1138,10 @@ public final class InGameController extends Controller {
      * and no notice to him that the other nation declared it (the
      * original has none).  The AI never declares war this way.  A tile
      * of a foreign colony occupied at war then becomes the occupier's
-     * land (the clip: "Neuholland" next to Montreal), where FreeCol
-     * clears its owner; either way the colony may claim it again when
-     * the occupier has gone.
+     * land if he is European (the clip: "Neuholland" next to Montreal),
+     * where FreeCol clears its owner (and still does for a native
+     * occupier); either way the colony may claim it again when the
+     * occupier has gone.
      *
      * @param serverPlayer The {@code ServerPlayer} that owns the unit.
      * @param unit The {@code Unit} to change the state of.
@@ -1172,10 +1173,13 @@ public final class InGameController extends Controller {
                     colony.csEvictUsers(unit, cs);
                 }
                 if (serverPlayer.getStance(owner) == Stance.WAR) {
-                    // Clear owner if at war; the occupier's with the
-                    // original's treaty breach (levi).
+                    // Clear owner if at war; a European occupier's with
+                    // the original's treaty breach (levi).  A native one
+                    // clears it as in FreeCol: the rule speaks of
+                    // Europeans only (the review of part M).
                     tile.changeOwnership((getGame().getSpecification()
-                            .getBoolean(GameOptions.FORTIFY_DECLARES_WAR))
+                            .getBoolean(GameOptions.FORTIFY_DECLARES_WAR)
+                            && serverPlayer.isEuropean())
                         ? serverPlayer : null, null);
                     tileDirty = true;
                 }

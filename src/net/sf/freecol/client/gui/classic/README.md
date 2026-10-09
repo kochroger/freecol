@@ -1413,7 +1413,9 @@ still ends by itself 485 ms after the last change (#691, #1834, #4680).
   which comes up as above (opening_014 1512; W17 item 6), and on our own
   colony, whose screen opens as outside the mode (the original's manual,
   p. 10: the player "may continue to perform management functions" while it
-  flashes; I: no clip); the mode stays and goes on when the screen closes.
+  flashes; I: no clip); the mode stays and goes on when the screen closes,
+  unless «Befehle aufheben.» freed a unit there: that unit comes up once the
+  screen is gone and the mode ends (I; "The units standing in the colony").
   A unit on a colony's tile (its guard, a ship in its port), which the map
   does not draw there, is never freed or brought up by the click (the fixer
   of part J: before, the click freed the fortified guard, who lost his
@@ -3244,9 +3246,17 @@ puts a colonist to work there (our click stand-in for the original's drag,
 - **What they do:** «Befehle aufheben.» clears the orders
   (`InGameController.clearOrders`; a pioneer at work without FreeCol's
   question): the flag's F becomes "-" (V #1298); the unit stays where it is,
-  selected, and does **not** come up on the map (V #1554: the unit that was
-  up stays up; `ClassicGUI.colonyWaking` drops the controller's choice of it,
-  it comes later in the cycle). «Wache» = sentry (S; boarding a ship in port is
+  selected, and does **not** come up on the map while the screen is open
+  (V #1554: the unit that was up stays up; `ClassicGUI.colonyWaking` drops
+  the controller's choice of it, it comes later in the cycle). With **no**
+  unit up or coming (the end view after the turn's last unit, whose idle end
+  the screen holds, or the Spielzugende mode) the freed unit comes as the
+  controller's next unit once the screen is gone, at once, and the mode ends
+  (I: the original is not seen; FreeCol's own colony panel asks for the next
+  unit at its close too; `ClassicTurnFlow.unitFreed`; before, the turn stood
+  still: no unit, no end, Enter refused, the review of part M). An idle end
+  held by any screen while a unit became able to move asks the controller
+  the same way («caught up»). «Wache» = sentry (S; boarding a ship in port is
   not built), «Befestigen.» = fortify (FreeCol: only with moves left),
   «Nach vorne bewegen.» = first in the row (I: the original's meaning is not
   seen; here only the screen's order, for the session).

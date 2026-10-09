@@ -3129,19 +3129,6 @@ public final class Specification implements OptionContainer {
     }
 
     /**
-     * Check if an option exists, and if not, create and install it.
-     *
-     * FIXME: Handles failure to create a needed option badly.
-     *
-     * @param <R> The underlying type encapsulated by the option.
-     * @param <T> The option type.
-     * @param id The option identifier.
-     * @param gr The option group identifier.
-     * @param defaultValue The default value of the option.
-     * @param returnClass The expected class of option.
-     * @return True if the option did not exist and was successfully created.
-     */
-    /**
      * The value {@code GameOptions.FORTIFY_DECLARES_WAR} gets in rules or
      * a save that lack it ({@link #fixGameOptions}): on for the "levi"
      * rules (a game of Roger's begun before the rule existed plays it as
@@ -3154,6 +3141,19 @@ public final class Specification implements OptionContainer {
         return "levi".equals(specId);
     }
 
+    /**
+     * Check if an option exists, and if not, create and install it.
+     *
+     * FIXME: Handles failure to create a needed option badly.
+     *
+     * @param <R> The underlying type encapsulated by the option.
+     * @param <T> The option type.
+     * @param id The option identifier.
+     * @param gr The option group identifier.
+     * @param defaultValue The default value of the option.
+     * @param returnClass The expected class of option.
+     * @return True if the option did not exist and was successfully created.
+     */
     private <R,T extends Option<R>> boolean checkOp(String id, String gr,
                                                     R defaultValue,
                                                     Class<T> returnClass) {

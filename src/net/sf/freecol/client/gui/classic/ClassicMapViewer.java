@@ -2601,7 +2601,9 @@ final class ClassicMapViewer extends JPanel {
             // mode (the original's manual, p. 10: the player "may continue
             // to perform management functions" while it flashes, as E opens
             // Europe); the mode stays and goes on after the colony screen
-            // closes.  A unit on a settlement's tile, which the map draws
+            // closes, unless «Befehle aufheben.» freed a unit there: that
+            // unit comes then and the mode ends (ClassicTurnFlow.unitFreed,
+            // the review of part M).  A unit on a settlement's tile, which the map draws
             // there only while it is up (K2, unitOverSettlement; in the
             // mode no unit is), is never freed or brought up by the click
             // (the review of part J: the colony's fortified guard lost its
