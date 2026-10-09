@@ -49,11 +49,12 @@ import javax.swing.KeyStroke;
  *   <li>{@code move <x> <y>}: move the pointer there, no button (build
  *       spec W20: what reacts to hover).</li>
  *   <li>{@code sclick <x> <y>}: a left click at a point of the open
- *       classic screen's own 320x200 canvas (the Europe screen: its ship
- *       in port, its Set Sail; the colony screen: a unit of its row,
- *       clip 019; also in a minimized run, whose screen never
- *       painted); {@code sclick <x> <y> shift} with Shift held
- *       (a part of a hold, gap list B1).</li>
+ *       classic screen's own 320x200 canvas (the Europe screen: a press
+ *       and a release there, its ship's or a colonist's box, a button;
+ *       its trades are drags since part N1, which a click does not do;
+ *       the colony screen: a unit of its row, clip 019; also in a
+ *       minimized run, whose screen never painted); {@code sclick <x>
+ *       <y> shift} with Shift held.</li>
  *   <li>{@code tclick <x> <y>}: a left click on map tile (x, y) as the
  *       map shows it now: the canvas point at its cell's centre in the
  *       15x12 view (a unit in the Spielzugende mode, J2); an error if the
