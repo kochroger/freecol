@@ -490,6 +490,29 @@ final class ClassicColonyPanel extends JPanel {
             + " cell=" + i + " state=" + pressed.getState());
         this.units.options(pressed, i == 0);
         refresh();
+        recordStill("unit " + pressed.getId());
+    }
+
+    /**
+     * While the acceptance recorder runs: the canvas as a still now (this
+     * window is not in the HUD copy the recorder samples), after a unit's
+     * box: its flag as the answer left it.
+     *
+     * @param why What it shows, for the event.
+     */
+    private void recordStill(String why) {
+        if (!ClassicFrameRecorder.on()) return;
+        final String name = "colony-" + (++stills);
+        ClassicFrameRecorder.event("colony-still", name + " " + why);
+        final BufferedImage still
+            = new BufferedImage(VW, VH, BufferedImage.TYPE_INT_RGB);
+        final Graphics2D g = still.createGraphics();
+        try {
+            paintCanvas(g);
+        } finally {
+            g.dispose();
+        }
+        ClassicFrameRecorder.still(name, still);
     }
 
     private void pressAt(int vx, int vy) {
