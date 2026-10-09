@@ -48,9 +48,11 @@ import net.sf.freecol.common.option.GameOptions;
  *   <li><b>Moves</b> ({@link #judge}): FreeCol's own move rule
  *   ({@code Unit.getMoveType}) decides; a refused type maps to its box:
  *   a merchantman, caravel or galleon into a foreign ship @SHIPCOMBAT
- *   (admiral), a civilian into a foreign unit or colony @CANNOTATTACK
- *   (soldier), a passenger or a loaded ship onto a square the enemy holds
- *   @LANDFIRST (frontiersman), a ship or wagon train into a foreign colony
+ *   (admiral), a civilian into a foreign unit @CANNOTATTACK (soldier), a
+ *   colonist from land into a foreign colony the colony's box
+ *   ({@link #VISIT}, part N6), a treasure train into one @CANNOTATTACK,
+ *   a passenger or a loaded ship onto a square the enemy holds or into a
+ *   foreign colony @LANDFIRST (frontiersman), a ship or wagon train into a foreign colony
  *   at war or not yet contacted @TRADEATWAR (its own words: "... oder noch
  *   keine Beziehungen aufgenommen haben", R3 verifier V2.1), contacted at
  *   peace without de Witt @TRADEMERCANTILISM in FreeCol's words (its
@@ -132,6 +134,14 @@ final class ClassicIllegalMoves {
     static final Verdict SILENT = new Verdict(null, ClassicNotices.Who.NONE, -1,
         null, null, false);
 
+    /**
+     * Not a refusal: a colonist at a foreign colony gets the colony's box
+     * with its rows ({@link ClassicForeignColony}, part N6), which
+     * {@link ClassicGUI#illegalMoveKey} asks.
+     */
+    static final Verdict VISIT = new Verdict(ClassicForeignColony.SECTION,
+        ClassicNotices.Who.SCOUT, -1, null, null, false);
+
     /** The prefix of the fallback words without the pack. */
     static final String FALLBACK = "classic.refusal.";
 
@@ -191,7 +201,13 @@ final class ClassicIllegalMoves {
             return (ClassicGUI.firstLander(unit, to) == null) ? SILENT : null;
         }
         case MOVE_NO_ACCESS_SETTLEMENT:
-            return box("CANNOTATTACK", ClassicNotices.Who.SOLDIER);
+            // A passenger cannot go ashore into it (@LANDFIRST, as into
+            // a foreign unit); a colonist from land meets the colony's
+            // box (part N6, ClassicForeignColony); what is left, a
+            // treasure train, cannot attack (I).
+            return (unit.isOnCarrier()) ? box("LANDFIRST", ClassicNotices.Who.SCOUT)
+                : (ClassicForeignColony.visits(unit, to)) ? VISIT
+                : box("CANNOTATTACK", ClassicNotices.Who.SOLDIER);
         case MOVE_NO_ACCESS_WAR:
             return box("TRADEATWAR", ClassicNotices.Who.NONE);
         case MOVE_NO_ACCESS_TRADE: {

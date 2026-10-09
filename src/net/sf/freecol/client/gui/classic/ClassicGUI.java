@@ -6683,13 +6683,10 @@ public class ClassicGUI extends GUI {
                           ClassicAdvisorLayer.NOT_SHOWN);
         }
         if (ClassicSeams.isOwnProposal(agreement)) {
-            ClassicFrameRecorder.event("negotiation", "own "
-                + agreement.getContext() + ": not yet");
             try {
                 handler.handle(null);
             } finally {
-                askOrPost(notice("negotiation", Messages.message(
-                    "classic.mainMenu.notYet"), title, null));
+                negotiationNotYet(agreement.getContext());
             }
             return;
         }
@@ -6712,6 +6709,23 @@ public class ClassicGUI extends GUI {
                     : TradeStatus.REJECT_TRADE);
                 handler.handle(agreement);
             });
+    }
+
+    /**
+     * Our own proposal (a scout's or a colonist's «Bürgermeister treffen»,
+     * a ship's trade at a foreign colony) is not built yet: the "not yet"
+     * notice, nothing happens (the original's meeting, @HELLOMEEK →
+     * [@SIEGES] → @OLDPEACEMEEK, is the planned greeting of the
+     * Europeans).
+     *
+     * @param context The proposal's context.
+     */
+    void negotiationNotYet(DiplomaticTrade.TradeContext context) {
+        ClassicFrameRecorder.event("negotiation", "own " + context
+            + ": not yet");
+        askOrPost(notice("negotiation", Messages.message(
+            "classic.mainMenu.notYet"), Messages.message(
+            "negotiationDialog.title." + context.getKey()), null));
     }
 
     /**
@@ -7169,6 +7183,78 @@ public class ClassicGUI extends GUI {
     }
 
     /**
+     * {@inheritDoc}
+     *
+     * <p>The original's questions before an attack (part N6), instead of
+     * FreeCol's "Ihr seid im Frieden mit ...":
+     * <ul>
+     *   <li>a native village: none, «Dorf angreifen» was the question (V,
+     *       landfall #26161: KAMPFANALYSE right after it);</li>
+     *   <li>a native unit in the open at peace: GAME.TXT @WHACKINDIANS
+     *       with the soldier, «Ja» attacks, «Nein» and Escape do nothing
+     *       (V, landfall #24717);</li>
+     *   <li>a European colony or unit at peace or cease fire: @HAVETREATY,
+     *       «Friedensvertrag brechen.» attacks (I: the tag's own case; the
+     *       F of part M asks the same);</li>
+     *   <li>at war: none.</li>
+     * </ul>
+     * Fortifying on foreign land, a privateer, an ally and a nation not
+     * met keep FreeCol's rule and words.  A refused attack spends nothing.
+     */
+    @Override
+    public boolean confirmHostileAction(Unit attacker, Tile target) {
+        if (attacker == null || target == null || target == attacker.getTile()
+            || attacker.hasAbility(net.sf.freecol.common.model.Ability.PIRACY)) {
+            return super.confirmHostileAction(attacker, target);
+        }
+        final net.sf.freecol.common.model.Settlement s = target.getSettlement();
+        final Player enemy;
+        if (s != null) {
+            enemy = s.getOwner();
+        } else {
+            final Unit d = target.getDefendingUnit(attacker);
+            if (d == null || d.hasAbility(net.sf.freecol.common.model.Ability.PIRACY)) {
+                return super.confirmHostileAction(attacker, target);
+            }
+            enemy = d.getOwner();
+        }
+        final Player me = attacker.getOwner();
+        if (enemy == null || me == null) {
+            return super.confirmHostileAction(attacker, target);
+        }
+        final net.sf.freecol.common.model.Stance stance = me.getStance(enemy);
+        if (stance == net.sf.freecol.common.model.Stance.WAR) return true;
+        final String title = colony(target);
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        ClassicAdvisorBox.Request r = null;
+        String what;
+        if (enemy.isIndian()) {
+            if (s != null) {
+                ClassicFrameRecorder.event("hostile", "village " + s.getName()
+                    + " no question");
+                return true;
+            }
+            r = ClassicWar.whackRequest(t, enemy, title);
+            what = ClassicWar.WHACK_SECTION;
+        } else if (stance == net.sf.freecol.common.model.Stance.PEACE
+                   || stance == net.sf.freecol.common.model.Stance.CEASE_FIRE) {
+            r = ClassicWar.treatyRequest(t, enemy, title);
+            what = ClassicWar.TREATY_SECTION;
+        } else {
+            what = null;
+        }
+        if (r == null) return super.confirmHostileAction(attacker, target);
+        final ClassicAdvisorBox.Request req = r;
+        final int chosen = onEventThread(() -> this.prompter.ask(req),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        final boolean attack = (ClassicWar.TREATY_SECTION.equals(what))
+            ? ClassicWar.breaksTreaty(chosen) : confirmed(chosen);
+        ClassicFrameRecorder.event("hostile", what + " " + attacker.getId()
+            + " chosen=" + chosen + ((attack) ? " attack" : " nothing"));
+        return attack;
+    }
+
+    /**
      * What puts the classic boxes: {@link #putBox} in the game, a fake in
      * the tests.  EDT only.
      */
@@ -7347,11 +7433,25 @@ public class ClassicGUI extends GUI {
     // The first village entry's woodcut comes before them when no key
     // brought it (W9: a goto, a click; the key's is villageEntryKey).
 
-    /** {@inheritDoc} */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>At a colony of another European there is no menu: an armed unit
+     * moved into it attacks (part N6, I: the original demands tribute
+     * from villages only, NAMES.TXT @ACTIONS "Zoll fordern"; FreeCol's
+     * tribute from a colony is FreeCol's).  At peace the treaty question
+     * comes next ({@link #confirmHostileAction}).
+     */
     @Override
     public net.sf.freecol.common.model.Constants.ArmedUnitSettlementAction
         getArmedUnitSettlementChoice(
             net.sf.freecol.common.model.Settlement settlement) {
+        if (settlement instanceof Colony) {
+            ClassicFrameRecorder.event("armed-colony", settlement.getName()
+                + " attack");
+            return net.sf.freecol.common.model.Constants
+                .ArmedUnitSettlementAction.SETTLEMENT_ATTACK;
+        }
         villageWoodcut(settlement);
         return villageChoice(settlement,
                              super.getArmedUnitSettlementChoice(settlement));
@@ -7682,8 +7782,86 @@ public class ClassicGUI extends GUI {
         final long at = (layer == null || this.mapViewer == null) ? 0L
             : landfallShowAt(this.mapViewer.moveKeyNanos(), waitClock().now(),
                 layer.loadsPalette(ClassicNotices.portrait(v.who, v.tribe)));
+        if (v == ClassicIllegalMoves.VISIT) {
+            colonyVisit(unit, direction, at);
+            return true;
+        }
         this.prompter.ask(refusalRequest(v, at));
         return true;
+    }
+
+    /**
+     * A colonist of ours that is no scout moved into a colony of another
+     * European (part N6; Roger 2026-10-09 09:50, "Richtig wäre der Dialog:
+     * "Bürgermeister treffen usw."", before FreeCol's refusal @CANNOTATTACK
+     * came): the colony's box ({@link ClassicForeignColony}), infiltrate
+     * and attack greyed.  «Bürgermeister treffen» takes the scout's way
+     * ({@link #negotiationNotYet}); «Nichts» and Escape do nothing.  The
+     * controller never sees the order: the unit keeps its moves and its
+     * place and stays up.  EDT only.
+     *
+     * @param unit The colonist.
+     * @param direction The direction of the colony.
+     * @param showAtNanos When the box should be on screen, 0 for at once.
+     */
+    void colonyVisit(Unit unit, Direction direction, long showAtNanos) {
+        final Tile to = (unit == null || !unit.hasTile()) ? null
+            : unit.getTile().getNeighbourOrNull(direction);
+        final Colony colony = (to == null) ? null : to.getColony();
+        if (colony == null) return;
+        final Player ref = unit.getOwner().getREFPlayer();
+        final boolean canMeet = ref == null || colony.getOwner() != ref;
+        final String title = colony(to);
+        ClassicAdvisorBox.Request r = ClassicForeignColony.request(
+            ClassicText.load(ClassicPackFiles.runtime()), colony.getName(),
+            canMeet, false, title, showAtNanos);
+        if (r == null) {
+            r = ClassicForeignColony.freeColRequest(unit, colony, canMeet,
+                                                    false, title, showAtNanos);
+        }
+        final int chosen = this.prompter.ask(r);
+        final net.sf.freecol.common.model.Constants.ScoutColonyAction act
+            = ClassicForeignColony.action(r, chosen);
+        ClassicFrameRecorder.event("colony-visit", "unit=" + unit.getId()
+            + " colony=" + colony.getName() + " chosen=" + chosen
+            + " action=" + ((act == null) ? "nothing" : act.toString()));
+        if (act == net.sf.freecol.common.model.Constants.ScoutColonyAction
+            .SCOUT_COLONY_NEGOTIATE) {
+            negotiationNotYet(DiplomaticTrade.TradeContext.DIPLOMATIC);
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The original's box ({@link ClassicForeignColony}, part N6; V
+     * playthrough-1 #73): GAME.TXT {@code @SCOUTCOLONY} with the colony's
+     * name and the frontiersman, «Nichts» and Escape cancel (nothing is
+     * spent).  Without the pack the same box in FreeCol's words.
+     */
+    @Override
+    public net.sf.freecol.common.model.Constants.ScoutColonyAction
+        getScoutForeignColonyChoice(Colony colony, Unit unit, boolean neg) {
+        if (colony == null || unit == null) {
+            return super.getScoutForeignColonyChoice(colony, unit, neg);
+        }
+        final String title = colony(colony.getTile());
+        ClassicAdvisorBox.Request req = ClassicForeignColony.request(
+            ClassicText.load(ClassicPackFiles.runtime()), colony.getName(),
+            neg, true, title, 0L);
+        if (req == null) {
+            req = ClassicForeignColony.freeColRequest(unit, colony, neg, true,
+                                                      title, 0L);
+        }
+        final ClassicAdvisorBox.Request r = req;
+        final int chosen = onEventThread(() -> this.prompter.ask(r),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        final net.sf.freecol.common.model.Constants.ScoutColonyAction act
+            = ClassicForeignColony.action(r, chosen);
+        ClassicFrameRecorder.event("scout-colony", "unit=" + unit.getId()
+            + " colony=" + colony.getName() + " chosen=" + chosen
+            + " action=" + ((act == null) ? "nothing" : act.toString()));
+        return act;
     }
 
     /**

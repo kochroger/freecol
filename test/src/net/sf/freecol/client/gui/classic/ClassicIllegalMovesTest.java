@@ -186,8 +186,9 @@ public class ClassicIllegalMovesTest extends FreeColTestCase {
     }
 
     /**
-     * A civilian on land into a foreign unit, or a colonist into a foreign
-     * colony: @CANNOTATTACK with the soldier.  A soldier and a scout attack.
+     * A civilian on land into a foreign unit: @CANNOTATTACK with the
+     * soldier.  A soldier and a scout attack.  A colonist into a foreign
+     * colony meets the colony's box (part N6, {@link #testForeignColonyAudit}).
      */
     public void testCannotAttack() {
         for (String rules : RULES) {
@@ -208,14 +209,108 @@ public class ClassicIllegalMovesTest extends FreeColTestCase {
                 "soldier"), w.east(at)));
             assertNull(ClassicIllegalMoves.judge(w.unit(at, w.dutch, "seasonedScout",
                 "scout"), w.east(at)));
-            // A colonist at a foreign colony.
+            // A colonist at a foreign colony: no longer @CANNOTATTACK (N6).
             final Tile c = w.tile(3, 8);
             w.colony(w.french, "Port", w.tile(4, 8));
             final Unit colonist = w.unit(c, w.dutch, "freeColonist");
             assertEquals(Unit.MoveType.MOVE_NO_ACCESS_SETTLEMENT,
                          colonist.getMoveType(w.east(c)));
-            assertVerdict(rules + " colony", "CANNOTATTACK", ClassicNotices.Who.SOLDIER,
+            assertSame(rules + " colony", ClassicIllegalMoves.VISIT,
                 ClassicIllegalMoves.judge(colonist, w.east(c)));
+        }
+    }
+
+    /**
+     * Part N6 (Roger 2026-10-09 09:50: the pioneer at a French colony got
+     * "Diese Art von Einheit kann nicht angreifen", "Richtig wäre der
+     * Dialog: "Bürgermeister treffen usw.""): every unit type moved into
+     * a colony of another European at peace and at war, and into a
+     * contacted village, from land.
+     * <ul>
+     *   <li>free colonist, expert, pioneer, missionary at the colony: the
+     *       colony's box ({@link ClassicIllegalMoves#VISIT}), at peace and
+     *       at war; a passenger aboard a ship: @LANDFIRST; the treasure
+     *       train: @CANNOTATTACK (I);</li>
+     *   <li>soldier, dragoon, artillery: the controller's attack (the
+     *       treaty question, {@link ClassicGUI#confirmHostileAction}); the
+     *       scout: the controller's @SCOUTCOLONY; the wagon train: the
+     *       trade refusals ({@link #testTradeRefusals});</li>
+     *   <li>at the village: nothing is @CANNOTATTACK (the controller's
+     *       village boxes, or the village refusals).</li>
+     * </ul>
+     */
+    public void testForeignColonyAudit() {
+        for (String rules : RULES) {
+            for (Stance stance : new Stance[] { Stance.PEACE, Stance.WAR }) {
+                final World w = new World(rules);
+                w.meet(w.dutch, w.french, stance);
+                w.colony(w.french, "Port", w.tile(4, 6));
+                final Tile at = w.tile(3, 6);
+                final String what = rules + " " + stance + " ";
+                final Unit[] visitors = {
+                    w.unit(at, w.dutch, "freeColonist"),
+                    w.unit(at, w.dutch, "masterCarpenter"),
+                    w.unit(at, w.dutch, "hardyPioneer", "pioneer"),
+                    w.unit(at, w.dutch, "freeColonist", "pioneer"),
+                    w.unit(at, w.dutch, "jesuitMissionary", "missionary"),
+                    w.unit(at, w.dutch, "freeColonist", "missionary"),
+                };
+                for (Unit u : visitors) {
+                    assertEquals(what + u, Unit.MoveType.MOVE_NO_ACCESS_SETTLEMENT,
+                                 u.getMoveType(w.east(at)));
+                    assertSame(what + u, ClassicIllegalMoves.VISIT,
+                               ClassicIllegalMoves.judge(u, w.east(at)));
+                }
+                final Unit treasure = w.unit(at, w.dutch, "treasureTrain");
+                assertVerdict(what + "treasure", "CANNOTATTACK",
+                    ClassicNotices.Who.SOLDIER, ClassicIllegalMoves.judge(treasure,
+                        w.east(at)));
+                for (String[] armed : new String[][] {
+                        { "veteranSoldier", "soldier" }, { "freeColonist", "dragoon" },
+                        { "artillery", null }, { "seasonedScout", "scout" } }) {
+                    final Unit u = (armed[1] == null) ? w.unit(at, w.dutch, armed[0])
+                        : w.unit(at, w.dutch, armed[0], armed[1]);
+                    assertNull(what + u, ClassicIllegalMoves.judge(u, w.east(at)));
+                }
+                assertEquals(Unit.MoveType.ENTER_FOREIGN_COLONY_WITH_SCOUT,
+                    w.unit(at, w.dutch, "seasonedScout", "scout").getMoveType(w.east(at)));
+                assertEquals(Unit.MoveType.ATTACK_SETTLEMENT,
+                    w.unit(at, w.dutch, "artillery").getMoveType(w.east(at)));
+                // A passenger next to the colony: go ashore first.
+                final Tile sea = w.tile(10, 6);
+                final Colony harbour = w.colony(w.french, "Harbour", w.tile(9, 6));
+                assertNotNull(harbour);
+                final Unit ship = w.unit(sea, w.dutch, "caravel");
+                final Unit passenger = w.unit(ship, w.dutch, "freeColonist");
+                final Direction west = w.map.getDirection(sea, w.tile(9, 6));
+                assertEquals(Unit.MoveType.MOVE_NO_ACCESS_SETTLEMENT,
+                             passenger.getMoveType(west));
+                assertVerdict(what + "passenger", "LANDFIRST", ClassicNotices.Who.SCOUT,
+                    ClassicIllegalMoves.judge(passenger, west));
+
+                // The village: never @CANNOTATTACK.
+                w.village(w.tile(4, 10));
+                w.meet(w.dutch, w.arawak, Stance.PEACE);
+                final Tile v = w.tile(3, 10);
+                for (String[] type : new String[][] {
+                        { "freeColonist", null }, { "masterCarpenter", null },
+                        { "hardyPioneer", "pioneer" }, { "jesuitMissionary", "missionary" },
+                        { "veteranSoldier", "soldier" }, { "freeColonist", "dragoon" },
+                        { "artillery", null }, { "seasonedScout", "scout" },
+                        { "wagonTrain", null } }) {
+                    final Unit u = (type[1] == null) ? w.unit(v, w.dutch, type[0])
+                        : w.unit(v, w.dutch, type[0], type[1]);
+                    final ClassicIllegalMoves.Verdict x
+                        = ClassicIllegalMoves.judge(u, w.east(v));
+                    assertTrue(what + "village " + u + " " + u.getMoveType(w.east(v))
+                        + " " + x, x == null || !"CANNOTATTACK".equals(x.section));
+                    assertNotSame(what + "village " + u, ClassicIllegalMoves.VISIT, x);
+                }
+                // The treasure train cannot go in anywhere (I).
+                assertVerdict(what + "village treasure", "CANNOTATTACK",
+                    ClassicNotices.Who.SOLDIER, ClassicIllegalMoves.judge(
+                        w.unit(v, w.dutch, "treasureTrain"), w.east(v)));
+            }
         }
     }
 

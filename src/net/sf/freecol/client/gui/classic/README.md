@@ -2073,8 +2073,9 @@ no rule is added.
 | Order | Refused because (FreeCol) | Box | Portrait (I) |
 |---|---|---|---|
 | move | merchantman, caravel, galleon into a foreign ship (`MOVE_NO_ATTACK_CIVILIAN`) | @SHIPCOMBAT | admiral |
-| move | civilian into a foreign unit or colony (`NO_ATTACK_CIVILIAN`, `NO_ACCESS_SETTLEMENT`) | @CANNOTATTACK | soldier |
-| move | from aboard onto an enemy square (`NO_ATTACK_MARINE`, `NO_ACCESS_WATER`, a civilian aboard); a loaded ship onto land a foreign unit holds | @LANDFIRST | frontiersman |
+| move | civilian into a foreign unit (`NO_ATTACK_CIVILIAN`); a treasure train into a colony or village (`NO_ACCESS_SETTLEMENT`) | @CANNOTATTACK | soldier |
+| move | a colonist that is no scout (free colonist, expert, pioneer, missionary) from land into a foreign colony (`NO_ACCESS_SETTLEMENT`, part N6) | not a refusal: the colony's box @SCOUTCOLONY, infiltrate and attack greyed (below) | frontiersman |
+| move | from aboard onto an enemy square (`NO_ATTACK_MARINE`, `NO_ACCESS_WATER`, a civilian aboard), or into a foreign colony (`NO_ACCESS_SETTLEMENT` aboard); a loaded ship onto land a foreign unit holds | @LANDFIRST | frontiersman |
 | move | ship or wagon train into a foreign colony at war, or not contacted (`NO_ACCESS_WAR`, `NO_ACCESS_TRADE`) | @TRADEATWAR | none |
 | move | the same, contacted and at peace, without de Witt | @TRADEMERCANTILISM in FreeCol's words (`%STRING0` unknown) | none |
 | move | ship at an uncontacted village (`NO_ACCESS_CONTACT`) | @DONTKNOWSHIPS | admiral |
@@ -2107,6 +2108,53 @@ Tests: `ClassicIllegalMovesTest` (every verdict, classic and levi, both
 topologies by the suite), `ClassicGUISeamTest.testRefusalBoxes` (the
 boxes, the moves kept), `ClassicMapViewerTest.testRefusedMoveKey`,
 `ClassicHudTest` (the P/R hook).
+
+### At a foreign colony, and the questions before an attack (`ClassicForeignColony`; part N6)
+
+Roger, 2026-10-09 09:50: "Als ich mit dem Pionier eine Kolonie der
+Franzosen betreten wollte, kam fälschlicherweise: Diese Art von Einheit
+kann nicht angreifen. Richtig wäre der Dialog: "Bürgermeister treffen
+usw."".
+
+- **The scout** (V, playthrough-1 #73, catalogue C38): moved into a
+  colony of another European, GAME.TXT @SCOUTCOLONY «Unsere {Späher} haben
+  die Außenbezirke von {Montreal} erreicht, Eure Exzellenz. Was sollen sie
+  jetzt tun?» with the frontiersman (MSS3), box (42,113,236,62), MSS3 at
+  (86,26), the bar on «Bürgermeister treffen» (0 px against #41523,
+  `ClassicForeignColonyTest`). The rows take FreeCol's actions
+  (`ClassicGUI.getScoutForeignColonyChoice`): negotiate, spy, attack;
+  «Nichts» and Escape do nothing and spend nothing. «Bürgermeister
+  treffen» is greyed at the REF's colonies. Without the pack FreeCol's
+  words in the same box.
+- **Any other colonist** (free colonist, expert, pioneer, missionary)
+  from land: FreeCol refuses the move (`MOVE_NO_ACCESS_SETTLEMENT`); before,
+  the refusal was @CANNOTATTACK. Now the same box (Roger; I: no clip shows
+  it, so its words keep GAME.TXT's «{Späher}»), with «Kolonie
+  infiltrieren» and «Kolonie angreifen» greyed: only a scout infiltrates,
+  only soldiers attack (I). `ClassicGUI.colonyVisit`, from
+  `illegalMoveKey`: the controller never sees the order, the unit keeps its
+  moves and stays up. A colonist aboard a ship gets @LANDFIRST, a treasure
+  train still @CANNOTATTACK (I).
+- **«Bürgermeister treffen»** leads, for the scout and the colonist, to the
+  "not yet" notice (`negotiationNotYet`): the original's meeting, @HELLOMEEK
+  → [@SIEGES] → @OLDPEACEMEEK (catalogue C39, C40), is part of the planned
+  greeting of the Europeans.
+- **Armed units** (soldier, dragoon, artillery) at a colony get no menu:
+  they attack (`getArmedUnitSettlementChoice`; I: the original's tribute is
+  the villages' «Zoll fordern», NAMES.TXT @ACTIONS; FreeCol's tribute from
+  a colony is FreeCol's). Before any attack `confirmHostileAction` asks the
+  original's question instead of FreeCol's "Ihr seid im Frieden mit ...":
+  a European colony or unit at peace or cease fire @HAVETREATY (only
+  «Friedensvertrag brechen.» attacks; I: the tag's own case, the F of part
+  M asks the same); a brave in the open at peace @WHACKINDIANS with the
+  soldier («Ja» attacks; V landfall #24717, 0 px against #24736); a
+  village nothing more after «Dorf angreifen» (V landfall #26161); at war
+  nothing. Fortifying on foreign land, privateers and allies keep FreeCol's
+  rule and words.
+- **Villages** keep FreeCol's menus in FreeCol's words (W8f, D11 open):
+  no unit gets @CANNOTATTACK there except the treasure train.
+- Recorder: `colony-visit`, `scout-colony`, `armed-colony`, `hostile`.
+- Tests: `ClassicForeignColonyTest`, `ClassicIllegalMovesTest.testForeignColonyAudit`.
 
 ### The silent seams (`ClassicSeams`; master plan N15, G1)
 

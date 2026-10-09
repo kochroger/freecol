@@ -119,6 +119,46 @@ final class ClassicWar {
                 .stopgap(title, null).build();
     }
 
+    /** GAME.TXT's question before an attack on natives in the open. */
+    static final String WHACK_SECTION = "WHACKINDIANS";
+
+    /**
+     * The {@code @WHACKINDIANS} box (V, landfall #24717: the soldier
+     * ordered into an Arawak brave): «Sollen wir die {Araukaner}
+     * angreifen, Eure Exzellenz?», {@code %STRING0} the tribe's NAMES.TXT
+     * {@code @TRIBES} name, the soldier, rows «Ja» (the bar's) / «Nein»
+     * (Escape's: nothing happens, nothing is spent).
+     *
+     * @param t The original texts, or null.
+     * @param natives The tribe.
+     * @param title The stopgap's window title.
+     * @return The box, or null without the text (FreeCol's question then).
+     */
+    static ClassicAdvisorBox.Request whackRequest(ClassicText t, Player natives,
+                                                 String title) {
+        final ClassicText.Message m = (t == null) ? null : t.message(WHACK_SECTION);
+        if (m == null || m.text.isEmpty() || m.options.size() < 2
+            || natives == null) return null;
+        final int tribe = ClassicGUI.tribeIndex(natives);
+        final List<String[]> rows = t.names("TRIBES");
+        String name = (rows != null && tribe >= 0 && tribe < rows.size()
+            && rows.get(tribe).length > 0) ? rows.get(tribe)[0].trim() : null;
+        if (name == null || name.isEmpty()) {
+            try {
+                name = ClassicAdvisorBox.literal(Messages.message(natives.getNationLabel()));
+            } catch (RuntimeException e) {
+                name = natives.getNationId();
+            }
+        }
+        final Map<String, String> values = new HashMap<>();
+        values.put("STRING0", name);
+        final ClassicAdvisorBox.Builder b
+            = ClassicAdvisorBox.fromGameText(WHACK_SECTION, m, values);
+        return (b == null) ? null
+            : b.cancelRow(1).portrait(ClassicAdvisorBox.Portrait.SOLDIER)
+                .stopgap(title, null).build();
+    }
+
     /**
      * The answer of the {@code @HAVETREATY} box: only «Friedensvertrag
      * brechen.» breaks the treaty; the other row, Escape and a box that
