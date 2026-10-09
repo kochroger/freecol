@@ -440,6 +440,11 @@ public class ClassicGUI extends GUI {
                 public void windowClosing(WindowEvent e) {
                     closeRequested();
                 }
+
+                @Override
+                public void windowActivated(WindowEvent e) {
+                    mapActivated();
+                }
             });
             // The original title picture (OPENMENU.PIK, 1:1 in a letterboxed
             // 320x200 canvas), passive until showMainPanel; without the pack a
@@ -503,6 +508,11 @@ public class ClassicGUI extends GUI {
             @Override
             public void windowClosing(WindowEvent e) {
                 closeRequested();
+            }
+
+            @Override
+            public void windowActivated(WindowEvent e) {
+                mapActivated();
             }
         });
         installFrameKeys();
@@ -2228,9 +2238,57 @@ public class ClassicGUI extends GUI {
      * @return True if so.
      */
     boolean boxBusy() {
+        return mapBoxBusy() || europeBoxBusy();
+    }
+
+    /**
+     * Whether a box of the map's own window is up or due: the advisor
+     * layer or a woodcut, not the boxes over Europe ({@link #boxBusy}).
+     * EDT only.
+     *
+     * @return True if so.
+     */
+    private boolean mapBoxBusy() {
         return (this.boxLayer != null && this.boxLayer.isBusy())
-            || (this.europeBoxes != null && this.europeBoxes.isBusy())
             || this.woodcutsPosted > 0;
+    }
+
+    /**
+     * Whether a wood box over the Europe screen is up or due
+     * ({@link #europeBoxes}: {@code @HOWMUCH4/5}, {@code @TUTORIAL18}).
+     * EDT only.
+     *
+     * @return True if so.
+     */
+    private boolean europeBoxBusy() {
+        return this.europeBoxes != null && this.europeBoxes.isBusy();
+    }
+
+    /**
+     * The map's window became the active window (a click on it beside a
+     * windowed Europe, Alt+Tab, the taskbar).  While a box over the open
+     * Europe screen is up or due, Europe and its box come in front again,
+     * as a modal box's owner would bring it: the box keeps every map key
+     * and click inert ({@link #isDialogShowing}, E included), so behind the
+     * map it was a dead game until the "Amsterdam" window was found in the
+     * taskbar (the fixer of part L, review LATER play 1).  EDT only.
+     */
+    void mapActivated() {
+        if (raisesEuropeOnActivation(isOpen(this.europeFrame), europeBoxBusy())) {
+            raiseEurope("box");
+        }
+    }
+
+    /**
+     * The rule of {@link #mapActivated}.
+     *
+     * @param europeOpen The Europe screen is open.
+     * @param boxOnEurope A box over Europe is up or due.
+     * @return True to bring Europe up.
+     */
+    static boolean raisesEuropeOnActivation(boolean europeOpen,
+                                            boolean boxOnEurope) {
+        return europeOpen && boxOnEurope;
     }
 
     /** @return The advisor boxes' layer, or null (the harness, tests). */
@@ -2651,15 +2709,18 @@ public class ClassicGUI extends GUI {
     /**
      * Whether a click on our own unit cancels its goto order
      * ({@link #unitClicked}): a unit on the map, not aboard a ship, with a
-     * destination (G) or a trade route.  Its moves do not matter: the
-     * cancel costs nothing.
+     * destination (G).  Its moves do not matter: the cancel costs nothing.
+     * A unit on a trade route (T) keeps it and its next stop: Roger's rule
+     * names G only, and a click just to look at a wagon train would have
+     * taken its route off without a word (the fixer of part L, review
+     * LATER play 3 / regress 1); such a click is the one before part L.
      *
      * @param unit The unit, or null.
      * @return True to cancel its goto order.
      */
     static boolean cancelsGotoOnClick(Unit unit) {
         return unit != null && unit.hasTile() && !unit.isOnCarrier()
-            && (unit.getDestination() != null || unit.getTradeRoute() != null);
+            && unit.getTradeRoute() == null && unit.getDestination() != null;
     }
 
     /**
@@ -3963,7 +4024,10 @@ public class ClassicGUI extends GUI {
         if (minimized) f.setExtendedState(state & ~Frame.ICONIFIED);
         if (!f.isVisible()) f.setVisible(true);
         f.toFront();
-        if (this.europePanel != null) this.europePanel.requestFocusInWindow();
+        // The keys to the box over Europe while one is up (its Enter, Esc
+        // and Backspace), else to the screen (the fixer of part L).
+        final Component keys = (europeBoxBusy()) ? this.europeBoxes : this.europePanel;
+        if (keys != null) keys.requestFocusInWindow();
         // One line per raise, not one per poll while Windows refuses it.
         final long now = waitClock().now();
         if (minimized || now - this.europeRaisedAt
@@ -3980,11 +4044,14 @@ public class ClassicGUI extends GUI {
      * waits for Europe's close, a Europe screen that is open while the
      * player is at the map (the map's window active: Europe behind it or
      * minimized) comes up again; not over a box or an open menu of the map
-     * (the box or the menu first).
+     * (the box or the menu first).  A box over Europe itself does not hold
+     * it: it comes up with Europe (the fixer of part L; before, such a box
+     * kept Europe behind the map, {@link #mapActivated}).
      *
      * @param europeOpen The Europe screen is open.
      * @param mapActive The map's window is the active window.
-     * @param boxUp A box, the first scene or a modal dialog is up.
+     * @param boxUp A box of the map's window ({@link #mapBoxBusy}), the
+     *     first scene or a modal dialog is up.
      * @param menuOpen A menu of the map's strip is open.
      * @return True to bring Europe up.
      */
@@ -4407,8 +4474,10 @@ public class ClassicGUI extends GUI {
 
         @Override
         public void keepEuropeUp() {
+            // A box of the map holds it, not one over Europe itself.
             if (raisesEurope(isOpen(europeFrame), frame != null && frame.isActive(),
-                    boxUp(), menuStrip != null && menuStrip.isMenuOpen())) {
+                    sceneShowing || modalDialogShowing() || mapBoxBusy(),
+                    menuStrip != null && menuStrip.isMenuOpen())) {
                 raiseEurope("hold");
             }
         }

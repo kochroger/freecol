@@ -952,8 +952,12 @@ have it too. Isometric maps, and maps built otherwise (the tests'
   #208; (56,42) still gives (42,36), cell (14,6), as the landfall clip.
   Our high seas may reach 16 columns in from the edge where the land is far
   (`MapGeneratorOptions.applyTopologyDefaults`), so such a row starts its
-  ship up to x 42 (cell (7,6)). Before part L (C2, N16) the ship always
-  started in the column inside the ring.
+  ship up to x 42 (cell (7,6)). Levi, 4 nations, square, seeds 1-40 (the L
+  review's probe): the Dutch start at x 42-56, at x 42 in 9 of 40 games
+  and at x 46 or less in 16; land is at least 3 tiles west of every start,
+  but on an AI row there can be 12-21 tiles of open ocean (or no land at
+  all) before it. Before part L (C2, N16) the ship always started in the
+  column inside the ring.
 - **The start order (N6).** With the classic starting positions (the
   default), the nations take the start tiles of such a map from north to
   south in a fixed order: England, France, the Netherlands, Spain
@@ -1295,13 +1299,16 @@ still ends by itself 485 ms after the last change (#691, #1834, #4680).
   Entität mit G auf einen Weg geschickt habe, kann ich seinen Weg später
   unterbrechen, indem ich mit der Maus auf die Entität klicke") cancels its
   goto order first (`ClassicGUI.cancelsGotoOnClick`: a unit on the map, not
-  aboard, with a destination or a trade route; `cancelGoto` ->
+  aboard, with a destination and no trade route; `cancelGoto` ->
   `InGameController.cancelGotoOrders`, the server's destination change with
   no choice of the next unit); the unit stays where it is, keeps its moves
   and comes up as any clicked unit, so the cycle no longer runs it. In the
   Spielzugende mode the same with moves left (`takesPromptClick`); without
   them the order goes and the mode stays (`gotoCancelledInPrompt`; I), so a
   unit on its way can be stopped before the next turn's cycle runs it.
+  A unit on a trade route (T) keeps its route and its next stop: Roger's
+  rule names G only, and the click is the one before part L (the fixer of
+  part L; a click just to look at a wagon train took its route off).
   Recorder event `click-goto-cancel`. Tests:
   `ClassicMapViewerTest.testAClickCancelsTheGotoOrder`.
 - **A load with nothing to move** (J3; the review of part I): the view opens

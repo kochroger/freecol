@@ -4020,5 +4020,35 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertFalse("a box first", ClassicGUI.raisesEurope(true, true, true, false));
         assertFalse("a menu first", ClassicGUI.raisesEurope(true, true, false, true));
         assertFalse("no Europe", ClassicGUI.raisesEurope(false, true, false, false));
+        // The fixer of part L: a box over Europe itself (@HOWMUCH4/5,
+        // @TUTORIAL18) does not hold Europe behind the map; the map's
+        // window activated while it is up or due brings Europe and the box
+        // in front (else every map key and click was dead behind it).
+        assertTrue(ClassicGUI.raisesEuropeOnActivation(true, true));
+        assertFalse("no box over Europe",
+                    ClassicGUI.raisesEuropeOnActivation(true, false));
+        assertFalse("no Europe", ClassicGUI.raisesEuropeOnActivation(false, true));
+        final String src;
+        try {
+            src = new String(Files.readAllBytes(new File(
+                "src/net/sf/freecol/client/gui/classic/ClassicGUI.java").toPath()),
+                StandardCharsets.UTF_8).replaceAll("\\s+", " ");
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+        final int keep = src.indexOf("public void keepEuropeUp()");
+        assertTrue(keep > 0);
+        final String body = src.substring(keep, src.indexOf("raiseEurope(\"hold\")", keep));
+        assertTrue(body, body.contains("mapBoxBusy()"));
+        assertFalse(body, body.contains("boxUp()"));
+        // Both main-window listeners (the start-up window's and our own).
+        final String hook = "public void windowActivated(WindowEvent e) { mapActivated(); }";
+        final int first = src.indexOf(hook);
+        assertTrue(first > 0 && src.indexOf(hook, first + 1) > first);
+        // A raise keeps the keys on the box over Europe while one is up.
+        final int raise = src.indexOf("private boolean raiseEurope(String why)");
+        assertTrue(raise > 0);
+        final String rb = src.substring(raise, src.indexOf("return true; }", raise));
+        assertTrue(rb, rb.contains("(europeBoxBusy()) ? this.europeBoxes : this.europePanel"));
     }
 }

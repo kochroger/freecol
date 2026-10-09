@@ -28,6 +28,7 @@ import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileType;
+import net.sf.freecol.common.model.TradeRoute;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.server.model.ServerUnit;
@@ -464,6 +465,15 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         assertTrue(ClassicGUI.cancelsGotoOnClick(scout));
         scout.setMovesLeft(0);
         assertTrue(ClassicGUI.cancelsGotoOnClick(scout));       // costs nothing
+        // A trade route (T) is not a G order: kept, with its next stop or
+        // without one (the fixer of part L).
+        final TradeRoute route = new TradeRoute(game, "route", dutch);
+        scout.setTradeRoute(route);
+        assertFalse(ClassicGUI.cancelsGotoOnClick(scout));      // route + stop
+        scout.setDestination(null);
+        assertFalse(ClassicGUI.cancelsGotoOnClick(scout));      // route only
+        scout.setTradeRoute(null);
+        scout.setDestination(target);
         final int moves = scout.getInitialMovesLeft();
         scout.setMovesLeft(moves);
 
@@ -528,6 +538,22 @@ public class ClassicMapViewerTest extends FreeColTestCase {
             mv.clickOn(sea, dutch);
             assertTrue(log.toString(), log.isEmpty());
             assertSame(target, aboard.getDestination());
+            // A unit on a trade route: no cancel, its route and next stop
+            // stay, it comes up as before part L (the fixer of part L).
+            scout.setTradeRoute(route);
+            scout.setDestination(target);
+            mv.clickOn(land, dutch);
+            assertTrue(log.toString(), log.isEmpty());
+            assertSame(route, scout.getTradeRoute());
+            assertSame(target, scout.getDestination());
+            assertSame(scout, mv.getActiveUnit());
+            // ... and in the mode it is ignored, as before part L.
+            mv.changeToEndTurn();
+            prompt[0] = true;
+            mv.clickOn(land, dutch);
+            assertTrue(log.toString(), log.isEmpty());
+            assertSame(route, scout.getTradeRoute());
+            assertSame(target, scout.getDestination());
         } finally {
             mv.dispose();
         }
