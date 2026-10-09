@@ -1664,7 +1664,8 @@ ignored, our colony opens, its guard kept, Enter still ends),
   off, spend the moves at the question as before. The scout, the armed unit
   and the missionary boxes never cost a move on a cancel (FreeCol asks the
   server only after the choice). An expert never gets the learn question
-  (`MOVE_NO_ACCESS_SKILL`, no server call).
+  (`MOVE_NO_ACCESS_SKILL`, no server call): he gets the chief's @LEARNMASTER,
+  a petty criminal @LEARNCRIMINAL, as refusals (see "Refusals").
 
 Tests: `ClassicGUISeamTest` (`testEscapeAnswersNo`, `testEscapeCancelsAChoice`,
 `testHighSeasQuestionIsSilent`, `testEastPastView`,
@@ -2089,6 +2090,8 @@ no rule is added.
 | move | the same, contacted and at peace, without de Witt | @TRADEMERCANTILISM in FreeCol's words (`%STRING0` unknown) | none |
 | move | ship at an uncontacted village (`NO_ACCESS_CONTACT`) | @DONTKNOWSHIPS | admiral |
 | move | empty ship or wagon train at a village (`NO_ACCESS_GOODS`) | @TRADENOCARGO | the chief |
+| move | an expert at a contacted village (`NO_ACCESS_SKILL`; `%STRING1` his `@JOB` name, V clip008 #24727 «Meister-Pelzjäger»; I: the original's two-row village box before it, D11) | @LEARNMASTER | the chief |
+| move | a petty criminal at a contacted village (`NO_ACCESS_SKILL`; `%STRING0` the tribe) | @LEARNCRIMINAL | the chief |
 | move | the rebels' ship past the edge (no Europe) | @EUROPENOTLEAVE | admiral |
 | move | into the sea without our ship, onto a full ship, off the map, an empty ship onto land | nothing | |
 | B | a ship | @SEACOLONY | frontiersman |
@@ -3568,16 +3571,24 @@ click-to-select idiom of the two subsections above is replaced (`ClassicEuropePa
   passengers after them 17 px apart. The market row keeps the stopgap's plate, now with
   "bid/ask"; the market cursor is a green 1-px frame. Icons and the backdrop are read through
   `ClassicPackFiles.image`.
-- **Selection**: the first ship in port (that can sail) is selected at opening, after every change
-  and after a ship sailed (`selectedShip`); a click on another ship selects it.
+- **Selection**: the first ship in port that can sail is selected at opening, after every change
+  and after a ship sailed (`selectedShip`); a click on another ship selects it. A ship under repair
+  (FreeCol's forced repair after a lost sea fight, `underRepair`) lies in box 3 but is never
+  selected, cannot be dragged, takes no drop, never sails and nobody boards it, as on FreeCol's own
+  screen (`InPortPanel.accepts`); sailed, it would lie on the map with 0 moves for good (review of
+  part N). It does not keep Europe open (`ClassicVoyages.closesAfterSailing`). I: no catalogue
+  shows a ship under repair in Europe.
 - **Mouse** (`pressAt` / `dragTo` / `releaseAt`; a drag starts once the pointer leaves what was
   pressed; a drop back on it, or anywhere unlisted, does nothing):
   ship in port → box 2 «Ziel:»: `@SAILAWAY` with the admiral (8 frames after the drop; Jawohl
   sails, Nein and Escape nothing); ship of box 1 → box 2: turned back to the New World (server
   `moveTo`); market slot → a ship in port or a hold: one hold bought (`ClassicTrade.buy`; Shift:
-  `@HOWMUCH4`); hold of goods → anywhere on the market row: sold (Shift: `@HOWMUCH5`, now preset
-  "100" over any "(0-max)", V clip 020 #24920; Enter on it sells the hold); a colonist's hold → the
-  docks: `leaveShip`; a dock colonist → a ship or a hold: `boardShip`. Clicks: the selected ship →
+  `@HOWMUCH4`, preset "100" over any "(0-max)", Roger 2026-10-09; Enter on it buys the rest of the
+  hold); hold of goods → anywhere on the market row: sold (Shift: `@HOWMUCH5`, preset "100" over
+  any "(0-max)", V clip 020 #24920; Enter on it sells the hold); a colonist's hold → the docks:
+  `leaveShip`; a dock colonist → a ship or a hold: `boardShip`, nothing when he does not fit
+  (`canAdd`; before, the server's refusal brought «Der Server kann das nicht ausführen.»). Clicks:
+  the selected ship →
   `@EUROPESHIPCLICK` (four rows: Nach vorne bewegen / Segel setzen / Alle Waren entladen / Keine
   Veränderungen); a dock colonist → `@EUROPEARM` (the "S" on or off, muskets / tools / horses bought
   or sold at the market's price through `equipUnitForRole`, missionary; I for every row but the
@@ -3590,7 +3601,11 @@ click-to-select idiom of the two subsections above is replaced (`ClassicEuropePa
 - Tests: `ClassicEuropePanelTest` (places, captions with the pack, holds; Roger's 1496 in port with
   FreeCol's real client controller and a real server game, synthetic AWT mouse events: buy, Shift
   buy, sell, Shift sell, leave and board, the dock box, the ship box, sail by the drop, the button,
-  turning a ship, recruit / train / purchase, keys), `ClassicTradeTest.testSellPresetIsAHundred`.
+  turning a ship, recruit / train / purchase, keys; the N fixer's: a ship under repair, Europe
+  not kept open by it, a full ship, Shift onto a partly filled hold, `refresh` off the event
+  thread), `ClassicTradeTest.testSellPresetIsAHundred`. `refresh` from another thread only
+  repaints; the selection is the event thread's (FreeCol's `setCurrentPlayer` refreshes the GUI
+  on the network thread).
 
 ## Report screens (`ClassicReportPanel` + concrete reports)
 

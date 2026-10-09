@@ -247,17 +247,21 @@ final class ClassicVoyages {
      * Whether the Europe screen closes by itself after a ship sailed from
      * it (Roger, 2026-10-08): no ship is left in its port.  The colonists
      * on the dock do not keep it open, nor do the ships on the high seas
-     * (both clips: "Keine Schiffe im Hafen", the map back 0.357 s later).
-     * A ship under repair is in port as the screen shows it and keeps it
-     * open (I: never recorded).
+     * (both clips: "Keine Schiffe im Hafen", the map back 0.357 s later),
+     * nor does a ship under repair: it cannot sail
+     * ({@link ClassicEuropePanel#underRepair}; the review of part N: it
+     * kept Europe open after the last ship that can sail had sailed, and
+     * then stood selected; I: never recorded).
      *
      * @param europe Our Europe, or null.
-     * @return True if no ship is in its port (false without a Europe).
+     * @return True if no ship that can sail is in its port (false without
+     *     a Europe).
      */
     static boolean closesAfterSailing(Europe europe) {
         if (europe == null) return false;
         for (Unit u : europe.getUnitList()) {
-            if (u.isNaval() && !u.isDisposed()) return false;
+            if (u.isNaval() && !u.isDisposed()
+                && !ClassicEuropePanel.underRepair(u)) return false;
         }
         return true;
     }

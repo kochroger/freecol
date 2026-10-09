@@ -58,7 +58,8 @@ import net.sf.freecol.common.model.Unit;
  *       SENTRY}) offers «Nicht aufs nächste Schiff gehen.», "-" «An Bord
  *       des nächsten Schiffes gehen.»; equipment it carries is offered
  *       for sale, equipment it can take for purchase; a missionary only
- *       «{Missionar}-Status aufheben.».  The prices are the market's (V:
+ *       «{Missionar}-Status aufheben.», a Jesuit missionary nothing (V
+ *       clip 020 #27860).  The prices are the market's (V:
  *       50 muskets × ask 3 = 150, 100 tools × 2 = 200, 50 horses × 3 =
  *       150); FreeCol's {@code equipUnitForRole} pays them.  «An die
  *       Spitze der Schlange verlegen.» is not offered (its meaning for
@@ -98,6 +99,9 @@ final class ClassicEuropeOptions {
     static final String DEFAULT = "model.role.default", SOLDIER = "model.role.soldier",
         DRAGOON = "model.role.dragoon", PIONEER = "model.role.pioneer",
         SCOUT = "model.role.scout", MISSIONARY = "model.role.missionary";
+
+    /** The missionary expert's type (its unit type suffix). */
+    static final String JESUIT = "jesuitMissionary";
 
     /** The goods of the rows' prices, {@code %NUMBER0..2}. */
     static final String[] PRICED = { "model.goods.muskets", "model.goods.tools",
@@ -166,7 +170,12 @@ final class ClassicEuropeOptions {
         out.add((u.getState() == Unit.UnitState.SENTRY) ? ArmOption.STAY : ArmOption.BOARD);
         final String role = roleId(u);
         if (MISSIONARY.equals(role)) {
-            out.add(ArmOption.UNMISSIONARY);
+            // A Jesuit is a missionary by his type: the original offers no
+            // row to undo it (V clip 020 #27860: «Nicht aufs nächste Schiff
+            // gehen.» / «An die Spitze der Schlange verlegen.» / «Keine
+            // Veränderungen.»; the review of part N, fidelity lens).  The
+            // queue's row is not built yet (class comment).
+            if (!JESUIT.equals(u.getType().getSuffix())) out.add(ArmOption.UNMISSIONARY);
         } else {
             for (ArmOption o : new ArmOption[] { ArmOption.ARM, ArmOption.DISARM,
                     ArmOption.TOOLS, ArmOption.SELL_TOOLS, ArmOption.HORSES,

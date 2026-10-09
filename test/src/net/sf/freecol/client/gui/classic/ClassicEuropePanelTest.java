@@ -814,6 +814,188 @@ public class ClassicEuropePanelTest extends FreeColTestCase {
     }
 
     /**
+     * A ship under repair in port (the review of part N, play and
+     * regression lenses: it was selected at once, dragged onto «Ziel:» it
+     * sailed with the dock's "S" colonist, and on the map it lay with 0
+     * moves for good, never repaired, MOVE_NO_REPAIR every way): it is
+     * drawn in box 3 but never selected («Keine Schiffe im Hafen», six
+     * crates); dragged onto «Ziel:» no @SAILAWAY comes and nothing goes to
+     * the server; a click on it, Enter, «Segel setzen», a market slot and
+     * a dock colonist dropped on it do nothing; nobody boards it.
+     * Repaired, it is an ordinary ship again and sails with the colonist.
+     */
+    public void testAShipUnderRepairDoesNotSail() throws Exception {
+        final Scene s = rogers1496();
+        s.ship.setHitPoints(1);
+        assertTrue(s.ship.isDamagedAndUnderForcedRepair());
+        assertTrue(s.ship.isNaval());
+        final Unit dock = new ServerUnit(s.game, s.europe, s.dutch, colonist);
+        dock.setState(Unit.UnitState.SENTRY);
+        s.panel.refresh();
+        assertNull("never selected", s.panel.selectedShip());
+        assertEquals("drawn in box 3", List.of(s.ship), s.panel.portShips());
+        assertSame(s.ship, s.panel.hitAt(154, 154).unit);
+        assertEquals("[crate, crate, crate, crate, crate, crate]",
+                     ClassicEuropePanel.holds(s.panel.selectedShip()).toString());
+        assertEquals(List.of(), ClassicEuropePanel.boarders(s.europe, s.ship));
+        final int gold = s.dutch.getGold();
+        s.boxes.row(0);                                            // «Jawohl», unused
+        drag(s.panel, 154, 154, 100, 150, false);                  // onto «Ziel:»
+        assertTrue("it stays", s.ship.isInEurope());
+        assertTrue("no @SAILAWAY", s.boxes.asked.isEmpty());
+        assertSame("nobody boards", s.europe, dock.getLocation());
+        click(s.panel, 154, 154);                                  // no box
+        run(s.panel, "ENTER");
+        final Rectangle b = ClassicEuropePanel.buttonBounds(3);
+        click(s.panel, cx(b), cy(b));                              // «Segel setzen»
+        drag(s.panel, cx(slot(tools)), cy(slot(tools)), 154, 154, false);
+        final Rectangle c = ClassicEuropePanel.dockCell(0, 1);
+        drag(s.panel, cx(c), cy(c), 154, 154, false);
+        assertTrue(s.ship.isInEurope());
+        assertTrue(s.boxes.asked.isEmpty());
+        assertSame(s.europe, dock.getLocation());
+        assertEquals(0, s.ship.getGoodsCount(tools));
+        assertEquals(gold, s.dutch.getGold());
+        assertTrue("nothing went to the server: " + s.api.log, s.api.log.isEmpty());
+        assertTrue(s.events.isEmpty());
+        assertNull(s.panel.selectedShip());
+        s.panel.canvas();
+        // Repaired: selected, sails with the "S" colonist.
+        s.ship.setHitPoints(s.ship.getType().getHitPoints());
+        assertFalse(s.ship.isDamagedAndUnderForcedRepair());
+        assertSame(s.ship, s.panel.selectedShip());
+        s.boxes.answers.clear();
+        if (ClassicText.load(ClassicPackFiles.runtime()) != null) s.boxes.row(0);
+        drag(s.panel, 154, 154, 100, 150, false);
+        assertFalse(s.ship.isInEurope());
+        assertSame(s.ship, dock.getLocation());
+        assertEquals(List.of("sailed " + s.ship.getId()), s.events);
+    }
+
+    /**
+     * A ship under repair does not keep Europe open (Roger's fact: when the
+     * last ship in port sails Europe closes by itself; the review of part
+     * N: the damaged caravel kept it open and then stood selected): the
+     * healthy ship is selected, sails, Europe closes
+     * ({@link ClassicVoyages#closesAfterSailing}) and nothing is selected.
+     */
+    public void testAShipUnderRepairDoesNotKeepEuropeOpen() throws Exception {
+        final Scene s = rogers1496();
+        final Unit damaged = new ServerUnit(s.game, s.europe, s.dutch, caravel);
+        damaged.setHitPoints(1);
+        assertTrue(damaged.isDamagedAndUnderForcedRepair());
+        assertEquals(List.of(s.ship, damaged), s.panel.portShips());
+        assertSame("the healthy ship is selected", s.ship, s.panel.selectedShip());
+        assertFalse(ClassicVoyages.closesAfterSailing(s.europe));
+        click(s.panel, 172, 154);                                  // the damaged one
+        assertSame("a click does not select it", s.ship, s.panel.selectedShip());
+        assertTrue(s.boxes.asked.isEmpty());
+        if (ClassicText.load(ClassicPackFiles.runtime()) != null) s.boxes.row(0);
+        drag(s.panel, 154, 154, 100, 150, false);
+        assertFalse(s.ship.isInEurope());
+        assertEquals(List.of("sailed " + s.ship.getId()), s.events);
+        assertTrue("Europe closes", ClassicVoyages.closesAfterSailing(s.europe));
+        assertNull("the damaged ship is not selected", s.panel.selectedShip());
+        assertTrue(damaged.isInEurope());
+    }
+
+    /**
+     * A dock colonist dropped on a full ship (or one of its holds) does
+     * nothing and sends nothing (the review of part N, play lens: the
+     * server refused the board and FreeCol's «Der Server kann das nicht
+     * ausführen.» came); a market slot dropped on it does nothing either.
+     */
+    public void testNothingGoesOntoAFullShip() throws Exception {
+        final Scene s = rogers1496();
+        s.ship.addGoods(tools, 100);
+        s.ship.addGoods(muskets, 100);
+        assertEquals(0, s.ship.getSpaceLeft());
+        final Unit dock = new ServerUnit(s.game, s.europe, s.dutch, colonist);
+        final Rectangle c = ClassicEuropePanel.dockCell(0, 1);
+        final int gold = s.dutch.getGold();
+        drag(s.panel, cx(c), cy(c), 154, 154, false);              // onto the ship
+        drag(s.panel, cx(c), cy(c), 200, 170, false);              // onto a hold
+        drag(s.panel, cx(slot(furs)), cy(slot(furs)), 154, 154, false);
+        assertSame(s.europe, dock.getLocation());
+        assertEquals(0, s.ship.getGoodsCount(furs));
+        assertEquals(gold, s.dutch.getGold());
+        assertTrue("nothing went to the server: " + s.api.log, s.api.log.isEmpty());
+        // With room again he boards.
+        drag(s.panel, cx(ClassicEuropePanel.holdCell(holdOf(s.panel, tools))), 170,
+             cx(ClassicEuropePanel.marketSlot(0)), 190, false);    // sell the tools
+        drag(s.panel, cx(c), cy(c), 154, 154, false);
+        assertSame(s.ship, dock.getLocation());
+    }
+
+    /**
+     * Shift onto a partly filled hold (the review of part N, fidelity
+     * lens; Roger 2026-10-09 "Soll zuerst 100 im Feld stehen? Ja"):
+     * {@code @HOWMUCH4} says "(0-70)" with "100" in the field, and Enter on
+     * it buys the 70 that fit.
+     */
+    public void testShiftBuyOntoAPartlyFilledHold() throws Exception {
+        final Scene s = rogers1496();
+        if (ClassicText.load(ClassicPackFiles.runtime()) == null) {
+            System.err.println(getClass().getSimpleName() + ": the partial buy skipped, no pack");
+            return;
+        }
+        s.dutch.setGold(10000);
+        s.ship.addGoods(tools, 100);
+        s.ship.addGoods(muskets, 30);
+        s.boxes.typed("");                                         // Enter on "100"
+        drag(s.panel, cx(slot(muskets)), cy(slot(muskets)), 154, 154, true);
+        assertEquals(List.of(ClassicTrade.BUY_SECTION), s.boxes.asked);
+        final ClassicAdvisorBox.Request r = s.boxes.requests.get(0);
+        assertEquals("100", r.field.initial);
+        assertTrue(r.plainText(), r.plainText().contains("(0-70)"));
+        assertEquals(100, s.ship.getGoodsCount(muskets));
+    }
+
+    /**
+     * A Jesuit missionary on the dock (V clip 020 #27860: «Nicht aufs
+     * nächste Schiff gehen.» / «An die Spitze der Schlange verlegen.» /
+     * «Keine Veränderungen.»; the review of part N, fidelity lens): no row
+     * takes his missionary role away; a free colonist dressed as a
+     * missionary keeps «{Missionar}-Status aufheben.» (I).  The queue's
+     * row is not built.
+     */
+    public void testTheJesuitsDockRows() throws Exception {
+        final Scene s = rogers1496();
+        final Role missionary = spec().getRole("model.role.missionary");
+        final Unit jesuit = new ServerUnit(s.game, s.europe, s.dutch,
+            spec().getUnitType("model.unit.jesuitMissionary"), missionary);
+        jesuit.setState(Unit.UnitState.SENTRY);
+        assertEquals("[STAY, NOTHING]", ClassicEuropeOptions.armOptions(jesuit).toString());
+        final Unit dressed = new ServerUnit(s.game, s.europe, s.dutch, colonist, missionary);
+        dressed.setState(Unit.UnitState.SENTRY);
+        assertEquals("[STAY, UNMISSIONARY, NOTHING]",
+                     ClassicEuropeOptions.armOptions(dressed).toString());
+    }
+
+    /**
+     * The game's GUI refreshes the screen from any thread (FreeCol's
+     * {@code setCurrentPlayer} on the network thread; the review of part
+     * N, regression lens): off the event thread {@link
+     * ClassicEuropePanel#refresh} only repaints and leaves the selection to
+     * the event thread; on it, the selection follows the port.
+     */
+    public void testRefreshOffTheEventThreadLeavesTheSelection() throws Exception {
+        final Scene s = rogers1496();
+        final Unit second = new ServerUnit(s.game, s.europe, s.dutch, caravel);
+        click(s.panel, 172, 154);
+        assertSame(second, s.panel.selectedShip());
+        final Field f = ClassicEuropePanel.class.getDeclaredField("selectedShip");
+        f.setAccessible(true);
+        second.setLocation(s.dutch.getHighSeas());                 // it leaves the port
+        second.setDestination(s.game.getMap());
+        assertFalse(javax.swing.SwingUtilities.isEventDispatchThread());
+        s.panel.refresh();
+        assertSame("untouched off the event thread", second, f.get(s.panel));
+        javax.swing.SwingUtilities.invokeAndWait(s.panel::refresh);
+        assertSame("the event thread's refresh selects", s.ship, f.get(s.panel));
+    }
+
+    /**
      * The keys: Escape and E close; R, K, A and 1-3 are the buttons;
      * Enter is the selected ship's box.
      */

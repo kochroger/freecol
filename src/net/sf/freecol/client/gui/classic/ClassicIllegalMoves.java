@@ -59,7 +59,9 @@ import net.sf.freecol.common.option.GameOptions;
  *   {@code %STRING0} is not known), a ship at an uncontacted village
  *   @DONTKNOWSHIPS (admiral), an empty trader at a village @TRADENOCARGO
  *   (the chief), a ship of the rebels past the edge @EUROPENOTLEAVE
- *   (admiral).  A refused move the original has no words for (into the sea
+ *   (admiral), an expert at a contacted village @LEARNMASTER and a petty
+ *   criminal there @LEARNCRIMINAL (the chief, {@link #learnRefusal}).  A
+ *   refused move the original has no words for (into the sea
  *   without our ship, onto a full ship, off the map, an empty ship onto
  *   land) is consumed silently.  Legal moves, a move without moves left
  *   (FreeCol's SKIPPED) and the village's skill and mission answers (D11)
@@ -107,9 +109,23 @@ final class ClassicIllegalMoves {
         /** Whether the box takes FreeCol's words even with the pack. */
         final boolean freeColOnly;
 
+        /**
+         * Placeholders whose value is a NAMES.TXT name, found with the
+         * pack's texts ({@link #request}): {placeholder, section, row},
+         * e.g. {"STRING1", "JOB", "0"}; never null.
+         */
+        final String[][] names;
+
         Verdict(String section, ClassicNotices.Who who, int tribe,
                 Map<String, String> values, StringTemplate freeCol,
                 boolean freeColOnly) {
+            this(section, who, tribe, values, freeCol, freeColOnly, null);
+        }
+
+        Verdict(String section, ClassicNotices.Who who, int tribe,
+                Map<String, String> values, StringTemplate freeCol,
+                boolean freeColOnly, String[][] names) {
+            this.names = (names == null) ? new String[0][] : names;
             this.section = section;
             this.who = who;
             this.tribe = tribe;
@@ -231,6 +247,8 @@ final class ClassicIllegalMoves {
         }
         case MOVE_NO_EUROPE:
             return box("EUROPENOTLEAVE", ClassicNotices.Who.ADMIRAL);
+        case MOVE_NO_ACCESS_SKILL:
+            return learnRefusal(unit, to);
         case MOVE_NO_ACCESS_EMBARK: case MOVE_NO_ACCESS_FULL:
         case MOVE_NO_ACCESS_BEACHED: case MOVE_NO_REPAIR:
         case MOVE_NO_TILE: case MOVE_ILLEGAL:
@@ -238,6 +256,54 @@ final class ClassicIllegalMoves {
         default:
             return null;
         }
+    }
+
+    /** Colonist types with a NAMES.TXT {@code @JOB} row that are no experts. */
+    private static final List<String> NO_EXPERTS = java.util.Arrays.asList(
+        "freeColonist", "indenturedServant", "pettyCriminal", "indianConvert");
+
+    /**
+     * A colonist who cannot learn at a contacted village (FreeCol's
+     * {@code MOVE_NO_ACCESS_SKILL}: no unit change by the natives), from
+     * land: the chief's answer in GAME.TXT's words, with the tribe's chief
+     * (the acceptance's F1 and the review of part N, fidelity lens; before,
+     * nothing at all happened).
+     * <ul>
+     *   <li>an expert (a {@code @JOB} row other than the free colonist,
+     *       the servant, the criminal and the convert) {@code @LEARNMASTER},
+     *       {@code %STRING1} the first column of his job's row: V clip008
+     *       #24727, «Wir sind froh, einen Meister-Pelzjäger unter uns zu
+     *       haben ...» for an expert fur trapper (@JOB «Pelzjäger»);</li>
+     *   <li>a petty criminal {@code @LEARNCRIMINAL}, {@code %STRING0} the
+     *       tribe (NAMES {@code @TRIBES}; I: never recorded);</li>
+     *   <li>any other (a convert): the controller's, as before.</li>
+     * </ul>
+     * The refusal costs nothing (class comment).  I: in the original the
+     * expert first gets the village's two-row box (clip008 #23034, D11,
+     * not built) and this answer after «Mit den Ureinwohnern leben»; ours
+     * comes at once, in place of that box.
+     *
+     * @param unit The colonist.
+     * @param to The village's tile, or null.
+     * @return The box, or null for the controller.
+     */
+    static Verdict learnRefusal(Unit unit, Tile to) {
+        if (unit == null || unit.getType() == null) return null;
+        final Settlement s = (to == null) ? null : to.getSettlement();
+        final int tribe = ClassicGUI.tribeIndex((s == null) ? null : s.getOwner());
+        final String type = unit.getType().getSuffix();
+        final StringTemplate freeCol = StringTemplate.template("move.noAccessSkill")
+            .addStringTemplate("%unit%", unit.getLabel(Unit.UnitLabelType.NATIONAL));
+        if ("pettyCriminal".equals(type)) {
+            return new Verdict("LEARNCRIMINAL", ClassicNotices.Who.CHIEF, tribe, null,
+                freeCol, false, new String[][] {
+                    { "STRING0", "TRIBES", Integer.toString(tribe) } });
+        }
+        final int row = ClassicHud.jobRow(type);
+        if (row < 0 || NO_EXPERTS.contains(type)) return null;
+        return new Verdict("LEARNMASTER", ClassicNotices.Who.CHIEF, tribe, null,
+            freeCol, false, new String[][] {
+                { "STRING1", "JOB", Integer.toString(row) } });
     }
 
     /**
@@ -343,6 +409,29 @@ final class ClassicIllegalMoves {
     }
 
     /**
+     * A refusal's values with its NAMES.TXT names ({@link Verdict#names},
+     * the first column of the row).
+     *
+     * @param t The pack's texts, or null.
+     * @param v The refusal.
+     * @return The values, or null when a name is not known (then
+     *     FreeCol's words).
+     */
+    static Map<String, String> names(ClassicText t, Verdict v) {
+        if (v.names.length == 0) return v.values;
+        if (t == null) return null;
+        final Map<String, String> out = new HashMap<>(v.values);
+        for (String[] n : v.names) {
+            final List<String[]> rows = t.names(n[1]);
+            final int row = Integer.parseInt(n[2]);
+            if (rows == null || row < 0 || row >= rows.size()
+                || rows.get(row).length == 0 || rows.get(row)[0].isEmpty()) return null;
+            out.put(n[0], rows.get(row)[0]);
+        }
+        return out;
+    }
+
+    /**
      * A refusal's box: GAME.TXT's words with the portrait, a notice (any key
      * closes it); FreeCol's words without the pack.
      *
@@ -356,8 +445,9 @@ final class ClassicIllegalMoves {
                                              long showAtNanos, String title) {
         final ClassicText.Message m = (t == null || v.freeColOnly) ? null
             : t.message(v.section);
-        ClassicAdvisorBox.Builder b = (m == null || m.text.isEmpty()) ? null
-            : ClassicAdvisorBox.fromGameText(v.section, m, v.values);
+        final Map<String, String> values = names(t, v);
+        ClassicAdvisorBox.Builder b = (m == null || m.text.isEmpty() || values == null)
+            ? null : ClassicAdvisorBox.fromGameText(v.section, m, values);
         if (b == null) {
             b = ClassicAdvisorBox.Request.builder(v.section)
                 .freeColText(Messages.message(v.freeCol));

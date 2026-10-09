@@ -199,7 +199,9 @@ public class ClassicTradeTest extends FreeColTestCase {
         assertEquals(72, ClassicTrade.buy(this.dutch, this.ship, tools, true, s));
         assertEquals(List.of("ask buy tools max=100 preset=100", "buy tools 72"), s.calls);
         // Enough gold: Enter on the preset buys the whole "(0-max)"; a
-        // partly filled hold's rest is the max and the preset.
+        // partly filled hold's rest is the max, the preset stays "100"
+        // (Roger 2026-10-09; the review of part N), and Enter on it buys
+        // the rest.
         s.calls.clear();
         this.dutch.setGold(100 * this.price);
         s.answer = 100;
@@ -209,9 +211,14 @@ public class ClassicTradeTest extends FreeColTestCase {
         this.dutch.setGold(10000 * this.price);
         this.ship.addGoods(sugar, 300);
         this.ship.addGoods(tools, 70);
+        s.answer = 100;                        // the box gives at most its max
+        assertEquals(30, ClassicTrade.buy(this.dutch, this.ship, tools, true, s));
+        assertEquals(List.of("ask buy tools max=30 preset=100", "buy tools 30"), s.calls);
+        s.calls.clear();
+        this.ship.addGoods(tools, -10);
         s.answer = 30;
         assertEquals(30, ClassicTrade.buy(this.dutch, this.ship, tools, true, s));
-        assertEquals(List.of("ask buy tools max=30 preset=30", "buy tools 30"), s.calls);
+        assertEquals(List.of("ask buy tools max=40 preset=100", "buy tools 30"), s.calls);
         // A boycott: no box, nothing.
         s.calls.clear();
         this.dutch.getMarket().setArrears(tools, 500);
@@ -247,7 +254,10 @@ public class ClassicTradeTest extends FreeColTestCase {
         final ClassicAdvisorBox.Request b = ClassicTrade.howMuchRequest(
             ClassicText.load(ClassicPackFiles.runtime()), true,
             ClassicTrade.buyValues(null, tools, 2, this.ship, 30), 30, 100);
-        assertEquals("@HOWMUCH4 stays within its max", "30", b.field.initial);
+        assertEquals("@HOWMUCH4 opens with 100 too", "100", b.field.initial);
+        final ClassicAdvisorBox.Bar buyBar = new ClassicAdvisorBox.Bar(b);
+        assertEquals(0, buyBar.enter());
+        assertEquals("Enter on 100 takes the rest of the hold", 30, b.field.amount());
     }
 
     /**

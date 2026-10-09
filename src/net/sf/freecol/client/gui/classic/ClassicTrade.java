@@ -55,12 +55,14 @@ import net.sf.freecol.common.model.Unit;
  * Our Europe screen drags as the original does (N1): a market slot
  * dropped on a ship in port or on the selected ship's holds is the drop,
  * with Shift held the Shift-drop; a hold dropped on the market row sells
- * it all, with Shift {@code @HOWMUCH5}.  {@code @HOWMUCH4}'s preset is
- * its "(0-max)": "100" for a free hold (Roger, 2026-10-09: "Soll zuerst
- * 100 im Feld stehen? Ja"; I: the rest of a partly filled hold, the
- * field never holds more than its max).  {@code @HOWMUCH5}'s preset is
- * "100" whatever the hold holds (V clip 020 #24920: "(0-24)" with "100"
- * in the field); Enter on it sells all of the hold.  Escape, 0 or an
+ * it all, with Shift {@code @HOWMUCH5}.  Both boxes open with "100" in
+ * the field whatever their "(0-max)" ({@link #PRESET}): {@code @HOWMUCH5}
+ * as the original (V clip 020 #24920: "(0-24)" with "100" in the field),
+ * {@code @HOWMUCH4} as Roger asked (2026-10-09: "Soll zuerst 100 im Feld
+ * stehen? Ja"; also over the rest of a partly filled hold, e.g. "(0-70)",
+ * the review of part N, fidelity lens; I: no clip shows a partly filled
+ * hold).  Enter on "100" over a smaller "(0-max)" takes the max: all of
+ * the hold sold, the rest of the hold bought.  Escape, 0 or an
  * empty field: nothing, it costs nothing (Roger).  A number the gold
  * cannot pay, the preset included: nothing (the original's red line,
  * W22, not built).
@@ -77,10 +79,17 @@ final class ClassicTrade {
     static final String BUY_SECTION = "HOWMUCH4", SELL_SECTION = "HOWMUCH5";
 
     /**
-     * {@code @HOWMUCH5}'s preset: "100", also over a smaller "(0-max)"
-     * (V clip 020 #24920: "(0-24)" with "100" in the field).
+     * The amount boxes' preset: "100", also over a smaller "(0-max)" (V
+     * clip 020 #24920: @HOWMUCH5 "(0-24)" with "100" in the field; Roger
+     * 2026-10-09 for @HOWMUCH4).
      */
-    static final int SELL_PRESET = GoodsContainer.CARGO_SIZE;
+    static final int PRESET = GoodsContainer.CARGO_SIZE;
+
+    /** {@code @HOWMUCH5}'s preset ({@link #PRESET}). */
+    static final int SELL_PRESET = PRESET;
+
+    /** {@code @HOWMUCH4}'s preset ({@link #PRESET}). */
+    static final int BUY_PRESET = PRESET;
 
     /** What a trade needs from the screen. */
     interface Trader {
@@ -171,9 +180,9 @@ final class ClassicTrade {
         if (max <= 0) return 0;
         int n = max;
         if (shift) {
-            n = t.ask(true, type, max, max);  // "100" for a free hold
+            n = t.ask(true, type, max, BUY_PRESET);   // "100", also over "(0-70)"
             if (n <= 0) return 0;              // Escape, 0, empty: nothing
-            n = Math.min(n, max);
+            n = Math.min(n, max);              // Enter on "100": all that fits
         }
         if (affordable(p, type, n) < n) {
             // Nothing is bought: the original's red line (W22) and, after
@@ -290,9 +299,8 @@ final class ClassicTrade {
     /**
      * A {@code @HOWMUCH} box (V #54344: (42,79,236,43), no portrait, the
      * field "Menge:" at box + (33, 24), its preset selected), coming
-     * {@link #HOWMUCH_MS} after the drop.  {@code @HOWMUCH5}'s preset may
-     * lie past its "(0-max)" ({@link #SELL_PRESET}), {@code @HOWMUCH4}'s
-     * is clamped to it.
+     * {@link #HOWMUCH_MS} after the drop.  The preset may lie past the
+     * "(0-max)" ({@link #PRESET}, both boxes); Enter on it takes the max.
      *
      * @param t The original texts, or null.
      * @param buying True for {@code @HOWMUCH4}, false for {@code @HOWMUCH5}.
@@ -308,7 +316,7 @@ final class ClassicTrade {
         final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText(
             s, (t == null) ? null : t.message(s), values);
         return (b == null) ? null : b.portrait(ClassicAdvisorBox.Portrait.NONE)
-            .amountField(max, preset, !buying).openDelay(HOWMUCH_MS)
+            .amountField(max, preset, true).openDelay(HOWMUCH_MS)
             .stopgap(Messages.message("classic.dialog.messages"), null).build();
     }
 }

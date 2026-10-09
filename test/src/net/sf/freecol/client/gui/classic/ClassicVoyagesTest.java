@@ -199,8 +199,8 @@ public class ClassicVoyagesTest extends FreeColTestCase {
     /**
      * Europe's close by itself after a ship sailed (Roger, 2026-10-08): no
      * ship left in port; colonists on the dock and ships on the high seas
-     * do not keep it open; a second ship in port (also one under repair)
-     * does; no Europe: never.
+     * do not keep it open, nor does a ship under repair (it cannot sail;
+     * the review of part N); a second ship in port does; no Europe: never.
      */
     public void testClosesAfterSailing() {
         for (Unit u : new ArrayList<>(this.dutch.getUnitSet())) u.dispose();
@@ -223,7 +223,10 @@ public class ClassicVoyagesTest extends FreeColTestCase {
         final Unit repair = new ServerUnit(this.game, europe, this.dutch, merchantman);
         repair.setHitPoints(1);
         assertTrue(repair.isDamaged());
-        assertFalse("a ship under repair", ClassicVoyages.closesAfterSailing(europe));
+        assertTrue(repair.isDamagedAndUnderForcedRepair());
+        assertTrue("a ship under repair", ClassicVoyages.closesAfterSailing(europe));
+        repair.setHitPoints(repair.getType().getHitPoints());
+        assertFalse("repaired, it can sail", ClassicVoyages.closesAfterSailing(europe));
         repair.dispose();
         assertTrue(ClassicVoyages.closesAfterSailing(europe));
     }

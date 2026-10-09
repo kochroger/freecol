@@ -405,12 +405,87 @@ public class ClassicIllegalMovesTest extends FreeColTestCase {
                 ClassicIllegalMoves.judge(ship, west));
             final Unit expert = w.unit(land, w.dutch, "expertFarmer");
             assertEquals(Unit.MoveType.MOVE_NO_ACCESS_SKILL, expert.getMoveType(w.east(land)));
-            assertNull(ClassicIllegalMoves.judge(expert, w.east(land)));
+            assertVerdict(rules + " expert", "LEARNMASTER", ClassicNotices.Who.CHIEF,
+                ClassicIllegalMoves.judge(expert, w.east(land)));
             final Unit tired = w.unit(w.tile(5, 5), w.dutch, "freeColonist");
             tired.setMovesLeft(0);
             assertEquals(Unit.MoveType.MOVE_NO_MOVES, tired.getMoveType(w.east(tired.getTile())));
             assertNull(ClassicIllegalMoves.judge(tired, w.east(tired.getTile())));
         }
+    }
+
+    /**
+     * The acceptance's F1 and the review of part N (fidelity lens): a
+     * colonist who cannot learn at a contacted village (FreeCol's
+     * MOVE_NO_ACCESS_SKILL) was met with nothing at all.  An expert gets
+     * {@code @LEARNMASTER} with his job (V clip008 #24727: «Wir sind froh,
+     * einen Meister-Pelzjäger unter uns zu haben ...» for an expert fur
+     * trapper), a petty criminal {@code @LEARNCRIMINAL} with the tribe,
+     * both with the tribe's chief and as refusals (the controller never
+     * sees the order: no move is spent); a free colonist, a servant, a
+     * free colonist with tools and a convert are the controller's as
+     * before; without the pack FreeCol's words.
+     */
+    public void testLearnRefusals() {
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        for (String rules : RULES) {
+            final World w = new World(rules);
+            w.village(w.tile(9, 7));
+            w.meet(w.dutch, w.arawak, Stance.PEACE);
+            final Tile land = w.tile(8, 7);
+            final int arawak = ClassicGUI.TRIBES.indexOf("arawak");
+            final Object[][] cases = {
+                { "expertFurTrapper", null, "LEARNMASTER", "Pelzjäger" },
+                { "expertFarmer", null, "LEARNMASTER", "Farmer" },
+                { "hardyPioneer", "pioneer", "LEARNMASTER", "Pionier" },
+                { "masterCarpenter", null, "LEARNMASTER", "Schreiner" },
+                { "pettyCriminal", null, "LEARNCRIMINAL", "Araukaner" },
+            };
+            for (Object[] c : cases) {
+                final Unit u = (c[1] == null) ? w.unit(land, w.dutch, (String) c[0])
+                    : w.unit(land, w.dutch, (String) c[0], (String) c[1]);
+                final String what = rules + " " + c[0];
+                assertEquals(what, Unit.MoveType.MOVE_NO_ACCESS_SKILL,
+                             u.getMoveType(w.east(land)));
+                final ClassicIllegalMoves.Verdict v = ClassicIllegalMoves.judge(u, w.east(land));
+                assertVerdict(what, (String) c[2], ClassicNotices.Who.CHIEF, v);
+                assertEquals(what, arawak, v.tribe);
+                final ClassicAdvisorBox.Request f = ClassicIllegalMoves.request(null, v, 0L, "x");
+                assertTrue(what, f.isNotice());
+                assertTrue(what + " " + f.plainText(), f.plainText().length() > 10);
+                if (t == null) continue;
+                final ClassicAdvisorBox.Request r = ClassicIllegalMoves.request(t, v, 0L, "x");
+                assertEquals(what, c[2], r.id);
+                assertTrue(what, r.isNotice());
+                assertEquals(what, ClassicNotices.portrait(ClassicNotices.Who.CHIEF, arawak).sprite,
+                             r.portrait.sprite);
+                assertEquals(what, "IND2A0.SS.000", r.portrait.sprite);
+                final String text = r.plainText();
+                if ("LEARNMASTER".equals(c[2])) {
+                    assertTrue(what + ": " + text,
+                               text.startsWith("\"Wir sind froh, einen Meister-" + c[3]
+                                               + " unter uns zu haben, alter Mann."));
+                } else {
+                    assertTrue(what + ": " + text,
+                               text.contains("Die " + c[3] + " werden Euch nichts beibringen"));
+                }
+                assertTrue(what, u.getMovesLeft() > 0);
+            }
+            for (String[] c : new String[][] {
+                    { "freeColonist", null }, { "indenturedServant", null },
+                    { "freeColonist", "pioneer" } }) {
+                final Unit u = (c[1] == null) ? w.unit(land, w.dutch, c[0])
+                    : w.unit(land, w.dutch, c[0], c[1]);
+                assertEquals(rules + " " + c[0], Unit.MoveType.ENTER_INDIAN_SETTLEMENT_WITH_FREE_COLONIST,
+                             u.getMoveType(w.east(land)));
+                assertNull(rules + " " + c[0], ClassicIllegalMoves.judge(u, w.east(land)));
+            }
+            final Unit convert = w.unit(land, w.dutch, "indianConvert");
+            final ClassicIllegalMoves.Verdict cv = ClassicIllegalMoves.judge(convert, w.east(land));
+            assertTrue(rules + " convert " + cv, cv == null || cv.section == null
+                       || !cv.section.startsWith("LEARN"));
+        }
+        if (t == null) System.err.println("ClassicIllegalMovesTest: testLearnRefusals without the pack texts");
     }
 
     /**

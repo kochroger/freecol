@@ -88,7 +88,9 @@ import net.sf.freecol.common.model.UnitType;
  *   <li><b>Ships in port</b> 1:1 with their flag in box 3 at (146 + 18i,
  *       146); the selected one in an 18&times;18 green frame.  The first
  *       ship is selected when the screen opens, after each change and
- *       after a ship sailed (V clip008 #17007, clip 020 #24220).</li>
+ *       after a ship sailed (V clip008 #17007, clip 020 #24220).  A ship
+ *       under repair lies there too but is never selected, dragged or
+ *       sailed ({@link #underRepair}).</li>
  *   <li><b>The selected ship's six holds</b> (x 147 + 12k, y 165): the
  *       colonists aboard first (I: how the original draws them is not
  *       seen, question 1), then the goods, one hold per 100 (an icon,
@@ -463,25 +465,44 @@ final class ClassicEuropePanel extends JPanel {
     }
 
     /**
-     * The selected ship: the one chosen while it is still in port, else
-     * the first ship in port that can sail, else the first in port (V: the
-     * original opens with the first ship selected).
+     * Whether a ship in port is under repair (FreeCol's forced repair
+     * after a lost sea fight, {@code Unit.isDamagedAndUnderForcedRepair}):
+     * it lies in box 3 as the others do (I: no catalogue shows a ship
+     * under repair in Europe), but it is never selected, cannot be
+     * dragged, takes no drop and never sails, as FreeCol's own Europe
+     * screen does ({@code EuropePanel.InPortPanel.accepts}: naval and not
+     * under repair).  Sailed, it would lie on the map with 0 moves for
+     * good, never repaired (the review of part N, play and regression
+     * lenses).  Once repaired it is an ordinary ship again.
      *
-     * @return The ship, or null with none in port.
+     * @param u The unit, or null.
+     * @return True if it is a ship under repair.
+     */
+    static boolean underRepair(Unit u) {
+        return u != null && u.isNaval() && u.isDamagedAndUnderForcedRepair();
+    }
+
+    /**
+     * The selected ship: the one chosen while it is still in port and not
+     * under repair, else the first ship in port that can sail (V: the
+     * original opens with the first ship selected); a ship under repair
+     * never ({@link #underRepair}).
+     *
+     * @return The ship, or null with none in port that can sail.
      */
     Unit selectedShip() {
         final List<Unit> ships = portShips();
-        if (this.selectedShip != null && ships.contains(this.selectedShip)) {
+        if (this.selectedShip != null && ships.contains(this.selectedShip)
+            && !underRepair(this.selectedShip)) {
             return this.selectedShip;
         }
         Unit pick = null;
         for (Unit u : ships) {
-            if (!u.isDamaged()) {
+            if (!underRepair(u)) {
                 pick = u;
                 break;
             }
         }
-        if (pick == null && !ships.isEmpty()) pick = ships.get(0);
         this.selectedShip = pick;
         return pick;
     }
@@ -820,7 +841,7 @@ final class ClassicEuropePanel extends JPanel {
             r.run();
         } finally {
             this.acting = false;
-            refresh();
+            update();
             if (isShowing()) requestFocusInWindow();
         }
     }
@@ -864,7 +885,9 @@ final class ClassicEuropePanel extends JPanel {
     /** @return Whether a pressed thing can be dragged. */
     private static boolean draggable(Hit h) {
         switch (h.kind) {
-        case SHIP: case DOCK: case MARKET:
+        case SHIP:
+            return !underRepair(h.unit);
+        case DOCK: case MARKET:
             return true;
         case SAILING:
             return h.unit != null && h.unit.getDestination() instanceof Europe;
@@ -948,7 +971,12 @@ final class ClassicEuropePanel extends JPanel {
             this.buttonActions.get(h.index).run();
             break;
         case SHIP:
-            if (h.unit != selectedShip()) {
+            if (underRepair(h.unit)) {
+                // Not selected, no box (I: what the original shows here is
+                // not known; FreeCol's screen does not offer it either).
+                ClassicFrameRecorder.event("europe-select", h.unit.getId()
+                    + " under repair: nothing");
+            } else if (h.unit != selectedShip()) {
                 this.selectedShip = h.unit;
                 ClassicFrameRecorder.event("europe-select", h.unit.getId());
             } else {
@@ -982,7 +1010,9 @@ final class ClassicEuropePanel extends JPanel {
         case MARKET: {
             final Unit ship = (dst.kind == Kind.SHIP) ? dst.unit
                 : (dst.kind == Kind.HOLD) ? dst.unit : null;
-            if (ship != null) {
+            if (underRepair(ship)) {
+                result = "under repair";
+            } else if (ship != null) {
                 this.selectedShip = ship;
                 result = "bought " + loadMarketGood(src.type, ship, shift);
             }
@@ -1001,7 +1031,16 @@ final class ClassicEuropePanel extends JPanel {
         case DOCK: {
             final Unit ship = (dst.kind == Kind.SHIP) ? dst.unit
                 : (dst.kind == Kind.HOLD && dst.unit != null) ? dst.unit : null;
-            if (ship != null) {
+            if (underRepair(ship)) {
+                result = "under repair";
+            } else if (ship != null && !ship.canAdd(src.unit)) {
+                // No room (or no carrier): nothing, before the server's
+                // refusal would bring FreeCol's «Der Server kann das nicht
+                // ausführen.» (the review of part N, play lens; I: no clip
+                // shows the original's answer, a market drop on a full
+                // ship does nothing as well, ClassicTrade.hold).
+                result = "no room";
+            } else if (ship != null) {
                 result = (igc().boardShip(src.unit, ship)) ? "aboard" : "refused";
                 if (src.unit.getLocation() == ship) this.selectedShip = ship;
                 ClassicFrameRecorder.event("europe-board", src.unit.getId() + " -> "
@@ -1051,6 +1090,7 @@ final class ClassicEuropePanel extends JPanel {
      * @return What happened, for the recorder.
      */
     private String askSail(Unit ship) {
+        if (underRepair(ship)) return "under repair";     // no box, nothing
         final ClassicAdvisorBox.Request r = (this.boxes == null) ? null
             : ClassicEuropeOptions.sailRequest(this.text, title());
         if (r != null) {
@@ -1271,13 +1311,17 @@ final class ClassicEuropePanel extends JPanel {
     /**
      * A ship sails for the New World ({@link #sail}).  The last ship
      * closes the screen by itself afterwards, colonists on the dock or not
-     * (Roger, 2026-10-08); the next ship in port is selected.
+     * (Roger, 2026-10-08); the next ship in port is selected.  A ship
+     * under repair does not sail, and nobody boards it ({@link #underRepair}:
+     * the drag onto «Ziel:», the ship's box and «Segel setzen» all end
+     * here).
      *
      * @param ship The ship in port.
      * @return True if it sailed.
      */
     private boolean setSail(Unit ship) {
-        if (ship == null || !ship.isNaval() || !ship.isInEurope()) return false;
+        if (ship == null || !ship.isNaval() || !ship.isInEurope()
+            || underRepair(ship)) return false;
         final Map map = this.freeColClient.getGame().getMap();
         sail(igc()::boardShip, igc()::moveTo, this.europe, ship, map);
         // Sailed (the server took it out of port): the last ship closes the
@@ -1296,14 +1340,15 @@ final class ClassicEuropePanel extends JPanel {
      * Set sail for the New World as the original does (clip opening_015
      * #1683 -&gt; #1686, V): first the colonists on the dock marked "S"
      * (FreeCol's SENTRY, which every land unit gets on the dock) board the
-     * ship by themselves, as many as fit, in the dock's order
+     * ship by themselves, as many as fit, the longest on the dock first
      * ({@link #boarders}; {@link InGameController#boardShip}, FreeCol's
      * {@code moveAutoload} with {@code Unit.sentryPred}); a colonist marked
      * "-" stays.  Then the ship sails ({@link InGameController#moveTo}, the
      * standard screen's own Set Sail seam).  No question about colonists
      * left behind: FreeCol's "... und die Kolonisten zurücklassen?" box
      * ({@code europePanel.leaveColonists}) is gone, its Enter left the
-     * colonist behind unseen (the review of part J).
+     * colonist behind unseen (the review of part J).  A ship under repair
+     * ({@link #underRepair}): nobody boards, it stays.
      *
      * @param board The controller's boarding ({@link InGameController#boardShip}).
      * @param move The controller's move ({@link InGameController#moveTo}).
@@ -1315,6 +1360,7 @@ final class ClassicEuropePanel extends JPanel {
     static boolean sail(java.util.function.BiPredicate<Unit, Unit> board,
                         java.util.function.BiPredicate<Unit, Location> move,
                         Europe europe, Unit ship, Map map) {
+        if (underRepair(ship)) return false;          // nobody boards, it stays
         for (Unit u : boarders(europe, ship)) board.test(u, ship);
         return move.test(ship, map);
     }
@@ -1322,8 +1368,11 @@ final class ClassicEuropePanel extends JPanel {
     /**
      * The colonists on the dock who board a ship when it sails
      * ({@link #sail}): the land units marked "S" (SENTRY) that fit into its
-     * space left, in the dock's order; one that does not fit stays, and so
-     * does every other one.
+     * space left, the longest on the dock first (Europe's order: the
+     * right of the dock first, the newest stands at the left, {@link
+     * #dockUnits}; I: who stays behind in the original is not known, N1
+     * question 5); one that does not fit stays, and so does every other
+     * one.  None for a ship under repair.
      *
      * @param europe Our Europe, or null.
      * @param ship The ship, or null.
@@ -1331,7 +1380,8 @@ final class ClassicEuropePanel extends JPanel {
      */
     static List<Unit> boarders(Europe europe, Unit ship) {
         final List<Unit> out = new ArrayList<>();
-        if (europe == null || ship == null || !ship.canCarryUnits()) return out;
+        if (europe == null || ship == null || !ship.canCarryUnits()
+            || underRepair(ship)) return out;
         int space = ship.getSpaceLeft();
         for (Unit u : europe.getUnitList()) {
             if (!Unit.sentryPred.test(u) || u.isDisposed()) continue;
@@ -1456,8 +1506,26 @@ final class ClassicEuropePanel extends JPanel {
     /** The tests' lists, or null: the Swing list. */
     Chooser chooser = null;
 
-    /** Repaint after a model change (a recruit, a purchase, an arrival). */
+    /**
+     * Repaint after a model change (a recruit, a purchase, an arrival).
+     * The game's GUI calls this from any thread (FreeCol's
+     * {@code setCurrentPlayer} ends with {@code getGUI().refresh()} on the
+     * network thread at our turn's start): off the event thread it only
+     * repaints, which is safe from any thread, and the selection follows
+     * on the event thread with the paint or the next use, both of which
+     * ask {@link #selectedShip} (the review of part N, regression lens:
+     * the selection and the fronted ships are the event thread's).
+     */
     void refresh() {
+        if (SwingUtilities.isEventDispatchThread()) {
+            update();
+        } else {
+            repaint();
+        }
+    }
+
+    /** The selection brought up to date, and a repaint (the screen's own actions). */
+    private void update() {
         selectedShip();
         repaint();
     }
