@@ -309,6 +309,22 @@ public class GUI extends FreeColClientHolder {
     }
 
     /**
+     * Confirm a fortification that breaks a treaty: the unit stands next
+     * to, or on the land of, a colony of a European we are at peace or
+     * cease fire with, and the rules make that a declaration of war
+     * ({@code Unit.getFortifyWarColony}, the levi rules).  FreeCol's
+     * question about the colony's owner ({@link #confirmHostileAction});
+     * the Classic UI asks the original's.
+     *
+     * @param unit The fortifying {@code Unit}.
+     * @param colony The {@code Colony} whose owner's treaty breaks.
+     * @return True to fortify (and break the treaty), false to abort.
+     */
+    public boolean confirmFortifyWar(Unit unit, Colony colony) {
+        return confirmHostileAction(unit, colony.getTile());
+    }
+
+    /**
      * Check if an attack results in a transition from peace or cease fire to
      * war and, if so, warn the player.
      *

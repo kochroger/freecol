@@ -74,6 +74,29 @@ save plays on as it was (R1b re-applies the rules on load, later).
   Rules and saves without the option take the moves
   (`Specification.fixGameOptions`); a running game keeps what its save has.
   (`ServerUnitTest.testFortifyKeepsMoves`, `LeviRulesTest.testFortifyKeepsMoves`.)
+- **The original's treaty breach** (B3, part M2; clip opening_018,
+  `war-french-analysis/10-spec.md`): `model.option.fortifyDeclaresWar` on.
+  F with an offensive land unit of a human player (soldier, dragoon,
+  artillery, and the scout, FreeCol's set, until Roger answers) on a land
+  tile next to a colony of a European he is at peace or cease fire with, or
+  on land such a colony owns (`Unit.getFortifyWarColony`), asks first
+  (`GUI.confirmFortifyWar`; the Classic UI's @HAVETREATY, below "Advisor
+  boxes"); "Friedensvertrag brechen." fortifies, and the server
+  (`InGameController.changeState`) declares war both ways before the
+  fortification's occupation: the colony's worker on that tile is evicted
+  and the tile becomes the occupier's land (V: «Neuholland» next to
+  Montreal afterwards; FreeCol clears its owner; either way the colony may
+  claim it again when he has gone, `Player.getLandPrice`). The declarer gets
+  no notice that the other "hat uns den Krieg erklärt"
+  (`ServerPlayer.csChangeStance(..., tellThis false, ...)`; the original has
+  none). The AI never declares war this way; its occupation at war takes the
+  tile too (the reverse case, a French soldier fortified next to our colony).
+  At war F asks nothing (V: the scout #53979); S never asks; native land and
+  alliances keep FreeCol's rule. Classic and freecol: off (FreeCol: no war
+  at peace). A levi save from before the rule gets it on
+  (`Specification.fortifyDeclaresWarDefault`: the game Roger is playing).
+  (`UnitTest.testFortifyWarColony`, `InGameControllerTest.testFortifyBreaksTheTreaty`,
+  `MoveTest.testFortifyNextToAForeignColony`, `LeviRulesTest.testFortifyDeclaresWar`.)
 - **House rules** (game options; rules and saves without them get FreeCol's
   behaviour from `Specification.fixGameOptions`):
   - `model.option.cancelKeepsMove` on (D1, moved here from the classic
@@ -1812,7 +1835,16 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
   chief on its side; "Ja" first and barred; FreeCol's words until W8c),
   the natives' demands (the refusal first and barred); `sailHomeKey`
   (GAME.TXT @SAILHOME with the admiral); `askLandfall` (GAME.TXT @LANDFALL
-  with the frontiersman, in both landing seams); `modalChoiceDialog` (one row per
+  with the frontiersman, in both landing seams); `confirmFortifyWar`
+  (GAME.TXT @HAVETREATY with the soldier, part M2: «"Wir haben einen
+  Friedensvertrag mit den {Frz.} unterzeichnet, Eure Exzellenz."», %STRING0
+  NAMES @NATIONALITY, rows «Handlung abbrechen.» (the bar's, Escape's:
+  nothing, nothing spent) / «Friedensvertrag brechen.»; box (34,116,236,46),
+  the soldier at (215,39), 0 px against clip opening_018 #640,
+  `ClassicWar`, `ClassicWarTest`); the colony screen's unit box @COLONYUNIT
+  in the colony screen's own layer ("The units standing in the colony"
+  below; a *unit box*: no portrait, the unit's icon at box + (5,6) and a
+  22-px icon column, `ClassicAdvisorBox.UnitIcon`); `modalChoiceDialog` (one row per
   choice, the cancel row last, greyed choices); and the notices: each model
   message is a box of its own, one after the other (the original has no
   paged report), the error and "not yet" notices too. The answers are
@@ -3176,6 +3208,57 @@ first-launch `options.xml` warning and the expected `CAPACITY_EXCEEDED` client w
 
 **Follow-ups:** the original's fixed building ground-slots remain a flow layout (Q5, unchanged by this
 slice); loading cargo and per-nation tints are still open, tracked above.
+
+### The units standing in the colony (`ClassicColonyUnits`; clip 019, part M2)
+
+How Roger wakes a soldier fortified in his colony (clip 019,
+`wake-in-colony-analysis/10-spec.md`; playthrough-2 #45170 for a unit without
+orders): the units standing on the colony tile (the original's "Vorhandene
+Einheiten"; ours in the band's left panel until D5d builds that panel) are a
+row of icons with their order flags, the letter black also for F (V #1290),
+18 px apart (closer when more stand there than fit, so all stay clickable).
+A **press** on one selects it (its frame; V: the white frame at #916), the
+**release** on the same one opens its **@COLONYUNIT** box over the colony
+screen (V: 0.6 s after the press, I: on the release), in the screen's own wood
+box layer (`ClassicGUI.colonyBoxes`, the colony frame's glass pane, as the
+Europe screen's; the map's keys and clicks are inert while it is up, and a
+click on the map's window brings the colony screen back in front). The unit stays
+selected after its box: a following click on a building or a work tile still
+puts a colonist to work there (our click stand-in for the original's drag,
+"Work assignment" above), now with the box in between.
+
+- **The box (V, 0 px, `ClassicColonyUnitsTest.testGoldenAgainstTheClips`):**
+  «Optionen für  {(Erfahrene Holzfäller)} (Dragoner):» -- `%STRING0` the
+  NAMES @UNIT name of the role/type, `%STRING1` " (" + the @JOB expert name +
+  ")", empty for a free colonist ("Optionen für  (Pioniere):") and a unit that
+  is no colonist (I) -- no portrait; a *unit box*: the unit's icon (sprite,
+  shadow, flag, black letter; V: the pioneer's shadow) at box + (5,6), the box 22 px wider, prompt,
+  rows and the bar's left end 22 px right (box (31,76,258,48), prompt x 58,
+  rows x 62, bar x 57-284; `ClassicAdvisorBox.UnitIcon`, `ICON_COLUMN`).
+- **The rows** (@UNITOPTIONS without the ones that change nothing; V for the
+  fortified dragoon and the pioneer, I for the rest): «Nach vorne bewegen.»
+  not for the row's first unit, «Befehle aufheben.» not without orders,
+  «Wache / An Bord gehen.» not on sentry, «Befestigen.» not when fortified
+  or fortifying, «Keine Veränderungen.» always. The bar on the first row;
+  Escape = «Keine Veränderungen.».
+- **What they do:** «Befehle aufheben.» clears the orders
+  (`InGameController.clearOrders`; a pioneer at work without FreeCol's
+  question): the flag's F becomes "-" (V #1298); the unit stays where it is,
+  selected, and does **not** come up on the map (V #1554: the unit that was
+  up stays up; `ClassicGUI.colonyWaking` drops the controller's choice of it,
+  it comes later in the cycle). «Wache» = sentry (S; boarding a ship in port is
+  not built), «Befestigen.» = fortify (FreeCol: only with moves left),
+  «Nach vorne bewegen.» = first in the row (I: the original's meaning is not
+  seen; here only the screen's order, for the session).
+- **The enemy on a work tile** (clip opening_018 #13962): an offensive unit of
+  a player at war with us on one of the colony's tiles is drawn there at cell
+  + (4,4) with his flag, fortified or not (`ClassicColonyPanel.occupier`).
+- Tests: `ClassicColonyUnitsTest` (rows, names, box and place, the rows in
+  the game with a fake controller, the row's order and step, the golden
+  check), `ClassicWarTest.testTheFrenchSoldierAtOurColony`.
+- Not yet (D5d/D6): the "Vorhandene Einheiten" panel and its buttons, the
+  blinking white/green frame, the figures on the Festung picture, the
+  original's 24 px cells.
 
 ## Europe screen (`ClassicEuropePanel`)
 

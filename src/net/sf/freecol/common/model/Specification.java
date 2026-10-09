@@ -3093,6 +3093,12 @@ public final class Specification implements OptionContainer {
         ret |= checkOp(GameOptions.FORTIFY_KEEPS_MOVES,
                        GameOptions.GAMEOPTIONS_MAP,
                        Boolean.FALSE, BooleanOption.class);
+        // The original's treaty breach by fortifying (levi, B3): without
+        // it no fortification declares war, as FreeCol has it; a levi
+        // save from before the rule gets the levi rules' value.
+        ret |= checkOp(GameOptions.FORTIFY_DECLARES_WAR,
+                       GameOptions.GAMEOPTIONS_MAP,
+                       fortifyDeclaresWarDefault(getId()), BooleanOption.class);
         ret |= checkOp(GameOptions.REVENGE_MODE,
                        GameOptions.GAMEOPTIONS_VICTORY_CONDITIONS,
                        Boolean.TRUE, BooleanOption.class);
@@ -3135,6 +3141,19 @@ public final class Specification implements OptionContainer {
      * @param returnClass The expected class of option.
      * @return True if the option did not exist and was successfully created.
      */
+    /**
+     * The value {@code GameOptions.FORTIFY_DECLARES_WAR} gets in rules or
+     * a save that lack it ({@link #fixGameOptions}): on for the "levi"
+     * rules (a game of Roger's begun before the rule existed plays it as
+     * the levi rules have it, the original's), off for any other.
+     *
+     * @param specId The specification's id.
+     * @return The value.
+     */
+    static Boolean fortifyDeclaresWarDefault(String specId) {
+        return "levi".equals(specId);
+    }
+
     private <R,T extends Option<R>> boolean checkOp(String id, String gr,
                                                     R defaultValue,
                                                     Class<T> returnClass) {

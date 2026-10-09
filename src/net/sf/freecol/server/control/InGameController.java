@@ -1130,6 +1130,18 @@ public final class InGameController extends Controller {
     /**
      * Change a units state.
      *
+     * With {@code GameOptions.FORTIFY_DECLARES_WAR} (the levi rules) a
+     * human player's fortification next to, or on the land of, a colony
+     * of a European he is at peace or cease fire with breaks the treaty
+     * ({@code Unit.getFortifyWarColony}; the original's @HAVETREATY,
+     * clip opening_018, B3): war, both ways, before the occupation below,
+     * and no notice to him that the other nation declared it (the
+     * original has none).  The AI never declares war this way.  A tile
+     * of a foreign colony occupied at war then becomes the occupier's
+     * land (the clip: "Neuholland" next to Montreal), where FreeCol
+     * clears its owner; either way the colony may claim it again when
+     * the occupier has gone.
+     *
      * @param serverPlayer The {@code ServerPlayer} that owns the unit.
      * @param unit The {@code Unit} to change the state of.
      * @param state The new {@code UnitState}.
@@ -1142,6 +1154,12 @@ public final class InGameController extends Controller {
         Tile tile = unit.getTile();
         boolean tileDirty = tile != null && tile.getIndianSettlement() != null;
         if (state == UnitState.FORTIFYING && tile != null) {
+            final Colony warColony = (serverPlayer.isAI()) ? null
+                : unit.getFortifyWarColony();
+            if (warColony != null) {
+                serverPlayer.csChangeStance(Stance.WAR, warColony.getOwner(),
+                                            true, false, cs);
+            }
             ServerColony colony = (tile.getOwningSettlement() instanceof Colony)
                 ? (ServerColony) tile.getOwningSettlement()
                 : null;
@@ -1154,7 +1172,11 @@ public final class InGameController extends Controller {
                     colony.csEvictUsers(unit, cs);
                 }
                 if (serverPlayer.getStance(owner) == Stance.WAR) {
-                    tile.changeOwnership(null, null); // Clear owner if at war
+                    // Clear owner if at war; the occupier's with the
+                    // original's treaty breach (levi).
+                    tile.changeOwnership((getGame().getSpecification()
+                            .getBoolean(GameOptions.FORTIFY_DECLARES_WAR))
+                        ? serverPlayer : null, null);
                     tileDirty = true;
                 }
             }

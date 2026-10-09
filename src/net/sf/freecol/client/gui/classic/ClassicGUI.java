@@ -49,6 +49,7 @@ import java.util.stream.Collectors;
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
@@ -155,6 +156,49 @@ public class ClassicGUI extends GUI {
 
     /** The colony panel inside {@link #colonyFrame}, kept so it can be repainted. */
     private ClassicColonyPanel colonyPanel;
+
+    /**
+     * The wood boxes over the colony screen ({@link #colonyFrame}'s glass
+     * pane: a unit's @COLONYUNIT, clip 019), or null.
+     */
+    private ClassicAdvisorLayer colonyBoxes;
+
+    /**
+     * The units moved to the front of their colony's row by «Nach vorne
+     * bewegen.» ({@link ClassicColonyUnits#order}), the last first; for
+     * the session (not in the save).  EDT only.
+     */
+    private final List<String> frontedUnits = new ArrayList<>();
+
+    /**
+     * The unit «Befehle aufheben.» is freeing in the colony screen, during
+     * the controller's state change: the controller's choice of it as the
+     * next active unit is dropped (clip 019 #1554: the woken dragoon does
+     * not come up; the unit that was up stays up).  EDT only.
+     */
+    private Unit colonyWaking = null;
+
+    /**
+     * Puts the colony screen's unit boxes ({@link #colonyBox}); a test
+     * puts its own in.
+     */
+    Prompter colonyPrompter = this::colonyBox;
+
+    /** What the colony screen's unit box orders ({@link UnitOrders}). */
+    UnitOrders unitOrders = new ControllerOrders();
+
+    /**
+     * A unit's map sprite for its box's icon: the image library's; a test
+     * puts its own in (without the game's resources the library's lookup
+     * ends the program).
+     */
+    java.util.function.Function<Unit, BufferedImage> unitArt = this::unitPicture;
+
+    /** @return The image library's map sprite of a unit, or null without one. */
+    private BufferedImage unitPicture(Unit u) {
+        return (this.imageLibrary == null) ? null
+            : this.imageLibrary.getScaledUnitImage(u);
+    }
 
     /** The build-queue screen's window, while one is open (see {@link #showBuildQueuePanel}). */
     private JFrame buildQueueFrame;
@@ -1292,6 +1336,7 @@ public class ClassicGUI extends GUI {
         this.colonyShown = null;
         this.voyages.clear();
         this.answeredNations.clear();
+        this.frontedUnits.clear();
         if (this.menuStrip != null) this.menuStrip.setBand(null);
         // FreeCol's goto batch again for whatever comes next (W5f), and
         // no held letter or road left over.
@@ -2095,18 +2140,19 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * What the wood boxes over the Europe screen need ({@link #europeBoxes},
-     * gap list B1): the font and the wood; no portraits (the @HOWMUCH boxes
-     * and @TUTORIAL18 have none); the keys back to the screen when they
-     * are gone.
+     * What the wood boxes over a classic screen need: the Europe screen's
+     * ({@link #europeBoxes}, gap list B1) and the colony screen's
+     * ({@link #colonyBoxes}, clip 019): the font and the wood; no
+     * portraits (the @HOWMUCH boxes, @TUTORIAL18 and @COLONYUNIT have
+     * none); the keys back to the screen when they are gone.
      */
-    private final class EuropeBoxHost implements ClassicAdvisorLayer.Host {
+    private final class ScreenBoxHost implements ClassicAdvisorLayer.Host {
 
         private final ClassicFont tiny;
         private final BufferedImage wood;
-        private final ClassicEuropePanel panel;
+        private final JComponent panel;
 
-        EuropeBoxHost(ClassicPackFiles pack, ClassicEuropePanel panel) {
+        ScreenBoxHost(ClassicPackFiles pack, JComponent panel) {
             this.tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
             this.wood = (pack == null) ? null : pack.image(ClassicMenuBar.WOOD_KEY);
             this.panel = panel;
@@ -2238,7 +2284,194 @@ public class ClassicGUI extends GUI {
      * @return True if so.
      */
     boolean boxBusy() {
-        return mapBoxBusy() || europeBoxBusy();
+        return mapBoxBusy() || europeBoxBusy() || colonyBoxBusy();
+    }
+
+    /**
+     * Whether a wood box over the colony screen is up or due
+     * ({@link #colonyBoxes}: @COLONYUNIT).  EDT only.
+     *
+     * @return True if so.
+     */
+    private boolean colonyBoxBusy() {
+        return this.colonyBoxes != null && this.colonyBoxes.isBusy();
+    }
+
+    /**
+     * A box over the colony screen: the wood box on its glass pane
+     * ({@link #colonyBoxes}), else (no font, no screen) the stopgap.  EDT
+     * only.
+     *
+     * @param r The box.
+     * @return The answer ({@link Prompter#ask}).
+     */
+    int colonyBox(ClassicAdvisorBox.Request r) {
+        final ClassicAdvisorLayer layer = this.colonyBoxes;
+        if (layer != null && isOpen(this.colonyFrame)) {
+            final int got = layer.show(r);
+            if (got != ClassicAdvisorLayer.UNAVAILABLE) return got;
+        }
+        return stopgapBox(r);
+    }
+
+    /** The colony screen's units ({@link ClassicColonyPanel.Units}, clip 019). */
+    private final class ColonyUnits implements ClassicColonyPanel.Units {
+
+        @Override
+        public List<Unit> order(List<Unit> standing) {
+            return ClassicColonyUnits.order(standing, frontedUnits);
+        }
+
+        @Override
+        public void options(Unit unit, boolean first) {
+            colonyUnitOptions(unit, first);
+        }
+    }
+
+    /**
+     * What the colony screen's unit box orders: the controller in the game,
+     * a fake in the tests.  EDT only.
+     */
+    interface UnitOrders {
+
+        /**
+         * Clear a unit's orders («Befehle aufheben.»).
+         *
+         * @param unit The unit.
+         * @return True if they were cleared.
+         */
+        boolean clearOrders(Unit unit);
+
+        /**
+         * Change a unit's state («Wache», «Befestigen.»).
+         *
+         * @param unit The unit.
+         * @param state The new state.
+         * @return True if it changed.
+         */
+        boolean changeState(Unit unit, Unit.UnitState state);
+    }
+
+    /** {@link UnitOrders} through the game's controller. */
+    private final class ControllerOrders implements UnitOrders {
+
+        @Override
+        public boolean clearOrders(Unit unit) {
+            final FreeColClient fcc = getFreeColClient();
+            if (fcc == null) return false;
+            final net.sf.freecol.client.control.InGameController igc
+                = fcc.getInGameController();
+            // A pioneer at work: FreeCol would ask whether to give up
+            // the work in its own words; the original's row just clears
+            // the orders (I).
+            return (unit.getState() == Unit.UnitState.IMPROVING)
+                ? igc.changeState(unit, Unit.UnitState.ACTIVE)
+                : igc.clearOrders(unit);
+        }
+
+        @Override
+        public boolean changeState(Unit unit, Unit.UnitState state) {
+            final FreeColClient fcc = getFreeColClient();
+            return fcc != null && fcc.getInGameController().changeState(unit, state);
+        }
+    }
+
+    /**
+     * A click on a unit standing in our colony (clip 019,
+     * {@link ClassicColonyUnits}): its @COLONYUNIT box over the colony
+     * screen, and what the answer does.  «Befehle aufheben.» frees the
+     * unit, which stays in the colony, selected, and does not come up on
+     * the map ({@link #colonyWaking}); «Wache» and «Befestigen.» give it
+     * those orders; «Nach vorne bewegen.» moves it to the front of the
+     * row; «Keine Veränderungen.» and Escape do nothing.  Without the
+     * pack's texts nothing is asked.  EDT only.
+     *
+     * @param unit The unit.
+     * @param first Whether it is the first unit of the row.
+     */
+    void colonyUnitOptions(Unit unit, boolean first) {
+        if (unit == null) return;
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final List<ClassicColonyUnits.Option> shown
+            = ClassicColonyUnits.options(unit, first);
+        final Colony colony = (unit.getTile() == null) ? null : unit.getTile().getColony();
+        final ClassicAdvisorBox.Request r = ClassicColonyUnits.request(t, unit,
+            shown, unitIcon(t, unit), (colony == null) ? "FreeCol" : colony.getName());
+        if (r == null) {
+            ClassicFrameRecorder.event("colony-unit", unit.getId() + " no texts");
+            return;
+        }
+        final int answer = this.colonyPrompter.ask(r);
+        final ClassicColonyUnits.Option o = ClassicColonyUnits.chosen(shown, answer);
+        boolean done = true;
+        switch (o) {
+        case FRONT:
+            ClassicColonyUnits.front(this.frontedUnits, unit);
+            break;
+        case CLEAR:
+            this.colonyWaking = unit;
+            try {
+                done = this.unitOrders.clearOrders(unit);
+            } finally {
+                this.colonyWaking = null;
+            }
+            break;
+        case SENTRY:
+            done = this.unitOrders.changeState(unit, Unit.UnitState.SENTRY);
+            break;
+        case FORTIFY:
+            done = this.unitOrders.changeState(unit, Unit.UnitState.FORTIFYING);
+            break;
+        default:
+            break;
+        }
+        ClassicFrameRecorder.event("colony-unit", ClassicColonyUnits.UNIT_SECTION
+            + " " + unit.getId() + " rows=" + shown + " chosen=" + answer + " " + o
+            + ((done) ? "" : " refused") + " state=" + unit.getState());
+    }
+
+    /**
+     * Whether the controller's choice of a unit to bring up is the unit
+     * «Befehle aufheben.» is freeing in the colony screen
+     * ({@link #colonyWaking}): it does not come up (clip 019 #1554).
+     *
+     * @param unit The controller's choice, or null.
+     * @param freeing The unit being freed there, or null.
+     * @return True to drop the choice.
+     */
+    static boolean freedInColony(Unit unit, Unit freeing) {
+        return unit != null && unit == freeing;
+    }
+
+    /** @return The unit being freed in the colony screen, or null (tests). */
+    Unit colonyWaking() {
+        return this.colonyWaking;
+    }
+
+    /** @return What the colony screen's units need (tests). */
+    ClassicColonyPanel.Units colonyUnits() {
+        return new ColonyUnits();
+    }
+
+    /**
+     * A unit's icon in its box ({@link ClassicAdvisorBox.UnitIcon}): its
+     * map sprite, its owner's flag and its flag letter.
+     *
+     * @param t The original texts, or null.
+     * @param unit The unit.
+     * @return The icon.
+     */
+    private ClassicAdvisorBox.UnitIcon unitIcon(ClassicText t, Unit unit) {
+        BufferedImage img = null;
+        try {
+            img = this.unitArt.apply(unit);
+        } catch (RuntimeException e) {
+            img = null;
+        }
+        return new ClassicAdvisorBox.UnitIcon((img == null) ? null : ClassicHud.fit16(img),
+            ClassicHud.nationRgb(unit.getOwner()),
+            ClassicHud.orderLetter(t, ClassicUnitCycle.ordersRowShown(unit)),
+            ClassicHud.unitRow(unit));
     }
 
     /**
@@ -2276,6 +2509,16 @@ public class ClassicGUI extends GUI {
     void mapActivated() {
         if (raisesEuropeOnActivation(isOpen(this.europeFrame), europeBoxBusy())) {
             raiseEurope("box");
+        } else if (raisesEuropeOnActivation(isOpen(this.colonyFrame),
+                                            colonyBoxBusy())) {
+            // The same for a unit's box over the colony screen.
+            final JFrame f = this.colonyFrame;
+            if (this.frame == null
+                || (this.frame.getExtendedState() & Frame.ICONIFIED) == 0) {
+                f.toFront();
+                this.colonyBoxes.requestFocusInWindow();
+                ClassicFrameRecorder.event("colony-raise", "box");
+            }
         }
     }
 
@@ -2299,6 +2542,11 @@ public class ClassicGUI extends GUI {
     /** @return The wood boxes over the Europe screen, or null (the harness). */
     ClassicAdvisorLayer europeBoxLayer() {
         return this.europeBoxes;
+    }
+
+    /** @return The wood boxes over the colony screen, or null (the harness). */
+    ClassicAdvisorLayer colonyBoxLayer() {
+        return this.colonyBoxes;
     }
 
     /**
@@ -2652,6 +2900,16 @@ public class ClassicGUI extends GUI {
      */
     @Override
     public void changeView(Unit unit, boolean force) {
+        // The unit «Befehle aufheben.» frees in the colony screen does not
+        // come up (clip 019 #1554): the controller's choice of it, from
+        // inside the state change, goes back to its cycle.
+        if (freedInColony(unit, this.colonyWaking)) {
+            ClassicFrameRecorder.event("handover", "dropped " + unit.getId()
+                + ": freed in the colony screen");
+            final Player p = myPlayer();
+            if (p != null && unit.getOwner() == p) p.putBackActiveUnit(unit);
+            return;
+        }
         // The controller's choice of the unit a click is freeing, from
         // inside the state change (its updateGUI runs at once on the event
         // thread): that is the click itself (J2 live check, run click4).
@@ -3844,10 +4102,17 @@ public class ClassicGUI extends GUI {
                 closeColonyPanel();
                 final ClassicColonyPanel panel = new ClassicColonyPanel(
                     getFreeColClient(), this.imageLibrary, colony,
-                    this::closeColonyPanel);
+                    this::closeColonyPanel, new ColonyUnits());
                 final JFrame f = new JFrame(colony.getName());
                 this.colonyFrame = f;
                 this.colonyPanel = panel;
+                // The wood boxes over the screen (a unit's @COLONYUNIT,
+                // clip 019), on its glass pane: the same 320x200 canvas,
+                // scale and letterbox as the panel.
+                this.colonyBoxes = new ClassicAdvisorLayer(
+                    new ScreenBoxHost(ClassicPackFiles.runtime(), panel),
+                    waitClock(), SwingUtilities::invokeLater, true);
+                f.setGlassPane(this.colonyBoxes);
                 f.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
                 f.setBackground(Color.BLACK);
                 f.setContentPane(panel);
@@ -3880,8 +4145,12 @@ public class ClassicGUI extends GUI {
     /** Dismiss the colony screen if one is open. */
     private void closeColonyPanel() {
         final JFrame f = this.colonyFrame;
+        final ClassicAdvisorLayer boxes = this.colonyBoxes;
         this.colonyFrame = null;
         this.colonyPanel = null;
+        this.colonyBoxes = null;
+        // A box still up answers "dismissed": no change.
+        if (boxes != null) boxes.dispose();
         if (f != null) f.dispose();
     }
 
@@ -3986,7 +4255,7 @@ public class ClassicGUI extends GUI {
                 // the same 320x200 canvas, scale and letterbox as the panel.
                 final ClassicPackFiles pack = ClassicPackFiles.runtime();
                 this.europeBoxes = new ClassicAdvisorLayer(
-                    new EuropeBoxHost(pack, panel), waitClock(),
+                    new ScreenBoxHost(pack, panel), waitClock(),
                     SwingUtilities::invokeLater, true);
                 f.setGlassPane(this.europeBoxes);
                 f.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
@@ -6813,6 +7082,34 @@ public class ClassicGUI extends GUI {
      */
     static boolean confirmed(int chosen) {
         return chosen == 0;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The original's treaty breach ({@link ClassicWar}, gap list B3;
+     * clip opening_018 #640): F next to a colony of a European we are at
+     * peace with asks GAME.TXT's @HAVETREATY with the soldier, the bar
+     * and Escape on «Handlung abbrechen.», which does nothing and spends
+     * nothing (the unit stays up with its moves); «Friedensvertrag
+     * brechen.» fortifies the unit and the server declares the war.
+     * Without the pack FreeCol's question about the colony's owner.
+     */
+    @Override
+    public boolean confirmFortifyWar(Unit unit, Colony colony) {
+        if (colony == null) return false;
+        final Player other = colony.getOwner();
+        final ClassicAdvisorBox.Request r = ClassicWar.treatyRequest(
+            ClassicText.load(ClassicPackFiles.runtime()), other, colony.getName());
+        if (r == null) return super.confirmFortifyWar(unit, colony);
+        final int chosen = onEventThread(() -> this.prompter.ask(r),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        final boolean war = ClassicWar.breaksTreaty(chosen);
+        ClassicFrameRecorder.event("fortify-war", ClassicWar.TREATY_SECTION + " "
+            + ((unit == null) ? "-" : unit.getId()) + " at "
+            + colony.getName() + " " + ClassicWar.nationality(null, other)
+            + " chosen=" + chosen + ((war) ? " war" : " nothing"));
+        return war;
     }
 
     /**

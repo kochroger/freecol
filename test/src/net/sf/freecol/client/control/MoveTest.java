@@ -312,4 +312,162 @@ public class MoveTest extends FreeColTestCase {
             }
         }
     }
+
+    /**
+     * A client of the test's game for F next to a foreign colony: its GUI
+     * notes FreeCol's question and the treaty question
+     * ({@code GUI.confirmFortifyWar}) and gives the answer; its server
+     * API notes the state change and makes it.
+     */
+    private static FreeColClient fortifyClient(Game game, Player me,
+                                               List<String> log,
+                                               boolean answer)
+        throws Exception {
+        final Class<?> uc = Class.forName("sun.misc.Unsafe");
+        final Field theUnsafe = uc.getDeclaredField("theUnsafe");
+        theUnsafe.setAccessible(true);
+        final FreeColClient fcc = (FreeColClient)uc
+            .getMethod("allocateInstance", Class.class)
+            .invoke(theUnsafe.get(null), FreeColClient.class);
+        // FreeCol's question's unit icon: any image.
+        final ImageLibrary lib = new ImageLibrary(1f, new ImageCache() {
+                @Override
+                public BufferedImage getScaledImage(String key, float scale,
+                                                    boolean grayscale) {
+                    return new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+                }
+            });
+        set(fcc, "gui", new GUI(fcc) {
+                @Override
+                public boolean modalConfirmDialog(Tile tile, StringTemplate t,
+                                                  ImageIcon icon, String okKey,
+                                                  String cancelKey,
+                                                  boolean defaultOk) {
+                    log.add("ask " + t.getId());
+                    return answer;
+                }
+
+                @Override
+                public ImageLibrary getFixedImageLibrary() {
+                    return lib;
+                }
+
+                @Override
+                public boolean confirmFortifyWar(Unit unit,
+                    net.sf.freecol.common.model.Colony colony) {
+                    log.add("treaty " + colony.getName());
+                    return answer;
+                }
+            });
+        set(fcc, "serverAPI", new ServerAPI() {
+                @Override
+                public boolean changeState(Unit unit, Unit.UnitState state) {
+                    log.add("changeState " + state);
+                    unit.setState(state);
+                    return true;
+                }
+
+                @Override
+                public Connection connect(String name, String host, int port) {
+                    return null;
+                }
+
+                @Override
+                public boolean disconnect() {
+                    return true;
+                }
+
+                @Override
+                public Connection reconnect() {
+                    return null;
+                }
+
+                @Override
+                public Connection getConnection() {
+                    return null;
+                }
+            });
+        set(fcc, "inGameController", new InGameController(fcc));
+        fcc.setGame(game);
+        fcc.setMyPlayer(me);
+        game.setCurrentPlayer(me);
+        fcc.changeClientState(true);
+        return fcc;
+    }
+
+    /**
+     * F next to a foreign colony (the original's treaty breach, clip
+     * opening_018, B3), both topologies: with the rules' breach the
+     * client asks the treaty question about the colony
+     * ({@code GUI.confirmFortifyWar}, the Classic UI's @HAVETREATY) and
+     * only a "yes" goes to the server; a "no" spends nothing (no state
+     * change, the moves kept).  Without the rule FreeCol's own question
+     * about the land's owner.  At war no question; S never asks.
+     */
+    public void testFortifyNextToAForeignColony() throws Exception {
+        final net.sf.freecol.common.model.Specification spec = spec();
+        try {
+            for (Topology topology : new Topology[] { Topology.ISOMETRIC,
+                                                      Topology.SQUARE }) {
+                Topology.setCurrent(topology);
+                for (int c = 0; c < 6; c++) {
+                    final boolean rule = c != 2;
+                    final boolean answer = c != 1;
+                    final boolean war = c == 3;
+                    final boolean sentry = c == 4;
+                    final boolean nextOnly = c == 5;
+                    final String what = topology + " case " + c;
+                    spec.setBoolean(net.sf.freecol.common.option.GameOptions
+                                    .FORTIFY_DECLARES_WAR, rule);
+                    final Game game = getStandardGame();
+                    final Map map = getTestMap(plains);
+                    game.changeMap(map);
+                    final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+                    final Player french = game.getPlayerByNationId("model.nation.french");
+                    final net.sf.freecol.common.model.Stance s = (war)
+                        ? net.sf.freecol.common.model.Stance.WAR
+                        : net.sf.freecol.common.model.Stance.PEACE;
+                    dutch.setStance(french, s);
+                    french.setStance(dutch, s);
+                    final net.sf.freecol.common.model.Colony montreal
+                        = net.sf.freecol.util.test.FreeColTestUtils
+                            .getColonyBuilder().player(french)
+                            .colonyTile(map.getTile(5, 8)).initialColonists(1)
+                            .build();
+                    final Tile east = montreal.getTile().getNeighbourOrNull(Direction.E);
+                    if (nextOnly) east.changeOwnership(null, null);
+                    final Unit dragoon = new ServerUnit(game, east, dutch,
+                        spec.getUnitType("model.unit.veteranSoldier"),
+                        spec.getRole("model.role.dragoon"));
+                    final int moves = dragoon.getMovesLeft();
+                    final List<String> log = new ArrayList<>();
+                    final FreeColClient fcc = fortifyClient(game, dutch, log, answer);
+                    final Unit.UnitState state = (sentry) ? Unit.UnitState.SENTRY
+                        : Unit.UnitState.FORTIFYING;
+                    final boolean done = fcc.getInGameController()
+                        .changeState(dragoon, state);
+                    final List<String> expected = new ArrayList<>();
+                    if (!war && !sentry) {
+                        expected.add((rule) ? "treaty " + montreal.getName()
+                            : "ask confirmHostile.peace");
+                    }
+                    if (answer || war || sentry) expected.add("changeState " + state);
+                    if (nextOnly) {
+                        // Land of no one next to the colony: only the rule asks.
+                        expected.clear();
+                        expected.add("treaty " + montreal.getName());
+                        expected.add("changeState " + state);
+                    }
+                    assertEquals(what, expected, log);
+                    assertEquals(what, answer || war || sentry, done);
+                    assertEquals(what, (done) ? state : Unit.UnitState.ACTIVE,
+                                 dragoon.getState());
+                    assertEquals(what, moves, dragoon.getMovesLeft());
+                }
+            }
+        } finally {
+            spec.setBoolean(net.sf.freecol.common.option.GameOptions
+                            .FORTIFY_DECLARES_WAR, false);
+        }
+    }
 }

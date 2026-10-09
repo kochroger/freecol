@@ -1371,6 +1371,27 @@ public class ServerPlayer extends Player implements TurnTaker {
      */
     public boolean csChangeStance(Stance stance, Player otherPlayer,
                                   boolean symmetric, ChangeSet cs) {
+        return csChangeStance(stance, otherPlayer, symmetric, true, cs);
+    }
+
+    /**
+     * Modifies stance, optionally without telling this player of the
+     * other player's side of a symmetric change: a war this player
+     * declares himself is no news to him (the original's treaty breach,
+     * clip opening_018: no notice at all, B3; FreeCol would tell him that
+     * the other nation "hat uns den Krieg erklärt").
+     *
+     * @param stance The new {@code Stance}.
+     * @param otherPlayer The {@code Player} wrt which the stance changes.
+     * @param symmetric If true, change the otherPlayer stance as well.
+     * @param tellThis If false, this player gets no message about the
+     *     other player's change.
+     * @param cs A {@code ChangeSet} to update.
+     * @return True if there was a change in stance at all.
+     */
+    public boolean csChangeStance(Stance stance, Player otherPlayer,
+                                  boolean symmetric, boolean tellThis,
+                                  ChangeSet cs) {
         boolean change = false;
         Stance old = getStance(otherPlayer);
 
@@ -1409,7 +1430,7 @@ public class ServerPlayer extends Player implements TurnTaker {
                 + " " + old + " -> " + stance
                 + " wrt " + getName() + " (symmetric)");
             ((ServerPlayer)otherPlayer).addStanceChange(this);
-            if (old != Stance.UNCONTACTED) {
+            if (old != Stance.UNCONTACTED && tellThis) {
                 cs.addMessage(this,
                     new ModelMessage(MessageType.FOREIGN_DIPLOMACY,
                                      stance.getStanceChangeKey(), otherPlayer)

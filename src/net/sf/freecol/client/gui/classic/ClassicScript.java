@@ -50,7 +50,8 @@ import javax.swing.KeyStroke;
  *       spec W20: what reacts to hover).</li>
  *   <li>{@code sclick <x> <y>}: a left click at a point of the open
  *       classic screen's own 320x200 canvas (the Europe screen: its ship
- *       in port, its Set Sail; also in a minimized run, whose screen never
+ *       in port, its Set Sail; the colony screen: a unit of its row,
+ *       clip 019; also in a minimized run, whose screen never
  *       painted); {@code sclick <x> <y> shift} with Shift held
  *       (a part of a hold, gap list B1).</li>
  *   <li>{@code tclick <x> <y>}: a left click on map tile (x, y) as the

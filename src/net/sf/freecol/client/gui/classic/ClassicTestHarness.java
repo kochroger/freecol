@@ -222,6 +222,9 @@ final class ClassicTestHarness {
         // So do the wood boxes over the Europe screen (B1).
         final ClassicAdvisorLayer europe = this.gui.europeBoxLayer();
         if (europe != null && europe.isBusy() && europe.isShowing()) return europe;
+        // And the unit boxes over the colony screen (clip 019).
+        final ClassicAdvisorLayer colony = this.gui.colonyBoxLayer();
+        if (colony != null && colony.isBusy() && colony.isShowing()) return colony;
         // So does the first scene: it holds the focus in a real game, but
         // a window minimized without activation has no focus owner, and
         // the keys would reach the map viewer behind it.
@@ -298,7 +301,10 @@ final class ClassicTestHarness {
         public String boxOnScreen() {
             return onEdt(() -> {
                     final ClassicAdvisorLayer l = gui.boxLayer();
-                    return (l == null || !l.isShowingBox()) ? null : l.probe();
+                    if (l != null && l.isShowingBox()) return l.probe();
+                    // A unit's box over the colony screen (clip 019).
+                    final ClassicAdvisorLayer c = gui.colonyBoxLayer();
+                    return (c == null || !c.isShowingBox()) ? null : c.probe();
                 }, null);
         }
 
@@ -409,6 +415,13 @@ final class ClassicTestHarness {
                         final Window s = gui.openScreen();
                         final java.awt.Container cp = (s instanceof JFrame)
                             ? ((JFrame) s).getContentPane() : null;
+                        if (cp instanceof ClassicColonyPanel) {
+                            // The colony screen (clip 019: a unit of its row).
+                            found[0] = true;
+                            ((ClassicColonyPanel)cp).paintTargets();
+                            ClassicFrameRecorder.event("sclick", x + "," + y + " -> colony");
+                            return;
+                        }
                         if (!(cp instanceof ClassicEuropePanel)) return;
                         found[0] = true;
                         final ClassicEuropePanel ep = (ClassicEuropePanel)cp;
@@ -422,7 +435,7 @@ final class ClassicTestHarness {
                 throw new ClassicScriptDriver.ScriptException("sclick: " + e.getCause());
             }
             if (!found[0]) {
-                throw new ClassicScriptDriver.ScriptException("no Europe screen to click");
+                throw new ClassicScriptDriver.ScriptException("no Europe or colony screen to click");
             }
             // The click itself is queued, as a real one: it may ask a box
             // (a modal loop) that the script answers.
@@ -430,7 +443,9 @@ final class ClassicTestHarness {
                     final Window s = gui.openScreen();
                     final java.awt.Container cp = (s instanceof JFrame)
                         ? ((JFrame) s).getContentPane() : null;
-                    if (cp instanceof ClassicEuropePanel) {
+                    if (cp instanceof ClassicColonyPanel) {
+                        ((ClassicColonyPanel)cp).clickAt(x, y);
+                    } else if (cp instanceof ClassicEuropePanel) {
                         ((ClassicEuropePanel)cp).clickAt(x, y, shift);
                     } else {
                         ClassicFrameRecorder.event("sclick", x + "," + y + " lost");

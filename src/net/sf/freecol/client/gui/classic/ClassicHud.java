@@ -1995,6 +1995,29 @@ final class ClassicHud {
     }
 
     /**
+     * A unit's icon in a unit box (clip 019 #959: the dragoon at box +
+     * (5,6); playthrough-2 #45170: the pioneer, his shadow 0 px) and in the
+     * colony screen's units (#1290: "-" and F alike): as on the map, its
+     * shadow included, but the flag's letter always black (V: the
+     * fortified dragoon's F is black there, dark orange on the map).
+     *
+     * @param g The graphics, in native pixels.
+     * @param font FONTTINY, or null (no letter).
+     * @param letter The flag letter.
+     * @param sp The sprite, at most 16x16, or null.
+     * @param fill The flag fill.
+     * @param unitRow The unit's NAMES.TXT {@code @UNIT} row, or -1.
+     * @param cellX The cell's left edge.
+     * @param cellY The cell's top edge.
+     */
+    static void paintBoxIcon(Graphics2D g, ClassicFont font, String letter,
+                             BufferedImage sp, int fill, int unitRow,
+                             int cellX, int cellY) {
+        paintIcon(g, font, letter, sp, fill, 0x000000, unitRow, cellX, cellY,
+                  NO_MARKER);
+    }
+
+    /**
      * Where a settlement sprite sits in its 16-px cell: centred, and a
      * wider one overhangs both sides (the landfall clip, #13302: the
      * 21-px village ICONS 011 at cell x - 2).

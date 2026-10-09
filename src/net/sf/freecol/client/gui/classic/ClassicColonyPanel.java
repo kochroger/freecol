@@ -242,6 +242,50 @@ final class ClassicColonyPanel extends JPanel {
     /** Run when the screen is dismissed (Escape / the exit button). */
     private final Runnable onClose;
 
+    /**
+     * What a click on a unit standing in the colony needs from the game's
+     * GUI (clip 019, {@link ClassicColonyUnits}): the row's order and the
+     * unit's options box over this screen.
+     */
+    interface Units {
+
+        /**
+         * The colony's row of units as the screen shows it
+         * ({@link ClassicColonyUnits#order}).
+         *
+         * @param standing The units standing in the colony, in the
+         *     tile's order.
+         * @return The row.
+         */
+        List<Unit> order(List<Unit> standing);
+
+        /**
+         * The unit's options box (@COLONYUNIT) over this screen, and what
+         * its answer does; returns when the box is closed.
+         *
+         * @param unit The unit clicked.
+         * @param first Whether it is the first unit of the row.
+         */
+        void options(Unit unit, boolean first);
+    }
+
+    /** The units' box, or null (then a click only selects, as before). */
+    private final Units units;
+
+    /**
+     * The units standing in the colony as last painted (the row), their
+     * cells parallel ({@link #paintPopulation}); a press on one selects it,
+     * the release on the same one opens its box.
+     */
+    private final List<Unit> bandUnits = new ArrayList<>();
+    private final List<Rectangle> bandBounds = new ArrayList<>();
+
+    /** The row's unit a press is on, waiting for its release, or null. */
+    private Unit pressedBand = null;
+
+    /** The flag letters' font (FONTTINY), or null without the pack. */
+    private final ClassicFont tiny;
+
     /** Cache of {@code BUILDING.SS} frames, loaded on demand. */
     private final Map<Integer, BufferedImage> buildingCache = new HashMap<>();
 
@@ -314,10 +358,26 @@ final class ClassicColonyPanel extends JPanel {
 
     ClassicColonyPanel(FreeColClient freeColClient, ImageLibrary lib,
                        Colony colony, Runnable onClose) {
+        this(freeColClient, lib, colony, onClose, null);
+    }
+
+    /**
+     * @param freeColClient The client.
+     * @param lib The images.
+     * @param colony The colony shown.
+     * @param onClose Run when the screen is dismissed.
+     * @param units What a click on a unit standing in the colony does, or
+     *     null (a click only selects it).
+     */
+    ClassicColonyPanel(FreeColClient freeColClient, ImageLibrary lib,
+                       Colony colony, Runnable onClose, Units units) {
         this.freeColClient = freeColClient;
         this.lib = lib;
         this.colony = colony;
         this.onClose = onClose;
+        this.units = units;
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        this.tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
         setOpaque(true);
         setBackground(Color.BLACK);
         setPreferredSize(new Dimension(VW * 3, VH * 3));
@@ -327,6 +387,11 @@ final class ClassicColonyPanel extends JPanel {
                 @Override
                 public void mousePressed(MouseEvent e) {
                     onClick(e);
+                }
+
+                @Override
+                public void mouseReleased(MouseEvent e) {
+                    onRelease(e);
                 }
             });
         addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
@@ -373,14 +438,77 @@ final class ClassicColonyPanel extends JPanel {
      * (see {@link #assignWork}).
      */
     private void onClick(MouseEvent e) {
-        final int vx = (e.getX() - this.originX) / this.scale;
-        final int vy = (e.getY() - this.originY) / this.scale;
+        pressAt((e.getX() - this.originX) / this.scale,
+                (e.getY() - this.originY) / this.scale);
+    }
+
+    /**
+     * The release of a press: on the unit of the colony's row the press
+     * selected, that unit's options box ({@link Units#options}; clip 019:
+     * the frame on the press #916, the box 0.6 s later, I: on the
+     * release).
+     */
+    private void onRelease(MouseEvent e) {
+        releaseAt((e.getX() - this.originX) / this.scale,
+                  (e.getY() - this.originY) / this.scale);
+    }
+
+    /**
+     * A click at a point of the 320x200 canvas, press and release (the
+     * acceptance harness's {@code sclick} on this screen).
+     *
+     * @param vx The x.
+     * @param vy The y.
+     */
+    void clickAt(int vx, int vy) {
+        pressAt(vx, vy);
+        releaseAt(vx, vy);
+    }
+
+    /**
+     * The unit of the colony's row at a canvas point: the topmost (the
+     * last drawn) where cells overlap.
+     *
+     * @param vx The x.
+     * @param vy The y.
+     * @return Its index in {@link #bandUnits}, or -1.
+     */
+    private int bandAt(int vx, int vy) {
+        for (int i = this.bandBounds.size() - 1; i >= 0; i--) {
+            if (this.bandBounds.get(i).contains(vx, vy)) return i;
+        }
+        return -1;
+    }
+
+    private void releaseAt(int vx, int vy) {
+        final Unit pressed = this.pressedBand;
+        this.pressedBand = null;
+        if (pressed == null || this.units == null) return;
+        final int i = bandAt(vx, vy);
+        if (i < 0 || this.bandUnits.get(i) != pressed) return;
+        ClassicFrameRecorder.event("colony-unit", "click " + pressed.getId()
+            + " cell=" + i + " state=" + pressed.getState());
+        this.units.options(pressed, i == 0);
+        refresh();
+    }
+
+    private void pressAt(int vx, int vy) {
+        this.pressedBand = null;
         if (this.constructionBounds.contains(vx, vy)) {
             this.freeColClient.getGUI().showBuildQueuePanel(this.colony);
             return;
         }
         if (vx >= WARE_W && vy >= WARE_Y) { close(); return; }
 
+        // A unit standing in the colony (the original's "Vorhandene
+        // Einheiten"): the press selects it, its release opens its box.
+        final int band = bandAt(vx, vy);
+        if (band >= 0 && this.units != null) {
+            this.pressedBand = this.bandUnits.get(band);
+            this.selectedUnit = this.pressedBand;
+            repaint();
+            return;
+        }
         for (int i = 0; i < this.unitBounds.size(); i++) {
             if (this.unitBounds.get(i).contains(vx, vy)) {
                 selectUnit(this.unitTargets.get(i));
@@ -709,6 +837,11 @@ final class ClassicColonyPanel extends JPanel {
                     paintProductionTag(g, ct.getProductionInfo(), sx + 1, sy + 1);
                 }
             }
+            // An enemy on the tile at war: his icon at cell + (4,4) with
+            // his flag (clip opening_018 #13962; the original's cells are
+            // 24 px, these 32).
+            final Unit enemy = occupier(t, this.colony.getOwner());
+            if (enemy != null) paintStanding(g, enemy, sx + 4, sy + 4);
         }
     }
 
@@ -757,22 +890,104 @@ final class ClassicColonyPanel extends JPanel {
         g.drawString((100 - sol) + "% (" + (count - rebels) + ")",
                      PANEL1_X + 62, PANEL_Y + 7);
 
+        this.bandUnits.clear();
+        this.bandBounds.clear();
         final Tile tile = this.colony.getTile();
         if (tile == null) return;
-        int x = PANEL1_X + 3;
+        final List<Unit> standing = new ArrayList<>();
         for (Unit u : tile.getUnitList()) {
-            if (u.isNaval()) continue;                 // ships go in the port
-            if (x > PANEL2_X - 16) break;
-            final BufferedImage img = this.lib.getScaledUnitImage(u);
-            if (img != null) drawFitted(g, img, x, PANEL_Y + 12, 16);
+            if (!u.isNaval()) standing.add(u);         // ships go in the port
+        }
+        final List<Unit> row = (this.units == null) ? standing
+            : this.units.order(standing);
+        final int pitch = bandPitch(row.size());
+        int x = PANEL1_X + 3;
+        for (Unit u : row) {
             final Rectangle r = new Rectangle(x, PANEL_Y + 12, 16, 16);
+            paintStanding(g, u, r.x, r.y);
             if (u == this.selectedUnit) {
                 g.setColor(PICKED);
                 g.drawRect(r.x, r.y, r.width - 1, r.height - 1);
             }
-            this.unitBounds.add(r);
-            this.unitTargets.add(u);
-            x += 12;
+            this.bandUnits.add(u);
+            this.bandBounds.add(r);
+            if (this.units == null) {
+                this.unitBounds.add(r);
+                this.unitTargets.add(u);
+            }
+            x += pitch;
+        }
+    }
+
+    /**
+     * The step between the cells of the colony's row: the original's 18
+     * px (clip 019 #1290: the dragoon from x 213, the artillery from 231,
+     * 249, 267), closer when more units stand there than 18 px cells fit
+     * in the band's left panel, so that every one stays in it and can be
+     * clicked (the topmost wins where cells overlap).
+     *
+     * @param n The number of units.
+     * @return The step, 18 at most, 1 at least.
+     */
+    static int bandPitch(int n) {
+        final int room = (PANEL2_X - 3) - (PANEL1_X + 3) - 16;
+        if (n <= 1) return BAND_PITCH;
+        return Math.max(1, Math.min(BAND_PITCH, room / (n - 1)));
+    }
+
+    /** The original's step between the units' cells (18 px). */
+    static final int BAND_PITCH = 18;
+
+    /**
+     * A unit standing in the colony: its map sprite with its order flag,
+     * the letter in black (clip 019 #1290: "F" and "-" alike black, the
+     * flag in the owner's colour), its shadow as on the map (I); without the pack's font the
+     * flag has no letter, without its sprite FreeCol's picture fitted.
+     */
+    private void paintStanding(Graphics2D g, Unit u, int x, int y) {
+        final BufferedImage img = (this.lib == null) ? null
+            : this.lib.getScaledUnitImage(u);
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        ClassicHud.paintBoxIcon(g, this.tiny,
+            ClassicHud.orderLetter(t, ClassicUnitCycle.ordersRowShown(u)),
+            (img == null) ? null : ClassicHud.fit16(img),
+            ClassicHud.nationRgb(u.getOwner()), ClassicHud.unitRow(u), x, y);
+    }
+
+    /**
+     * The enemy unit occupying a work tile of the colony at war, which no
+     * colonist can then work (clip opening_018 #13962: a French dragoon on
+     * Cotton Town's west tile, a French soldier on its south-east one,
+     * fortified or not): an offensive unit of a player at war with the
+     * colony's owner.  None at peace (I).
+     *
+     * @param t The work tile.
+     * @param owner The colony's owner.
+     * @return The unit, or null.
+     */
+    static Unit occupier(Tile t, Player owner) {
+        if (t == null || owner == null) return null;
+        for (Unit u : t.getUnitList()) {
+            final Player p = u.getOwner();
+            if (p != null && p != owner && u.isOffensiveUnit()
+                && owner.atWarWith(p)) return u;
+        }
+        return null;
+    }
+
+    /**
+     * Paint the units again into a picture nobody sees, so that the
+     * clickable places exist before the screen was ever painted (a
+     * minimized scripted run; the harness's {@code sclick}).
+     */
+    void paintTargets() {
+        final BufferedImage img = new BufferedImage(VW, VH, BufferedImage.TYPE_INT_RGB);
+        final Graphics2D g = img.createGraphics();
+        try {
+            this.scale = Math.max(1, this.scale);
+            paintCanvas(g);
+        } finally {
+            g.dispose();
         }
     }
 

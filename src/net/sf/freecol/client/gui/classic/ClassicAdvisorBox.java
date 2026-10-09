@@ -118,6 +118,14 @@ import java.util.Map;
  *       bar; typed characters edit it, Enter takes it, Escape keeps the
  *       default.  The @HOWMUCH boxes' "Menge:" is an amount field
  *       ({@link Field#amount}, V playthrough-1 #54344, gap list B1).</li>
+ *   <li><b>Unit boxes (V, clip 019 #959; playthrough-2 #45259; the
+ *       same layout as clip008's @EUROPEARM).</b>  A box about one unit
+ *       ({@link Request#unitIcon}, the colony's @COLONYUNIT) has no
+ *       portrait; the unit's own icon -- sprite, shadow and order flag
+ *       as on the map, the letter in black -- stands at box + (5,6), and
+ *       an icon column of {@link #ICON_COLUMN} px widens the box: prompt, rows and
+ *       the bar's left end move right by it, the bar's right end stays
+ *       (box (31,76,258,48), prompt at x 58, rows at x 62, bar x 57-284).</li>
  * </ul>
  */
 final class ClassicAdvisorBox {
@@ -133,6 +141,47 @@ final class ClassicAdvisorBox {
 
     /** The width FreeCol's own texts are laid out at (most GAME.TXT boxes). */
     static final int FREECOL_WIDTH = 230;
+
+    /**
+     * A unit box's icon column (V, clip 019 #959: the box 258 wide for
+     * @width 230, the prompt at box + 27, the rows at box + 31).
+     */
+    static final int ICON_COLUMN = 22;
+
+    /** Where a unit box's icon cell is: box + (5,6) (V, #959: x 36, y 82). */
+    static final int ICON_DX = 5, ICON_DY = 6;
+
+
+    /**
+     * The unit a unit box is about ({@link Request#unitIcon}): what its
+     * icon in the box is drawn from ({@link ClassicHud#paintBoxIcon}).
+     */
+    static final class UnitIcon {
+
+        /** The map sprite (at most 16x16), or null (the flag only). */
+        final BufferedImage sprite;
+
+        /** The flag's fill (the owner's colour). */
+        final int fill;
+
+        /** The flag's letter ({@code @ORDERS}), drawn in black. */
+        final String letter;
+
+        /** The unit's NAMES.TXT {@code @UNIT} row, or -1: the flag's side. */
+        final int unitRow;
+
+        UnitIcon(BufferedImage sprite, int fill, String letter, int unitRow) {
+            this.sprite = sprite;
+            this.fill = fill;
+            this.letter = (letter == null) ? "" : letter;
+            this.unitRow = unitRow;
+        }
+
+        @Override
+        public String toString() {
+            return "icon[row=" + this.unitRow + " letter=" + this.letter + "]";
+        }
+    }
 
 
     /** Who stands at the box, and where. */
@@ -645,6 +694,12 @@ final class ClassicAdvisorBox {
          */
         final Map<Character, Integer> letters;
 
+        /**
+         * The unit a unit box is about, with the icon column (the class
+         * comment's unit boxes), or null for every other box.
+         */
+        final UnitIcon unitIcon;
+
         private Request(Builder b) {
             this.id = b.id;
             final List<List<String>> ps = new ArrayList<>();
@@ -694,6 +749,12 @@ final class ClassicAdvisorBox {
                 if (e.getValue() >= 0 && e.getValue() < n) ls.put(e.getKey(), e.getValue());
             }
             this.letters = Collections.unmodifiableMap(ls);
+            this.unitIcon = b.unitIcon;
+        }
+
+        /** @return The icon column's width: {@link #ICON_COLUMN} for a unit box, else 0. */
+        int iconColumn() {
+            return (this.unitIcon == null) ? 0 : ICON_COLUMN;
         }
 
         /** @return Whether it has a name field ({@link #field}). */
@@ -764,7 +825,8 @@ final class ClassicAdvisorBox {
                 + (this.outsideCancels ? "" : " outside=stays")
                 + (this.escapes ? "" : " esc=stays")
                 + (isCheckbox() ? " checks=" + checkString(this.checks) : "")
-                + (hasField() ? " field=" + this.field.initial : "");
+                + (hasField() ? " field=" + this.field.initial : "")
+                + ((this.unitIcon == null) ? "" : " " + this.unitIcon);
         }
 
         /**
@@ -811,9 +873,22 @@ final class ClassicAdvisorBox {
         private Field field = null;
         private String fieldLabel = null;
         private final Map<Character, Integer> letters = new HashMap<>();
+        private UnitIcon unitIcon = null;
 
         private Builder(String id) {
             this.id = (id == null) ? "box" : id;
+        }
+
+        /**
+         * A unit box: the unit's icon in its column (the class comment's
+         * unit boxes).
+         *
+         * @param icon The unit's icon, or null for an ordinary box.
+         * @return This builder.
+         */
+        Builder unitIcon(UnitIcon icon) {
+            this.unitIcon = icon;
+            return this;
         }
 
         /**
@@ -1114,6 +1189,12 @@ final class ClassicAdvisorBox {
         /** The field's label line ("Name:"), or null. */
         final ClassicTextLayout.Line fieldLabel;
 
+        /** A unit box's icon column ({@link #ICON_COLUMN}), else 0. */
+        final int iconColumn;
+
+        /** A unit box's icon cell (box + (5,6)), or null. */
+        final Point iconAt;
+
         Layout(Request request, Rectangle box, List<ClassicTextLayout.Line> prompt,
                List<ClassicTextLayout.Line> rows, BufferedImage portrait,
                Point portraitAt, boolean under) {
@@ -1138,6 +1219,9 @@ final class ClassicAdvisorBox {
             this.fieldLabel = fieldLabel;
             this.request = request;
             this.box = box;
+            this.iconColumn = request.iconColumn();
+            this.iconAt = (request.unitIcon == null) ? null
+                : new Point(box.x + ICON_DX, box.y + ICON_DY);
             this.prompt = Collections.unmodifiableList(new ArrayList<>(prompt));
             this.rows = Collections.unmodifiableList(new ArrayList<>(rows));
             this.portrait = portrait;
@@ -1196,9 +1280,16 @@ final class ClassicAdvisorBox {
                                  this.portrait.getHeight()).contains(vx, vy);
         }
 
-        /** @return The bar's rectangle at row {@code i}. */
+        /**
+         * @return The bar's rectangle at row {@code i}; in a unit box its
+         *     left end moves right by the icon column, its right end stays
+         *     (V, clip 019 #959: x 57-284 in the box at 31, 258 wide).
+         */
         Rectangle barRect(int i) {
-            return ClassicMenuBox.barRect(this.box, promptLines(), i);
+            final Rectangle b = ClassicMenuBox.barRect(this.box, promptLines(), i);
+            b.x += this.iconColumn;
+            b.width -= this.iconColumn;
+            return b;
         }
 
         /** @return Everything the box paints: box and portrait. */
@@ -1367,7 +1458,9 @@ final class ClassicAdvisorBox {
         if (room < 0) return null;
         final boolean cut = p > room;
         if (cut) p = room;
-        final int w = width + 6, h = ClassicMenuBox.dialogHeight(p, rows) + foot;
+        // A unit box's icon column widens the box and moves the text.
+        final int col = r.iconColumn();
+        final int w = width + 6 + col, h = ClassicMenuBox.dialogHeight(p, rows) + foot;
         final Portrait who = r.portrait;
         final BufferedImage sprite = (who.sprite == null) ? null : portrait;
         final Point boxAt, picAt;
@@ -1399,7 +1492,7 @@ final class ClassicAdvisorBox {
         }
         final Rectangle box = new Rectangle(boxAt.x, boxAt.y, w, h);
         List<ClassicTextLayout.Line> prompt = lines(r, tiny, width,
-            ClassicMenuBox.promptX(box), ClassicMenuBox.promptTop(box, 0));
+            ClassicMenuBox.promptX(box) + col, ClassicMenuBox.promptTop(box, 0));
         if (cut) {
             prompt = new ArrayList<>(prompt.subList(0, p));
             if (p > 0) {
@@ -1410,8 +1503,8 @@ final class ClassicAdvisorBox {
         }
         final List<ClassicTextLayout.Line> rowLines = new ArrayList<>(rows);
         final List<ClassicTextLayout.Line> rightLines = new ArrayList<>(rows);
-        final int x = box.x + r.rowIndent;
-        final int max = box.width - r.rowIndent - 5;   // rowTextMaxWidth at x + 9
+        final int x = box.x + r.rowIndent + col;
+        final int max = box.width - r.rowIndent - col - 5;   // rowTextMaxWidth at x + 9
         final int bullet = r.isCheckbox()
             ? tiny.markedWidth(checkRow("", true)) : 0;
         for (int i = 0; i < rows; i++) {
@@ -1525,6 +1618,11 @@ final class ClassicAdvisorBox {
         }
         final ClassicMenuBox.Theme t = ClassicMenuBox.GAME;
         ClassicMenuBox.paintDialogFrame(g, l.box, t, wood);
+        final UnitIcon icon = l.request.unitIcon;
+        if (icon != null && l.iconAt != null) {
+            ClassicHud.paintBoxIcon(g, tiny, icon.letter, icon.sprite, icon.fill,
+                                    icon.unitRow, l.iconAt.x, l.iconAt.y);
+        }
         if (bar >= 0 && bar < l.rows.size()) {
             final Rectangle b = l.barRect(bar);
             g.setColor(t.dark);

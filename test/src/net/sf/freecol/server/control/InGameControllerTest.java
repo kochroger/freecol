@@ -61,6 +61,7 @@ import net.sf.freecol.common.model.TileImprovementType;
 import net.sf.freecol.common.model.TileType;
 import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
+import net.sf.freecol.common.model.Unit.UnitState;
 import net.sf.freecol.common.model.UnitChangeType;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.common.model.WorkLocation;
@@ -343,6 +344,135 @@ public class InGameControllerTest extends FreeColTestCase {
         } finally {
             spec.setBoolean(GameOptions.REVENGE_MODE, true);
         }
+    }
+
+    /**
+     * The original's treaty breach ({@code model.option.fortifyDeclaresWar},
+     * on in the levi rules; clip opening_018, B3), on both topologies: a
+     * human player's dragoon fortifying on the worked tile east of a
+     * French colony at peace declares war both ways, evicts the colony's
+     * worker and takes the tile as his land; he gets no notice that the
+     * French declared it (the French get theirs).  S there changes
+     * nothing; an AI's fortification declares nothing; without the rule
+     * FreeCol's (nothing at peace).  At war, a French soldier fortifying
+     * on our colony's worked tile evicts our worker and takes the tile
+     * (FreeCol: the tile loses its owner); our colony may claim it again
+     * once he has gone.
+     */
+    public void testFortifyBreaksTheTreaty() {
+        final Topology saved = Topology.current();
+        try {
+            for (Topology topology : new Topology[] { Topology.ISOMETRIC,
+                                                      Topology.SQUARE }) {
+                Topology.setCurrent(topology);
+                for (boolean rule : new boolean[] { true, false }) {
+                    final Game game = ServerTestHelper.startServerGame(
+                        getTestMap(plains));
+                    final Specification spec = game.getSpecification();
+                    assertFalse(spec.getBoolean(GameOptions.FORTIFY_DECLARES_WAR));
+                    spec.setBoolean(GameOptions.FORTIFY_DECLARES_WAR, rule);
+                    try {
+                        fortifyBreaksTheTreaty(game, topology + " rule=" + rule, rule);
+                    } finally {
+                        spec.setBoolean(GameOptions.FORTIFY_DECLARES_WAR, false);
+                        ServerTestHelper.stopServerGame();
+                    }
+                }
+            }
+        } finally {
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /** The lines of a change set that are a message to a player. */
+    private static int messages(net.sf.freecol.common.networking.ChangeSet cs,
+                                String id, Player to) {
+        int n = 0;
+        for (String line : cs.toString().split("\n")) {
+            if (line.contains(id) && line.contains(" to " + to.getId() + "]")) n++;
+        }
+        return n;
+    }
+
+    private void fortifyBreaksTheTreaty(Game game, String what, boolean rule) {
+        final Map map = game.getMap();
+        final InGameController igc = ServerTestHelper.getInGameController();
+        final ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+        final ServerPlayer french = getServerPlayer(game, "model.nation.french");
+        dutch.setAI(false);   // a human player (the test server has only AIs)
+        dutch.setStance(french, Stance.PEACE);
+        french.setStance(dutch, Stance.PEACE);
+        final Colony montreal = FreeColTestUtils.getColonyBuilder()
+            .player(french).colonyTile(map.getTile(5, 8)).initialColonists(2)
+            .build();
+        final Tile east = montreal.getTile().getNeighbourOrNull(Direction.E);
+        assertSame(what, montreal, east.getOwningSettlement());
+        final Unit worker = first(montreal.getUnitList());
+        worker.setLocation(montreal.getColonyTile(east));
+        assertTrue(what, montreal.isTileInUse(east));
+        final String declared = Stance.WAR.getStanceChangeKey();
+
+        // S next to the colony: nothing (Roger).
+        final ServerUnit dragoon = new ServerUnit(game, east, dutch,
+                                                  veteranType, dragoonRole);
+        igc.changeState(dutch, dragoon, UnitState.SENTRY);
+        assertEquals(what, Stance.PEACE, dutch.getStance(french));
+        assertTrue(what, montreal.isTileInUse(east));
+        dragoon.setState(UnitState.ACTIVE);
+
+        // The AI's own fortification declares nothing.
+        dutch.setAI(true);
+        igc.changeState(dutch, dragoon, UnitState.FORTIFYING);
+        assertEquals(what, Stance.PEACE, dutch.getStance(french));
+        assertTrue(what, montreal.isTileInUse(east));
+        assertSame(what, montreal, east.getOwningSettlement());
+        dragoon.setState(UnitState.ACTIVE);
+        dutch.setAI(false);
+
+        // F: "Friedensvertrag brechen." (the client asked first).
+        final net.sf.freecol.common.networking.ChangeSet cs
+            = igc.changeState(dutch, dragoon, UnitState.FORTIFYING);
+        assertEquals(what, UnitState.FORTIFYING, dragoon.getState());
+        if (!rule) {
+            // FreeCol: no war at peace, nothing taken.
+            assertEquals(what, Stance.PEACE, dutch.getStance(french));
+            assertEquals(what, Stance.PEACE, french.getStance(dutch));
+            assertTrue(what, montreal.isTileInUse(east));
+            assertSame(what, montreal, east.getOwningSettlement());
+        } else {
+            assertEquals(what, Stance.WAR, dutch.getStance(french));
+            assertEquals(what, Stance.WAR, french.getStance(dutch));
+            assertFalse(what, montreal.isTileInUse(east));
+            assertTrue(what, worker.isInColony());
+            assertSame(what, dutch, east.getOwner());
+            assertNull(what, east.getOwningSettlement());
+            assertEquals(what + " " + cs, 0, messages(cs, declared, dutch));
+            assertEquals(what + " " + cs, 1, messages(cs, declared, french));
+        }
+
+        // At war: a French soldier fortifies on our colony's worked tile.
+        dutch.setStance(french, Stance.WAR);
+        french.setStance(dutch, Stance.WAR);
+        final Colony base = FreeColTestUtils.getColonyBuilder()
+            .player(dutch).colonyTile(map.getTile(12, 8)).initialColonists(2)
+            .build();
+        final Tile west = base.getTile().getNeighbourOrNull(Direction.W);
+        assertSame(what, base, west.getOwningSettlement());
+        final Unit ourWorker = first(base.getUnitList());
+        ourWorker.setLocation(base.getColonyTile(west));
+        assertTrue(what, base.isTileInUse(west));
+        final ServerUnit frenchSoldier = new ServerUnit(game, west, french,
+                                                        veteranType, soldierRole);
+        assertTrue(what, west.isOccupied());
+        igc.changeState(french, frenchSoldier, UnitState.FORTIFYING);
+        assertFalse(what, base.isTileInUse(west));
+        assertSame(what, (rule) ? french : null, west.getOwner());
+        assertNull(what, west.getOwningSettlement());
+        assertEquals(what, Stance.WAR, dutch.getStance(french));
+        // Held against us while he is there; ours again when he has gone.
+        assertFalse(what, dutch.canClaimForSettlement(west));
+        frenchSoldier.setLocation(map.getTile(16, 8));
+        assertTrue(what, dutch.canClaimForSettlement(west));
     }
 
     public void testCreateMission() {

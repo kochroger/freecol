@@ -638,5 +638,124 @@ public class UnitTest extends FreeColTestCase {
                 assertFalse(type.hasMaximumAttrition());
             }
         }
-    }        
+    }
+
+    /**
+     * The colony whose treaty a fortification would break (the original's
+     * @HAVETREATY, clip opening_018, B3; {@code Unit.getFortifyWarColony}),
+     * on both topologies: only with the rules' treaty breach; an offensive
+     * land unit (the scout too, FreeCol's set) on a land tile next to a
+     * colony of a European at peace or cease fire with its owner, or on
+     * land such a colony owns (also beyond its neighbours); not next to
+     * our own colony, a native settlement, at war, in an alliance, for a
+     * colonist or a ship, nor without the rule.
+     */
+    public void testFortifyWarColony() {
+        final Specification spec = spec();
+        assertFalse("off in the freecol rules",
+            spec.getBoolean(net.sf.freecol.common.option.GameOptions.FORTIFY_DECLARES_WAR));
+        final Topology saved = Topology.current();
+        try {
+            for (Topology topology : new Topology[] { Topology.ISOMETRIC,
+                                                      Topology.SQUARE }) {
+                Topology.setCurrent(topology);
+                spec.setBoolean(net.sf.freecol.common.option.GameOptions
+                                .FORTIFY_DECLARES_WAR, true);
+                fortifyWarColony(topology.toString());
+            }
+        } finally {
+            spec.setBoolean(net.sf.freecol.common.option.GameOptions
+                            .FORTIFY_DECLARES_WAR, false);
+            Topology.setCurrent(saved);
+        }
+    }
+
+    private void fortifyWarColony(String what) {
+        final Game game = getStandardGame();
+        final Map map = getTestMap(plains, true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        final Player sioux = game.getPlayerByNationId("model.nation.sioux");
+        dutch.setStance(french, Stance.PEACE);
+        french.setStance(dutch, Stance.PEACE);
+        final Colony montreal = net.sf.freecol.util.test.FreeColTestUtils
+            .getColonyBuilder().player(french).colonyTile(map.getTile(5, 8))
+            .initialColonists(1).build();
+        final Tile east = montreal.getTile().getNeighbourOrNull(Direction.E);
+        final Tile ne = montreal.getTile().getNeighbourOrNull(Direction.NE);
+        assertNotNull(what, east);
+        assertSame(what, montreal, east.getOwningSettlement());
+
+        // The clip's case: a dragoon on the colony's own tile east of it.
+        final Unit dragoon = new ServerUnit(game, east, dutch,
+                                            veteranSoldierType, dragoonRole);
+        assertSame(what, montreal, dragoon.getFortifyWarColony());
+        // Next to it on land the colony does not own (ours, or no one's).
+        ne.changeOwnership(dutch, null);
+        final Unit soldier = new ServerUnit(game, ne, dutch, veteranSoldierType,
+                                            soldierRole);
+        assertSame(what, montreal, soldier.getFortifyWarColony());
+        ne.changeOwnership(null, null);
+        assertSame(what, montreal, soldier.getFortifyWarColony());
+        // The scout counts (FreeCol's offensive units; Roger's question 1).
+        final Unit scout = new ServerUnit(game, ne, dutch, colonistType, scoutRole);
+        assertTrue(what, scout.isOffensiveUnit());
+        assertSame(what, montreal, scout.getFortifyWarColony());
+        // Artillery counts; a colonist and a wagon do not.
+        assertSame(what, montreal,
+            new ServerUnit(game, ne, dutch, artilleryType).getFortifyWarColony());
+        assertNull(what, new ServerUnit(game, ne, dutch, colonistType)
+                   .getFortifyWarColony());
+        assertNull(what, new ServerUnit(game, ne, dutch, wagonType)
+                   .getFortifyWarColony());
+        // Land the colony owns two tiles away (beyond its neighbours).
+        final Tile far = east.getNeighbourOrNull(Direction.E);
+        far.changeOwnership(french, montreal);
+        final Unit farSoldier = new ServerUnit(game, far, dutch,
+                                               veteranSoldierType, soldierRole);
+        assertSame(what, montreal, farSoldier.getFortifyWarColony());
+        far.changeOwnership(null, null);
+        assertNull(what, farSoldier.getFortifyWarColony());
+
+        // A cease fire is a treaty too; war and alliance are not.
+        dutch.setStance(french, Stance.CEASE_FIRE);
+        assertSame(what, montreal, dragoon.getFortifyWarColony());
+        dutch.setStance(french, Stance.WAR);
+        assertNull(what, dragoon.getFortifyWarColony());
+        dutch.setStance(french, Stance.ALLIANCE);
+        assertNull(what, dragoon.getFortifyWarColony());
+        dutch.setStance(french, Stance.PEACE);
+
+        // The French at our own colony: theirs breaks theirs (the AI's
+        // question is the server's); our unit next to our colony nothing.
+        final Unit frenchSoldier = new ServerUnit(game, ne, french,
+            veteranSoldierType, soldierRole);
+        assertNull(what, frenchSoldier.getFortifyWarColony());
+        final Colony ours = net.sf.freecol.util.test.FreeColTestUtils
+            .getColonyBuilder().player(dutch).colonyTile(map.getTile(5, 13))
+            .initialColonists(1).build();
+        final Tile nextToOurs = ours.getTile().getNeighbourOrNull(Direction.E);
+        final Unit home = new ServerUnit(game, nextToOurs, dutch,
+                                         veteranSoldierType, soldierRole);
+        assertNull(what, home.getFortifyWarColony());
+        final Unit frenchAtOurs = new ServerUnit(game, nextToOurs, french,
+            veteranSoldierType, soldierRole);
+        assertSame(what, ours, frenchAtOurs.getFortifyWarColony());
+
+        // A native settlement is no colony: FreeCol's question there.
+        final IndianSettlement camp = new FreeColTestCase.IndianSettlementBuilder(game)
+            .player(sioux).settlementTile(map.getTile(12, 8)).build();
+        dutch.setStance(sioux, Stance.PEACE);
+        final Unit atCamp = new ServerUnit(game,
+            camp.getTile().getNeighbourOrNull(Direction.W), dutch,
+            veteranSoldierType, soldierRole);
+        assertNull(what, atCamp.getFortifyWarColony());
+
+        // Without the rule nothing breaks a treaty.
+        spec().setBoolean(net.sf.freecol.common.option.GameOptions
+                          .FORTIFY_DECLARES_WAR, false);
+        assertNull(what, dragoon.getFortifyWarColony());
+        assertNull(what, soldier.getFortifyWarColony());
+    }
 }

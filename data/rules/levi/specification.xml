@@ -93,6 +93,16 @@
              FreeCol (classic, freecol) takes the turn's moves. -->
         <booleanOption id="model.option.fortifyKeepsMoves"
                        defaultValue="true"/>
+        <!-- The original's treaty breach (clip opening_018, B3): F next
+             to a colony of a European we are at peace with asks
+             "Wir haben einen Friedensvertrag ..." (@HAVETREATY), and
+             "Friedensvertrag brechen." declares war at once; the
+             fortified unit occupies the tile, which becomes our land
+             ("Neuholland").  Only a human player's units; FreeCol
+             (classic, freecol): no war, an occupied tile loses its
+             owner. -->
+        <booleanOption id="model.option.fortifyDeclaresWar"
+                       defaultValue="true"/>
         <!-- The original's sailing time between Europe and the New
              World: two turns each way (landfall: off the map in 1503,
              in Amsterdam at the start of 1505; clip008: off the map in

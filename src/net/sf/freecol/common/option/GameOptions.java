@@ -80,6 +80,19 @@ public class GameOptions {
     public static final String FORTIFY_KEEPS_MOVES
         = "model.option.fortifyKeepsMoves";
 
+    /**
+     * The original's treaty breach (clip opening_018, B3): a human
+     * player's offensive unit that fortifies next to, or on the land of,
+     * a colony of a European he is at peace (or cease fire) with breaks
+     * the treaty, after the original's question; the server declares war
+     * and the fortified unit occupies the tile, which becomes the
+     * occupier's land ({@code Unit.getFortifyWarColony}).  On in the
+     * "levi" rules; rules and saves without it play as FreeCol does (no
+     * war, an occupied tile at war loses its owner).
+     */
+    public static final String FORTIFY_DECLARES_WAR
+        = "model.option.fortifyDeclaresWar";
+
     /** Do missionaries provide extra benefits. */
     public static final String ENHANCED_MISSIONARIES
         = "model.option.enhancedMissionaries";

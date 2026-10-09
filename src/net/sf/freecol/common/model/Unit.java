@@ -2043,6 +2043,56 @@ public class Unit extends GoodsLocation
     }
 
     /**
+     * The colony of another European player whose peace this unit's
+     * fortification here would break, with the rules' treaty breach
+     * ({@code GameOptions.FORTIFY_DECLARES_WAR}, the levi rules; the
+     * original's @HAVETREATY, clip opening_018: a dragoon east of
+     * Montreal, F, "Friedensvertrag brechen.", war at once).  The unit is
+     * an offensive land unit on a land tile; the colony owns that tile,
+     * or else stands on one of its neighbours (the first in the map's
+     * order); its owner is a European we are at peace or cease fire
+     * with.  Our own colonies, native settlements, a war or an alliance
+     * do not count.  Whose unit it is (a human's or the AI's) is the
+     * caller's concern.
+     *
+     * @return The colony, or null when fortifying here breaks no treaty.
+     */
+    public Colony getFortifyWarColony() {
+        final Tile tile = getTile();
+        final Player player = getOwner();
+        if (tile == null || !isOnTile() || !tile.isLand() || isNaval()
+            || player == null || !player.isEuropean() || !isOffensiveUnit()
+            || !getSpecification().getBoolean(GameOptions.FORTIFY_DECLARES_WAR)) {
+            return null;
+        }
+        final Settlement owning = tile.getOwningSettlement();
+        if (owning instanceof Colony && breaksTreaty((Colony)owning, player)) {
+            return (Colony)owning;
+        }
+        for (Tile t : tile.getSurroundingTiles(1)) {
+            final Colony c = t.getColony();
+            if (breaksTreaty(c, player)) return c;
+        }
+        return null;
+    }
+
+    /**
+     * Whether fortifying at a colony breaks a treaty of a player
+     * ({@link #getFortifyWarColony}).
+     *
+     * @param colony The colony, or null.
+     * @param player The fortifying unit's owner.
+     * @return True if the colony is another European's at peace or cease
+     *     fire with the player.
+     */
+    private static boolean breaksTreaty(Colony colony, Player player) {
+        final Player other = (colony == null) ? null : colony.getOwner();
+        if (other == null || other == player || !other.isEuropean()) return false;
+        final Stance stance = player.getStance(other);
+        return stance == Stance.PEACE || stance == Stance.CEASE_FIRE;
+    }
+
+    /**
      * Can this unit ambush another?
      *
      * @param defender The defending {@code Unit}.

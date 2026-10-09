@@ -3065,12 +3065,20 @@ public final class InGameController extends FreeColClientHolder {
         if (!unit.checkSetState(state)) return false;
 
         // Check if this is a hostile fortification, and give the player
-        // a chance to confirm.
+        // a chance to confirm.  With the rules' treaty breach (levi) a
+        // fortification next to a colony of a European we are at peace
+        // with asks first (the original's @HAVETREATY, B3); the server
+        // then declares the war.
         final Player player = getMyPlayer();
         if (state == UnitState.FORTIFYING && unit.isOffensiveUnit()
             && !unit.isOwnerHidden()) {
             Tile tile = unit.getTile();
-            if (tile != null && tile.getOwningSettlement() != null) {
+            final Colony warColony = unit.getFortifyWarColony();
+            if (warColony != null) {
+                if (!getGUI().confirmFortifyWar(unit, warColony)) {
+                    return false; // Aborted
+                }
+            } else if (tile != null && tile.getOwningSettlement() != null) {
                 Player enemy = tile.getOwningSettlement().getOwner();
                 if (player != enemy
                     && player.getStance(enemy) != Stance.ALLIANCE
