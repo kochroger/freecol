@@ -44,7 +44,7 @@ import net.sf.freecol.util.test.FreeColTestCase;
 
 /**
  * Buying and selling a part of a hold in Europe (gap list B1,
- * {@link ClassicTrade}): the plain click, the Shift click and its
+ * {@link ClassicTrade}): the plain drop, the Shift drop and its
  * {@code @HOWMUCH} boxes, {@code @TUTORIAL18}; their texts and boxes
  * against GAME.TXT and the playthrough-1 clip.
  */
@@ -221,9 +221,40 @@ public class ClassicTradeTest extends FreeColTestCase {
     }
 
     /**
-     * A click on a good in the hold sells all of it; Shift asks
-     * {@code @HOWMUCH5} with all of it as max and preset and sells the
-     * number, the goods still on the ship; Escape or 0 sells nothing.
+     * A hold dropped on the market sells all of it; Shift asks
+     * {@code @HOWMUCH5} with all of it as max and "100" as the preset
+     * (V clip 020 #24920: "(0-24)" with "100") and sells the number, the
+     * goods still on the ship; Enter on "100" over a smaller max sells all
+     * of it; Escape or 0 sells nothing.
+     */
+    public void testSellPresetIsAHundred() {
+        final Screen s = new Screen();
+        this.ship.addGoods(furs, 24);
+        final Goods g = this.ship.getCompactGoodsList().get(0);
+        s.answer = 100;                        // Enter on the preset
+        assertEquals(24, ClassicTrade.sell(this.dutch, g, true, s));
+        assertEquals(List.of("ask sell furs max=24 preset=100", "sell furs 24"), s.calls);
+        assertSame("all of it: the goods themselves", g, s.sold);
+        final ClassicAdvisorBox.Request r = ClassicTrade.howMuchRequest(
+            ClassicText.load(ClassicPackFiles.runtime()), false,
+            ClassicTrade.sellValues(null, furs, 3, this.dutch, 24), 24,
+            ClassicTrade.SELL_PRESET);
+        if (r == null) return;                 // no pack texts
+        assertEquals("100", r.field.initial);
+        final ClassicAdvisorBox.Bar bar = new ClassicAdvisorBox.Bar(r);
+        assertEquals(0, bar.enter());
+        assertEquals("Enter on 100 takes the max", 24, r.field.amount());
+        final ClassicAdvisorBox.Request b = ClassicTrade.howMuchRequest(
+            ClassicText.load(ClassicPackFiles.runtime()), true,
+            ClassicTrade.buyValues(null, tools, 2, this.ship, 30), 30, 100);
+        assertEquals("@HOWMUCH4 stays within its max", "30", b.field.initial);
+    }
+
+    /**
+     * A hold dropped on the market sells all of it; Shift asks
+     * {@code @HOWMUCH5} with all of it as max, "100" as the preset and
+     * sells the number, the goods still on the ship; Escape or 0 sells
+     * nothing.
      */
     public void testSell() {
         final Screen s = new Screen();

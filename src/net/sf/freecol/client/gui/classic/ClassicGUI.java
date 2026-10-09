@@ -2142,17 +2142,20 @@ public class ClassicGUI extends GUI {
     /**
      * What the wood boxes over a classic screen need: the Europe screen's
      * ({@link #europeBoxes}, gap list B1) and the colony screen's
-     * ({@link #colonyBoxes}, clip 019): the font and the wood; no
-     * portraits (the @HOWMUCH boxes, @TUTORIAL18 and @COLONYUNIT have
-     * none); the keys back to the screen when they are gone.
+     * ({@link #colonyBoxes}, clip 019): the font, the wood and the
+     * portraits (Europe's @SAILAWAY has the admiral, N1; the @HOWMUCH
+     * boxes, @TUTORIAL18 and @COLONYUNIT have none); the keys back to the
+     * screen when they are gone.
      */
     private final class ScreenBoxHost implements ClassicAdvisorLayer.Host {
 
+        private final ClassicPackFiles pack;
         private final ClassicFont tiny;
         private final BufferedImage wood;
         private final JComponent panel;
 
         ScreenBoxHost(ClassicPackFiles pack, JComponent panel) {
+            this.pack = pack;
             this.tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
             this.wood = (pack == null) ? null : pack.image(ClassicMenuBar.WOOD_KEY);
             this.panel = panel;
@@ -2170,12 +2173,16 @@ public class ClassicGUI extends GUI {
 
         @Override
         public BufferedImage portrait(String sprite) {
-            return null;
+            // The admiral of Europe's @SAILAWAY (N1), as the map's boxes.
+            return (this.pack == null || sprite == null) ? null
+                : this.pack.image(ClassicPackFiles.ssKey(sprite));
         }
 
         @Override
         public int[] portraitPalette(ClassicAdvisorBox.Portrait p) {
-            return null;
+            if (this.pack == null || p == null || p.sprite == null) return null;
+            return ClassicAdvisorBox.portraitPalette(
+                this.pack.indexSheet(p.sheet()), 0, portrait(p.sprite));
         }
 
         @Override
@@ -4831,8 +4838,9 @@ public class ClassicGUI extends GUI {
     /**
      * {@code @TUTORIAL17} once per game, {@link ClassicVoyages#TUTORIAL_MS}
      * after the game's first Europe screen is drawn, whatever opened it
-     * (U7), with Tutortips on; over the Europe window it is the stopgap's
-     * box.  Kept in the save ({@code Player.classicTips}).  EDT only.
+     * (U7), with Tutortips on: the wood box over the Europe screen
+     * ({@link #europeBox}; a key or a click closes it).  Kept in the save
+     * ({@code Player.classicTips}).  EDT only.
      */
     private void europeTip() {
         if (!isOpen(this.europeFrame)) return;
@@ -4854,7 +4862,10 @@ public class ClassicGUI extends GUI {
         if (r == null) return;   // no pack: FreeCol has no such tip
         markTip(me, ClassicBands.TUTORIAL_EUROPE_NUMBER);
         ClassicFrameRecorder.event("tip", ClassicBands.TUTORIAL_EUROPE);
-        this.prompter.ask(r);
+        // Over the Europe screen, on its own box layer (N1, prep R7): on
+        // the map's layer it stood behind Europe in a windowed game, and
+        // while unanswered it held Europe's close after the last ship.
+        europeBox(r);
     }
 
     /**

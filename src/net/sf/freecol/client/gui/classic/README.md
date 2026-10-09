@@ -3464,6 +3464,52 @@ success path is un-exercised beyond code review, though it is a one-line delegat
 thread above; the wood-framed dialog reskin (shared Phase-3 component, same as boarding); per-nation
 tints.
 
+### Part N1: the screen made usable, operated as the original (drag and drop)
+
+Roger, 2026-10-09 (his 1496 arrival): "In Europa kann ich gar nichts tun ... das Schiff kommt nie
+an". The N1 prep (`n/prep/europe.md`) found nothing blocking the input; the screen simply did
+nothing the original's way: no ship selected at opening (every market click and «Segel setzen» a
+silent no-op), the ship drawn in box 1 «Bald erwartet» without captions, the holds never filled, the
+colonists aboard drawn nowhere, no drag and drop (what @TUTORIAL17 tells the player to do). The
+click-to-select idiom of the two subsections above is replaced (`ClassicEuropePanel`,
+`ClassicEuropeOptions`):
+
+- **Places** (V clip008 `01-europe.md` §2.4-2.8, clip 020): captions in FONTTINY ink #348220 at
+  glyph tops 120/127 (LABELS `@MISC` «Bald erwartet», «Ziel:» + the New World's name, «Einladen:» +
+  the ship type or «Keine Schiffe im Hafen»; `captionX`, 5 of 6 clip positions exact, «Einladen:»
+  1 px right); ships in port 1:1 with their flag at (146 + 18i, 146), the selected one in an 18 x 18
+  green frame; the selected ship's six holds at (147 + 12k, 165): the units aboard first (their
+  sprite fitted into the hold, I), then the goods per 100 (ICONS.SS 022 + row, grey 038 + row below
+  100), crates (ICONS.SS.122) on holds the ship lacks, six without a ship (`holds`); the docks at
+  (233 + 17i, 138), three per row, the next row 23 px lower, the newest at the left, with their
+  flags; ships under way in box 1 (to Europe) / box 2 (to the New World) at box x + 1, y 146, their
+  passengers after them 17 px apart. The market row keeps the stopgap's plate, now with
+  "bid/ask"; the market cursor is a green 1-px frame. Icons and the backdrop are read through
+  `ClassicPackFiles.image`.
+- **Selection**: the first ship in port (that can sail) is selected at opening, after every change
+  and after a ship sailed (`selectedShip`); a click on another ship selects it.
+- **Mouse** (`pressAt` / `dragTo` / `releaseAt`; a drag starts once the pointer leaves what was
+  pressed; a drop back on it, or anywhere unlisted, does nothing):
+  ship in port → box 2 «Ziel:»: `@SAILAWAY` with the admiral (8 frames after the drop; Jawohl
+  sails, Nein and Escape nothing); ship of box 1 → box 2: turned back to the New World (server
+  `moveTo`); market slot → a ship in port or a hold: one hold bought (`ClassicTrade.buy`; Shift:
+  `@HOWMUCH4`); hold of goods → anywhere on the market row: sold (Shift: `@HOWMUCH5`, now preset
+  "100" over any "(0-max)", V clip 020 #24920; Enter on it sells the hold); a colonist's hold → the
+  docks: `leaveShip`; a dock colonist → a ship or a hold: `boardShip`. Clicks: the selected ship →
+  `@EUROPESHIPCLICK` (four rows: Nach vorne bewegen / Segel setzen / Alle Waren entladen / Keine
+  Veränderungen); a dock colonist → `@EUROPEARM` (the "S" on or off, muskets / tools / horses bought
+  or sold at the market's price through `equipUnitForRole`, missionary; I for every row but the
+  first, the seen colonist's); a market slot moves the cursor (no purchase); the buttons act on the
+  release. The stopgap's «Segel setzen» button stays.
+- **Keys**: Escape and E close; R / K / A and 1-3 the buttons; Enter the selected ship's box; U
+  sells its first hold.
+- **@TUTORIAL17** is a wood box over Europe (`europeBox`, prep R7: on the map's layer it stood behind
+  Europe in a windowed game and held Europe's close after the last ship).
+- Tests: `ClassicEuropePanelTest` (places, captions with the pack, holds; Roger's 1496 in port with
+  FreeCol's real client controller and a real server game, synthetic AWT mouse events: buy, Shift
+  buy, sell, Shift sell, leave and board, the dock box, the ship box, sail by the drop, the button,
+  turning a ship, recruit / train / purchase, keys), `ClassicTradeTest.testSellPresetIsAHundred`.
+
 ## Report screens (`ClassicReportPanel` + concrete reports)
 
 The original 1994 game's full-screen **advisor reports** (design ref: the

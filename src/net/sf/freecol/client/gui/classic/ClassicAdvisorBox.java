@@ -452,9 +452,26 @@ final class ClassicAdvisorBox {
          * @return The field.
          */
         static Field amount(int max, int preset) {
+            return amount(max, preset, false);
+        }
+
+        /**
+         * An amount field whose preset may lie past its "(0-max)": the
+         * original's {@code @HOWMUCH5} opens with "100" whatever the hold
+         * holds (V clip 020 #24920: "(0-24)", the field "100"); Enter on it
+         * takes the max ({@link #amount}).  Typing stays within 0..max.
+         *
+         * @param max The largest amount, the box's "(0-max)".
+         * @param preset The amount it opens with, selected.
+         * @param pastMax Whether the preset may exceed the max (it is
+         *     still at least 0); false clamps it to 0..max.
+         * @return The field.
+         */
+        static Field amount(int max, int preset, boolean pastMax) {
             final int m = Math.max(0, max);
-            return new Field(Integer.toString(Math.max(0, Math.min(m, preset))),
-                             AMOUNT_X, AMOUNT_W, m);
+            final int p = (pastMax) ? Math.max(0, preset)
+                : Math.max(0, Math.min(m, preset));
+            return new Field(Integer.toString(p), AMOUNT_X, AMOUNT_W, m);
         }
 
         /** @return Whether it is an amount field ({@link #amount}). */
@@ -1126,7 +1143,18 @@ final class ClassicAdvisorBox {
          * @param preset The amount it opens with.
          */
         Builder amountField(int max, int preset) {
-            this.field = Field.amount(max, preset);
+            return amountField(max, preset, false);
+        }
+
+        /**
+         * An amount field ({@link Field#amount(int, int, boolean)}).
+         *
+         * @param max The largest amount ("(0-max)").
+         * @param preset The amount it opens with.
+         * @param pastMax Whether the preset may exceed the max.
+         */
+        Builder amountField(int max, int preset, boolean pastMax) {
+            this.field = Field.amount(max, preset, pastMax);
             this.outsideCancels = false;
             return this;
         }

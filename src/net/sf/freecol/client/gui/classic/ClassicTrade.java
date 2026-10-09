@@ -52,16 +52,18 @@ import net.sf.freecol.common.model.Unit;
  *       the gold allows (72).  Enter buys the number; then N7's line and
  *       receipt (W22, not built).</li>
  * </ul>
- * Our Europe screen (a stopgap until W22) has clicks, not drags: a click
- * on a market slot with a ship selected is the drop, Shift+click the
- * Shift-drop; a click on a good in the hold sells it all, Shift+click
- * brings {@code @HOWMUCH5} (I, by analogy).  The preset is the
- * "(0-max)", as in the original: "100" for a free hold (Roger,
- * 2026-10-09: "Soll zuerst 100 im Feld stehen? Ja"; I: the rest of a
- * partly filled hold, the field never holds more than its max), and
- * all of it for {@code @HOWMUCH5}.  Escape, 0 or an empty field:
- * nothing, it costs nothing (Roger).  A number the gold cannot pay, the
- * preset included: nothing (the original's red line, W22, not built).
+ * Our Europe screen drags as the original does (N1): a market slot
+ * dropped on a ship in port or on the selected ship's holds is the drop,
+ * with Shift held the Shift-drop; a hold dropped on the market row sells
+ * it all, with Shift {@code @HOWMUCH5}.  {@code @HOWMUCH4}'s preset is
+ * its "(0-max)": "100" for a free hold (Roger, 2026-10-09: "Soll zuerst
+ * 100 im Feld stehen? Ja"; I: the rest of a partly filled hold, the
+ * field never holds more than its max).  {@code @HOWMUCH5}'s preset is
+ * "100" whatever the hold holds (V clip 020 #24920: "(0-24)" with "100"
+ * in the field); Enter on it sells all of the hold.  Escape, 0 or an
+ * empty field: nothing, it costs nothing (Roger).  A number the gold
+ * cannot pay, the preset included: nothing (the original's red line,
+ * W22, not built).
  */
 final class ClassicTrade {
 
@@ -73,6 +75,12 @@ final class ClassicTrade {
 
     /** GAME.TXT's amount boxes: buying in Europe, selling there. */
     static final String BUY_SECTION = "HOWMUCH4", SELL_SECTION = "HOWMUCH5";
+
+    /**
+     * {@code @HOWMUCH5}'s preset: "100", also over a smaller "(0-max)"
+     * (V clip 020 #24920: "(0-24)" with "100" in the field).
+     */
+    static final int SELL_PRESET = GoodsContainer.CARGO_SIZE;
 
     /** What a trade needs from the screen. */
     interface Trader {
@@ -146,7 +154,7 @@ final class ClassicTrade {
     }
 
     /**
-     * A click (the drop) on a market slot with a ship selected (class
+     * A market slot dropped on a ship in port or its holds (class
      * comment).
      *
      * @param p Our player.
@@ -177,8 +185,9 @@ final class ClassicTrade {
     }
 
     /**
-     * A click on a good in the selected ship's hold: all of it is sold;
-     * with Shift, {@code @HOWMUCH5} asks how much (preset: all of it).
+     * A hold of the selected ship dropped on the market row: all of it
+     * is sold; with Shift, {@code @HOWMUCH5} asks how much (preset
+     * {@link #SELL_PRESET}; Enter on it sells all of it).
      *
      * @param p Our player.
      * @param goods The goods in the hold (located on the ship).
@@ -192,7 +201,7 @@ final class ClassicTrade {
         if (!shift) return (t.sell(goods)) ? goods.getAmount() : 0;
         if (p != null && !p.canTrade(goods.getType())) return 0;
         final int max = goods.getAmount();
-        final int n = Math.min(max, t.ask(false, goods.getType(), max, max));
+        final int n = Math.min(max, t.ask(false, goods.getType(), max, SELL_PRESET));
         if (n <= 0) return 0;                  // Escape, 0, empty: nothing
         final Goods part = (n == max) ? goods
             : new Goods(goods.getGame(), goods.getLocation(), goods.getType(), n);
@@ -281,7 +290,9 @@ final class ClassicTrade {
     /**
      * A {@code @HOWMUCH} box (V #54344: (42,79,236,43), no portrait, the
      * field "Menge:" at box + (33, 24), its preset selected), coming
-     * {@link #HOWMUCH_MS} after the click.
+     * {@link #HOWMUCH_MS} after the drop.  {@code @HOWMUCH5}'s preset may
+     * lie past its "(0-max)" ({@link #SELL_PRESET}), {@code @HOWMUCH4}'s
+     * is clamped to it.
      *
      * @param t The original texts, or null.
      * @param buying True for {@code @HOWMUCH4}, false for {@code @HOWMUCH5}.
@@ -297,7 +308,7 @@ final class ClassicTrade {
         final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText(
             s, (t == null) ? null : t.message(s), values);
         return (b == null) ? null : b.portrait(ClassicAdvisorBox.Portrait.NONE)
-            .amountField(max, preset).openDelay(HOWMUCH_MS)
+            .amountField(max, preset, !buying).openDelay(HOWMUCH_MS)
             .stopgap(Messages.message("classic.dialog.messages"), null).build();
     }
 }
