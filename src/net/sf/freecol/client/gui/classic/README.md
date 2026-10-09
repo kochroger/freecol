@@ -1324,16 +1324,26 @@ still ends by itself 485 ms after the last change (#691, #1834, #4680).
   goto order first (`ClassicGUI.cancelsGotoOnClick`: a unit on the map, not
   aboard, with a destination and no trade route; `cancelGoto` ->
   `InGameController.cancelGotoOrders`, the server's destination change with
-  no choice of the next unit); the unit stays where it is, keeps its moves
-  and comes up as any clicked unit, so the cycle no longer runs it. In the
+  no choice of the next unit); the unit stays where it is and keeps its
+  moves, and the cycle no longer runs it. **While another of our units is
+  up** (N3, Roger 2026-10-09 09:50: "Wenn ein "G" abgebrochen wird, geht das
+  Spiel einfach sofort dort weiter, wo ich vorher gespielt habe (das wäre:
+  Schiff ist am Zug)"; his recording `our-recordings\2026-10-09_0943`, turn 5:
+  the soldier's G cancelled by a click while the ship was up, the soldier
+  came up with no moves and the ship only 6 s later) that is all: the
+  unit up stays up, keeps blinking and keeps its moves, and the view stays
+  where it is (`ClassicGUI.otherUnitUp`); the freed unit takes orders now
+  and comes later in the cycle if it has moves, else at the next turn start.
+  With no unit up (the terrain view) it comes up as any clicked unit. In the
   Spielzugende mode the same with moves left (`takesPromptClick`); without
   them the order goes and the mode stays (`gotoCancelledInPrompt`; I), so a
   unit on its way can be stopped before the next turn's cycle runs it.
   A unit on a trade route (T) keeps its route and its next stop: Roger's
   rule names G only, and the click is the one before part L (the fixer of
   part L; a click just to look at a wagon train took its route off).
-  Recorder event `click-goto-cancel`. Tests:
-  `ClassicMapViewerTest.testAClickCancelsTheGotoOrder`.
+  Recorder event `click-goto-cancel` (with ` up=<unit> stays` for N3). Tests:
+  `ClassicMapViewerTest.testAClickCancelsTheGotoOrder`,
+  `ClassicMapViewerTest.testAClickCancellingAGotoKeepsTheUnitUp`.
 - **A load with nothing to move** (J3; the review of part I): the view opens
   with no unit when FreeCol's saved active unit (`restoreActiveUnit`, any
   state) is sentried, fortified or out of moves (`ClassicGUI.firstUnit`:

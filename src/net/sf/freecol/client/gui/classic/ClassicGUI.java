@@ -2950,16 +2950,33 @@ public class ClassicGUI extends GUI {
      * (G) loses it the same way, first (Roger, 2026-10-08: "Wenn ich eine
      * Entität mit G auf einen Weg geschickt habe, kann ich seinen Weg
      * später unterbrechen, indem ich mit der Maus auf die Entität
-     * klicke"; part L): it stays where it is, keeps its moves and comes
-     * up as any unit clicked ({@link #cancelsGotoOnClick}).
+     * klicke"; part L): it stays where it is and keeps its moves
+     * ({@link #cancelsGotoOnClick}).  While another of our units is up the
+     * click does nothing more (Roger, 2026-10-09 09:50: "Wenn ein "G"
+     * abgebrochen wird, geht das Spiel einfach sofort dort weiter, wo ich
+     * vorher gespielt habe (das wäre: Schiff ist am Zug)"; part N3): that
+     * unit stays up, keeps blinking and keeps its moves, and the view stays
+     * where it is; the freed unit comes later in the unit cycle when it
+     * has moves (it takes orders now, {@link ClassicUnitCycle#kind}), else
+     * at the next turn start.  With no unit up (the terrain view; the
+     * Spielzugende mode, {@code ClassicMapViewer.clickOn}) it comes up as
+     * any unit clicked, as part L built.
      *
      * @param unit The unit clicked.
      */
     void unitClicked(Unit unit) {
         if (cancelsGotoOnClick(unit)) {
+            final Unit up = otherUnitUp(unit);
+            final boolean stays = up != null && !wakesOnClick(unit);
             ClassicFrameRecorder.event("click-goto-cancel", unit.getId()
-                + " moves=" + unit.getMovesLeft() + " to=" + unit.getDestination());
+                + " moves=" + unit.getMovesLeft() + " to=" + unit.getDestination()
+                + ((stays) ? " up=" + up.getId() + " stays" : ""));
             cancelGoto(unit);
+            if (stays) {
+                // The order's letter goes from the map at once.
+                if (this.mapViewer != null) this.mapViewer.repaint();
+                return;
+            }
         }
         if (wakesOnClick(unit)) {
             ClassicFrameRecorder.event("click-wake", unit.getId() + " " + unit.getState());
@@ -2971,6 +2988,24 @@ public class ClassicGUI extends GUI {
             }
         }
         changeView(unit, true, "click");
+    }
+
+    /**
+     * The unit up on the map besides the one clicked, which a click that
+     * cancels a goto order leaves up ({@link #unitClicked}, N3): the move
+     * view's active unit, of the clicked unit's owner.
+     *
+     * @param clicked The unit clicked.
+     * @return The other unit up, or null if none is (the terrain view, the
+     *     end view, the Spielzugende mode) or the clicked unit is.
+     */
+    private Unit otherUnitUp(Unit clicked) {
+        final ClassicMapViewer mv = this.mapViewer;
+        if (mv == null || clicked == null
+            || mv.getViewMode() != ViewMode.MOVE_UNITS) return null;
+        final Unit up = mv.getActiveUnit();
+        return (up == null || up == clicked || up.isDisposed()
+                || up.getOwner() != clicked.getOwner()) ? null : up;
     }
 
     /**
@@ -2994,8 +3029,8 @@ public class ClassicGUI extends GUI {
      * Cancel a unit's goto order: the controller's
      * {@code cancelGotoOrders}, on the server (its destination and trade
      * route go; its moves and place stay), with no choice of the next
-     * unit (the click brings the unit up itself).  Overridden by the
-     * tests.
+     * unit (the click brings the unit up itself, or leaves the unit up as
+     * it is, N3).  Overridden by the tests.
      *
      * @param unit The unit.
      */

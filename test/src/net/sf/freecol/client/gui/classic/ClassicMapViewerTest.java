@@ -497,11 +497,23 @@ public class ClassicMapViewerTest extends FreeColTestCase {
         try {
             mv.setFocus(sea);
             mv.changeToMoveUnits(ship);
-            // Outside the mode, another unit up: the order goes, then up.
+            // Outside the mode, another unit up: the order goes, and the
+            // unit up stays up (N3, testAClickCancellingAGotoKeepsTheUnitUp).
             mv.clickOn(land, dutch);
             assertEquals(List.of("cancel " + target + " active=" + ship), log);
             assertNull(scout.getDestination());
             assertSame(land, scout.getTile());
+            assertEquals(moves, scout.getMovesLeft());
+            assertSame(ship, mv.getActiveUnit());
+            // Outside the mode with no unit up (the terrain view): the
+            // order goes, then up (part L).
+            mv.changeToTerrain(sea);
+            assertNull(mv.getActiveUnit());
+            scout.setDestination(target);
+            log.clear();
+            mv.clickOn(land, dutch);
+            assertEquals(List.of("cancel " + target + " active=null"), log);
+            assertNull(scout.getDestination());
             assertEquals(moves, scout.getMovesLeft());
             assertSame(scout, mv.getActiveUnit());
 
@@ -554,6 +566,108 @@ public class ClassicMapViewerTest extends FreeColTestCase {
             assertTrue(log.toString(), log.isEmpty());
             assertSame(route, scout.getTradeRoute());
             assertSame(target, scout.getDestination());
+        } finally {
+            mv.dispose();
+        }
+    }
+
+    /**
+     * N3 (Roger, 2026-10-09 09:50: "Wenn ich das "G" beim Soldaten
+     * abgebrochen habe, müsste nachher direkt wieder das Schiff am Zug
+     * sein (blinken) ... Wenn ein "G" abgebrochen wird, geht das Spiel
+     * einfach sofort dort weiter, wo ich vorher gespielt habe"), his
+     * sequence in our-recordings 2026-10-09_0943, turn 5: the soldier's G
+     * to New Amsterdam took its one step (moves 0), the ship came up with
+     * its 15 moves, a minimap click showed the soldier, and a click on
+     * him cancelled the order (frame 5880).  Before, the soldier came up
+     * with no moves and the ship only 6 s later.  Now the order goes and
+     * nothing else changes: the ship stays up with its moves and the view
+     * stays; the soldier is not due this turn.  A goto unit with moves
+     * (its goto not run yet) is freed the same way and comes later in the
+     * cycle, after the ship.
+     */
+    public void testAClickCancellingAGotoKeepsTheUnitUp() {
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Tile land = map.getTile(5, 7), sea = map.getTile(15, 7);
+        final Tile land2 = map.getTile(4, 9);
+        final Tile colony = map.getTile(2, 7);
+        final Unit ship = new ServerUnit(game, sea, dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final Unit soldier = new ServerUnit(game, land, dutch,
+            spec().getUnitType("model.unit.veteranSoldier"));
+        final Unit scout = new ServerUnit(game, land2, dutch,
+            spec().getUnitType("model.unit.seasonedScout"));
+        final int shipMoves = ship.getMovesLeft() - 3;   // one step sailed
+        ship.setMovesLeft(shipMoves);
+        // The soldier's goto ran this turn: one step, no moves left.
+        soldier.setDestination(colony);
+        soldier.setMovesLeft(0);
+
+        final List<String> log = new ArrayList<>();
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                boolean turnPrompt() {
+                    return false;
+                }
+
+                @Override
+                void cancelGoto(Unit u) {   // the server's change
+                    log.add("cancel " + u.getId() + " active="
+                            + mapViewer.getActiveUnit().getId());
+                    u.setDestination(null);
+                }
+            };
+        gui.unitCycle.ran(soldier);
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        try {
+            mv.setFocus(sea);
+            mv.changeToMoveUnits(ship);
+            // The minimap click: the view goes to the soldier, the ship
+            // stays up.
+            mv.setFocus(land);
+            final Tile focus = mv.getFocus();
+            assertSame(ship, mv.getActiveUnit());
+
+            mv.clickOn(land, dutch);
+            assertEquals(List.of("cancel " + soldier.getId()
+                                 + " active=" + ship.getId()), log);
+            assertNull(soldier.getDestination());
+            assertSame(land, soldier.getTile());
+            assertEquals(0, soldier.getMovesLeft());
+            // The ship is still up, in the move view, with its moves; the
+            // view did not move.
+            assertSame(ship, mv.getActiveUnit());
+            assertSame(GUI.ViewMode.MOVE_UNITS, mv.getViewMode());
+            assertEquals(shipMoves, ship.getMovesLeft());
+            assertSame(focus, mv.getFocus());
+            // With no moves the soldier is not due this turn.
+            assertNull(gui.unitCycle.kind(soldier));
+
+            // A goto unit with moves, its goto not run yet: freed, not up;
+            // it takes orders now and comes after the ship.
+            scout.setDestination(colony);
+            final int scoutMoves = scout.getMovesLeft();
+            assertTrue(scoutMoves > 0);
+            assertSame(ClassicUnitCycle.Kind.GOTO, gui.unitCycle.kind(scout));
+            log.clear();
+            mv.clickOn(land2, dutch);
+            assertEquals(List.of("cancel " + scout.getId()
+                                 + " active=" + ship.getId()), log);
+            assertNull(scout.getDestination());
+            assertEquals(scoutMoves, scout.getMovesLeft());
+            assertSame(ship, mv.getActiveUnit());
+            assertSame(ClassicUnitCycle.Kind.ORDERS, gui.unitCycle.kind(scout));
+            assertSame(scout, gui.unitCycle.next(ship, dutch));
+
+            // A click on a unit with no order still brings it up (J2).
+            log.clear();
+            mv.clickOn(land2, dutch);
+            assertTrue(log.toString(), log.isEmpty());
+            assertSame(scout, mv.getActiveUnit());
         } finally {
             mv.dispose();
         }

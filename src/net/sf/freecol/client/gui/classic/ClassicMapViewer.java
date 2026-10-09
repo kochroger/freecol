@@ -2659,7 +2659,8 @@ final class ClassicMapViewer extends JPanel {
             // Our unit active, freed first if it was fortified or sentried
             // and can move (ClassicGUI.wakesOnClick), its goto order gone
             // (ClassicGUI.cancelsGotoOnClick, part L); the unit cycle goes
-            // on after it (W5f).
+            // on after it (W5f).  A goto unit clicked while another unit
+            // is up only loses its order: the unit up stays (N3).
             this.gui.unitClicked(unit);
         } else if (unit != null) { // Someone else's unit: select the tile
             this.gui.setFocus(tile);
