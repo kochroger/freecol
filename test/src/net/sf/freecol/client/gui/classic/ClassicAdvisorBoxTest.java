@@ -112,7 +112,8 @@ public class ClassicAdvisorBoxTest extends TestCase {
             arawak = ClassicAdvisorBox.Portrait.chief(2),
             sioux = ClassicAdvisorBox.Portrait.chief(6),
             iroquois = ClassicAdvisorBox.Portrait.chief(3),
-            apache = ClassicAdvisorBox.Portrait.chief(5);
+            apache = ClassicAdvisorBox.Portrait.chief(5),
+            inca = ClassicAdvisorBox.Portrait.chief(0);
         final Object[][] boxes = {
             // who, pw, ph, @width, P, R, @y, box x, y, w, h, pic x, y
             { "TUTORIAL1", a, 75, 91, 230, 5, 0, null, 44, 112, 236, 48, 40, 41 },
@@ -154,6 +155,15 @@ public class ClassicAdvisorBoxTest extends TestCase {
             { "Apache CHIEFHOWDY #47458", apache, 114, 142, 230, 4, 0, null,
               84, 79, 236, 42, 0, 28 },
             { "Apache 3 lines", apache, 114, 142, 230, 3, 0, null, 84, 82, 236, 36, 0, 28 },
+            // N7, playthrough-2 (00-index section 0.2): the Inca chief at
+            // the left at (6,19), his box at x 78; the King's 306 wide box.
+            { "Inca WELCOME #9701", inca, 66, 160, 230, 5, 2, null,
+              78, 68, 236, 64, 6, 19 },
+            { "Inca PEACE #9913", inca, 66, 160, 230, 3, 0, null,
+              78, 82, 236, 36, 6, 19 },
+            { "Inca CHIEFHOWDY #15301", inca, 66, 160, 230, 4, 0, null,
+              78, 79, 236, 42, 6, 19 },
+            { "KINGNAVACT #34353", k, 79, 161, 300, 4, 2, null, 14, 71, 306, 58, 0, 18 },
         };
         final ClassicFont f = font();
         for (Object[] b : boxes) {
@@ -733,8 +743,8 @@ public class ClassicAdvisorBoxTest extends TestCase {
         assertSame(ClassicAdvisorBox.Portrait.NONE, ClassicAdvisorBox.Portrait.chief(8));
         assertSame(ClassicAdvisorBox.Portrait.NONE, ClassicAdvisorBox.Portrait.chief(-1));
         assertNull(ClassicAdvisorBox.Portrait.NONE.sheet());
-        // Q11: the chief's side by tribe (V 2, 3, 5, 6; the parity I).
-        final boolean[] left = { false, true, false, true, false, true, false, true };
+        // Q11, N7: the chief's side by tribe (V 0, 2, 3, 5, 6; 1, 4, 7 I).
+        final boolean[] left = { true, true, false, true, false, true, false, true };
         for (int tribe = 0; tribe < 8; tribe++) {
             final ClassicAdvisorBox.Portrait p = ClassicAdvisorBox.Portrait.chief(tribe);
             assertEquals("tribe " + tribe, left[tribe], p.left);
@@ -760,6 +770,23 @@ public class ClassicAdvisorBoxTest extends TestCase {
             sprite(100, 160));
         assertEquals(new Point(0, 19), aztec.portraitAt);
         assertEquals(new Rectangle(84, 82, 236, 36), aztec.box);
+        // N7: at the left x = max(0, 72 - pw), the box min(320 - w, x + pw + 6),
+        // checked against every measured left portrait (Inca 66, Iroquois
+        // 87, Apache 114, the King 79 with a 236 and a 306 wide box).
+        assertEquals(6, ClassicAdvisorBox.Portrait.leftX(66));
+        assertEquals(78, ClassicAdvisorBox.Portrait.leftBoxX(66, 236));
+        assertEquals(0, ClassicAdvisorBox.Portrait.leftX(87));
+        assertEquals(84, ClassicAdvisorBox.Portrait.leftBoxX(87, 236));
+        assertEquals(0, ClassicAdvisorBox.Portrait.leftX(114));
+        assertEquals(84, ClassicAdvisorBox.Portrait.leftBoxX(114, 236));
+        assertEquals(0, ClassicAdvisorBox.Portrait.leftX(79));
+        assertEquals(84, ClassicAdvisorBox.Portrait.leftBoxX(79, 236));
+        assertEquals(14, ClassicAdvisorBox.Portrait.leftBoxX(79, 306));
+        // The unseen left chiefs (I): the Aztec (68 wide) and the Tupi (56).
+        assertEquals(4, ClassicAdvisorBox.Portrait.leftX(68));
+        assertEquals(78, ClassicAdvisorBox.Portrait.leftBoxX(68, 236));
+        assertEquals(16, ClassicAdvisorBox.Portrait.leftX(56));
+        assertEquals(78, ClassicAdvisorBox.Portrait.leftBoxX(56, 236));
     }
 
     /**
@@ -1531,18 +1558,7 @@ public class ClassicAdvisorBoxTest extends TestCase {
      * excused.
      */
     public void testChiefsAgainstPlaythrough1() throws Exception {
-        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
-        final File dir = (clips == null) ? null : new File(clips, "playthrough-1");
-        final ClassicPackFiles pack = ClassicPackFiles.runtime();
-        final ClassicText t = ClassicText.load(pack);
-        final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
-        if (dir == null || !dir.isDirectory() || t == null || tiny == null) {
-            System.err.println(getClass().getSimpleName()
-                + ": playthrough-1 chiefs skipped, no recordings or no pack");
-            return;
-        }
-        final BufferedImage wood = pack.image(ClassicMenuBar.WOOD_KEY);
-        final Object[][] cases = {
+        chiefsAgainst("playthrough-1", new Object[][] {
             // frame, section, values, tribe, bar, box, chief
             { 4742, "INDIANWELCOME", "STRING0=Irokesen;NUMBER0=18;STRING1=Dörfer", 3, 0,
               new Rectangle(84, 68, 236, 64), new Point(0, 11) },
@@ -1553,7 +1569,124 @@ public class ClassicAdvisorBoxTest extends TestCase {
             { 47458, "CHIEFHOWDY", "STRING0=Kampferprobte Späher;STRING1=Rum;"
               + "STRING2=Nahrungsmittel;STRING3=Pferde", 5, -1,
               new Rectangle(84, 79, 236, 42), new Point(0, 28) },
+        });
+    }
+
+    /**
+     * Part N7 golden (the pack and {@code -Dclassic.clips}): the Inca
+     * chief (IND0A0, 66x160) at the left at (6,19), his box at x 78, not
+     * flush right, over playthrough-2's frames: @INDIANWELCOME #9701,
+     * @INDIANPEACE #9913, @CHIEFHOWDY #15301; 0 px off as above.
+     */
+    public void testIncaAgainstPlaythrough2() throws Exception {
+        chiefsAgainst("playthrough-2", new Object[][] {
+            // frame, section, values, tribe, bar, box, chief
+            { 9701, "INDIANWELCOME", "STRING0=Inka;NUMBER0=7;STRING1=Städte", 0, 0,
+              new Rectangle(78, 68, 236, 64), new Point(6, 19) },
+            { 9913, "INDIANPEACE", "STRING0=Inka;STRING1=Holl.", 0, -1,
+              new Rectangle(78, 82, 236, 36), new Point(6, 19) },
+            { 15301, "CHIEFHOWDY", "STRING0=Erfahr. Silber-Bergarb.;STRING1=Werkzeuge;"
+              + "STRING2=Handelswaren;STRING3=Rum", 0, -1,
+              new Rectangle(78, 79, 236, 42), new Point(6, 19) },
+        });
+    }
+
+    /**
+     * Part N7 golden for the King, the fourth measured portrait at the
+     * left (the pack and {@code -Dclassic.clips}): the rule x = max(0, 72
+     * - 79) = 0, box x = min(320 - w, 85) puts him at (0,18) and his box at
+     * 84 (clip005 #17640, 236 wide) and at 14 (playthrough-2 #34395, 306
+     * wide, before the gesture).  Checked pixel by pixel: every opaque
+     * pixel of KING.SS.000 (with KING2.SS.000, his hand at rest, over him)
+     * the box does not cover is the frame's, and the
+     * box's outer ring as we draw it is the frame's (its place and size),
+     * 0 px off.
+     */
+    public void testKingAgainstTheClips() throws Exception {
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
+        final BufferedImage king = (pack == null) ? null
+            : pack.image(ClassicPackFiles.ssKey(ClassicAdvisorBox.Portrait.KING.sprite));
+        if (clips == null || tiny == null || king == null) {
+            System.err.println(getClass().getSimpleName()
+                + ": King placement golden skipped, no recordings or no pack");
+            return;
+        }
+        final BufferedImage wood = pack.image(ClassicMenuBar.WOOD_KEY);
+        final BufferedImage hand = pack.image(ClassicPackFiles.ssKey("KING2.SS.000"));
+        final Object[][] cases = {
+            // frame, @width, P, R, box
+            { "clip005/frame_017640.png", 230, 5, 2, new Rectangle(84, 68, 236, 64) },
+            { "playthrough-2/frame_034395.png", 300, 4, 2, new Rectangle(14, 71, 306, 58) },
         };
+        final StringBuilder out = new StringBuilder();
+        for (Object[] c : cases) {
+            final File f = new File(clips, (String) c[0]);
+            if (!f.isFile()) {
+                System.err.println(getClass().getSimpleName() + ": " + c[0] + " missing");
+                continue;
+            }
+            final BufferedImage frame = ImageIO.read(f);
+            final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(
+                request((Integer) c[1], (Integer) c[2], (Integer) c[3],
+                        ClassicAdvisorBox.Portrait.KING, null), tiny, king);
+            assertEquals((String) c[0], c[4], l.box);
+            assertEquals((String) c[0], new Point(0, 18), l.portraitAt);
+            final BufferedImage canvas = new BufferedImage(320, 200,
+                BufferedImage.TYPE_INT_RGB);
+            final Graphics2D g = canvas.createGraphics();
+            g.drawImage(frame, 0, 0, null);
+            ClassicAdvisorBox.paint(g, l, -1, wood, tiny);
+            g.dispose();
+            int compared = 0, off = 0;
+            for (int y = 0; y < 200; y++) {
+                for (int x = 0; x < 320; x++) {
+                    final Rectangle b = l.box;
+                    final boolean ring = b.contains(x, y) && (x == b.x || y == b.y
+                        || x == b.x + b.width - 1 || y == b.y + b.height - 1);
+                    final boolean chief = !b.contains(x, y) && opaque(l, x, y);
+                    if (!ring && !chief) continue;
+                    compared++;
+                    // The King's hand at rest, KING2.SS.000, lies over him
+                    // at the same place (clip005: 642 px, 0 off).
+                    final int px = x - l.portraitAt.x, py = y - l.portraitAt.y;
+                    final int want = (chief && hand != null && px < hand.getWidth()
+                        && py < hand.getHeight() && (hand.getRGB(px, py) >>> 24) != 0)
+                        ? hand.getRGB(px, py) : canvas.getRGB(x, y);
+                    if ((frame.getRGB(x, y) & 0xFFFFFF) != (want & 0xFFFFFF)) off++;
+                }
+            }
+            out.append(' ').append(c[0]).append(' ').append(compared)
+                .append(" px, off ").append(off);
+            assertTrue((String) c[0] + " compared " + compared, compared > 2000);
+            assertEquals((String) c[0] + " pixels off", 0, off);
+        }
+        System.out.println(getClass().getSimpleName() + ": King placement," + out);
+    }
+
+    /**
+     * Chiefs over a clip's frames (the two tests above): each box drawn
+     * from the pack's GAME.TXT with the values the frame shows, its place
+     * as measured, its pixels and the chief's opaque ones the frame's, 0 px
+     * off; the original's mouse arrow (frame indices 0, 7, 15 where we
+     * differ) counted and excused.
+     *
+     * @param clip The clip's frame folder.
+     * @param cases Per box: frame, section, values, tribe, bar, box, chief.
+     */
+    private void chiefsAgainst(String clip, Object[][] cases) throws Exception {
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        final File dir = (clips == null) ? null : new File(clips, clip);
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicText t = ClassicText.load(pack);
+        final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
+        if (dir == null || !dir.isDirectory() || t == null || tiny == null) {
+            System.err.println(getClass().getSimpleName()
+                + ": " + clip + " chiefs skipped, no recordings or no pack");
+            return;
+        }
+        final BufferedImage wood = pack.image(ClassicMenuBar.WOOD_KEY);
         final StringBuilder out = new StringBuilder();
         int bad = 0, compared = 0, arrow = 0;
         for (Object[] c : cases) {
@@ -1609,7 +1742,7 @@ public class ClassicAdvisorBoxTest extends TestCase {
             arrow += arrowHere;
             bad += diff;
         }
-        System.out.println(getClass().getSimpleName() + ": playthrough-1 chiefs, "
+        System.out.println(getClass().getSimpleName() + ": " + clip + " chiefs, "
             + compared + " px," + out + ", arrow " + arrow);
         assertEquals("pixels off:" + out, 0, bad);
         assertTrue("arrow pixels " + arrow, arrow <= 4 * 60);

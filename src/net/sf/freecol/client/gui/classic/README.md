@@ -1832,12 +1832,21 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
   the Apache at 28). At the right: `chief.x = min(246, 317 - pw)`, the box's
   right edge 3 px left of him, at least x 0 (Arawak (246,8) and box x 7,
   Sioux (210,10) and box x 0; the 3 px are I). At the left, as the King
-  ((0,18), clip005/006 (84,68,236,64)): x 0, the box flush right,
-  `x = 320 - w` (Iroquois (0,11) and Apache (0,28) with box x 84,
-  playthrough-1). The side: V for Iroquois and Apache (left), Arawak and
-  Sioux (right); Aztec and Tupi left, Inca and Cherokee right by the index
-  parity that fits those four (I). The chiefs' sprites are `IND<n>A0` in
-  NAMES.TXT @TRIBES order (Inca 0 ... Tupi 7, `ClassicGUI.TRIBES`).
+  (part N7): `chief.x = max(0, 72 - pw)`, the box 6 px right of him, at
+  most flush right, `x = min(320 - w, chief.x + pw + 6)`
+  (`Portrait.leftX`, `leftBoxX`). It gives every measured left portrait:
+  the Inca (66 wide) at (6,19) with box x 78 (playthrough-2, 8 boxes),
+  the Iroquois (0,11) and the Apache (0,28) with box x 84 (playthrough-1),
+  the King (0,18) with box x 84 (clip005/006) and x 14 for a 306 wide box
+  (playthrough-2), all 0 px off (`ClassicAdvisorBoxTest`
+  `testIncaAgainstPlaythrough2`, `testChiefsAgainstPlaythrough1`,
+  `testKingAgainstTheClips`; the King's hand at rest, KING2.SS.000, lies
+  over him in clip005). The side: V for the Inca, Iroquois and Apache
+  (left), Arawak and Sioux (right); Aztec and Tupi left and Cherokee right
+  stay guessed (I; the old index parity, which the Inca broke). The unseen
+  Aztec (68 wide) and Tupi (56) get box x 78 by the rule (I). The chiefs'
+  sprites are `IND<n>A0` in NAMES.TXT @TRIBES order (Inca 0 ... Tupi 7,
+  `ClassicGUI.TRIBES`).
 - **The bar (V, Roger).** It starts on GAME.TXT's `@default=n` (1-based),
   else on row 1 (@SAILHOME, @LANDFALL, @ABANDON's 2, @BUYME1, every box
   without one); in a FreeCol box on the row FreeCol makes the default.

@@ -69,11 +69,13 @@ import java.util.Map;
  *       even height is 1 px lower than {@code (197 - ph) div 2}).  At the
  *       right (Arawak (246,8), Sioux (210,10)): {@code chief.x = min(246,
  *       317 - pw)}, the box's right edge 3 px left of him, at least x = 0
- *       (box x 7 and 0).  At the left (Iroquois (0,11), Apache (0,28)):
- *       {@code x = 0}, the box flush right, {@code x = 320 - w} = 84, as
- *       the King ({@link Portrait#KING}, (0,18); clip005/006:
- *       (84,68,236,64)).  The box is drawn over him and centred vertically
- *       in all of them.</li>
+ *       (box x 7 and 0).  At the left (part N7; Inca (6,19) with the box at
+ *       78, playthrough-2; Iroquois (0,11), Apache (0,28), playthrough-1;
+ *       the King (0,18), clip005/006 (84,68,236,64), playthrough-2 a 306
+ *       wide box at 14): {@code x = max(0, 72 - pw)}, the box 6 px right
+ *       of him, at most flush right, {@code min(320 - w, x + pw + 6)}
+ *       ({@link Portrait#leftX}, {@link Portrait#leftBoxX}).  The box is
+ *       drawn over him and centred vertically in all of them.</li>
  *   <li><b>Bar (V).</b>  It starts on GAME.TXT's {@code @default=n}
  *       (1-based), else on row 1; it moves one row per key and is redrawn in
  *       one paint; Enter takes the row it is on, Escape the box's cancel
@@ -224,7 +226,7 @@ final class ClassicAdvisorBox {
         static final Portrait COLONIST = new Portrait("MSS5.SS.000", Kind.OVER,
             Anchor.CENTRE, 0, -62);
 
-        /** The King (KING, 79x161): at the left, the box flush right. */
+        /** The King (KING, 79x161): at the left, his box 6 px right of him, at most flush right. */
         static final Portrait KING = new Portrait("KING.SS.000", Kind.KING,
             Anchor.LEFT, 0, 0);
 
@@ -283,20 +285,52 @@ final class ClassicAdvisorBox {
         }
 
         /**
-         * Whether a tribe's chief stands at the left (gap list Q11).  The
-         * side belongs to the tribe, not to where its village is (V:
-         * playthrough-1, the Iroquois left with the village right of the
-         * map's centre, #9449, and with Base near it, #80739).  V for four
-         * tribes: Iroquois (3) and Apache (5) left, Arawak (2; landfall,
-         * clip008) and Sioux (6; clip004) right.  The other four were never
-         * seen and follow the index parity that fits those four (I): Aztec
-         * (1) and Tupi (7) left, Inca (0) and Cherokee (4) right.
+         * Whether a tribe's chief stands at the left (gap list Q11, part
+         * N7).  The side belongs to the tribe, not to where its village is
+         * (V: playthrough-1, the Iroquois left with the village right of
+         * the map's centre, #9449, and with Base near it, #80739).  V for
+         * five tribes: Inca (0; playthrough-2, 8 boxes), Iroquois (3) and
+         * Apache (5) left, Arawak (2; landfall, clip008) and Sioux (6;
+         * clip004) right.  The other three were never seen and keep the
+         * old guess (I): Aztec (1) and Tupi (7) left, Cherokee (4) right.
          *
          * @param tribe The tribe's NAMES.TXT {@code @TRIBES} index.
          * @return True for the left side.
          */
         static boolean chiefLeft(int tribe) {
-            return (tribe & 1) == 1;
+            return tribe != 2 && tribe != 4 && tribe != 6;
+        }
+
+        /** The column a chief or the King at the left stands in (N7). */
+        static final int LEFT_COLUMN = 72;
+
+        /** The gap between a chief or the King at the left and his box. */
+        static final int LEFT_GAP = 6;
+
+        /**
+         * A chief's or the King's x at the left (part N7): right-aligned in
+         * a {@link #LEFT_COLUMN} px column, at least 0 (V: the Inca, 66
+         * wide, at 6; the Iroquois 87, the Apache 114 and the King 79 at 0).
+         *
+         * @param pw The portrait's width.
+         * @return Its x.
+         */
+        static int leftX(int pw) {
+            return Math.max(0, LEFT_COLUMN - pw);
+        }
+
+        /**
+         * The box's x next to a chief or the King at the left (part N7):
+         * {@link #LEFT_GAP} px right of him, at most flush right (V: the
+         * Inca's box at 78; the Iroquois', the Apache's and the King's at
+         * 84 = 320 - 236, the King's 306 wide box at 14).
+         *
+         * @param pw The portrait's width.
+         * @param w The box's width.
+         * @return The box's x.
+         */
+        static int leftBoxX(int pw, int w) {
+            return Math.min(VW - w, leftX(pw) + pw + LEFT_GAP);
         }
 
         /**
@@ -1504,9 +1538,11 @@ final class ClassicAdvisorBox {
             under = true;
         } else if (who.kind == Portrait.Kind.CHIEF
                    || who.kind == Portrait.Kind.KING) {
-            // A chief at the left stands as the King does (Q11).
-            boxAt = new Point(VW - w, (VH - h + 1) / 2);
-            picAt = new Point(0, Portrait.underY(sprite.getHeight()));
+            // A chief at the left stands as the King does (Q11, N7).
+            boxAt = new Point(Portrait.leftBoxX(sprite.getWidth(), w),
+                              (VH - h + 1) / 2);
+            picAt = new Point(Portrait.leftX(sprite.getWidth()),
+                              Portrait.underY(sprite.getHeight()));
             under = true;
         } else {
             final Point off = who.offset(w, sprite.getWidth());
