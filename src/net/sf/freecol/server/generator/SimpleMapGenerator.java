@@ -141,12 +141,42 @@ public class SimpleMapGenerator implements MapGenerator {
         final Map map = new TerrainGenerator(this.random).generateMap(game, importMap, landMap, lb);
         
         makeNativeSettlements(map, importMap, lb);
+        retireEmptyNatives(game);
         makeLostCityRumours(map, importMap, lb);
         if (generateEuropeanPlayerUnits) {
             createEuropeanUnits(map, game.getLiveEuropeanPlayerList());
         }
         lb.shrink("\n");
         return map;
+    }
+
+    /**
+     * Retire, silently, every native nation the new map gave neither a
+     * settlement nor a unit.  {@link #makeNativeSettlements} gives every
+     * tribe a site whenever the map has one to give, so this is only a
+     * safety net.  Such a tribe would otherwise be found dead on its
+     * first turn and announced to everyone ("Die Arawak wurden
+     * vernichtet", Roger's game of 2026-10-09), which the original
+     * never does: here it is gone before the game starts, with no
+     * message, no history event and so no score, as if its nation had
+     * not been in the game.  The player stays in the game's list as a
+     * dead one, as a tribe destroyed in play does, so the turn order,
+     * the AI and the reports, which all look at the live players only,
+     * never meet it.
+     *
+     * @param game The {@code Game} whose map was just made.
+     * @return The native players retired.
+     */
+    public static List<Player> retireEmptyNatives(Game game) {
+        final List<Player> ret = new ArrayList<>();
+        for (Player p : game.getLiveNativePlayerList()) {
+            if (p.hasSettlements() || p.getUnitCount() > 0) continue;
+            p.setDead(true);
+            ret.add(p);
+            logger.info("Retired " + p.getNationId()
+                + " before the game: no settlement and no unit.");
+        }
+        return ret;
     }
 
 
@@ -387,7 +417,32 @@ public class SimpleMapGenerator implements MapGenerator {
             }
             designatedArea.put(player, settlementTilesForNation);
         }
-        
+
+        // Every tribe gets at least its capital, as the original's
+        // eight tribes all have villages.  The pick above spaces all
+        // sites by the settlement number (10 on the easiest levels,
+        // about 13 sites on a 58x72 map) without looking at the
+        // regions, so a tribe's region could get no site at all, and
+        // the server then announced the tribe as destroyed on its
+        // first turn.  No random numbers are drawn here, so a map on
+        // which every tribe has a site stays as it was.
+        for (Player player : nativePlayers) {
+            final Set<Tile> own = designatedArea.get(player);
+            if (own != null && !own.isEmpty()) continue;
+            final Tile site = findFallbackSite(map, player, allTiles,
+                                               settlementTiles,
+                                               designatedArea);
+            if (site == null) {
+                logger.warning("No settlement site at all for nationType="
+                    + player.getNationId());
+                continue;
+            }
+            for (Set<Tile> s : designatedArea.values()) s.remove(site);
+            settlementTiles.add(site);
+            designatedArea.computeIfAbsent(player,
+                k -> new LinkedHashSet<>()).add(site);
+        }
+
         // Place the capitals:
         for (Player player : nativePlayers) {
             final Set<Tile> allowedPlacements = designatedArea.get(player);
@@ -519,6 +574,119 @@ public class SimpleMapGenerator implements MapGenerator {
                     " x ", iss.get(0).getLearnableSkill().getSuffix());
             }
         }
+    }
+
+    /** The least distance of a fallback site to any other site. */
+    private static final int FALLBACK_SITE_DISTANCE = 4;
+
+    /**
+     * Find a settlement site for a tribe whose area or regions got none.
+     *
+     * <ol>
+     *   <li>In the tribe's own regions, the free suitable tile farthest
+     *       from every other site, if it is at least
+     *       {@link #FALLBACK_SITE_DISTANCE} away.
+     *   <li>Else the free suitable tile nearest to the middle of the
+     *       regions that is that far from every other site.
+     *   <li>Else the site nearest to that middle of the tribe that has
+     *       the most sites, if it has more than one.
+     * </ol>
+     * Ties go to the earlier tile of the map's shuffled tile list, so a
+     * seed still fixes the map.  Package private for the test.
+     *
+     * @param map The {@code Map} to search.
+     * @param player The native {@code Player} without a site.
+     * @param allTiles The map's tiles in the generator's shuffled order.
+     * @param settlementTiles The sites chosen so far.
+     * @param designatedArea The sites of each tribe.
+     * @return A site, or null if the map has none to give.
+     */
+    Tile findFallbackSite(Map map, Player player, List<Tile> allTiles,
+                          Set<Tile> settlementTiles,
+                          java.util.Map<Player, Set<Tile>> designatedArea) {
+        final List<Rectangle> regions = new ArrayList<>();
+        if (player.getNationType() instanceof IndianNationType) {
+            for (String key : ((IndianNationType)player.getNationType())
+                     .getRegions()) {
+                final ServerRegion r = (ServerRegion)map.getRegionByKey(key);
+                if (r != null && r.getBounds() != null
+                    && !r.getBounds().isEmpty()) regions.add(r.getBounds());
+            }
+        }
+        Rectangle all = null;
+        for (Rectangle r : regions) {
+            all = (all == null) ? new Rectangle(r) : all.union(r);
+        }
+        final Tile anchor = (all == null)
+            ? map.getTile(map.getWidth() / 2, map.getHeight() / 2)
+            : map.getTile((int)all.getCenterX(), (int)all.getCenterY());
+        final Predicate<Tile> free = t -> !t.isPolar() && !t.isOuterRing()
+            && !settlementTiles.contains(t)
+            && suitableForNativeSettlement(t);
+        final Function<Tile, Integer> spacing = t -> {
+            int d = Integer.MAX_VALUE;
+            for (Tile s : settlementTiles) d = Math.min(d, t.getDistanceTo(s));
+            return d;
+        };
+
+        // 1. In the tribe's own regions, as far from the others as can be.
+        Tile best = null;
+        int bestSpacing = FALLBACK_SITE_DISTANCE - 1;
+        for (Tile t : allTiles) {
+            if (!any(regions, r -> r.contains(t.getX(), t.getY()))
+                || !free.test(t)) continue;
+            final int d = spacing.apply(t);
+            if (d > bestSpacing) {
+                best = t;
+                bestSpacing = d;
+            }
+        }
+        if (best != null) {
+            logger.info("Fallback settlement site in the regions of "
+                + player.getNationId() + ": " + best);
+            return best;
+        }
+
+        // 2. Outside them, as near to their middle as can be.
+        int bestDistance = Integer.MAX_VALUE;
+        if (anchor != null) {
+            for (Tile t : allTiles) {
+                if (!free.test(t)
+                    || spacing.apply(t) < FALLBACK_SITE_DISTANCE) continue;
+                final int d = t.getDistanceTo(anchor);
+                if (d < bestDistance) {
+                    best = t;
+                    bestDistance = d;
+                }
+            }
+        }
+        if (best != null) {
+            logger.info("Fallback settlement site near the regions of "
+                + player.getNationId() + ": " + best);
+            return best;
+        }
+
+        // 3. A site of the tribe with the most of them.
+        Set<Tile> donor = null;
+        for (java.util.Map.Entry<Player, Set<Tile>> e
+                 : designatedArea.entrySet()) {
+            if (e.getKey() == player) continue;
+            if (donor == null || e.getValue().size() > donor.size()) {
+                donor = e.getValue();
+            }
+        }
+        if (donor == null || donor.size() < 2 || anchor == null) return null;
+        bestDistance = Integer.MAX_VALUE;
+        for (Tile t : donor) {
+            final int d = t.getDistanceTo(anchor);
+            if (d < bestDistance) {
+                best = t;
+                bestDistance = d;
+            }
+        }
+        logger.info("Fallback settlement site taken from another tribe for "
+            + player.getNationId() + ": " + best);
+        return best;
     }
 
     /**

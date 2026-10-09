@@ -130,6 +130,31 @@ save plays on as it was (R1b re-applies the rules on load, later).
   (`model.nation.spanish.europe.levi`, `Player.getEuropeNameKey`).
   `ClassicGUI.isFreePlayerName` refuses the name another nation's player
   gets; the player's own leader, the name screen's default, is free.
+- **Every tribe has villages** (part N5; Roger 2026-10-09: "Zu Beginn kommt
+  sehr schnell die Meldung, dass der eine oder andere Stamm ausgerottet sei.
+  DAs gibts im Original natürlich nicht."; his game: "Die Arawak wurden
+  vernichtet" in turn 2). The cause: `SimpleMapGenerator.makeNativeSettlements`
+  spaces all village sites by `model.option.settlementNumber` (10 tiles on
+  the easiest level, about 13 sites on a 58x72 map) before it looks at the
+  tribes' regions, so a region could get no site (square, very easy: the
+  Apache on 14 of 40 seeds, the Cherokee on 11); the tribe had nothing, and
+  the server found it dead on its first turn and told everyone. Now a tribe
+  without a site gets one (`findFallbackSite`): in its own regions the free
+  site farthest from the others, at least 4 tiles away; else the nearest
+  such site outside them; else one of the tribe with the most sites. No
+  random numbers are drawn, so a map on which every tribe had a site is
+  unchanged. As a safety net `SimpleMapGenerator.retireEmptyNatives` marks
+  a tribe with neither a settlement nor a unit dead before the game starts,
+  with no message and no history event (so no score); the turn order, the
+  AI and the reports look at the live players only. Measured with
+  `net.sf.freecol.tools.NativeSettlementCensus` (40 seeds, five levels,
+  both topologies): every tribe has at least one village on every map
+  (`MapGeneratorTest.testEveryTribeGetsASettlement`,
+  `testATribeWithNothingIsRetiredSilently`, `testFallbackSiteSteps`).
+  Open: the original has far more villages (its first-contact boxes:
+  Iroquois 18 and Apache 13 in playthrough-1, at "Entdecker", Sioux 21 in
+  clip004, Araukaner 6 in landfall); ours have about 12 in all on the
+  easiest level, 19 on medium.
 
 ## `ClassicGUI` — the view facade
 

@@ -53,6 +53,7 @@ import net.sf.freecol.server.FreeColServer;
 import net.sf.freecol.server.ServerTestHelper;
 import net.sf.freecol.server.model.ServerGame;
 import net.sf.freecol.server.model.ServerPlayer;
+import net.sf.freecol.server.model.ServerRegion;
 import net.sf.freecol.server.model.ServerUnit;
 import net.sf.freecol.util.test.FreeColTestCase;
 
@@ -395,9 +396,22 @@ public class MapGeneratorTest extends FreeColTestCase {
      * @return The new {@code Game}.
      */
     private static Game makeNewGame(String rules, List<String> europeans) {
+        return makeNewGame(rules, europeans, "model.difficulty.medium");
+    }
+
+    /**
+     * A new game on the given rules and difficulty with only the given
+     * European nations, every native nation and the REF, without a map.
+     *
+     * @param rules The identifier of the rules.
+     * @param europeans The identifiers of the European nations to play.
+     * @param difficulty The identifier of the difficulty level.
+     * @return The new {@code Game}.
+     */
+    private static Game makeNewGame(String rules, List<String> europeans,
+                                    String difficulty) {
         Specification spec = FreeCol.loadSpecification(
-            FreeColRules.getFreeColRulesFile(rules), null,
-            "model.difficulty.medium");
+            FreeColRules.getFreeColRulesFile(rules), null, difficulty);
         spec.setFile(MapGeneratorOptions.IMPORT_FILE, null);
         MapGeneratorOptions.applyTopologyDefaults(spec.getMapGeneratorOptions());
         Game game = new ServerGame(spec);
@@ -662,6 +676,217 @@ public class MapGeneratorTest extends FreeColTestCase {
             seeded.setBoolean(null, wasSeeded);
             seed.setLong(null, oldSeed);
             ServerTestHelper.stopServer();
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
+     * A new levi game on the easiest level, its map made with a seed.
+     *
+     * @param seed The seed of the map generator.
+     * @return The {@code Game} with its new map.
+     */
+    private static Game makeVeryEasyLeviGame(long seed) {
+        Game game = makeNewGame("levi",
+            EuropeanStartingPositionsGenerator.START_ORDER,
+            "model.difficulty.veryEasy");
+        new SimpleMapGenerator(new Random(seed))
+            .generateMap(game, null, true, new LogBuilder(-1));
+        return game;
+    }
+
+    /**
+     * Every tribe of a new game gets a settlement (part N5; Roger,
+     * 2026-10-09: "Zu Beginn kommt sehr schnell die Meldung, dass der
+     * eine oder andere Stamm ausgerottet sei. DAs gibts im Original
+     * natürlich nicht."; his game: "Die Arawak wurden vernichtet" in
+     * turn 2).  On the easiest level the levi rules space the
+     * settlements 10 tiles apart, and before these seeds left a tribe
+     * without one: square 4 the Inca, Arawak and Apache, 5 the Sioux, 9
+     * the Apache and Cherokee, 21 the Aztec and Apache; isometric 1 the
+     * Apache, 2 the Arawak, 4 the Aztec, 15 the Cherokee and Apache, 37
+     * the Inca and Cherokee.
+     * Each tribe has one capital.
+     */
+    public void testEveryTribeGetsASettlement() {
+        final Topology saved = Topology.current();
+        try {
+            for (Topology top : new Topology[] { Topology.SQUARE,
+                                                 Topology.ISOMETRIC }) {
+                Topology.setCurrent(top);
+                final long[] seeds = (top == Topology.SQUARE)
+                    ? new long[] { 4, 5, 9, 21 }
+                    : new long[] { 1, 2, 4, 15, 37 };
+                for (long seed : seeds) {
+                    final Game game = makeVeryEasyLeviGame(seed);
+                    final String what = top + " seed " + seed;
+                    assertEquals(what, 8, game.getLiveNativePlayerList().size());
+                    for (Player p : game.getLiveNativePlayerList()) {
+                        assertTrue(what + " " + p.getNationId(),
+                                   p.hasSettlements());
+                        int capitals = 0;
+                        for (IndianSettlement is : p.getIndianSettlementList()) {
+                            if (is.isCapital()) capitals++;
+                        }
+                        assertEquals(what + " " + p.getNationId(), 1, capitals);
+                    }
+                }
+            }
+        } finally {
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
+     * The safety net of part N5: a native nation a new map gave neither a
+     * settlement nor a unit is retired before the game, silently (no
+     * message, no history event); a tribe with settlements stays.
+     */
+    public void testATribeWithNothingIsRetiredSilently() {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            // No map: no tribe has anything.
+            Game game = makeNewGame("levi",
+                EuropeanStartingPositionsGenerator.START_ORDER,
+                "model.difficulty.veryEasy");
+            final List<Player> natives = game.getLiveNativePlayerList();
+            assertEquals(8, natives.size());
+            final List<Player> europeans = game.getLiveEuropeanPlayerList();
+            final List<Player> retired
+                = SimpleMapGenerator.retireEmptyNatives(game);
+            assertEquals(natives, retired);
+            for (Player p : natives) assertTrue(p.getNationId(), p.isDead());
+            assertTrue(game.getLiveNativePlayerList().isEmpty());
+            assertEquals(europeans, game.getLiveEuropeanPlayerList());
+            for (Player p : game.getPlayers(p -> true)
+                     .collect(java.util.stream.Collectors.toList())) {
+                assertTrue(p.getNationId(), p.getModelMessages().isEmpty());
+                assertTrue(p.getNationId(), p.getHistory().isEmpty());
+            }
+
+            // A new map: every tribe has its settlements, none is retired.
+            game = makeVeryEasyLeviGame(4);
+            assertTrue(SimpleMapGenerator.retireEmptyNatives(game).isEmpty());
+            assertEquals(8, game.getLiveNativePlayerList().size());
+        } finally {
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
+     * Whether a tile is a free site for a fallback settlement, as the
+     * generator's own test (not polar, not on the ring, settleable with
+     * at least half its neighbours settleable).
+     */
+    private static boolean freeSite(Tile t, java.util.Set<Tile> sites) {
+        if (t.isPolar() || t.isOuterRing() || sites.contains(t)
+            || !t.getType().canSettle()) return false;
+        int good = 0, n = 0;
+        for (Tile s : t.getSurroundingTiles(1)) {
+            if (s.getType().canSettle()) good++;
+            n++;
+        }
+        return good >= n / 2;
+    }
+
+    private static int spacing(Tile t, java.util.Set<Tile> sites) {
+        int d = Integer.MAX_VALUE;
+        for (Tile s : sites) d = Math.min(d, t.getDistanceTo(s));
+        return d;
+    }
+
+    /**
+     * The three steps of the fallback site (part N5): in the tribe's own
+     * regions the free site farthest from the others; with no room
+     * there, the free site nearest to the regions' middle that keeps 4
+     * tiles from the others; with no free site at all, the site nearest
+     * to that middle of the tribe that has the most (never its last one).
+     */
+    public void testFallbackSiteSteps() {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            final Game game = makeVeryEasyLeviGame(4);
+            final Map map = game.getMap();
+            final SimpleMapGenerator gen = new SimpleMapGenerator(new Random(1));
+            final List<Tile> allTiles = map.getShuffledTiles(new Random(1));
+            final java.util.Set<Tile> sites = new java.util.LinkedHashSet<>();
+            final java.util.Map<Player, java.util.Set<Tile>> area
+                = new java.util.LinkedHashMap<>();
+            for (Player p : game.getLiveNativePlayerList()) {
+                java.util.Set<Tile> own = new java.util.LinkedHashSet<>();
+                for (IndianSettlement is : p.getIndianSettlementList()) {
+                    own.add(is.getTile());
+                }
+                sites.addAll(own);
+                area.put(p, own);
+            }
+            final Player apache = game.getPlayerByNationId("model.nation.apache");
+            final java.awt.Rectangle center = ((ServerRegion)map
+                .getRegionByKey("model.region.center")).getBounds();
+            // As before the fallback: the Apache without a site.
+            sites.removeAll(area.get(apache));
+            area.get(apache).clear();
+
+            // 1. In its own region, the farthest from the others.
+            Tile t = gen.findFallbackSite(map, apache, allTiles, sites, area);
+            assertNotNull(t);
+            assertTrue(t.toString(), center.contains(t.getX(), t.getY()));
+            assertTrue(t.toString(), freeSite(t, sites));
+            int best = 0;
+            for (Tile u : map.getTileList(u -> center.contains(u.getX(), u.getY())
+                                              && freeSite(u, sites))) {
+                best = Math.max(best, spacing(u, sites));
+            }
+            assertTrue(best >= 4);
+            assertEquals(t.toString(), best, spacing(t, sites));
+
+            // 2. A region without a site: the nearest outside it.
+            final java.awt.Rectangle saved2 = new java.awt.Rectangle(center);
+            center.setBounds(0, 0, map.getWidth() - 1, 1); // the polar row
+            final Tile anchor = map.getTile((int)center.getCenterX(),
+                                            (int)center.getCenterY());
+            t = gen.findFallbackSite(map, apache, allTiles, sites, area);
+            assertNotNull(t);
+            assertTrue(t.toString(), freeSite(t, sites));
+            assertTrue(t.toString(), spacing(t, sites) >= 4);
+            int nearest = Integer.MAX_VALUE;
+            for (Tile u : map.getTileList(u -> freeSite(u, sites)
+                                              && spacing(u, sites) >= 4)) {
+                nearest = Math.min(nearest, u.getDistanceTo(anchor));
+            }
+            assertEquals(t.toString(), nearest, t.getDistanceTo(anchor));
+
+            // 3. No free site anywhere: one of the tribe with the most.
+            final java.util.Set<Tile> full
+                = new java.util.LinkedHashSet<>(map.getTileList(Tile::isLand));
+            Player most = null;
+            for (Player p : area.keySet()) {
+                if (p == apache) continue;
+                if (most == null || area.get(p).size() > area.get(most).size()) {
+                    most = p;
+                }
+            }
+            assertTrue(area.get(most).size() >= 2);
+            t = gen.findFallbackSite(map, apache, allTiles, full, area);
+            assertNotNull(t);
+            assertTrue(t.toString(), area.get(most).contains(t));
+            for (Tile u : area.get(most)) {
+                assertTrue(u.toString(),
+                    t.getDistanceTo(anchor) <= u.getDistanceTo(anchor));
+            }
+            // ... but never a tribe's last site.
+            final java.util.Map<Player, java.util.Set<Tile>> single
+                = new java.util.LinkedHashMap<>();
+            for (Player p : area.keySet()) {
+                java.util.Set<Tile> one = new java.util.LinkedHashSet<>();
+                if (!area.get(p).isEmpty()) one.add(area.get(p).iterator().next());
+                single.put(p, one);
+            }
+            assertNull(gen.findFallbackSite(map, apache, allTiles, full, single));
+            center.setBounds(saved2);
+        } finally {
             Topology.setCurrent(saved);
         }
     }
