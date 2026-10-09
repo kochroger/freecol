@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.WeakHashMap;
 import java.util.logging.Logger;
 
 import net.sf.freecol.common.io.FreeColModFile;
@@ -92,15 +93,22 @@ public class NameCache {
     private static final Object seasonNamesLock = new Object();
     private static int seasonNumber = 0;
     
-    /** Settlement names. */
+    /**
+     * Settlement names.  The player maps hold their keys weakly: a player
+     * equals only a player of its own game, so an entry is of no use once
+     * its game is gone, and a strong key kept every game with named
+     * settlements or ships alive for the life of the JVM (about 2 MB a
+     * game: every new game of a session, and every map the test suite
+     * made, which ran its 256 MB JVM out of memory, part N5).
+     */
     private static final Map<Player, String> capitalNames
-        = new HashMap<>();
+        = new WeakHashMap<>();
     private static final Map<Player, List<String>> settlementNames
-        = new HashMap<>();
+        = new WeakHashMap<>();
     private static final Object settlementNameLock = new Object();
 
-    /** Ship names. */
-    private static final Map<Player, List<String>> shipNames = new HashMap<>();
+    /** Ship names (weak keys, as the settlement names). */
+    private static final Map<Player, List<String>> shipNames = new WeakHashMap<>();
     private static final Object shipNameLock = new Object();
 
 

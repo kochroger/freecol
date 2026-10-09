@@ -410,10 +410,34 @@ public class MapGeneratorTest extends FreeColTestCase {
      */
     private static Game makeNewGame(String rules, List<String> europeans,
                                     String difficulty) {
+        return makeNewGame(loadRules(rules, difficulty), europeans);
+    }
+
+    /**
+     * The rules of a new game: a fresh specification with the topology's
+     * map options.
+     *
+     * @param rules The identifier of the rules.
+     * @param difficulty The identifier of the difficulty level.
+     * @return The {@code Specification}.
+     */
+    private static Specification loadRules(String rules, String difficulty) {
         Specification spec = FreeCol.loadSpecification(
             FreeColRules.getFreeColRulesFile(rules), null, difficulty);
         spec.setFile(MapGeneratorOptions.IMPORT_FILE, null);
         MapGeneratorOptions.applyTopologyDefaults(spec.getMapGeneratorOptions());
+        return spec;
+    }
+
+    /**
+     * A new game on given rules with only the given European nations,
+     * every native nation and the REF, without a map.
+     *
+     * @param spec The rules ({@link #loadRules}).
+     * @param europeans The identifiers of the European nations to play.
+     * @return The new {@code Game}.
+     */
+    private static Game makeNewGame(Specification spec, List<String> europeans) {
         Game game = new ServerGame(spec);
         NationOptions nationOptions = new NationOptions(spec);
         for (Nation n : spec.getEuropeanNations()) {
@@ -681,15 +705,26 @@ public class MapGeneratorTest extends FreeColTestCase {
     }
 
     /**
-     * A new levi game on the easiest level, its map made with a seed.
+     * The levi rules on the easiest level, with the topology's map options.
+     * One per test and topology: a spec serves many games, and the suite's
+     * one JVM (256 MB) cannot hold a fresh one per map.
      *
+     * @return The {@code Specification}.
+     */
+    private static Specification veryEasyLevi() {
+        return loadRules("levi", "model.difficulty.veryEasy");
+    }
+
+    /**
+     * The map of a new levi game on the easiest level.
+     *
+     * @param spec The rules ({@link #veryEasyLevi}).
      * @param seed The seed of the map generator.
      * @return The {@code Game} with its new map.
      */
-    private static Game makeVeryEasyLeviGame(long seed) {
-        Game game = makeNewGame("levi",
-            EuropeanStartingPositionsGenerator.START_ORDER,
-            "model.difficulty.veryEasy");
+    private static Game makeVeryEasyLeviGame(Specification spec, long seed) {
+        Game game = makeNewGame(spec,
+            EuropeanStartingPositionsGenerator.START_ORDER);
         new SimpleMapGenerator(new Random(seed))
             .generateMap(game, null, true, new LogBuilder(-1));
         return game;
@@ -714,11 +749,12 @@ public class MapGeneratorTest extends FreeColTestCase {
             for (Topology top : new Topology[] { Topology.SQUARE,
                                                  Topology.ISOMETRIC }) {
                 Topology.setCurrent(top);
+                final Specification spec = veryEasyLevi();
                 final long[] seeds = (top == Topology.SQUARE)
                     ? new long[] { 4, 5, 9, 21 }
                     : new long[] { 1, 2, 4, 15, 37 };
                 for (long seed : seeds) {
-                    final Game game = makeVeryEasyLeviGame(seed);
+                    final Game game = makeVeryEasyLeviGame(spec, seed);
                     final String what = top + " seed " + seed;
                     assertEquals(what, 8, game.getLiveNativePlayerList().size());
                     for (Player p : game.getLiveNativePlayerList()) {
@@ -747,9 +783,9 @@ public class MapGeneratorTest extends FreeColTestCase {
         try {
             Topology.setCurrent(Topology.SQUARE);
             // No map: no tribe has anything.
-            Game game = makeNewGame("levi",
-                EuropeanStartingPositionsGenerator.START_ORDER,
-                "model.difficulty.veryEasy");
+            final Specification spec = veryEasyLevi();
+            Game game = makeNewGame(spec,
+                EuropeanStartingPositionsGenerator.START_ORDER);
             final List<Player> natives = game.getLiveNativePlayerList();
             assertEquals(8, natives.size());
             final List<Player> europeans = game.getLiveEuropeanPlayerList();
@@ -766,7 +802,7 @@ public class MapGeneratorTest extends FreeColTestCase {
             }
 
             // A new map: every tribe has its settlements, none is retired.
-            game = makeVeryEasyLeviGame(4);
+            game = makeVeryEasyLeviGame(spec, 4);
             assertTrue(SimpleMapGenerator.retireEmptyNatives(game).isEmpty());
             assertEquals(8, game.getLiveNativePlayerList().size());
         } finally {
@@ -807,7 +843,7 @@ public class MapGeneratorTest extends FreeColTestCase {
         final Topology saved = Topology.current();
         try {
             Topology.setCurrent(Topology.SQUARE);
-            final Game game = makeVeryEasyLeviGame(4);
+            final Game game = makeVeryEasyLeviGame(veryEasyLevi(), 4);
             final Map map = game.getMap();
             final SimpleMapGenerator gen = new SimpleMapGenerator(new Random(1));
             final List<Tile> allTiles = map.getShuffledTiles(new Random(1));
