@@ -568,6 +568,200 @@ public class ClassicPacificTest extends FreeColTestCase {
     }
 
 
+    // M1: woodcut 6 for each nation (Roger, 2026-10-09)
+
+    /** A merchantman of {@code nation} at (x,y), its sight explored. */
+    private ServerUnit ship(Game game, Map map, String nation, int x, int y) {
+        final ServerPlayer p = (ServerPlayer)game
+            .getPlayerByNationId("model.nation." + nation);
+        final ServerUnit u = new ServerUnit(game, map.getTile(x, y), p,
+            spec().getUnitType("model.unit.merchantman"));
+        p.exploreForUnit(u);
+        p.invalidateCanSeeTiles();
+        return u;
+    }
+
+    /**
+     * The French discover the Pacific before anyone else: their ship's
+     * step (30,40) to (29,40) brings (28,39..41) into its sight (square
+     * maps; on FreeCol's isometric maps the discovery is reserved for it
+     * directly), and their name is answered.
+     */
+    private ServerPlayer frenchDiscover(Game game, Map map, Region p) {
+        final ServerUnit frigate = ship(game, map, "french", 31, 40);
+        final ServerPlayer french = (ServerPlayer)frigate.getOwner();
+        if (ServerRegion.hasClassicPacific(map)) {
+            assertFalse(names(move(frigate, 30, 40)));
+            assertTrue(names(move(frigate, 29, 40)));
+            assertTrue(french.getPacificSighted());
+        } else {
+            assertTrue(p.checkDiscover(frigate));
+        }
+        ((ServerRegion)p).csDiscover(french, frigate, game.getTurn(),
+                                     "Pazifik", new ChangeSet());
+        assertFalse(p.getDiscoverable());
+        assertSame(french, p.getDiscoveredBy());
+        return french;
+    }
+
+    /** Whether a change set updates the region {@code r} before any request. */
+    private static boolean updatesFirst(ChangeSet cs, Region r) {
+        final String s = cs.toString();
+        final int u = s.indexOf(" " + r.getId() + "]");
+        return u >= 0 && u < s.indexOf("[" + NewRegionNameMessage.TAG);
+    }
+
+    /**
+     * M1 (Roger, 2026-10-09: "Dieser Holzschnitt erscheint nur bei MEINER
+     * ersten Pazifikentdeckung. Ob die anderen Nationen vorher schon dort
+     * waren, weiss man als Spieler gar nicht"): woodcut 6 is each nation's
+     * own.  The French discover the Pacific first; the Dutch ship's step
+     * (30,67) to (29,67), which first brings a Pacific tile (28,68) into
+     * its sight, still sends the Dutch the request, for the discovered
+     * Pacific, with the region's update first (their client then finds it
+     * discovered: the picture, nothing to name), and records the sighting
+     * ({@code Player.pacificSighted}).  Once: the next Dutch sightings, by
+     * the same ship or another, send nothing.
+     */
+    public void testWoodcutForEachNation() {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            final Game game = getStandardGame();
+            final Map map = rogersMap(game, Topology.SQUARE);
+            final Region p = map.getRegionByKey("model.region.pacific");
+            final ServerPlayer french = frenchDiscover(game, map, p);
+            final ServerUnit ship = ship(game, map);
+            final ServerPlayer dutch = (ServerPlayer)ship.getOwner();
+            assertFalse(dutch.getPacificSighted());
+
+            assertFalse(names(move(ship, 30, 67)));
+            assertFalse(dutch.getPacificSighted());
+            final ChangeSet cs = move(ship, 29, 67);
+            final String s = cs.toString();
+            assertTrue(s, names(cs));
+            assertEquals(s, s.indexOf("[" + NewRegionNameMessage.TAG),
+                         s.lastIndexOf("[" + NewRegionNameMessage.TAG));
+            assertTrue(s, s.contains(p.getId()));
+            assertTrue(s, updatesFirst(cs, p));
+            assertTrue(dutch.getPacificSighted());
+            assertFalse(p.getDiscoverable());
+            assertSame("the French keep their discovery", french, p.getDiscoveredBy());
+
+            assertFalse(names(move(ship, 29, 68)));
+            assertFalse(names(move(ship, 28, 68)));     // into the Pacific
+            final ServerUnit other = ship(game, map);
+            move(other, 30, 66);
+            assertFalse(names(move(other, 29, 65)));
+            assertFalse(names(move(other, 28, 65)));
+        } finally {
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
+     * M1: no request for an AI nation (it would answer the naming, which
+     * the server refuses), nor for the nation that discovered the Pacific
+     * in a save without the record (its sighting is recorded then), nor
+     * while another nation's discovery waits for its name (nothing
+     * recorded: the next sighting after the name sends it).  FreeCol's
+     * isometric maps keep FreeCol's rule: the first discoverer only.
+     */
+    public void testNoWoodcutRequestTwiceOrForTheAI() {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            // An AI nation.
+            Game game = getStandardGame();
+            Map map = rogersMap(game, Topology.SQUARE);
+            Region p = map.getRegionByKey("model.region.pacific");
+            frenchDiscover(game, map, p);
+            final ServerUnit english = ship(game, map, "english", 31, 50);
+            english.getOwner().setAI(true);
+            assertFalse(names(move(english, 30, 50)));
+            assertFalse(names(move(english, 29, 50)));
+            assertTrue(english.getOwner().getPacificSighted());
+
+            // The discoverer of an older save (no record).
+            game = getStandardGame();
+            map = rogersMap(game, Topology.SQUARE);
+            p = map.getRegionByKey("model.region.pacific");
+            final ServerUnit first = ship(game, map);
+            final ServerPlayer dutch = (ServerPlayer)first.getOwner();
+            move(first, 30, 67);
+            assertTrue(names(move(first, 29, 67)));
+            ((ServerRegion)p).csDiscover(dutch, first, game.getTurn(),
+                                         "Pazifik", new ChangeSet());
+            dutch.setPacificSighted(false);
+            final ServerUnit second = ship(game, map, "dutch", 31, 50);
+            assertFalse(names(move(second, 30, 50)));
+            assertFalse(names(move(second, 29, 50)));
+            assertTrue(dutch.getPacificSighted());
+
+            // Another nation's discovery waits for its name.
+            game = getStandardGame();
+            map = rogersMap(game, Topology.SQUARE);
+            p = map.getRegionByKey("model.region.pacific");
+            final ServerUnit frigate = ship(game, map, "french", 31, 40);
+            move(frigate, 30, 40);
+            assertTrue(names(move(frigate, 29, 40)));   // not answered yet
+            final ServerUnit ship = ship(game, map);
+            final ServerPlayer us = (ServerPlayer)ship.getOwner();
+            move(ship, 30, 67);
+            assertFalse(names(move(ship, 29, 67)));
+            assertFalse(us.getPacificSighted());
+            ((ServerRegion)p).csDiscover(frigate.getOwner(), frigate,
+                game.getTurn(), "Pazifik", new ChangeSet());
+            final ChangeSet cs = move(ship, 28, 67);     // (27,66..68) new
+            assertTrue(cs.toString(), names(cs));
+            assertTrue(us.getPacificSighted());
+        } finally {
+            Topology.setCurrent(saved);
+        }
+        final Topology saved2 = Topology.current();
+        try {
+            Topology.setCurrent(Topology.ISOMETRIC);
+            final Game game = getStandardGame();
+            final Map map = rogersMap(game, Topology.ISOMETRIC);
+            final Region p = map.getRegionByKey("model.region.pacific");
+            frenchDiscover(game, map, p);
+            final ServerUnit ship = ship(game, map);
+            assertFalse(names(move(ship, 30, 67)));
+            assertFalse(names(move(ship, 29, 67)));
+            assertFalse(names(move(ship, 28, 67)));      // into the Pacific
+            assertFalse(ship.getOwner().getPacificSighted());
+        } finally {
+            Topology.setCurrent(saved2);
+        }
+    }
+
+    /**
+     * M1: the woodcuts a save without the record counts as shown
+     * ({@code ClassicWoodcut.derived}): the Pacific only when we
+     * discovered it or sighted it, not when another nation discovered it.
+     */
+    public void testDerivedPacificIsOurOwn() {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            final Game game = getStandardGame();
+            final Map map = rogersMap(game, Topology.SQUARE);
+            final Region p = map.getRegionByKey("model.region.pacific");
+            final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+            final int bit = ClassicWoodcut.bit(ClassicWoodcut.PACIFIC);
+            assertEquals(0, ClassicWoodcut.derived(dutch, map) & bit);
+            final ServerPlayer french = frenchDiscover(game, map, p);
+            assertEquals("the French discovery", 0,
+                         ClassicWoodcut.derived(dutch, map) & bit);
+            assertEquals(bit, ClassicWoodcut.derived(french, map) & bit);
+            dutch.setPacificSighted(true);
+            assertEquals(bit, ClassicWoodcut.derived(dutch, map) & bit);
+        } finally {
+            Topology.setCurrent(saved);
+        }
+    }
+
+
     // The answer: one per discovery (J review of part I, play lens; J3)
 
     /**
@@ -867,6 +1061,57 @@ public class ClassicPacificTest extends FreeColTestCase {
             new NamingServer(ServerTestHelper.getServer(), dutch, stale)
                 .newRegionName(p, a.getTile(game), ship, a.getNewRegionName());
             assertEquals(List.of("rejected " + first), stale);
+        } finally {
+            ServerTestHelper.stopServerGame();
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
+     * M1, the client side in a real server game: the French named the
+     * Pacific; the Dutch ship's goto run (31,67) to (27,68) gets one
+     * request, at the step that first brings a Pacific tile into its
+     * sight, and its client shows the Pacific's picture (the Classic UI's
+     * woodcut 6) and answers nothing (the server would refuse it, "No
+     * discoverable region"); the later steps bring nothing.  The same
+     * request once more (none comes from the server) shows the picture
+     * again, which the Classic UI's once-per-game record drops
+     * ({@code ClassicGUI.woodcut}).
+     */
+    public void testWoodcutAfterAnotherNationsDiscovery() throws Exception {
+        final Topology saved = Topology.current();
+        try {
+            Topology.setCurrent(Topology.SQUARE);
+            final Game game = ServerTestHelper.startServerGame(
+                rogersMap(getStandardGame(), Topology.SQUARE));
+            final Map map = game.getMap();
+            final Region p = map.getRegionByKey("model.region.pacific");
+            frenchDiscover(game, map, p);
+            final ServerUnit ship = ship(game, map);
+            final ServerPlayer dutch = (ServerPlayer)ship.getOwner();
+            // Without a client every nation of the server game is an AI;
+            // the Dutch are the human's here.
+            dutch.setAI(false);
+            final List<String> log = new ArrayList<>();
+            final FreeColClient fcc = namingClient(game, dutch, log);
+            List<NewRegionNameMessage> last = List.of();
+            for (int[] s : new int[][] { {30, 67}, {29, 67}, {28, 68}, {27, 68} }) {
+                final List<NewRegionNameMessage> reqs
+                    = requests(move(ship, s[0], s[1]), dutch);
+                log.add("step " + s[0] + "," + s[1] + ": " + reqs.size());
+                for (NewRegionNameMessage m : reqs) m.clientHandler(fcc);
+                if (!reqs.isEmpty()) last = reqs;
+            }
+            final String panel = "panel image.flavor.event.discoverPacific";
+            assertEquals(List.of("step 30,67: 0", "step 29,67: 1",
+                                 panel, "panel closed",
+                                 "step 28,68: 0", "step 27,68: 0"), log);
+            assertEquals(1, last.size());
+            assertEquals(p, last.get(0).getRegion(game));
+            assertTrue(dutch.getPacificSighted());
+            log.clear();
+            last.get(0).clientHandler(fcc);
+            assertEquals(List.of(panel, "panel closed"), log);
         } finally {
             ServerTestHelper.stopServerGame();
             Topology.setCurrent(saved);

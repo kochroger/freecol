@@ -187,6 +187,16 @@ public final class InGameController extends FreeColClientHolder {
      */
     private boolean regionStops = true;
 
+    /**
+     * Whether burial mounds the player declines to explore are taken away
+     * ({@link #moveExplore}: FreeCol's {@code declineMounds}).  On by
+     * default (FreeCol); the Classic UI switches it off for its game view:
+     * in the original "Haltet Euch davon fern!" (and Escape) leaves
+     * everything as it was, the mounds stay and the unit keeps its place
+     * and its moves (Roger, 2026-10-09).
+     */
+    private boolean declinedMoundsGo = true;
+
     /** A map of messages to be ignored. */
     private final java.util.Map<String, Integer> messagesToIgnore
         = Collections.synchronizedMap(new HashMap<>());
@@ -1149,6 +1159,27 @@ public final class InGameController extends FreeColClientHolder {
     }
 
     /**
+     * Switch the taking away of declined burial mounds on or off
+     * ({@link #moveExplore}).  The Classic UI switches it off while its
+     * game view is up, and back on when it goes.
+     *
+     * @param on True for FreeCol's (the default): the mounds go.
+     */
+    public void setDeclinedMoundsGo(boolean on) {
+        this.declinedMoundsGo = on;
+    }
+
+    /**
+     * Whether declined burial mounds are taken away
+     * ({@link #setDeclinedMoundsGo}).
+     *
+     * @return True if they are.
+     */
+    public boolean isDeclinedMoundsGo() {
+        return this.declinedMoundsGo;
+    }
+
+    /**
      * Whether automatic movement stops after a step onto a tile so that
      * the region there can be named (BR#2707): its region is still to
      * discover, and the stop is on ({@link #setRegionStops}).
@@ -1896,7 +1927,14 @@ public final class InGameController extends FreeColClientHolder {
             && !getGUI().modalConfirmDialog(now,
                 StringTemplate.key("exploreMoundsRumour.text"), unit,
                 "exploreLostCityRumour.yes", "exploreLostCityRumour.no", true)) {
-            askServer().declineMounds(unit, direction); // LCR goes away
+            if (this.declinedMoundsGo) {
+                askServer().declineMounds(unit, direction); // LCR goes away
+            } else if (unit.getDestination() != null) {
+                // The mounds stay (setDeclinedMoundsGo): a goto through
+                // them ends here, as after a "no" to a rumour, or it
+                // would ask again at its next step.
+                askClearGotoOrders(unit);
+            }
             return false;
         }
 
@@ -4526,8 +4564,19 @@ public final class InGameController extends FreeColClientHolder {
                 // thread, where this runs at once, so a goto run (no goto
                 // stop, setRegionStops) answers inside the step that
                 // brought the request; a request queued from another
-                // thread can still come after the answer.
-                if (!region.getDiscoverable()) return;
+                // thread can still come after the answer.  The original's
+                // Pacific that another nation discovered before comes
+                // the same way at our own first sighting
+                // (ServerUnit.csCheckSightedPacific): its picture once,
+                // nothing to name (Roger, 2026-10-09).
+                if (!region.getDiscoverable()) {
+                    if (region.isPacific()
+                        && !discoveredByUs(region)) {
+                        showEventPanel(Messages.message("event.discoverPacific"),
+                            "image.flavor.event.discoverPacific", null);
+                    }
+                    return;
+                }
                 if (region.hasName()) {
                     if (region.isPacific()) {
                         showEventPanel(Messages.message("event.discoverPacific"),
@@ -4553,6 +4602,18 @@ public final class InGameController extends FreeColClientHolder {
 
                 }
             });
+    }
+
+    /**
+     * Whether we discovered a region ({@link #newRegionNameHandler}).
+     *
+     * @param region The {@code Region}.
+     * @return True if our player is its discoverer.
+     */
+    private boolean discoveredByUs(Region region) {
+        final Player me = getMyPlayer();
+        final Player by = region.getDiscoveredBy();
+        return me != null && by != null && me.getId().equals(by.getId());
     }
 
     /**

@@ -169,33 +169,42 @@ public class ClassicTradeTest extends FreeColTestCase {
 
     /**
      * Shift: the box asks with the "(0-max)" of the hold and the preset
-     * the gold pays (144 gold at 2: "(0-100)", 72); Enter's number is
+     * "100", the "(0-max)" whatever the gold pays (V #54344: 144 gold at
+     * 2, "(0-100)" and "100"; Roger, 2026-10-09); Enter's number is
      * bought; Escape, 0 or an empty field buy nothing; a number the gold
-     * cannot pay buys nothing and brings no tip (the original's red line,
-     * W22).
+     * cannot pay, the preset itself too, buys nothing and brings no tip
+     * (the original's red line, W22).
      */
     public void testShiftBuy() {
         final Screen s = new Screen();
         this.dutch.setGold(72 * this.price);
         s.answer = 50;
         assertEquals(50, ClassicTrade.buy(this.dutch, this.ship, tools, true, s));
-        assertEquals(List.of("ask buy tools max=100 preset=72", "buy tools 50"), s.calls);
+        assertEquals(List.of("ask buy tools max=100 preset=100", "buy tools 50"), s.calls);
         for (int a : new int[] { -1, 0 }) {
             s.calls.clear();
             s.answer = a;
             assertEquals(0, ClassicTrade.buy(this.dutch, this.ship, tools, true, s));
-            assertEquals(List.of("ask buy tools max=100 preset=72"), s.calls);
+            assertEquals(List.of("ask buy tools max=100 preset=100"), s.calls);
         }
-        s.calls.clear();
-        s.answer = 73;
-        assertEquals(0, ClassicTrade.buy(this.dutch, this.ship, tools, true, s));
-        assertEquals(List.of("ask buy tools max=100 preset=72"), s.calls);
+        for (int a : new int[] { 73, 100 }) {     // 100: Enter on the preset
+            s.calls.clear();
+            s.answer = a;
+            assertEquals(0, ClassicTrade.buy(this.dutch, this.ship, tools, true, s));
+            assertEquals(List.of("ask buy tools max=100 preset=100"), s.calls);
+        }
+        assertEquals("nothing paid", 72 * this.price, this.dutch.getGold());
         s.calls.clear();
         s.answer = 72;
         assertEquals(72, ClassicTrade.buy(this.dutch, this.ship, tools, true, s));
-        assertEquals(List.of("ask buy tools max=100 preset=72", "buy tools 72"), s.calls);
-        // Enough gold: the preset is the whole "(0-max)"; a partly filled
-        // hold's rest is the max.
+        assertEquals(List.of("ask buy tools max=100 preset=100", "buy tools 72"), s.calls);
+        // Enough gold: Enter on the preset buys the whole "(0-max)"; a
+        // partly filled hold's rest is the max and the preset.
+        s.calls.clear();
+        this.dutch.setGold(100 * this.price);
+        s.answer = 100;
+        assertEquals(100, ClassicTrade.buy(this.dutch, this.ship, tools, true, s));
+        assertEquals(List.of("ask buy tools max=100 preset=100", "buy tools 100"), s.calls);
         s.calls.clear();
         this.dutch.setGold(10000 * this.price);
         this.ship.addGoods(sugar, 300);

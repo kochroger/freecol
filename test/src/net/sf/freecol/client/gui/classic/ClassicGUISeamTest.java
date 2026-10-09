@@ -446,6 +446,30 @@ public class ClassicGUISeamTest extends FreeColTestCase {
     }
 
     /**
+     * M1 (Roger, 2026-10-09: "Grabhügel: die Hügel bleiben. Es ist, als
+     * hätte man nichts angetastet"): the classic game view switches off
+     * FreeCol's taking away of declined burial mounds with its goto batch
+     * and region stop ({@code ClassicGUI.gotoBatch}), and back on when it
+     * goes; the controller's side is {@code MoveTest.testDeclinedMounds}.
+     */
+    public void testClassicViewKeepsDeclinedMounds() {
+        final net.sf.freecol.client.control.InGameController igc
+            = new net.sf.freecol.client.control.InGameController(null);
+        assertTrue(igc.isDeclinedMoundsGo());
+        assertTrue(igc.isGotoBatch());
+        assertTrue(igc.isRegionStops());
+        ClassicGUI.freeColMoves(igc, false);
+        assertFalse(igc.isDeclinedMoundsGo());
+        assertFalse(igc.isGotoBatch());
+        assertFalse(igc.isRegionStops());
+        ClassicGUI.freeColMoves(igc, true);
+        assertTrue(igc.isDeclinedMoundsGo());
+        assertTrue(igc.isGotoBatch());
+        assertTrue(igc.isRegionStops());
+        ClassicGUI.freeColMoves(null, false);           // no controller: nothing
+    }
+
+    /**
      * Roger's rule: the step east past the last drawn column (x = W-2),
      * and only that, is the Europe question's.
      */

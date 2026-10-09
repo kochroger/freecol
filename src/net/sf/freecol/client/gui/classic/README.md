@@ -2407,14 +2407,21 @@ appearance: its "woodcut 2" is k = 3, its "woodcut 3" k = 7). Spec:
   then the W10 seam `discoveryShown`); 2 between `getNewColonyName` (the
   founding, `noteFounding`) and that colony's screen; 3/4/5 in
   `showFirstContactDialog` before the box; 6 `showEventPanel` with FreeCol's
-  Pacific picture (FreeCol sends it only to the first discoverer in the whole
-  game; on the square maps the server asks for the Pacific's naming for the
-  first unit of any kind, ship, scout or colonist, whose move brings a
-  Pacific tile into its own sight or enters one, whether the tile was
-  explored or seen before or not: `ServerUnit.csCheckSightedPacific` with
+  Pacific picture (on the square maps the server asks for the Pacific's
+  naming for the first unit of any kind, ship, scout or colonist, whose move
+  brings a Pacific tile into its own sight or enters one, whether the tile
+  was explored or seen before or not: `ServerUnit.csCheckSightedPacific` with
   `broughtIntoSight`, part L, Roger 2026-10-08, opening_017 #46351-#46373: a
   seasoned scout's step on a map the cheat had revealed; before, only tiles
-  newly explored or out of sight counted); 7 the key into a village (`villageEntryKey`, before the move), else
+  newly explored or out of sight counted. Once per nation, M1, Roger
+  2026-10-09: "Dieser Holzschnitt erscheint nur bei MEINER ersten
+  Pazifikentdeckung", whether others were there before, which the player
+  cannot know: a human nation whose first sighting comes after another
+  nation discovered the Pacific gets the same request for the discovered
+  region, once (`csSightedDiscoveredPacific`, `Player.pacificSighted` in the
+  save), and its client shows the picture and names nothing
+  (`InGameController.newRegionNameHandler`); FreeCol's isometric maps keep
+  FreeCol's rule, the first discoverer only); 7 the key into a village (`villageEntryKey`, before the move), else
   before the village seams' boxes and the learn question; 8/9/11/12/13 the
   notice funnel (`showMessagePopup`, by message id, also for a dropped
   notice; 8 also before the Fountain of Youth's recruit box); 10 a CONTACT
@@ -2428,7 +2435,8 @@ appearance: its "woodcut 2" is k = 3, its "woodcut 3" k = 7). Spec:
   every later save has it (autosaves included). A save without it (an older
   build, the standard GUI) counts the woodcuts whose event left a trace as
   shown (`ClassicWoodcut.derived`: explored land, a colony or FOUND_COLONY,
-  a met native nation, the Aztecs/Incas met, a discovered Pacific, a visited
+  a met native nation, the Aztecs/Incas met, a Pacific we discovered or
+  sighted (`pacificSighted`; not one another nation discovered), a visited
   village, goods sold in Europe, a met European, COLONY_DESTROYED; none for 8,
   11, 13). Multiplayer: this session and the derived bits only.
 - **The recorder** puts the woodcut's palette (the index sheets of WOODFRAM,
@@ -3916,8 +3924,11 @@ otherwise a reassuring picture:
   before every rumour, `exploreLostCityRumour.text`, is answered yes without a
   box (L3/Q2: the original has none, C32); its burial mounds question
   `exploreMoundsRumour.text` is the original's @LOSTCITY4 with the frontiersman
-  (row 1 digs, row 2 and Escape leave them; FreeCol then takes the mounds away
-  and the unit keeps its place and moves; the original asks after the slide, I).
+  (row 1 digs, row 2 and Escape leave them: nothing is touched, the mounds stay
+  and the unit keeps its place and moves, Roger 2026-10-09 "Es ist, als hätte
+  man nichts angetastet"; `InGameController.setDeclinedMoundsGo(false)` with
+  the classic view switches off FreeCol's `declineMounds`, and a goto through
+  them ends there; the original asks after the slide, V playthrough-2).
   Window title is `colony(tile)` — the tile's colony, else **"FreeCol"**.
 - `showErrorPanel(String, Runnable)` — the audit's find. All five `showErrorPanel`
   overloads are `final` and funnel into this one non-final seam, so a no-op meant

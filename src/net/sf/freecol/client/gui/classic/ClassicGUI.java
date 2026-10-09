@@ -3282,17 +3282,31 @@ public class ClassicGUI extends GUI {
      * runs on through new regions, whose names are answered at once
      * ({@link #showNamingDialog}; clip006 U22: three road steps in one
      * run); on again when the view goes, so the standard GUI (and a test
-     * after it in the same JVM) gets FreeCol's.
+     * after it in the same JVM) gets FreeCol's.  The same for FreeCol's
+     * taking away of burial mounds the player declines
+     * ({@code setDeclinedMoundsGo}): off with the classic view, where
+     * "Haltet Euch davon fern!" and Escape leave them and touch nothing
+     * (Roger, 2026-10-09).
      *
-     * @param on True for FreeCol's batch and stop.
+     * @param on True for FreeCol's batch, stop and mounds.
      */
     private void gotoBatch(boolean on) {
         final FreeColClient fcc = getFreeColClient();
-        final net.sf.freecol.client.control.InGameController igc
-            = (fcc == null) ? null : fcc.getInGameController();
+        freeColMoves((fcc == null) ? null : fcc.getInGameController(), on);
+    }
+
+    /**
+     * The switches of {@link #gotoBatch} on a controller.
+     *
+     * @param igc The controller, or null (nothing).
+     * @param on True for FreeCol's.
+     */
+    static void freeColMoves(net.sf.freecol.client.control.InGameController igc,
+                             boolean on) {
         if (igc == null) return;
         igc.setGotoBatch(on);
         igc.setRegionStops(on);
+        igc.setDeclinedMoundsGo(on);
     }
 
     /**
@@ -6546,8 +6560,10 @@ public class ClassicGUI extends GUI {
      *
      * The original has no such event pictures: nothing is shown at the
      * first landing, and the Pacific's discovery shows the original's
-     * woodcut 6 instead (N17; FreeCol calls this only for the first
-     * discoverer in the whole game).  The callers still need a panel:
+     * woodcut 6 instead (N17), once per game at our own first sighting,
+     * whether another nation discovered the Pacific before or not
+     * (Roger, 2026-10-09; {@code ServerUnit.csCheckSightedPacific}).  The
+     * callers still need a panel:
      * {@code InGameController.newLandName} adds a closing callback to the
      * result (the build-colony tip and the next message), and the base
      * {@code GUI}'s null would throw there.  The returned stand-in is
@@ -6746,9 +6762,11 @@ public class ClassicGUI extends GUI {
      * the frontiersman (Q2; box V landfall #19737, (42,124,236,40)): row 1
      * "Laßt uns nach Schätzen suchen!" (the bar's, no {@code @default})
      * digs, row 2 "Haltet Euch davon fern!" and Escape (Roger: Esc is
-     * Nein) do not.  FreeCol's "no" then takes the mounds away and the
-     * unit keeps its place and its moves (I: the original asks after the
-     * slide, so its unit already stands there).
+     * Nein) do not: nothing is touched, the mounds stay and the unit
+     * keeps its place and its moves (Roger, 2026-10-09: "Es ist, als
+     * hätte man nichts angetastet"; {@link #freeColMoves} switches off
+     * FreeCol's taking away; a goto through them ends there).  The
+     * original asks after the slide (V playthrough-2), ours before it.
      *
      * @param tile The unit's tile.
      * @return Whether to dig, or null without the pack's text (FreeCol's

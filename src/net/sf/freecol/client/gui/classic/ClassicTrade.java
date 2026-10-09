@@ -47,20 +47,21 @@ import net.sf.freecol.common.model.Unit;
  *       {@link ClassicTips#PART}).</li>
  *   <li>A drop with Shift held brings {@code @HOWMUCH4} 27 frames later:
  *       "Wieviel {Werkzeuge} (zu {2$}) kaufen und auf Handelsschiff laden
- *       (0-100)?", the field "Menge:" with its preset selected.  The
- *       "(0-100)" is the hold's free space, not what the gold allows
- *       (72).  Enter buys the number; then N7's line and receipt (W22, not
- *       built).</li>
+ *       (0-100)?", the field "Menge:" with its preset "100" selected.
+ *       The "(0-100)" and the preset are the hold's free space, not what
+ *       the gold allows (72).  Enter buys the number; then N7's line and
+ *       receipt (W22, not built).</li>
  * </ul>
  * Our Europe screen (a stopgap until W22) has clicks, not drags: a click
  * on a market slot with a ship selected is the drop, Shift+click the
  * Shift-drop; a click on a good in the hold sells it all, Shift+click
- * brings {@code @HOWMUCH5} (I, by analogy).  The preset is what the gold
- * can pay of the "(0-max)" (part L's plan, so that Enter on it buys while
- * the red line is missing; the original showed "100" with gold for 72: a
- * question for Roger).  Escape, 0 or an empty field: nothing, it costs
- * nothing (Roger).  A number the gold cannot pay: nothing (the original's
- * red line, W22).
+ * brings {@code @HOWMUCH5} (I, by analogy).  The preset is the
+ * "(0-max)", as in the original: "100" for a free hold (Roger,
+ * 2026-10-09: "Soll zuerst 100 im Feld stehen? Ja"; I: the rest of a
+ * partly filled hold, the field never holds more than its max), and
+ * all of it for {@code @HOWMUCH5}.  Escape, 0 or an empty field:
+ * nothing, it costs nothing (Roger).  A number the gold cannot pay, the
+ * preset included: nothing (the original's red line, W22, not built).
  */
 final class ClassicTrade {
 
@@ -162,7 +163,7 @@ final class ClassicTrade {
         if (max <= 0) return 0;
         int n = max;
         if (shift) {
-            n = t.ask(true, type, max, affordable(p, type, max));
+            n = t.ask(true, type, max, max);  // "100" for a free hold
             if (n <= 0) return 0;              // Escape, 0, empty: nothing
             n = Math.min(n, max);
         }

@@ -233,6 +233,15 @@ public class Player extends FreeColGameObject implements Nameable {
      */
     protected volatile String classicLandName = null;
 
+    /**
+     * Whether a unit of this player has sighted the original's Pacific
+     * ({@code ServerUnit.csCheckSightedPacific}): woodcut 6 comes once per
+     * game and player, at the player's own first sighting, whether
+     * another nation discovered the Pacific before or not (Roger,
+     * 2026-10-09).  Set by the server, kept in the save.
+     */
+    protected boolean pacificSighted = false;
+
     /** Is this player an admin? */
     protected boolean admin;
 
@@ -580,6 +589,26 @@ public class Player extends FreeColGameObject implements Nameable {
     public void setClassicLandName(String classicLandName) {
         this.classicLandName = (classicLandName == null || classicLandName.isEmpty())
             ? null : classicLandName;
+    }
+
+    /**
+     * Gets whether a unit of this player has sighted the original's
+     * Pacific.
+     *
+     * @return True if one has (false in a save without the attribute).
+     */
+    public boolean getPacificSighted() {
+        return this.pacificSighted;
+    }
+
+    /**
+     * Sets whether a unit of this player has sighted the original's
+     * Pacific.
+     *
+     * @param pacificSighted The new value.
+     */
+    public void setPacificSighted(boolean pacificSighted) {
+        this.pacificSighted = pacificSighted;
     }
 
     /**
@@ -4271,6 +4300,8 @@ public class Player extends FreeColGameObject implements Nameable {
         this.classicTips |= o.getClassicTips();
         // Nor the name taken at the first sighting (W10).
         if (o.getClassicLandName() != null) this.classicLandName = o.getClassicLandName();
+        // Nor the Pacific sighted.
+        this.pacificSighted |= o.getPacificSighted();
         // The unit cycle cursor is the client's own (the server's copy only
         // mirrors it for the save): an update in flight never moves it.
         this.admin = o.isAdmin();
@@ -4345,6 +4376,7 @@ public class Player extends FreeColGameObject implements Nameable {
     private static final String NEW_LAND_NAME_TAG = "newLandName";
     private static final String OFFERED_FATHERS_TAG = "offeredFathers";
     private static final String OLD_SOL_TAG = "oldSoL";
+    private static final String PACIFIC_SIGHTED_TAG = "pacificSighted";
     private static final String PLAYER_TAG = "player";
     private static final String PLAYER_TYPE_TAG = "playerType";
     private static final String READY_TAG = "ready";
@@ -4424,6 +4456,10 @@ public class Player extends FreeColGameObject implements Nameable {
 
             if (classicLandName != null) {
                 xw.writeAttribute(CLASSIC_LAND_NAME_TAG, classicLandName);
+            }
+
+            if (pacificSighted) {
+                xw.writeAttribute(PACIFIC_SIGHTED_TAG, pacificSighted);
             }
         }
 
@@ -4611,6 +4647,8 @@ public class Player extends FreeColGameObject implements Nameable {
         setClassicCycleCursor(xr.getAttribute(CLASSIC_CYCLE_CURSOR_TAG, -1L));
 
         setClassicLandName(xr.getAttribute(CLASSIC_LAND_NAME_TAG, (String)null));
+
+        pacificSighted = xr.getAttribute(PACIFIC_SIGHTED_TAG, false);
 
         independentNationName = xr.getAttribute(INDEPENDENT_NATION_NAME_TAG,
                                                 (String)null);

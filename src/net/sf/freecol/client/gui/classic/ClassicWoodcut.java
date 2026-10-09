@@ -699,7 +699,9 @@ final class ClassicWoodcut {
      * The woodcuts a game counts as shown although it has no record of
      * them (a save of an older build or of the standard GUI): those whose
      * event has left a trace (spec G5 section 4.2).  Evaluated once, when
-     * the game view is built.
+     * the game view is built.  The Pacific counts only when we discovered
+     * it or sighted it ({@code Player.getPacificSighted}): woodcut 6 is
+     * each nation's own (Roger, 2026-10-09).
      *
      * @param me Our player (null: none).
      * @param map The client's map (null: none).
@@ -708,12 +710,16 @@ final class ClassicWoodcut {
     static int derived(Player me, Map map) {
         if (me == null) return 0;
         int bits = 0;
+        if (me.getPacificSighted()) bits |= bit(PACIFIC);
         if (map != null) {
             if (!map.getTileSet(t -> t.isExplored() && t.isLand()).isEmpty()) {
                 bits |= bit(DISCOVERY);
             }
             for (Region r : map.getRegions()) {
-                if (r.isPacific() && r.getDiscoveredIn() != null) bits |= bit(PACIFIC);
+                final Player by = r.getDiscoveredBy();
+                if (r.isPacific() && by != null && by.getId().equals(me.getId())) {
+                    bits |= bit(PACIFIC);
+                }
             }
         }
         boolean colony = me.getSettlementCount() > 0, destroyed = false;

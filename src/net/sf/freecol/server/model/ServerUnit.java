@@ -939,8 +939,16 @@ public class ServerUnit extends Unit implements TurnTaker {
      * run's next step finds the Pacific discovered; a request handled
      * after the answer is dropped there (no longer discoverable), also
      * the first one after its woodcut 6 when a repeat run while the
-     * woodcut was up has answered.  Once per game: the region is then
-     * no longer discoverable, and the client shows woodcut 6 once.
+     * woodcut was up has answered.  The region is then no longer
+     * discoverable, and the client shows woodcut 6 once.
+     *
+     * Once per game and nation (Roger, 2026-10-09: "Dieser Holzschnitt
+     * erscheint nur bei MEINER ersten Pazifikentdeckung", whether the
+     * other nations were there before, which the player cannot know):
+     * a human nation whose first sighting comes after another nation
+     * has discovered the Pacific gets the same request for the
+     * discovered region ({@link #csSightedDiscoveredPacific}), which its
+     * client answers with woodcut 6 alone (nothing to name).
      *
      * @param newTiles The tiles the move brought into this unit's sight,
      *     and the tile it entered, or null.
@@ -956,7 +964,7 @@ public class ServerUnit extends Unit implements TurnTaker {
         }
         Tile best = null;
         for (Tile t : newTiles) {
-            final Region r = t.getDiscoverableRegion();
+            final Region r = t.getRegion();
             if (r == null || !r.isPacific()) continue;
             // The same tile every time: the northernmost, then westernmost.
             if (best == null || t.getY() < best.getY()
@@ -966,11 +974,47 @@ public class ServerUnit extends Unit implements TurnTaker {
         }
         if (best == null) return null;
         final Region region = best.getDiscoverableRegion();
-        if (!region.checkDiscover(this)) return null;
-        cs.add(See.only(getOwner()),
-            new NewRegionNameMessage(region, best, this,
-                getOwner().getNameForRegion(region)));
-        return region;
+        if (region != null && region.checkDiscover(this)) {
+            getOwner().setPacificSighted(true);
+            cs.add(See.only(getOwner()),
+                new NewRegionNameMessage(region, best, this,
+                    getOwner().getNameForRegion(region)));
+            return region;
+        }
+        csSightedDiscoveredPacific(best, cs);
+        return null;
+    }
+
+    /**
+     * A nation's first sighting of the original's Pacific after another
+     * nation has discovered it ({@link #csCheckSightedPacific}): the
+     * naming request for the discovered Pacific, which the client
+     * answers with woodcut 6 and nothing else (it is no longer
+     * discoverable, so there is nothing to name; the region's update
+     * comes first).  Once per nation ({@link Player#getPacificSighted},
+     * in the save); not for the nation that discovered it (an older
+     * save), nor for an AI (it would answer the naming); nothing while
+     * another unit's discovery waits for its name (the region is still
+     * discoverable: a later sighting tries again).
+     *
+     * @param tile The Pacific tile sighted.
+     * @param cs A {@code ChangeSet} to update.
+     */
+    private void csSightedDiscoveredPacific(Tile tile, ChangeSet cs) {
+        final Player owner = getOwner();
+        Region pacific = tile.getRegion();
+        while (pacific.getParent() != null && pacific.getParent().isPacific()) {
+            pacific = pacific.getParent();
+        }
+        if (owner.getPacificSighted() || pacific.getDiscoverable()) return;
+        owner.setPacificSighted(true);
+        final Player by = pacific.getDiscoveredBy();
+        if ((by != null && by.getId().equals(owner.getId()))
+            || owner.isAI()) return;
+        cs.add(See.only(owner), pacific);
+        cs.add(See.only(owner),
+            new NewRegionNameMessage(pacific, tile, this,
+                owner.getNameForRegion(pacific)));
     }
 
     /**

@@ -345,6 +345,34 @@ public class PlayerTest extends FreeColTestCase {
     }
 
     /**
+     * The original's Pacific sighted (M1, woodcut 6 once per nation): the
+     * attribute {@code pacificSighted} goes into a save and to its owner
+     * only while it is true, a save or an older one without it reads
+     * false, and an update ({@code copyIn}) never takes it away.
+     */
+    public void testPacificSighted() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        assertFalse(dutch.getPacificSighted());
+        assertFalse(dutch.serialize(net.sf.freecol.common.io.FreeColXMLWriter
+            .WriteScope.toSave()).contains("pacificSighted"));
+        dutch.setPacificSighted(true);
+        final String save = dutch.serialize(
+            net.sf.freecol.common.io.FreeColXMLWriter.WriteScope.toSave());
+        assertTrue(save.contains("pacificSighted=\"true\""));
+        assertTrue(dutch.serialize(dutch).contains("pacificSighted=\"true\""));
+        assertFalse(dutch.serialize(french).contains("pacificSighted"));
+        final Player read = readPlayer(game, save);
+        assertTrue(read.getPacificSighted());
+        assertFalse(readPlayer(game, save.replace("pacificSighted=\"true\"", ""))
+                    .getPacificSighted());
+        read.setPacificSighted(false);
+        assertTrue(dutch.copyIn(read));
+        assertTrue(dutch.getPacificSighted());
+    }
+
+    /**
      * The Classic UI's unit cycle cursor (I2): the attribute
      * {@code classicCycleCursor} goes into a save and to its owner only
      * while it is not the head (-1); a save or an older one without it
