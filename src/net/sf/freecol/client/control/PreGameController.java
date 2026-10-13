@@ -303,7 +303,9 @@ public final class PreGameController extends FreeColClientHolder {
         fcc.changeClientState(true);
         fcc.restoreGUI(player);
         
-        // Clean up autosaves
+        // Clean up autosaves.  Never in the Classic UI (Roger 2026-10-13:
+        // no saved game is ever deleted by itself): its options say false
+        // and FreeColDirectories.removeAutosaves refuses there.
         final ClientOptions co = getClientOptions();
         if (player.isAdmin() && co.getBoolean(ClientOptions.AUTOSAVE_DELETE)) {
             String logMe = FreeColDirectories

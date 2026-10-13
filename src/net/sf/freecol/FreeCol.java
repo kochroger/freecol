@@ -1066,6 +1066,18 @@ public final class FreeCol {
     }
 
     /**
+     * Set the classic UI state ({@code --classic}).
+     *
+     * Used by the test suite, which runs the code the Classic UI runs
+     * without a command line.
+     *
+     * @param newClassic The new classic state.
+     */
+    public static void setClassic(boolean newClassic) {
+        classic = newClassic;
+    }
+
+    /**
      * Gets the default advantages type.
      *
      * @return Usually Advantages.SELECTABLE, but can be overridden at the

@@ -536,6 +536,11 @@ public final class FreeColClient {
             clop.load(userOptions);
         }
 
+        // The Classic UI never deletes a saved game by itself (Roger
+        // 2026-10-13), whatever the saved game or an older options file
+        // said: no autosave is outdated, none is deleted at a new game.
+        if (FreeCol.getClassic()) clop.keepAllSaves();
+
         //logger.info("Final client options: " + clop.toString());
         return clop;
     }
@@ -1155,15 +1160,7 @@ public final class FreeColClient {
     public void quit() {
         stopServer();
 
-        final ClientOptions co = getClientOptions();
-        List<String> excludeSuffixes = new ArrayList<>(2);
-        excludeSuffixes.add(co.getText(ClientOptions.LAST_TURN_NAME));
-        excludeSuffixes.add(co.getText(ClientOptions.BEFORE_LAST_TURN_NAME));
-        String logMe = FreeColDirectories
-            .removeOutdatedAutosaves(co.getText(ClientOptions.AUTO_SAVE_PREFIX),
-                                     excludeSuffixes,
-                                     co.getInteger(ClientOptions.AUTOSAVE_VALIDITY));
-        if (logMe != null) logger.info(logMe);
+        removeOutdatedAutosaves();
 
         // Exit
         try {
@@ -1173,7 +1170,31 @@ public final class FreeColClient {
         }
         FreeCol.quit(0);
     }
-    
+
+    /**
+     * The autosave housekeeping of {@link #quit}: remove the numbered
+     * autosaves older than {@link ClientOptions#AUTOSAVE_VALIDITY} days
+     * (the last-turn and before-last-turn ones stay).  Never in the
+     * Classic UI (Roger 2026-10-13: no saved game is ever deleted by
+     * itself; {@code FreeColDirectories.removeOutdatedAutosaves} refuses
+     * there, and the Classic UI's options say 0 days), and with the
+     * default of 0 days nowhere.
+     *
+     * @return The log message of what was deleted, or null if nothing.
+     */
+    private String removeOutdatedAutosaves() {
+        final ClientOptions co = getClientOptions();
+        List<String> excludeSuffixes = new ArrayList<>(2);
+        excludeSuffixes.add(co.getText(ClientOptions.LAST_TURN_NAME));
+        excludeSuffixes.add(co.getText(ClientOptions.BEFORE_LAST_TURN_NAME));
+        String logMe = FreeColDirectories
+            .removeOutdatedAutosaves(co.getText(ClientOptions.AUTO_SAVE_PREFIX),
+                                     excludeSuffixes,
+                                     co.getInteger(ClientOptions.AUTOSAVE_VALIDITY));
+        if (logMe != null) logger.info(logMe);
+        return logMe;
+    }
+
     private void overrideDefaultUncaughtExceptionHandler() {
         // This overrides the handler in FreeCol:
         Thread.setDefaultUncaughtExceptionHandler((Thread thread, Throwable e) -> {

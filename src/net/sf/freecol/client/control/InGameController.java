@@ -28,11 +28,12 @@ import static net.sf.freecol.common.util.CollectionUtils.none;
 import static net.sf.freecol.common.util.CollectionUtils.removeInPlace;
 import static net.sf.freecol.common.util.CollectionUtils.transform;
 import static net.sf.freecol.common.util.Utils.delay;
-import static net.sf.freecol.common.util.Utils.deleteFile;
 
 import java.awt.Color;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -886,16 +887,7 @@ public final class InGameController extends FreeColClientHolder {
         // if "last-turn" file exists, shift it to "before-last-turn" file
         if (lastTurnFile != null) {
             if (lastTurnFile.exists()) {
-                if (beforeLastTurnFile.exists()) deleteFile(beforeLastTurnFile);
-                try {
-                    if (!lastTurnFile.renameTo(beforeLastTurnFile)) {
-                        logger.warning("Could not rename: "
-                            + lastTurnFile.getPath());
-                    }
-                } catch (NullPointerException|SecurityException ex) {
-                    logger.log(Level.WARNING, "Could not rename: "
-                        + lastTurnFile.getPath(), ex);
-                }
+                replaceFile(lastTurnFile, beforeLastTurnFile);
             }
             saveGame(lastTurnFile);
         }
@@ -906,6 +898,31 @@ public final class InGameController extends FreeColClientHolder {
         if (saveGamePeriod >= 1 && turnNumber % saveGamePeriod == 0) {
             String fileName = prefix + "-" + getSaveGameString(game);
             saveGame(FreeColDirectories.getAutosaveFile(fileName));
+        }
+    }
+
+    /**
+     * Move a saved game onto another name, replacing the file there in a
+     * single atomic step, never deleting it first: the last-turn autosave
+     * becomes the before-last-turn one.  In the Classic UI the game never
+     * deletes a saved game by itself (Roger 2026-10-13); and if the move
+     * fails, both files stay as they were (FreeCol deleted the
+     * before-last-turn autosave first, so a failed rename left none).
+     *
+     * @param from The {@code File} to move.
+     * @param to The {@code File} it replaces.
+     * @return True if the file was moved.
+     */
+    private static boolean replaceFile(File from, File to) {
+        try {
+            Files.move(from.toPath(), to.toPath(),
+                       StandardCopyOption.REPLACE_EXISTING,
+                       StandardCopyOption.ATOMIC_MOVE);
+            return true;
+        } catch (IOException|SecurityException|UnsupportedOperationException ex) {
+            logger.log(Level.WARNING, "Could not move " + from.getPath()
+                + " to " + to.getPath(), ex);
+            return false;
         }
     }
 

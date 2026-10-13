@@ -45,6 +45,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -57,6 +58,8 @@ import javax.xml.transform.TransformerException;
 import javax.xml.transform.TransformerFactory;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
+import net.sf.freecol.FreeCol;
 
 
 /**
@@ -270,11 +273,45 @@ public class Utils {
     }
 
     /**
+     * The start of the warning {@link #deleteFile} logs when the Classic UI
+     * keeps a saved game.
+     */
+    public static final String KEPT_SAVE
+        = "Classic UI: a saved game is never deleted: ";
+
+    /**
+     * Is this file a saved game ({@code .fsg}, in any case) that the
+     * Classic UI keeps?  In the Classic UI the game never deletes a saved
+     * game by itself (Roger 2026-10-13: "Bitte auf keinen Fall
+     * automatisches L&ouml;schen.").
+     *
+     * @param file The {@code File} to check.
+     * @return True in the Classic UI for a saved game.
+     */
+    public static boolean keepsSavedGame(File file) {
+        return FreeCol.getClassic() && file != null
+            && file.getName().toLowerCase(Locale.ROOT)
+                .endsWith("." + FreeCol.FREECOL_SAVE_EXTENSION);
+    }
+
+    /**
      * Delete a file.
+     *
+     * In the Classic UI a saved game is never deleted
+     * ({@link #keepsSavedGame}): the file stays and a warning starting
+     * with {@link #KEPT_SAVE} is logged.  The game's own deletions of
+     * saved games (the autosave pruning at quit and at a new game, the
+     * before-last-turn autosave, the map editor's start map) do not run
+     * in the Classic UI at all; this is the last guard for any other
+     * caller.
      *
      * @param file The {@code File} to delete.
      */
     public static void deleteFile(File file) {
+        if (keepsSavedGame(file)) {
+            logger.warning(KEPT_SAVE + file.getPath());
+            return;
+        }
         try {
             if (!file.delete()) {
                 logger.warning("Failed to delete: " + file.getPath());

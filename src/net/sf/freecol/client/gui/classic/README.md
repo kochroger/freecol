@@ -5367,6 +5367,40 @@ start. Sound *effects* stay FreeCol's for now. (2026-10-04)
   - The classic UI has no options dialog, so the music volume stays
     FreeCol's `MUSIC_VOLUME` (default 100); use the Windows volume mixer.
 
+## Saved games are never deleted (part O3)
+
+The owner (2026-10-13): "Bitte auf keinen Fall automatisches Löschen." In
+the Classic UI the game never deletes a saved game (`.fsg`) by itself. Every
+delete, move or rename of a file in `src` (pinned by
+`ClassicKeepSavesTest.testEveryDeleteInTheCodeIsKnown`):
+
+- **Quit** (`FreeColClient.quit` → `removeOutdatedAutosaves`): FreeCol
+  removed the numbered autosaves older than `model.option.autosaveValidity`
+  days (default 30). Now the default is 0 (no age limit) for every UI, the
+  Classic UI's options are forced to 0 (`ClientOptions.keepAllSaves`, in
+  `loadClientOptions`, whatever an older `options.xml` says), and
+  `FreeColDirectories.removeOutdatedAutosaves` refuses in the Classic UI.
+- **New game** (`PreGameController.startGameInternal`): every autosave was
+  removed when `model.option.autosaveDelete` was set (default false). The
+  Classic UI forces false and `FreeColDirectories.removeAutosaves` refuses.
+- **The last-turn autosave** (`InGameController.autoSaveGame`): FreeCol
+  deleted `Autosave-before-last-turn.fsg`, then renamed the last-turn one
+  onto it (a failed rename left none). Now one atomic move replaces it
+  (`replaceFile`); if it fails, both stay. This slot is overwritten every
+  turn by design (as the original's autosave rows); the numbered copy of
+  every turn stays.
+- **The map editor's start map** (`FreeColServer.readGame`, a map import of
+  `autosave/startMap.fsg` consumed it): never in the Classic UI.
+- **The last guard:** `Utils.deleteFile` does not delete a `.fsg` in the
+  Classic UI (warning `Utils.KEPT_SAVE`); every delete above goes through it.
+- Not saves: the log file and the comms log (`FreeColDirectories`), and two
+  tools the game never runs (`ClassicAssetConverter` regenerates its pack
+  folder, `MapConverter` renames its input to `.old`).
+
+Not a delete, still open: writing an autosave whose name exists overwrites
+it (a game loaded from an older autosave and played on writes the same
+`Autosave-<game>_<nation>_<year>_<season>.fsg` names again).
+
 ## Full screen, Alt+Enter and exit (`ClassicGUI`)
 
 The owner wants the game to look like the original running full screen in

@@ -1001,9 +1001,12 @@ public final class FreeColServer {
         logger.info("Read file " + file.getPath());
 
         // If importing as a result of "Start Game" in the map editor,
-        // consume the file.
+        // consume the file.  Never in the Classic UI: there the game never
+        // deletes a saved game by itself (Roger 2026-10-13), and the
+        // start map is one (autosave/startMap.fsg, which the Classic load
+        // box lists and a remembered map import reads).
         File startGame = FreeColDirectories.getStartMapFile();
-        if (startGame != null
+        if (startGame != null && !FreeCol.getClassic()
             && startGame.getPath().equals(file.getPath())) deleteFile(file);
         return serverGame;
     }

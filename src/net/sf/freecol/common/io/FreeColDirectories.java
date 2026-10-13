@@ -674,13 +674,17 @@ public class FreeColDirectories {
      * @param prefix The autosave file prefix.
      * @param excludeSuffixes Only files not ending with any of these prefixes
      *     will be removed.
+     * Never in the Classic UI, whatever {@code validDays} says: there the
+     * game never deletes a saved game by itself (Roger 2026-10-13,
+     * {@link net.sf.freecol.common.util.Utils#keepsSavedGame}).
+     *
      * @param validDays Only files older than this amount of days will
      *     be removed.
      * @return A suitable log message, or null if nothing was deleted.
      */
     public static String removeOutdatedAutosaves(String prefix,
         List<String> excludeSuffixes, long validDays) {
-        if (validDays <= 0L) return null;
+        if (FreeCol.getClassic() || validDays <= 0L) return null;
         final long validMS = 1000L * 24L * 60L * 60L * validDays; // days to ms
         final long timeNow = now();
         final Predicate<File> outdatedPred = f -> 
@@ -705,10 +709,15 @@ public class FreeColDirectories {
     /**
      * Remove all autosave files.
      *
+     * Never in the Classic UI: there the game never deletes a saved game
+     * by itself (Roger 2026-10-13,
+     * {@link net.sf.freecol.common.util.Utils#keepsSavedGame}).
+     *
      * @param prefix The autosave file prefix.
      * @return A suitable log message, or null if nothing was deleted.
      */
     public static String removeAutosaves(String prefix) {
+        if (FreeCol.getClassic()) return null;
         List<File> files = getAutosaveFiles(sanitize(prefix), alwaysTrue());
         if (files.isEmpty()) return null;
         deleteFiles(files);

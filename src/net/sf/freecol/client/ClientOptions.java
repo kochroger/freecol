@@ -758,6 +758,19 @@ public class ClientOptions extends OptionGroup {
     }
 
     /**
+     * Keep every saved game: no autosave is ever outdated
+     * ({@link #AUTOSAVE_VALIDITY} 0) and none is deleted when a new game
+     * starts ({@link #AUTOSAVE_DELETE} false), whatever an options file or
+     * a saved game said.  The Classic UI applies this to the options it
+     * loads (Roger 2026-10-13: "Bitte auf keinen Fall automatisches
+     * L&ouml;schen."); both are also the defaults now.
+     */
+    public void keepAllSaves() {
+        setInteger(AUTOSAVE_VALIDITY, 0);
+        setBoolean(AUTOSAVE_DELETE, false);
+    }
+
+    /**
      * Perform backward compatibility fixups on new client options as
      * they are introduced.  Annotate with introduction version so we
      * can clean these up as they become standard.

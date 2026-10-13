@@ -342,10 +342,13 @@
       <integerOption id="model.option.autosavePeriod"
                      defaultValue="1" minimumValue="0" maximumValue="100"/>
       <!-- Option for setting the number of days autosaves are kept
-           (valid time).  0 to ignore this condition. -->
+           (valid time).  0 to ignore this condition.  The default is 0
+           (FreeCol's was 30): no autosave is ever deleted by itself
+           (Roger 2026-10-13); the Classic UI always uses 0. -->
       <integerOption id="model.option.autosaveValidity"
-                     defaultValue="30" minimumValue="0" maximumValue="360"/>
-      <!-- Option to delete old save games when a new game is started. -->
+                     defaultValue="0" minimumValue="0" maximumValue="360"/>
+      <!-- Option to delete old save games when a new game is started.
+           The Classic UI always uses false. -->
       <booleanOption id="model.option.autosaveDelete"
                      defaultValue="false"/>
       <!-- Option to confirm the overwrite of existing save files. -->
