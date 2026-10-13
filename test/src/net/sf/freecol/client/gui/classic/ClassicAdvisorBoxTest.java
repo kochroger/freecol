@@ -113,7 +113,8 @@ public class ClassicAdvisorBoxTest extends TestCase {
             sioux = ClassicAdvisorBox.Portrait.chief(6),
             iroquois = ClassicAdvisorBox.Portrait.chief(3),
             apache = ClassicAdvisorBox.Portrait.chief(5),
-            inca = ClassicAdvisorBox.Portrait.chief(0);
+            inca = ClassicAdvisorBox.Portrait.chief(0),
+            aztec = ClassicAdvisorBox.Portrait.chief(1);
         final Object[][] boxes = {
             // who, pw, ph, @width, P, R, @y, box x, y, w, h, pic x, y
             { "TUTORIAL1", a, 75, 91, 230, 5, 0, null, 44, 112, 236, 48, 40, 41 },
@@ -164,6 +165,14 @@ public class ClassicAdvisorBoxTest extends TestCase {
             { "Inca CHIEFHOWDY #15301", inca, 66, 160, 230, 4, 0, null,
               78, 79, 236, 42, 6, 19 },
             { "KINGNAVACT #34353", k, 79, 161, 300, 4, 2, null, 14, 71, 306, 58, 0, 18 },
+            // O B5, playthrough-3 (00-index #219-#221): the Aztec chief at
+            // the RIGHT at (244,10), 68x177, his box at x 5.
+            { "Aztec WELCOME #103212", aztec, 68, 177, 230, 5, 2, null,
+              5, 68, 236, 64, 244, 10 },
+            { "Aztec PEACE #103275", aztec, 68, 177, 230, 3, 0, null,
+              5, 82, 236, 36, 244, 10 },
+            { "Aztec COME #103462", aztec, 68, 177, 230, 3, 0, null,
+              5, 82, 236, 36, 244, 10 },
         };
         final ClassicFont f = font();
         for (Object[] b : boxes) {
@@ -743,8 +752,9 @@ public class ClassicAdvisorBoxTest extends TestCase {
         assertSame(ClassicAdvisorBox.Portrait.NONE, ClassicAdvisorBox.Portrait.chief(8));
         assertSame(ClassicAdvisorBox.Portrait.NONE, ClassicAdvisorBox.Portrait.chief(-1));
         assertNull(ClassicAdvisorBox.Portrait.NONE.sheet());
-        // Q11, N7: the chief's side by tribe (V 0, 2, 3, 5, 6; 1, 4, 7 I).
-        final boolean[] left = { true, true, false, true, false, true, false, true };
+        // Q11, N7, O B5: the chief's side by tribe (V 0, 1, 2, 3, 5, 6; 4, 7 I):
+        // the Aztec at the right (playthrough-3 #219-#221).
+        final boolean[] left = { true, false, false, true, false, true, false, true };
         for (int tribe = 0; tribe < 8; tribe++) {
             final ClassicAdvisorBox.Portrait p = ClassicAdvisorBox.Portrait.chief(tribe);
             assertEquals("tribe " + tribe, left[tribe], p.left);
@@ -765,11 +775,20 @@ public class ClassicAdvisorBoxTest extends TestCase {
             sprite(100, 146));
         assertEquals(new Point(217, 26), cherokee.portraitAt);
         assertEquals(new Rectangle(0, 82, 236, 36), cherokee.box);
+        // O B5: the Aztec at the right at his measured x 244, whatever the
+        // width (playthrough-3: 68 wide, box x 5); the rule would give 246.
         final ClassicAdvisorBox.Layout aztec = ClassicAdvisorBox.layout(
             request(230, 3, 0, ClassicAdvisorBox.Portrait.chief(1), null), font(),
-            sprite(100, 160));
-        assertEquals(new Point(0, 19), aztec.portraitAt);
-        assertEquals(new Rectangle(84, 82, 236, 36), aztec.box);
+            sprite(68, 177));
+        assertEquals(new Point(244, 10), aztec.portraitAt);
+        assertEquals(new Rectangle(5, 82, 236, 36), aztec.box);
+        assertEquals(244, ClassicAdvisorBox.Portrait.chief(1).rightX(68));
+        assertEquals(246, ClassicAdvisorBox.Portrait.chief(2).rightX(65));
+        assertEquals(210, ClassicAdvisorBox.Portrait.chief(6).rightX(107));
+        assertEquals(217, ClassicAdvisorBox.Portrait.chief(4).rightX(100));
+        assertEquals(1, ClassicAdvisorBox.Portrait.chief(1).tribe());
+        assertEquals(-1, ClassicAdvisorBox.Portrait.KING.tribe());
+        assertEquals(-1, ClassicAdvisorBox.Portrait.NONE.tribe());
         // N7: at the left x = max(0, 72 - pw), the box min(320 - w, x + pw + 6),
         // checked against every measured left portrait (Inca 66, Iroquois
         // 87, Apache 114, the King 79 with a 236 and a 306 wide box).
@@ -782,7 +801,8 @@ public class ClassicAdvisorBoxTest extends TestCase {
         assertEquals(0, ClassicAdvisorBox.Portrait.leftX(79));
         assertEquals(84, ClassicAdvisorBox.Portrait.leftBoxX(79, 236));
         assertEquals(14, ClassicAdvisorBox.Portrait.leftBoxX(79, 306));
-        // The unseen left chiefs (I): the Aztec (68 wide) and the Tupi (56).
+        // A 68 wide portrait at the left, and the unseen left chief (I),
+        // the Tupi (56).
         assertEquals(4, ClassicAdvisorBox.Portrait.leftX(68));
         assertEquals(78, ClassicAdvisorBox.Portrait.leftBoxX(68, 236));
         assertEquals(16, ClassicAdvisorBox.Portrait.leftX(56));
@@ -1588,6 +1608,26 @@ public class ClassicAdvisorBoxTest extends TestCase {
             { 15301, "CHIEFHOWDY", "STRING0=Erfahr. Silber-Bergarb.;STRING1=Werkzeuge;"
               + "STRING2=Handelswaren;STRING3=Rum", 0, -1,
               new Rectangle(78, 79, 236, 42), new Point(6, 19) },
+        });
+    }
+
+    /**
+     * Part O B5 golden (the pack and {@code -Dclassic.clips}): the Aztec
+     * chief (IND1A0, 68x177) at the RIGHT at (244,10), his box at x 5,
+     * over playthrough-3's frames (00-index #219-#221): @INDIANWELCOME
+     * #103212 (the bar on "Ja"), @INDIANPEACE #103275, @INDIANCOME
+     * #103462; 0 px off as above.  Before B5 he stood at the left at
+     * (4,10) with the box at 78.
+     */
+    public void testAztecAgainstPlaythrough3() throws Exception {
+        chiefsAgainst("playthrough-3", new Object[][] {
+            // frame, section, values, tribe, bar, box, chief
+            { 103212, "INDIANWELCOME", "STRING0=Azteken;NUMBER0=6;STRING1=Städte", 1, 0,
+              new Rectangle(5, 68, 236, 64), new Point(244, 10) },
+            { 103275, "INDIANPEACE", "STRING0=Azteken;STRING1=Holl.", 1, -1,
+              new Rectangle(5, 82, 236, 36), new Point(244, 10) },
+            { 103462, "INDIANCOME", "STRING0=Azteken", 1, -1,
+              new Rectangle(5, 82, 236, 36), new Point(244, 10) },
         });
     }
 

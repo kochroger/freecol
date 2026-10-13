@@ -68,8 +68,9 @@ import java.util.Map;
  *       on both sides (playthrough-1: the Apache, 142 high, at y 28; an
  *       even height is 1 px lower than {@code (197 - ph) div 2}).  At the
  *       right (Arawak (246,8), Sioux (210,10)): {@code chief.x = min(246,
- *       317 - pw)}, the box's right edge 3 px left of him, at least x = 0
- *       (box x 7 and 0).  At the left (part N7; Inca (6,19) with the box at
+ *       317 - pw)}, except the Aztec, measured at (244,10) (playthrough-3,
+ *       {@link Portrait#rightX}); the box's right edge 3 px left of him,
+ *       at least x = 0 (box x 7, 0 and 5).  At the left (part N7; Inca (6,19) with the box at
  *       78, playthrough-2; Iroquois (0,11), Apache (0,28), playthrough-1;
  *       the King (0,18), clip005/006 (84,68,236,64), playthrough-2 a 306
  *       wide box at 14): {@code x = max(0, 72 - pw)}, the box 6 px right
@@ -289,16 +290,55 @@ final class ClassicAdvisorBox {
          * N7).  The side belongs to the tribe, not to where its village is
          * (V: playthrough-1, the Iroquois left with the village right of
          * the map's centre, #9449, and with Base near it, #80739).  V for
-         * five tribes: Inca (0; playthrough-2, 8 boxes), Iroquois (3) and
-         * Apache (5) left, Arawak (2; landfall, clip008) and Sioux (6;
-         * clip004) right.  The other three were never seen and keep the
-         * old guess (I): Aztec (1) and Tupi (7) left, Cherokee (4) right.
+         * six tribes: Inca (0; playthrough-2, 8 boxes), Iroquois (3) and
+         * Apache (5) left, Arawak (2; landfall, clip008), Sioux (6;
+         * clip004) and Aztec (1; playthrough-3 #219-#221, part O B5)
+         * right.  The other two were never seen and keep the old guess
+         * (I): Tupi (7) left, Cherokee (4) right.
          *
          * @param tribe The tribe's NAMES.TXT {@code @TRIBES} index.
          * @return True for the left side.
          */
         static boolean chiefLeft(int tribe) {
-            return tribe != 2 && tribe != 4 && tribe != 6;
+            return tribe != 1 && tribe != 2 && tribe != 4 && tribe != 6;
+        }
+
+        /**
+         * The measured x of a chief at the right, by tribe, or -1 (part O
+         * B5): the Aztec (68 wide) at 244 (playthrough-3 #219-#221, 100 %
+         * match, box x 5), not the rule's 246.  No formula fits the three
+         * measured right chiefs (Arawak 65 wide at 246, Sioux 107 at 210,
+         * Aztec 68 at 244), so the Aztec's is taken as measured; the
+         * others get {@link #rightX}'s rule (the Cherokee: I).
+         */
+        private static final int[] RIGHT_X = { -1, 244, -1, -1, -1, -1, -1, -1 };
+
+        /**
+         * The tribe of a chief's portrait ({@code IND<n>A0}).
+         *
+         * @return The tribe's NAMES.TXT {@code @TRIBES} index, or -1.
+         */
+        int tribe() {
+            if (this.kind != Kind.CHIEF || this.sprite == null
+                || this.sprite.length() < 4 || !this.sprite.startsWith("IND")) {
+                return -1;
+            }
+            final int n = this.sprite.charAt(3) - '0';
+            return (n >= 0 && n <= 7) ? n : -1;
+        }
+
+        /**
+         * A chief's x at the right: the measured one ({@link #RIGHT_X}),
+         * else {@code min(246, 317 - pw)} (the Arawak at 246 and the Sioux
+         * at 210, both V).
+         *
+         * @param pw The portrait's width.
+         * @return Its x.
+         */
+        int rightX(int pw) {
+            final int t = tribe();
+            final int m = (t < 0) ? -1 : RIGHT_X[t];
+            return (m >= 0) ? m : Math.min(246, 317 - pw);
         }
 
         /** The column a chief or the King at the left stands in (N7). */
@@ -1532,7 +1572,7 @@ final class ClassicAdvisorBox {
                 (r.y != null) ? r.y : (VH - h + 1) / 2);
             picAt = null;
         } else if (who.kind == Portrait.Kind.CHIEF && !who.left) {
-            final int cx = Math.min(246, 317 - sprite.getWidth());
+            final int cx = who.rightX(sprite.getWidth());
             boxAt = new Point(Math.max(0, cx - 3 - w), (VH - h + 1) / 2);
             picAt = new Point(cx, Portrait.underY(sprite.getHeight()));
             under = true;
