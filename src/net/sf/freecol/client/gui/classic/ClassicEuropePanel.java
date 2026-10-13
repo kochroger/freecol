@@ -123,7 +123,11 @@ import net.sf.freecol.common.model.UnitType;
  *       opens {@code @EUROPESHIPCLICK} (clip 020 #27512), a click on a
  *       colonist of the dock {@code @EUROPEARM} ({@link
  *       ClassicEuropeOptions}); a click on a market slot moves the market
- *       cursor there; a drop back on its own place, or anywhere else, does
+ *       cursor there, on a boycotted good it asks @KISSUP (part O, A1,
+ *       {@link ClassicBoycott}: a boycotted hold is never sold, it stays
+ *       aboard, @SOMEBOYCOTT says so; the market draws the red X and the
+ *       hover label «Ware (Boykott)», else «Ware (Geboten b, Gefordert
+ *       a)»); a drop back on its own place, or anywhere else, does
  *       nothing;</li>
  *   <li>the buttons act on the release (clip008 §2.3).</li>
  * </ul>
@@ -259,6 +263,15 @@ final class ClassicEuropePanel extends JPanel {
     /** Index of the hovered button, or -1. */
     private int hovered = -1;
 
+    /** The market slot under the pointer (its hover label), or -1. */
+    private int hoverSlot = -1;
+
+    /** Whether the action under way tried to sell a boycotted good (A1). */
+    private boolean boycottSold;
+
+    /** The boycotted good the action under way tried to buy (A1), or null. */
+    private GoodsType boycottBought;
+
     /**
      * The selected ship in port (the original's green frame in box 3): its
      * holds are shown, the market's drops and «Segel setzen» go to it.
@@ -358,6 +371,11 @@ final class ClassicEuropePanel extends JPanel {
                 @Override
                 public void mouseMoved(MouseEvent e) {
                     onHover(canvasX(e.getX()), canvasY(e.getY()));
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    onHover(-1, -1);
                 }
             };
         addMouseListener(mouse);
@@ -837,8 +855,11 @@ final class ClassicEuropePanel extends JPanel {
     private void act(Runnable r) {
         if (this.acting) return;
         this.acting = true;
+        this.boycottSold = false;
+        this.boycottBought = null;
         try {
             r.run();
+            answerBoycott();
         } finally {
             this.acting = false;
             update();
@@ -988,6 +1009,11 @@ final class ClassicEuropePanel extends JPanel {
             break;
         case MARKET:
             this.marketCursor = h.index;
+            // A boycotted good: @KISSUP, pay the arrears or not (A1, M
+            // manual:199 "click the boycotted item ... and pay").
+            if (ClassicBoycott.boycotted(this.freeColClient.getMyPlayer(), h.type)) {
+                liftBoycott(h.type);
+            }
             break;
         default:
             break;
@@ -1056,7 +1082,7 @@ final class ClassicEuropePanel extends JPanel {
     }
 
     /** Track which button the pointer is over, and repaint if it changed. */
-    private void onHover(int vx, int vy) {
+    void onHover(int vx, int vy) {
         int found = -1;
         for (int i = 0; i < this.buttonActions.size(); i++) {
             if (buttonBounds(i).contains(vx, vy)) {
@@ -1064,10 +1090,81 @@ final class ClassicEuropePanel extends JPanel {
                 break;
             }
         }
-        if (found != this.hovered) {
+        final int slot = marketSlotAt(vx, vy, marketGoods().size());
+        if (found != this.hovered || slot != this.hoverSlot) {
             this.hovered = found;
+            this.hoverSlot = slot;
             repaint();
         }
+    }
+
+    /**
+     * The market slot under a point, for its hover label (V clip008 §2.9:
+     * the label is up while the pointer is over the market row).
+     *
+     * @param vx Canvas x.
+     * @param vy Canvas y.
+     * @param n The market's goods.
+     * @return The slot, or -1.
+     */
+    static int marketSlotAt(int vx, int vy, int n) {
+        if (vy < MARKET_Y || vy >= VH || vx < 0) return -1;
+        final int k = vx / MARKET_W;
+        return (k < n && vx < EXIT.x) ? k : -1;
+    }
+
+    /** @return The market slot under the pointer (its hover label), or -1 (tests). */
+    int hoverSlot() {
+        return this.hoverSlot;
+    }
+
+    /**
+     * The market's hover label (V clip008 §2.9, clip006 #8146): the
+     * good's NAMES.TXT {@code @CARGO} name and «(Geboten b, Gefordert a)»
+     * with Amsterdam's bid and ask (LABELS {@code @MISC}), or «(Boykott)»
+     * for a boycotted good (A1).
+     *
+     * @param t The original texts, or null (then none).
+     * @param p Our player, or null.
+     * @param type The good.
+     * @return The label, or null.
+     */
+    static String marketLabel(ClassicText t, Player p, GoodsType type) {
+        if (t == null || type == null) return null;
+        final String name = ClassicTrade.goodsName(t, type);
+        if (ClassicBoycott.boycotted(p, type)) {
+            final String b = t.misc(MISC_BOYCOTT);
+            return (b == null) ? null : name + " (" + b.trim() + ")";
+        }
+        final Market m = (p == null) ? null : p.getMarket();
+        final String bid = t.misc(MISC_BID), ask = t.misc(MISC_ASK);
+        if (m == null || bid == null || ask == null) return null;
+        return name + " (" + bid.trim() + " " + m.getPaidForSale(type) + ", "
+            + ask.trim() + " " + m.getCostToBuy(type) + ")";
+    }
+
+    /** LABELS.TXT {@code @MISC}: «Gefordert», «Geboten», «Boykott» (lines 139, 140, 146). */
+    static final int MISC_ASK = 123, MISC_BID = 124, MISC_BOYCOTT = 130;
+
+    /** The hover label's black box: rows 193-199, the text's glyph top 194 (V clip008 §2.9). */
+    static final int LABEL_Y = 193, LABEL_H = 7, LABEL_TEXT_Y = 194;
+
+    /** The hover label's box ends at x 304 at most (V clip008 §2.9). */
+    static final int LABEL_RIGHT = 304;
+
+    /**
+     * The hover label's box's left edge (V clip008 §2.9, 4 centred and 3
+     * clamped cases): centred on the slot, {@code 19k + 10 - (adv + 1)
+     * div 2}, at most {@code 304 - adv}; the box is {@code adv + 1} wide,
+     * the text 1 px in.
+     *
+     * @param k The slot.
+     * @param adv The text's advance.
+     * @return The box's x.
+     */
+    static int labelX(int k, int adv) {
+        final int x0 = k * MARKET_W + 10 - (adv + 1) / 2;
+        return Math.max(0, Math.min(x0, LABEL_RIGHT - adv));
     }
 
     private void close() {
@@ -1182,14 +1279,77 @@ final class ClassicEuropePanel extends JPanel {
             + " gold=" + gold());
     }
 
-    /** U: the selected ship's first hold of goods is sold (manual). */
+    /**
+     * U: the selected ship's first hold of goods that can be sold is sold
+     * (manual); a boycotted hold stays aboard, and with only boycotted
+     * holds left U brings {@code @SOMEBOYCOTT} (A1, I).
+     */
     private void sellFirstHold() {
+        Goods boycotted = null;
+        final Player me = this.freeColClient.getMyPlayer();
         for (Hold h : holds(selectedShip())) {
-            if (h.goods != null) {
-                sellCargo(h.goods, false);
-                return;
+            if (h.goods == null) continue;
+            if (ClassicBoycott.boycotted(me, h.goods.getType())) {
+                if (boycotted == null) boycotted = h.goods;
+                continue;
             }
+            sellCargo(h.goods, false);
+            return;
         }
+        if (boycotted != null) sellCargo(boycotted, false);   // stays: the notice
+    }
+
+    /**
+     * After an action (a drop, a click, a key, the ship's box): a sale of
+     * a boycotted good left its cargo aboard, {@code @SOMEBOYCOTT} once;
+     * a buy of one asks {@code @KISSUP} as a click on it does (A1;
+     * {@link ClassicBoycott}).
+     */
+    private void answerBoycott() {
+        final GoodsType bought = this.boycottBought;
+        final boolean sold = this.boycottSold;
+        this.boycottBought = null;
+        this.boycottSold = false;
+        if (bought != null) liftBoycott(bought);
+        if (sold && this.boxes != null) {
+            final int a = this.boxes.ask(ClassicBoycott.someRequest(this.text, title()));
+            ClassicFrameRecorder.event("europe-boycott", ClassicBoycott.SOME_SECTION
+                + " closed=" + a);
+        }
+    }
+
+    /**
+     * A boycotted good clicked in the market (or dragged onto a ship):
+     * {@code @KISSUP}; its second row pays FreeCol's arrears and lifts the
+     * boycott, with too little gold {@code @KISSSORRY} and nothing paid;
+     * its first row and Escape do nothing (A1, {@link ClassicBoycott}).
+     * The payment is FreeCol's ({@code PayArrearsMessage}, as its own
+     * {@code payArrears} sends it after its own question), without its
+     * question: @KISSUP was the question.
+     *
+     * @param type The good.
+     */
+    private void liftBoycott(GoodsType type) {
+        final Player me = this.freeColClient.getMyPlayer();
+        if (!ClassicBoycott.boycotted(me, type) || this.boxes == null) return;
+        final int arrears = ClassicBoycott.arrears(me, type);
+        final int a = this.boxes.ask(ClassicBoycott.kissRequest(this.text, me,
+                                                                arrears, title()));
+        String result;
+        if (!ClassicBoycott.pays(a)) {
+            result = "refused";
+        } else if (!me.checkGold(arrears)) {
+            this.boxes.ask(ClassicBoycott.sorryRequest(this.text, me.getGold(),
+                                                       arrears, title()));
+            result = "too little gold";
+        } else {
+            final boolean ok = this.freeColClient.askServer().payArrears(type)
+                && me.canTrade(type);
+            result = (ok) ? "paid" : "not paid";
+        }
+        ClassicFrameRecorder.event("europe-boycott", ClassicBoycott.KISS_SECTION + " "
+            + type.getSuffix() + " arrears=" + arrears + " chosen=" + a + " "
+            + result + " gold=" + gold());
     }
 
     /**
@@ -1256,6 +1416,17 @@ final class ClassicEuropePanel extends JPanel {
             @Override
             public void cannotPay(GoodsType type) {
                 if (boxes != null) boxes.cannotPay(type);
+            }
+
+            @Override
+            public void boycotted(GoodsType type, boolean buying) {
+                // Answered after the action (answerBoycott): one notice
+                // for all the holds an unload left aboard.
+                if (buying) {
+                    boycottBought = type;
+                } else {
+                    boycottSold = true;
+                }
             }
         };
     }
@@ -1858,11 +2029,51 @@ final class ClassicEuropePanel extends JPanel {
                 g.drawString(s, r.x + (r.width - g.getFontMetrics().stringWidth(s)) / 2,
                              VH - 2);
             }
+            if (ClassicBoycott.boycotted(player, gt)) paintBoycottX(g, r);
         }
         final int k = Math.max(0, Math.min(goods.size() - 1, this.marketCursor));
         final Rectangle c = marketSlot(k);
         g.setColor(FRAME);
         g.drawRect(c.x, c.y, c.width, c.height - 1);
+        paintHoverLabel(g, player, goods);
+    }
+
+    /**
+     * A boycotted good's red X, ICONS.SS 055 at (19k + 6, 184), over its
+     * icon, the price left as it is (V clip006 #8146: (272,184) and
+     * (291,184) over Werkzeuge and Musketen; playthrough-3 #24114 over
+     * Nahrungsmittel); without the pack two red strokes there.
+     */
+    private void paintBoycottX(Graphics2D g, Rectangle slot) {
+        final int x = slot.x + ClassicBoycott.X_DX, y = ClassicBoycott.X_Y;
+        final BufferedImage img = icon(ClassicBoycott.ICON_X);
+        if (img != null) {
+            g.drawImage(img, x, y, null);
+            return;
+        }
+        g.setColor(BOYCOTT_RED);
+        g.drawLine(x, y + 2, x + 7, y + 9);
+        g.drawLine(x + 7, y + 2, x, y + 9);
+    }
+
+    /** The fallback X's red (the sprite's, I). */
+    private static final Color BOYCOTT_RED = new Color(0xC0, 0x00, 0x00);
+
+    /**
+     * The hover label over the market slot under the pointer
+     * ({@link #marketLabel}, {@link #labelX}): FONTTINY white on a black
+     * box; none without the pack.
+     */
+    private void paintHoverLabel(Graphics2D g, Player player, List<GoodsType> goods) {
+        final int k = this.hoverSlot;
+        if (k < 0 || k >= goods.size() || this.tiny == null || this.pressed != null) return;
+        final String s = marketLabel(this.text, player, goods.get(k));
+        if (s == null) return;
+        final int adv = this.tiny.stringWidth(s);
+        final int x0 = labelX(k, adv);
+        g.setColor(Color.BLACK);
+        g.fillRect(x0, LABEL_Y, adv + 1, LABEL_H);
+        this.tiny.draw(g, s, x0 + 1, LABEL_TEXT_Y, ClassicFont.colours(0xFFFFFF));
     }
 
     /**

@@ -75,9 +75,10 @@ import net.sf.freecol.client.gui.GUI;
  *
  * <p>A binding may also carry the visibility rule of the BEFEHLE row that
  * prints its key ({@link Binding#when}), so the key fires exactly where the
- * row is listed: U only in a colony, O only for a ship outside one (both are
- * FreeCol's {@code unloadAction}, which would otherwise unload a whole ship
- * in a colony on O, or dump cargo at sea on U without asking).
+ * row is listed: U only in a colony, O only for a ship outside one (both fire
+ * the id {@code unloadAction}, which the Classic UI answers with its own
+ * action, part O: U one hold into the warehouse, O the @OVERBOARD list;
+ * {@code ClassicGUI.classicUnload}).
  *
  * <p>Ctrl+N is FreeCol's "new game" ({@code newAction}): the in-game way
  * back to the classic title, which dropping the {@code JMenuBar} had
@@ -135,11 +136,11 @@ final class ClassicKeyMap {
         new Binding("F", ANY_MODE, "fortifyAction"),
         new Binding("S", ANY_MODE, "sentryAction"),
         new Binding("L", ANY_MODE, "loadAction"),
-        // U and O share FreeCol's unloadAction, which unloads everything in a
-        // colony and silently dumps the goods elsewhere
-        // (InGameController.unload); each key fires only where its BEFEHLE
-        // row is listed: U in a colony (row 11), O for a ship outside one
-        // (row 18, dump cargo).
+        // U and O share the id unloadAction, which the Classic UI answers
+        // with its own action (part O, ClassicGUI.classicUnload: U one
+        // hold, the most valuable, with @WAREHOUSEFULL; O the @OVERBOARD
+        // list); each key fires only where its BEFEHLE row is listed: U in
+        // a colony (row 11), O for a ship outside one (row 18).
         new Binding("U", ANY_MODE, c -> orderListed(11, c), "unloadAction"),
         new Binding("O", ANY_MODE, c -> orderListed(18, c), "unloadAction"),
         new Binding("T", ANY_MODE, "assignTradeRouteAction"),

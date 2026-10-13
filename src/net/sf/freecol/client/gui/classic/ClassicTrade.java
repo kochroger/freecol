@@ -65,7 +65,9 @@ import net.sf.freecol.common.model.Unit;
  * the hold sold, the rest of the hold bought.  Escape, 0 or an
  * empty field: nothing, it costs nothing (Roger).  A number the gold
  * cannot pay, the preset included: nothing (the original's red line,
- * W22, not built).
+ * W22, not built).  A boycotted good is neither sold nor bought, with
+ * or without Shift: its cargo stays aboard and the screen answers with
+ * the original's boxes (part O, A1, {@link ClassicBoycott}).
  */
 final class ClassicTrade {
 
@@ -131,6 +133,17 @@ final class ClassicTrade {
          * @param type The goods.
          */
         void cannotPay(GoodsType type);
+
+        /**
+         * A trade of a boycotted good, which does nothing (part O, A1,
+         * {@link ClassicBoycott}): its cargo stays aboard.  The screen
+         * answers after the action: a sale with {@code @SOMEBOYCOTT}, a
+         * buy with {@code @KISSUP}.
+         *
+         * @param type The goods.
+         * @param buying True for a buy, false for a sale.
+         */
+        void boycotted(GoodsType type, boolean buying);
     }
 
     private ClassicTrade() {}
@@ -175,7 +188,12 @@ final class ClassicTrade {
      */
     static int buy(Player p, Unit ship, GoodsType type, boolean shift, Trader t) {
         if (p == null || ship == null || type == null || t == null
-            || !ship.isNaval() || !p.canTrade(type)) return 0;
+            || !ship.isNaval()) return 0;
+        if (!p.canTrade(type)) {
+            // Boycotted: nothing bought; the screen asks @KISSUP (A1).
+            t.boycotted(type, true);
+            return 0;
+        }
         final int max = hold(ship, type);
         if (max <= 0) return 0;
         int n = max;
@@ -207,8 +225,14 @@ final class ClassicTrade {
     static int sell(Player p, Goods goods, boolean shift, Trader t) {
         if (goods == null || goods.getType() == null || goods.getAmount() <= 0
             || t == null) return 0;
+        if (p != null && !p.canTrade(goods.getType())) {
+            // Boycotted: the cargo stays aboard, with or without Shift
+            // (part O, A1: before, a plain sale reached FreeCol's
+            // sellGoods and the server dumped the hold for nothing).
+            t.boycotted(goods.getType(), false);
+            return 0;
+        }
         if (!shift) return (t.sell(goods)) ? goods.getAmount() : 0;
-        if (p != null && !p.canTrade(goods.getType())) return 0;
         final int max = goods.getAmount();
         final int n = Math.min(max, t.ask(false, goods.getType(), max, SELL_PRESET));
         if (n <= 0) return 0;                  // Escape, 0, empty: nothing

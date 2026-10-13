@@ -2845,7 +2845,7 @@ M4) and gets 0 px.
 | --- | --- |
 | SPIEL | 0 `classic.gameOptions`ᶜ, 1 `classic.colonyOptions`ᶜ, 2 —, 3 —, 4 `saveAction`ⁿ, 5 `openAction`ⁿ, 6 `declareIndependenceAction`ⁿ, 7 `retireAction`, 8 `quitAction` |
 | ANSICHT | 0 `toggleViewModeAction` (fires only in TERRAIN mode, key M), 1 `toggleViewModeAction` (fires only outside it, key V), 2 `europeAction`, 3 `findSettlementAction`ⁿ, 4 `zoomInAction`, 5 `zoomOutAction` (both disable themselves: `GUI.canZoomInMap` is false), 6-9 —, 10 —, 11 `centerAction` |
-| BEFEHLE | 0 `clearOrdersAction`, 1 `waitAction`, 2 `fortifyAction`, 3 (second fortify line: hidden, context unknown), 4 `sentryAction`, 5/6 `buildColonyAction` (no colony / colony on the tile), 7 `clearForestAction` (forest), 8 `plowAction` (no forest), 9 `roadAction`, 10 `loadAction` (carriers), 11 `unloadAction` (carrier in a colony), 12 — (armed land units), 13/14 `gotoAction` (ship / land, the destination list), 15 `assignTradeRouteAction`ⁿ (carriers), 16 `returnToEuropeAction` (ships, key R), 17 `skipUnitAction`, 18 `unloadAction` (ship at sea: dumps cargo), 19 `disbandUnitAction` |
+| BEFEHLE | 0 `clearOrdersAction`, 1 `waitAction`, 2 `fortifyAction`, 3 (second fortify line: hidden, context unknown), 4 `sentryAction`, 5/6 `buildColonyAction` (no colony / colony on the tile), 7 `clearForestAction` (forest), 8 `plowAction` (no forest), 9 `roadAction`, 10 `loadAction` (carriers), 11 `unloadAction` (carrier in a colony: one hold, the Classic UI's own action, part O), 12 — (armed land units), 13/14 `gotoAction` (ship / land, the destination list), 15 `assignTradeRouteAction`ⁿ (carriers), 16 `returnToEuropeAction` (ships, key R), 17 `skipUnitAction`, 18 `unloadAction` (ship at sea: the @OVERBOARD list, part O), 19 `disbandUnitAction` |
 | BERICHTE | 0 —, 1 `reportReligionAction`, 2 `reportCongressAction`, 3 `reportLabourAction`, 4 `reportTradeAction`, 5 `reportColonyAction`, 6 `reportNavalAction`, 7 `reportForeignAction`, 8 `reportIndianAction`, 9 `reportHighScoresAction` (the hall of fame, not the live score: earlier README decision) |
 | HANDEL | 0-2 `tradeRouteAction`ⁿ (FreeCol's one panel does all three) |
 | COLONIPÄDIE | 0 `colopediaAction.goods`ⁿ, 1 `.units`ⁿ, 2 `.terrain`ⁿ, 3 —, 4 `.buildings`ⁿ, 5 `.fathers` (D8b, I5), 6 `.concepts`ⁿ, 7 — |
@@ -2927,9 +2927,9 @@ map must keep winning as it did over the old accelerators.
 | key | action |
 | --- | --- |
 | A F S L | clearOrders, fortify, sentry, load |
-| U, O | unload (both `unloadAction`; each only where its BEFEHLE row is listed: U in a colony, O for a ship outside one — `Binding.when`, `contextAllows`; FreeCol's action would otherwise unload a whole ship on O in a colony, or dump cargo at sea on U without asking) |
+| U, O | unload (both the id `unloadAction`, answered by the Classic UI's own action, part O, `ClassicGUI.classicUnload`: U in a colony unloads one hold, the most valuable, asking @WAREHOUSEFULL before a full warehouse; O at sea asks @OVERBOARD which hold goes overboard; each only where its BEFEHLE row is listed — `Binding.when`, `contextAllows`) |
 | T, G | assignTradeRoute, goto (no-op seams: ignored for now) |
-| Shift+D | disbandUnit |
+| Shift+D | disbandUnit (part O: a ship outside a colony with units aboard is refused with @DISBANDSHIP; else @SUREDISBAND asks; in a colony the units and goods go ashore first) |
 | P | clearForest else plow |
 | R | road (land units), else back to Europe (ships, `returnToEuropeAction`): the gold letter of both BEFEHLE rows, each action enabled only for its kind |
 | M / V | toggleViewMode, only from TERRAIN / only from MOVE_UNITS; fired through `ClassicGUI.classicAction` (the strip and the keys): V is the player's own tile selection (`ClassicGUI.toggleView` -> `selectTile`, no unit brought), M is FreeCol's toggle (G fixer: FreeCol's V called the controller's fallback `changeView(Tile)`, whose cycle step activated the next unit) |

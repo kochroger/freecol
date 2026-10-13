@@ -2616,6 +2616,12 @@ public class ClassicGUI extends GUI {
     /** The id of FreeCol's view toggle (ANSICHT V and M, the keys V and M). */
     static final String VIEW_TOGGLE = "toggleViewModeAction";
 
+    /** The id of FreeCol's unload (BEFEHLE rows 11 and 18, the keys U and O). */
+    static final String UNLOAD = "unloadAction";
+
+    /** FreeCol's unload as the Classic UI fires it ({@link #classicUnload}), made on first use. */
+    private javax.swing.Action unloadAction = null;
+
     /**
      * The Classic UI's own menu actions ({@link ClassicMenuModel#GAME_OPTIONS},
      * {@link ClassicMenuModel#COLONY_OPTIONS}), and its own way of firing
@@ -2643,6 +2649,25 @@ public class ClassicGUI extends GUI {
                     };
             }
             return this.viewToggleAction;
+        }
+        if (UNLOAD.equals(id)) {
+            if (this.unloadAction == null) {
+                this.unloadAction = new javax.swing.AbstractAction(UNLOAD) {
+                        @Override
+                        public boolean isEnabled() {
+                            // Where FreeCol's would fire: a carrier of ours
+                            // with something aboard.
+                            final javax.swing.Action fc = freeColAction(UNLOAD);
+                            return fc != null && fc.isEnabled();
+                        }
+
+                        @Override
+                        public void actionPerformed(java.awt.event.ActionEvent e) {
+                            classicUnload(getActiveUnit());
+                        }
+                    };
+            }
+            return this.unloadAction;
         }
         if (ClassicMenuModel.GAME_OPTIONS.equals(id)) {
             if (this.gameOptionsAction == null) {
@@ -5357,6 +5382,21 @@ public class ClassicGUI extends GUI {
             ClassicFrameRecorder.event("notice-silent", id);
             return null;
         }
+        // FreeCol's "too little gold for the arrears" (its equip path):
+        // the original's @KISSSORRY with our gold (part O, A1).
+        if (PAY_ARREARS_NO_GOLD.equals(id)) {
+            final Player me = myPlayer();
+            final ClassicAdvisorBox.Request r = ClassicBoycott.sorryRequest(
+                ClassicText.load(ClassicPackFiles.runtime()),
+                (me == null) ? 0 : me.getGold(), amountOf(template),
+                Messages.message("classic.dialog.messages"));
+            if (SwingUtilities.isEventDispatchThread()) {
+                screenBox(r);
+            } else {
+                SwingUtilities.invokeLater(() -> screenBox(r));
+            }
+            return null;
+        }
         // "... hat Euer großzügiges Angebot abgelehnt." after our own "no"
         // to the other nation's proposal: no offer of ours (K3).
         if (ClassicNotices.isAnswerEcho(template, this.answeredNations)) {
@@ -7005,6 +7045,18 @@ public class ClassicGUI extends GUI {
             final Boolean found = siteWarning(template);
             if (found != null) return found;
         }
+        // FreeCol's arrears question (its equip path in Europe, a colonist
+        // armed with a boycotted good): the original's @KISSUP, the bar
+        // and Escape on the refusal (part O, A1; FreeCol's bar was on
+        // "pay").
+        if (template != null && PAY_ARREARS_QUESTION.equals(template.getId())) {
+            return askArrears(template);
+        }
+        // Shift-D: the original's refusal at sea with units aboard
+        // (@DISBANDSHIP) or its question @SUREDISBAND (part O, A5).
+        if (template != null && DISBAND_QUESTION.equals(template.getId())) {
+            return askDisband(getActiveUnit());
+        }
         // The learn question is a village box: the first entry's woodcut
         // before it when no key brought one (W9).
         if (template != null && LEARN_QUESTION.equals(template.getId())) villageWoodcut();
@@ -7152,6 +7204,207 @@ public class ClassicGUI extends GUI {
      */
     static boolean confirmed(int chosen) {
         return chosen == 0;
+    }
+
+    /** FreeCol's arrears question ({@code InGameController.payArrears}). */
+    static final String PAY_ARREARS_QUESTION = "payArrears.text";
+
+    /** FreeCol's notice that the gold cannot pay the arrears. */
+    static final String PAY_ARREARS_NO_GOLD = "payArrears.noGold";
+
+    /**
+     * @param template A FreeCol message.
+     * @return Its {@code %amount%} as a number, 0 without one.
+     */
+    static int amountOf(StringTemplate template) {
+        final StringTemplate a = (template == null) ? null
+            : template.getReplacement("%amount%");
+        try {
+            return (a == null || a.getId() == null) ? 0 : Integer.parseInt(a.getId());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * A box over the screen the player looks at: over Europe its box
+     * layer, over a colony screen its own, else the map's (part O).  EDT
+     * only.
+     *
+     * @param r The box.
+     * @return The answer ({@link Prompter#ask}).
+     */
+    int screenBox(ClassicAdvisorBox.Request r) {
+        if (this.europeBoxes != null && isOpen(this.europeFrame)) return europeBox(r);
+        if (isOpen(this.colonyFrame)) return this.colonyPrompter.ask(r);
+        return this.prompter.ask(r);
+    }
+
+    /**
+     * FreeCol's arrears question (its equip path in Europe) as the
+     * original's @KISSUP ({@link ClassicBoycott#kissRequest}): «N zahlen.»
+     * pays, the refusal (the bar's, Escape's) does not (part O, A1).
+     *
+     * @param template FreeCol's question, with the arrears.
+     * @return Whether to pay.
+     */
+    private boolean askArrears(StringTemplate template) {
+        final int arrears = amountOf(template);
+        final ClassicAdvisorBox.Request r = ClassicBoycott.kissRequest(
+            ClassicText.load(ClassicPackFiles.runtime()), myPlayer(), arrears,
+            Messages.message("classic.dialog.messages"));
+        final int chosen = onEventThread(() -> screenBox(r),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        final boolean pay = ClassicBoycott.pays(chosen);
+        ClassicFrameRecorder.event("boycott", ClassicBoycott.KISS_SECTION
+            + " arrears=" + arrears + " chosen=" + chosen + ((pay) ? " pay" : " refused"));
+        return pay;
+    }
+
+    /** What U, O and Shift-D in a colony do with the cargo: the controller, a fake in tests. */
+    ClassicUnload.Cargo cargo = new ControllerCargo();
+
+    /** {@link ClassicUnload.Cargo} through the game's controller and the boxes. */
+    private final class ControllerCargo implements ClassicUnload.Cargo {
+
+        private net.sf.freecol.client.control.InGameController igc() {
+            final FreeColClient fcc = getFreeColClient();
+            return (fcc == null) ? null : fcc.getInGameController();
+        }
+
+        @Override
+        public int ask(ClassicAdvisorBox.Request r) {
+            return onEventThread(() -> screenBox(r), ClassicAdvisorBox.Bar.DISMISSED);
+        }
+
+        @Override
+        public boolean unload(Goods goods) {
+            final net.sf.freecol.client.control.InGameController igc = igc();
+            return igc != null && igc.unloadCargo(goods, false);
+        }
+
+        @Override
+        public boolean dump(Goods goods) {
+            final net.sf.freecol.client.control.InGameController igc = igc();
+            return igc != null && igc.unloadCargo(goods, true);
+        }
+
+        @Override
+        public boolean land(Unit unit) {
+            final net.sf.freecol.client.control.InGameController igc = igc();
+            return igc != null && igc.leaveShip(unit);
+        }
+    }
+
+    /**
+     * U and O, BEFEHLE rows 11 and 18, as the original's (part O, A3 and
+     * A4, {@link ClassicUnload}): in our colony one press unloads the
+     * most valuable hold, asking @WAREHOUSEFULL first when the warehouse
+     * would overflow (none left: the units go ashore); outside a colony
+     * the @OVERBOARD list throws the chosen hold overboard.  FreeCol's
+     * {@code unloadAction} unloaded everything at once without a word,
+     * and O threw every hold overboard.  Nothing refused costs anything.
+     *
+     * @param carrier The active unit, or null.
+     */
+    void classicUnload(Unit carrier) {
+        if (carrier == null || !carrier.isCarrier()) return;
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final String title = Messages.message("classic.dialog.messages");
+        final Tile tile = carrier.getTile();
+        final Colony colony = (tile == null) ? null : tile.getColony();
+        final Player me = carrier.getOwner();
+        String what;
+        if (colony != null && colony.getOwner() == me) {
+            what = "U " + ClassicUnload.unloadOne(carrier, colony,
+                (me == null) ? null : me.getMarket(), t, title, this.cargo);
+        } else if (tile != null && carrier.getSettlement() == null) {
+            what = "O " + ClassicUnload.overboard(carrier, t, title, this.cargo);
+        } else {
+            what = "nothing";
+        }
+        ClassicFrameRecorder.event("unload", carrier.getId() + " " + what);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Native land: the original's @INDIANLAND with the chief, the bar
+     * and Escape on «Gut, wir werden Eure Wünsche respektieren.», which
+     * spends nothing (part O, A2, {@link ClassicNativeLand}); over the
+     * colony screen when it is open (V clip008 #6382).  FreeCol's box had
+     * the bar on "pay".  Another European's land keeps FreeCol's.
+     */
+    @Override
+    public net.sf.freecol.common.model.Constants.ClaimAction getClaimChoice(
+        Tile tile, Player player, int price, Player owner) {
+        if (owner == null || player == null || !owner.isIndian()) {
+            return super.getClaimChoice(tile, player, price, owner);
+        }
+        final ClassicAdvisorBox.Request r = ClassicNativeLand.claimRequest(
+            ClassicText.load(ClassicPackFiles.runtime()), owner,
+            owner.hasContacted(player), price, player.checkGold(price), colony(tile));
+        final int chosen = onEventThread(() -> screenBox(r),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        final net.sf.freecol.common.model.Constants.ClaimAction act
+            = ClassicNativeLand.action(r, chosen);
+        ClassicFrameRecorder.event("claim", ClassicNativeLand.SECTION + " "
+            + ((tile == null) ? "-" : tile.getX() + "," + tile.getY())
+            + " price=" + price + " chosen=" + chosen
+            + " " + ((act == null) ? "leave" : act.toString()));
+        return act;
+    }
+
+    /** FreeCol's question before a unit is disbanded ({@code InGameController.disbandUnit}). */
+    static final String DISBAND_QUESTION = "disbandUnit.text";
+
+    /**
+     * Shift-D (BEFEHLE row 19) as the original's (part O, A5): a ship
+     * outside a colony with units aboard is refused with @DISBANDSHIP
+     * ({@link ClassicIllegalMoves#disbandRefusal}); else @SUREDISBAND
+     * asks ({@link ClassicIllegalMoves#disbandRequest}); «Ja» in our
+     * colony first puts the units aboard ashore and unloads the goods
+     * (@WAREHOUSEFULL when the warehouse would overflow; a good kept
+     * aboard keeps the carrier: nothing is lost), and only an empty
+     * carrier is disbanded.  FreeCol disbanded the ship with everything
+     * aboard.  «Nein», Escape and a refusal cost nothing.
+     *
+     * @param unit The unit FreeCol disbands (the active unit:
+     *     {@code DisbandUnitAction}'s), or null.
+     * @return Whether FreeCol may disband it.
+     */
+    private boolean askDisband(Unit unit) {
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final String title = Messages.message("classic.dialog.messages");
+        final ClassicIllegalMoves.Verdict v = ClassicIllegalMoves.disbandRefusal(unit);
+        if (v != null) {
+            onEventThread(() -> {
+                    refused("Shift-D", unit, v);
+                    return null;
+                }, null);
+            return false;
+        }
+        final ClassicAdvisorBox.Request r = ClassicIllegalMoves.disbandRequest(t, unit, title);
+        final int chosen = onEventThread(() -> screenBox(r),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        if (!confirmed(chosen)) {
+            ClassicFrameRecorder.event("disband", ClassicIllegalMoves.SURE_DISBAND
+                + " " + ((unit == null) ? "-" : unit.getId()) + " chosen=" + chosen + " no");
+            return false;
+        }
+        final Tile tile = (unit == null) ? null : unit.getTile();
+        final Colony colony = (tile == null) ? null : tile.getColony();
+        if (unit != null && unit.isCarrier() && colony != null
+            && colony.getOwner() == unit.getOwner()
+            && (unit.getUnitCount() > 0 || unit.hasGoodsCargo())) {
+            final boolean empty = ClassicUnload.unloadAll(unit, colony, t, title, this.cargo);
+            ClassicFrameRecorder.event("disband", unit.getId() + " in " + colony.getName()
+                + ((empty) ? ": all ashore" : ": something kept aboard, not disbanded"));
+            if (!empty) return false;
+        }
+        ClassicFrameRecorder.event("disband", ClassicIllegalMoves.SURE_DISBAND + " "
+            + ((unit == null) ? "-" : unit.getId()) + " yes");
+        return true;
     }
 
     /**

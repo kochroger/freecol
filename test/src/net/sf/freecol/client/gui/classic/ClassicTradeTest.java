@@ -106,6 +106,11 @@ public class ClassicTradeTest extends FreeColTestCase {
         public void cannotPay(GoodsType type) {
             this.calls.add("cannot pay " + type.getSuffix());
         }
+
+        @Override
+        public void boycotted(GoodsType type, boolean buying) {
+            this.calls.add("boycotted " + ((buying) ? "buy " : "sell ") + type.getSuffix());
+        }
     }
 
     /**
@@ -219,12 +224,16 @@ public class ClassicTradeTest extends FreeColTestCase {
         s.answer = 30;
         assertEquals(30, ClassicTrade.buy(this.dutch, this.ship, tools, true, s));
         assertEquals(List.of("ask buy tools max=40 preset=100", "buy tools 30"), s.calls);
-        // A boycott: no box, nothing.
+        // A boycott: no amount box, nothing bought; the screen is told
+        // (it asks @KISSUP after the drop, part O A1).
         s.calls.clear();
         this.dutch.getMarket().setArrears(tools, 500);
         assertFalse(this.dutch.canTrade(tools));
         assertEquals(0, ClassicTrade.buy(this.dutch, this.ship, tools, true, s));
-        assertTrue(s.calls.isEmpty());
+        assertEquals(List.of("boycotted buy tools"), s.calls);
+        s.calls.clear();
+        assertEquals(0, ClassicTrade.buy(this.dutch, this.ship, tools, false, s));
+        assertEquals(List.of("boycotted buy tools"), s.calls);
     }
 
     /**
@@ -293,6 +302,33 @@ public class ClassicTradeTest extends FreeColTestCase {
         assertEquals(100, ClassicTrade.sell(this.dutch, g, true, s));
         assertSame("all of it: the goods themselves", g, s.sold);
         assertEquals(0, ClassicTrade.sell(this.dutch, null, true, s));
+    }
+
+    /**
+     * A boycotted hold is never sold (part O, A1; M manual:197): a plain
+     * sale and a Shift sale do nothing but tell the screen, which says
+     * {@code @SOMEBOYCOTT}; before, the plain sale went to FreeCol's
+     * {@code sellGoods} and the server dumped the hold for no gold.
+     */
+    public void testBoycottedSaleKeepsTheCargo() {
+        final Screen s = new Screen();
+        this.ship.addGoods(furs, 100);
+        final Goods g = this.ship.getCompactGoodsList().get(0);
+        this.dutch.getMarket().setArrears(furs, 300);
+        assertFalse(this.dutch.canTrade(furs));
+        assertEquals(0, ClassicTrade.sell(this.dutch, g, false, s));
+        assertEquals("no sale, the screen told", List.of("boycotted sell furs"), s.calls);
+        s.calls.clear();
+        s.answer = 50;
+        assertEquals(0, ClassicTrade.sell(this.dutch, g, true, s));
+        assertEquals("no amount box either", List.of("boycotted sell furs"), s.calls);
+        assertNull(s.sold);
+        assertEquals(100, this.ship.getGoodsCount(furs));
+        // Lifted: sold as before.
+        this.dutch.getMarket().setArrears(furs, 0);
+        s.calls.clear();
+        assertEquals(100, ClassicTrade.sell(this.dutch, g, false, s));
+        assertEquals(List.of("sell furs 100"), s.calls);
     }
 
     /**

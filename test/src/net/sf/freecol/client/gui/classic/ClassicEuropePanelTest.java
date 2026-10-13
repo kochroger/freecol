@@ -55,6 +55,7 @@ import net.sf.freecol.common.networking.EmigrateUnitMessage;
 import net.sf.freecol.common.networking.EquipForRoleMessage;
 import net.sf.freecol.common.networking.LoadGoodsMessage;
 import net.sf.freecol.common.networking.MoveToMessage;
+import net.sf.freecol.common.networking.PayArrearsMessage;
 import net.sf.freecol.common.networking.ServerAPI;
 import net.sf.freecol.common.networking.TrainUnitInEuropeMessage;
 import net.sf.freecol.common.networking.UnloadGoodsMessage;
@@ -318,6 +319,12 @@ public class ClassicEuropePanelTest extends FreeColTestCase {
             return handle("equip " + unit.getId() + " " + role.getSuffix(),
                 new EquipForRoleMessage(unit, role, roleCount)
                     .serverHandler(this.server, this.player));
+        }
+
+        @Override
+        public boolean payArrears(GoodsType type) {
+            return handle("payArrears " + type.getSuffix(), new PayArrearsMessage(type)
+                .serverHandler(this.server, this.player));
         }
 
         @Override
@@ -1033,6 +1040,224 @@ public class ClassicEuropePanelTest extends FreeColTestCase {
         final String body = src.substring(at, end);
         assertTrue(body.contains("europeBox(r);"));
         assertFalse(body.contains("prompter.ask"));
+    }
+
+    // Part O, bundle A1: a boycotted good (ClassicBoycott)
+
+    /** Boycott a good as FreeCol's tea party does: arrears = bid x the arrears factor. */
+    private static int boycott(Scene s, GoodsType gt) {
+        final int arrears = s.dutch.getMarket().getPaidForSale(gt)
+            * spec().getInteger(net.sf.freecol.common.option.GameOptions.ARREARS_FACTOR);
+        s.dutch.getMarket().setArrears(gt, arrears);
+        assertFalse(s.dutch.canTrade(gt));
+        return arrears;
+    }
+
+    /**
+     * A boycotted hold stays aboard (A1; M manual:197; GAME.TXT
+     * @SOMEBOYCOTT): U sells the first hold that can be sold and leaves
+     * the furs; U with only the furs left, a drag of them onto the market
+     * and the ship box's «Alle Waren entladen.» sell nothing of them and
+     * say @SOMEBOYCOTT once per action; the gold is unchanged by them.
+     * Before (48e69f0c8) each of the three dumped the furs in the harbour
+     * for no gold and without a box (prep A1, probes).
+     */
+    public void testBoycottedHoldStaysAboard() throws Exception {
+        final Scene s = rogers1496();
+        s.ship.addGoods(furs, 100);
+        s.ship.addGoods(tools, 100);
+        boycott(s, furs);
+        final int gold = s.dutch.getGold();
+        run(s.panel, "U");                                   // the tools go
+        assertEquals(0, s.ship.getGoodsCount(tools));
+        assertEquals(100, s.ship.getGoodsCount(furs));
+        assertTrue("the tools sold", s.dutch.getGold() > gold);
+        assertTrue("no box for a sale that went: " + s.boxes.asked, s.boxes.asked.isEmpty());
+        final int afterTools = s.dutch.getGold();
+        run(s.panel, "U");                                   // only the furs: the notice
+        assertEquals(100, s.ship.getGoodsCount(furs));
+        assertEquals(afterTools, s.dutch.getGold());
+        assertEquals(List.of(ClassicBoycott.SOME_SECTION), s.boxes.asked);
+        assertTrue("a notice", s.boxes.requests.get(0).isNotice());
+        // A drag onto the market: stays, the notice once.
+        s.boxes.asked.clear();
+        final int h = holdOf(s.panel, furs);
+        assertTrue(h >= 0);
+        drag(s.panel, cx(ClassicEuropePanel.holdCell(h)), 170,
+             cx(ClassicEuropePanel.marketSlot(0)), 190, false);
+        assertEquals(100, s.ship.getGoodsCount(furs));
+        assertEquals(List.of(ClassicBoycott.SOME_SECTION), s.boxes.asked);
+        // Shift too: no amount box, the notice.
+        s.boxes.asked.clear();
+        drag(s.panel, cx(ClassicEuropePanel.holdCell(h)), 170,
+             cx(ClassicEuropePanel.marketSlot(0)), 190, true);
+        assertEquals(100, s.ship.getGoodsCount(furs));
+        assertEquals(List.of(ClassicBoycott.SOME_SECTION), s.boxes.asked);
+        assertEquals(afterTools, s.dutch.getGold());
+        // The ship box's unload row: the others sold, the furs stay, one notice.
+        if (ClassicText.load(ClassicPackFiles.runtime()) == null) {
+            System.err.println(getClass().getSimpleName() + ": the unload row skipped, no pack");
+            return;
+        }
+        s.ship.addGoods(tools, 100);
+        s.boxes.asked.clear();
+        s.boxes.row(ClassicEuropeOptions.ShipOption.UNLOAD.ordinal());
+        click(s.panel, 154, 154);
+        assertEquals(0, s.ship.getGoodsCount(tools));
+        assertEquals(100, s.ship.getGoodsCount(furs));
+        assertEquals(List.of(ClassicEuropeOptions.SHIP_SECTION, ClassicBoycott.SOME_SECTION),
+                     s.boxes.asked);
+        assertFalse("still boycotted", s.dutch.canTrade(furs));
+    }
+
+    /**
+     * A click on a boycotted good in the market lifts the boycott as the
+     * original does (A1; M manual:199; GAME.TXT @KISSUP, @KISSSORRY):
+     * @KISSUP with the bar and Escape on its first row (the refusal),
+     * which changes nothing; its second row pays FreeCol's arrears and
+     * the good can be traded again; with too little gold @KISSSORRY and
+     * nothing paid; an unboycotted good brings no box; a boycotted good
+     * dragged onto the ship asks @KISSUP too (I).  Before (48e69f0c8) a
+     * click only moved the cursor and nothing could lift a boycott.
+     */
+    public void testMarketClickLiftsTheBoycott() throws Exception {
+        final Scene s = rogers1496();
+        final int arrears = boycott(s, furs);
+        final Rectangle fs = slot(furs);
+        click(s.panel, cx(fs), cy(fs));                      // Escape
+        assertEquals(List.of(ClassicBoycott.KISS_SECTION), s.boxes.asked);
+        final ClassicAdvisorBox.Request r = s.boxes.requests.get(0);
+        assertEquals(2, r.rows.size());
+        assertEquals("the bar on the refusal", 0, r.defaultRow);
+        assertEquals("Escape refuses", ClassicBoycott.REFUSE_ROW, r.escapeAnswer());
+        assertEquals(arrears, s.dutch.getArrears(furs));
+        assertEquals(1000, s.dutch.getGold());
+        if (ClassicText.load(ClassicPackFiles.runtime()) != null) {
+            assertTrue(r.plainText(), r.plainText().contains(arrears + "$"));
+            assertTrue(r.plainText(), r.plainText().contains("Amsterdam"));
+            assertTrue(ClassicAdvisorBox.plain(r.rows.get(1)).startsWith(arrears + "$"));
+        }
+        // Row 1, the refusal: nothing.
+        s.boxes.asked.clear();
+        s.boxes.row(0);
+        click(s.panel, cx(fs), cy(fs));
+        assertEquals(List.of(ClassicBoycott.KISS_SECTION), s.boxes.asked);
+        assertFalse(s.dutch.canTrade(furs));
+        // Row 2 with too little gold: @KISSSORRY, nothing paid.
+        s.dutch.setGold(arrears - 1);
+        s.boxes.asked.clear();
+        s.boxes.row(1);
+        click(s.panel, cx(fs), cy(fs));
+        assertEquals(List.of(ClassicBoycott.KISS_SECTION, ClassicBoycott.SORRY_SECTION),
+                     s.boxes.asked);
+        assertTrue(s.boxes.requests.get(s.boxes.requests.size() - 1).isNotice());
+        assertFalse(s.dutch.canTrade(furs));
+        assertEquals(arrears - 1, s.dutch.getGold());
+        // A drag of it onto the ship: @KISSUP (I), Escape: nothing bought.
+        s.dutch.setGold(arrears + 500);
+        s.boxes.asked.clear();
+        drag(s.panel, cx(fs), cy(fs), 154, 154, false);
+        assertEquals(List.of(ClassicBoycott.KISS_SECTION), s.boxes.asked);
+        assertEquals(0, s.ship.getGoodsCount(furs));
+        // Row 2 with the gold: paid, lifted.
+        s.boxes.asked.clear();
+        s.boxes.row(1);
+        click(s.panel, cx(fs), cy(fs));
+        assertEquals(List.of(ClassicBoycott.KISS_SECTION), s.boxes.asked);
+        assertTrue("lifted", s.dutch.canTrade(furs));
+        assertEquals(500, s.dutch.getGold());
+        assertTrue(s.api.log.contains("payArrears furs"));
+        // Not boycotted: the cursor only.
+        s.boxes.asked.clear();
+        click(s.panel, cx(fs), cy(fs));
+        assertTrue(s.boxes.asked.isEmpty());
+        assertEquals(spec().getStorableGoodsTypeList().indexOf(furs), s.panel.marketCursor());
+    }
+
+    /**
+     * The market shows the boycott as the original (A1, V clip006 #8146,
+     * playthrough-3 #24114): ICONS.SS 055, the red X, 1:1 at (19k + 6,
+     * 184) over the good's slot, none over the others; the hover label
+     * «Werkzeuge (Boykott)» over a boycotted good, «Rum (Geboten b,
+     * Gefordert a)» over the others, its black box centred on the slot and
+     * clamped at x 304 (V clip008 §2.9: seven boxes, clip006: two).
+     */
+    public void testTheBoycottInTheMarket() throws Exception {
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicText t = ClassicText.load(pack);
+        final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
+        if (t == null || tiny == null) {
+            System.err.println(getClass().getSimpleName() + ": the market's boycott skipped, no pack");
+            return;
+        }
+        assertEquals("Boykott", t.misc(ClassicEuropePanel.MISC_BOYCOTT).trim());
+        assertEquals("Geboten", t.misc(ClassicEuropePanel.MISC_BID).trim());
+        assertEquals("Gefordert", t.misc(ClassicEuropePanel.MISC_ASK).trim());
+        // The label boxes of the clips: {label, slot, box x0, box right}.
+        final Object[][] v = {
+            { "Pferde (Geboten 2, Gefordert 3)", 8, 105, 219 },
+            { "Rum (Geboten 13, Gefordert 14)", 9, 125, 237 },
+            { "Silber (Geboten 19, Gefordert 20)", 7, 83, 203 },
+            { "Stoff (Geboten 9, Gefordert 10)", 11, 162, 275 },
+            { "Werkzeuge (Geboten 1, Gefordert 2)", 14, 176, 304 },
+            { "Musketen (Geboten 2, Gefordert 3)", 15, 181, 304 },
+            { "Handelswaren (Geboten 2, Gefordert 3)", 13, 165, 304 },
+            { "Werkzeuge (Boykott)", 14, 230, 304 },
+            { "Musketen (Boykott)", 15, 235, 304 },
+        };
+        for (Object[] c : v) {
+            final int adv = tiny.stringWidth((String)c[0]);
+            final int x0 = ClassicEuropePanel.labelX((Integer)c[1], adv);
+            assertEquals((String)c[0], ((Integer)c[2]).intValue(), x0);
+            assertEquals((String)c[0], ((Integer)c[3]).intValue(), x0 + adv);
+        }
+        // Our market: the X over the boycotted tools only, the labels.
+        final Scene s = rogers1496();
+        boycott(s, tools);
+        final int k = spec().getStorableGoodsTypeList().indexOf(tools);
+        assertEquals("Werkzeuge (Boykott)", ClassicEuropePanel.marketLabel(t, s.dutch, tools));
+        final net.sf.freecol.common.model.Market m = s.dutch.getMarket();
+        assertEquals("Felle (Geboten " + m.getPaidForSale(furs) + ", Gefordert "
+                     + m.getCostToBuy(furs) + ")",
+                     ClassicEuropePanel.marketLabel(t, s.dutch, furs));
+        final BufferedImage x = pack.image(ClassicPackFiles.ssKey("ICONS.SS.055"));
+        assertEquals(8, x.getWidth());
+        assertEquals(12, x.getHeight());
+        final BufferedImage img = s.panel.canvas();
+        int ink = 0;
+        for (int yy = 0; yy < x.getHeight(); yy++) {
+            for (int xx = 0; xx < x.getWidth(); xx++) {
+                final int p = x.getRGB(xx, yy);
+                if ((p >>> 24) == 0) continue;
+                ink++;
+                assertEquals("X pixel " + xx + "," + yy, p & 0xFFFFFF,
+                    img.getRGB(19 * k + 6 + xx, 184 + yy) & 0xFFFFFF);
+            }
+        }
+        assertTrue(ink > 20);
+        final int kf = spec().getStorableGoodsTypeList().indexOf(furs);
+        final int red = x.getRGB(0, 2) & 0xFFFFFF;
+        assertTrue("no X over the furs",
+                   (img.getRGB(19 * kf + 6, 186) & 0xFFFFFF) != red
+                   || (img.getRGB(19 * kf + 7, 186) & 0xFFFFFF) != red);
+        // The hover label: the pointer over the tools' slot.
+        s.panel.onHover(19 * k + 5, 190);
+        assertEquals(k, s.panel.hoverSlot());
+        final String label = ClassicEuropePanel.marketLabel(t, s.dutch, tools);
+        final int adv = tiny.stringWidth(label);
+        final int x0 = ClassicEuropePanel.labelX(k, adv);
+        final BufferedImage hov = s.panel.canvas();
+        assertEquals("the box's black", 0x000000, hov.getRGB(x0, 193) & 0xFFFFFF);
+        assertEquals(0x000000, hov.getRGB(x0 + adv, 199) & 0xFFFFFF);
+        boolean white = false;
+        for (int xx = x0 + 1; xx < x0 + adv && !white; xx++) {
+            for (int yy = 194; yy < 200; yy++) {
+                if ((hov.getRGB(xx, yy) & 0xFFFFFF) == 0xFFFFFF) white = true;
+            }
+        }
+        assertTrue("white text", white);
+        s.panel.onHover(150, 100);
+        assertEquals(-1, s.panel.hoverSlot());
     }
 
     /** Run a key's action as its binding does. */

@@ -409,6 +409,63 @@ final class ClassicIllegalMoves {
     }
 
     /**
+     * Shift-D on a ship outside a colony with units aboard (part O, A5;
+     * GAME.TXT @DISBANDSHIP: a ship at sea cannot be given up while units
+     * are aboard; I: the trigger is read from its text, no clip shows
+     * it): refused, with the admiral (the family of the ship refusals,
+     * I).  FreeCol disbanded the ship and every unit aboard died with it
+     * (prep A5, probes).  In a colony the units go ashore first instead
+     * ({@code ClassicGUI.askDisband}).  The refusal costs nothing.
+     *
+     * @param unit The unit to disband, or null.
+     * @return The refusal, or null when the question may come.
+     */
+    static Verdict disbandRefusal(Unit unit) {
+        if (unit == null || !unit.isNaval() || !unit.hasTile()
+            || unit.getSettlement() != null || unit.getUnitCount() <= 0) return null;
+        return box("DISBANDSHIP", ClassicNotices.Who.ADMIRAL);
+    }
+
+    /** GAME.TXT's question before a unit is disbanded (Shift-D). */
+    static final String SURE_DISBAND = "SUREDISBAND";
+
+    /**
+     * Shift-D's question (part O, A5): GAME.TXT @SUREDISBAND, «%STRING0
+     * wirklich auflösen?» with the unit's NAMES.TXT name, rows «Ja» /
+     * «Nein»; no {@code @default}, so the bar is on «Ja» as on every
+     * GAME.TXT box without one (I: no clip shows it); Escape answers
+     * «Nein»; no portrait (I).  Without the pack: FreeCol's question
+     * («Seid Ihr sicher ...?»), its bar on «Auflösen» as FreeCol's,
+     * Escape on «Abbrechen».
+     *
+     * @param t The original texts, or null.
+     * @param unit The unit, or null.
+     * @param title The stopgap's window title.
+     * @return The box.
+     */
+    static ClassicAdvisorBox.Request disbandRequest(ClassicText t, Unit unit, String title) {
+        final ClassicText.Message m = (t == null) ? null : t.message(SURE_DISBAND);
+        String name = (unit == null) ? null : ClassicTips.unitName(t, unit);
+        if (name == null && unit != null) name = Messages.message(unit.getLabel());
+        ClassicAdvisorBox.Builder b = null;
+        if (m != null && m.options.size() >= 2 && name != null) {
+            final Map<String, String> v = new HashMap<>();
+            v.put("STRING0", name);
+            b = ClassicAdvisorBox.fromGameText(SURE_DISBAND, m, v);
+            if (b != null) b.defaultRow(ClassicAdvisorBox.defaultRow(m));
+        }
+        if (b == null) {
+            b = ClassicAdvisorBox.Request.builder(SURE_DISBAND)
+                .freeColText(Messages.message("disbandUnit.text"))
+                .rows(ClassicAdvisorBox.literal(Messages.message("disbandUnit.yes")),
+                      ClassicAdvisorBox.literal(Messages.message("cancel")))
+                .defaultRow(0);
+        }
+        return b.cancelRow(1).portrait(ClassicAdvisorBox.Portrait.NONE)
+            .stopgap(title, null).build();
+    }
+
+    /**
      * A refusal's values with its NAMES.TXT names ({@link Verdict#names},
      * the first column of the row).
      *
