@@ -125,6 +125,15 @@ public class IndianSettlement extends Settlement implements TradeLocation {
      */
     protected UnitType learnableSkill = null;
 
+    /**
+     * The skill this settlement last taught a European, or null (Classic
+     * UI, part O D-B3c): the original's chief names his village's skill
+     * also after it was taught (clip008), while FreeCol forgets it
+     * ({@link #learnableSkill} null).  Saved and sent as the learnable
+     * skill is; a save from before has none.
+     */
+    protected UnitType taughtSkill = null;
+
     /** The goods this settlement wants. */
     protected final List<GoodsType> wantedGoods = emptyWantedGoods();
 
@@ -296,6 +305,25 @@ public class IndianSettlement extends Settlement implements TradeLocation {
      */
     public void setLearnableSkill(UnitType skill) {
         learnableSkill = skill;
+    }
+
+    /**
+     * Gets the skill this settlement last taught a European
+     * ({@link #taughtSkill}).
+     *
+     * @return The skill, or null.
+     */
+    public UnitType getTaughtSkill() {
+        return taughtSkill;
+    }
+
+    /**
+     * Sets the skill this settlement last taught a European.
+     *
+     * @param skill The skill, or null.
+     */
+    public void setTaughtSkill(UnitType skill) {
+        taughtSkill = skill;
     }
 
     /**
@@ -1558,6 +1586,7 @@ public class IndianSettlement extends Settlement implements TradeLocation {
         if (o == null || !super.copyIn(o)) return false;
         final Game game = getGame();
         this.learnableSkill = o.getLearnableSkill();
+        this.taughtSkill = o.getTaughtSkill();
         this.setWantedGoods(o.getWantedGoods());
         synchronized (this.contactLevels) {
             this.contactLevels.clear();
@@ -1591,6 +1620,8 @@ public class IndianSettlement extends Settlement implements TradeLocation {
     // Public for now while 0.10.7 backward compatibility code in Tile
     // for PlayerExploredTile needs to check these.
     public static final String LEARNABLE_SKILL_TAG = "learnableSkill";
+    // Classic UI, part O D-B3c: the skill last taught (an old save has none).
+    public static final String TAUGHT_SKILL_TAG = "taughtSkill";
     public static final String WANTED_GOODS_TAG = "wantedGoods";
 
 
@@ -1620,6 +1651,10 @@ public class IndianSettlement extends Settlement implements TradeLocation {
 
             if (learnableSkill != null) {
                 xw.writeAttribute(LEARNABLE_SKILL_TAG, learnableSkill);
+            }
+
+            if (taughtSkill != null) {
+                xw.writeAttribute(TAUGHT_SKILL_TAG, taughtSkill);
             }
 
             for (int i = 0; i < WANTED_GOODS_COUNT; i++) {
@@ -1719,6 +1754,9 @@ public class IndianSettlement extends Settlement implements TradeLocation {
 
         learnableSkill = xr.getType(spec, LEARNABLE_SKILL_TAG,
                                     UnitType.class, (UnitType)null);
+
+        taughtSkill = xr.getType(spec, TAUGHT_SKILL_TAG,
+                                 UnitType.class, (UnitType)null);
 
         mostHated = xr.findFreeColGameObject(getGame(), MOST_HATED_TAG,
                                              Player.class, (Player)null, false);

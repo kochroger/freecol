@@ -167,6 +167,28 @@ public class ClassicNoticesTest extends FreeColTestCase {
         assertNull(ClassicNotices.rule("model.lostCityRumour.nothing..description"));
         assertNull(ClassicNotices.rule("info.notEnoughGold"));
         assertNull(ClassicNotices.rule(null));
+        // Part O: the unrest's colonist and FreeCol's survival recruit with
+        // the priest (B4), the success at a village (B2).
+        for (String id : new String[] { "model.player.emigrate",
+                                        "model.player.autoRecruit" }) {
+            assertEquals(id, "UNREST", ClassicNotices.rule(id).section);
+            assertEquals(id, ClassicNotices.Who.PRIEST, ClassicNotices.rule(id).who);
+        }
+        assertEquals("LEARNDONE", ClassicNotices.rule("learnSkill.done").section);
+        assertEquals(ClassicNotices.Who.CHIEF, ClassicNotices.rule("learnSkill.done").who);
+        assertEquals(ClassicNotices.DONE_CHAIN_MS,
+                     ClassicNotices.rule("learnSkill.done").chainMs);
+        assertSame(ClassicAdvisorBox.Portrait.PRIEST,
+                   ClassicNotices.portrait(ClassicNotices.Who.PRIEST, -1));
+        // The chief's answers' pace (B3): 16-17 frames, the area 42-43.
+        assertEquals(ClassicNotices.SPEAK_CHAIN_MS,
+                     ClassicNotices.rule("scoutSettlement.speakBeads").chainMs);
+        assertEquals(ClassicNotices.SPEAK_CHAIN_MS,
+                     ClassicNotices.rule("scoutSettlement.expertScout").chainMs);
+        assertEquals(ClassicNotices.SPEAK_CHAIN_MS,
+                     ClassicNotices.rule("scoutSettlement.speakNothing").chainMs);
+        assertEquals(ClassicNotices.AREA_CHAIN_MS,
+                     ClassicNotices.rule("scoutSettlement.speakTales").chainMs);
         // Every rule's section is in GAME.TXT (with the pack).
         final ClassicText t = texts("testRules (sections)");
         if (t == null) return;
@@ -280,6 +302,185 @@ public class ClassicNoticesTest extends FreeColTestCase {
             "model.lostCityRumour.nothing.mounds.description", dutch)));
         assertEquals(3, keep.boxes.size());
         if (t != null) assertEquals("BURIAL1", keep.boxes.get(2).id);
+    }
+
+
+    // Part O, bundle B: the chief's greeting, the unrest, the learning
+
+    /** An Arawak village teaching {@code skill}, wanting tools, trade goods and rum. */
+    private IndianSettlement howdyVillage(Game game, String skill) {
+        final IndianSettlement is = arawakVillage(game);
+        is.setLearnableSkill((skill == null) ? null : spec().getUnitType(skill));
+        is.setWantedGoods(0, spec().getGoodsType("model.goods.tools"));
+        is.setWantedGoods(1, spec().getGoodsType("model.goods.tradeGoods"));
+        is.setWantedGoods(2, spec().getGoodsType("model.goods.rum"));
+        return is;
+    }
+
+    /** The ids of boxes, in order. */
+    private static List<String> ids(List<ClassicAdvisorBox.Request> boxes) {
+        final List<String> out = new ArrayList<>();
+        for (ClassicAdvisorBox.Request r : boxes) out.add(r.id);
+        return out;
+    }
+
+    /**
+     * Part O B3 (Roger's D-B3b): before every result of speaking to a
+     * chief but his killing, his greeting @CHIEFHOWDY with the village's
+     * skill (NAMES @JOB column 2, «Erfahrene Pelzjäger») and its three
+     * wanted goods (@CARGO: «Werkzeuge», «Handelswaren», «Rum»; V
+     * playthrough-2 #15301), the tribe's chief, 236 ms (16-17 frames)
+     * after the menu; the result 236 ms after it (@CHIEFAREA 607 ms);
+     * after @CHIEFGUIDES the frontiersman's @WELLSEASONED 700 ms (49
+     * frames) later.  Posted from another thread, they come in one go,
+     * in order.  Without the pack: FreeCol's words alone.
+     */
+    public void testChiefHowdyChain() throws Exception {
+        final Game game = getStandardGame();
+        final IndianSettlement is = howdyVillage(game, "model.unit.expertFurTrapper");
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final NoticeGUI gui = new NoticeGUI(game, dutch);
+        final Keeper keep = new Keeper();
+        gui.prompter = keep;
+        final ClassicText t = texts("testChiefHowdyChain");
+        final StringTemplate beads = StringTemplate.template("scoutSettlement.speakBeads")
+            .add("%amount%", "640");
+        final StringTemplate guides = StringTemplate.template("scoutSettlement.expertScout")
+            .addNamed("%unit%", spec().getUnitType("model.unit.seasonedScout"));
+        final StringTemplate tales = StringTemplate.template("scoutSettlement.speakTales");
+        final StringTemplate bored = StringTemplate.template("scoutSettlement.speakNothing")
+            .addStringTemplate("%nation%", dutch.getNationLabel());
+        final StringTemplate die = StringTemplate.template("scoutSettlement.speakDie");
+        final Object[][] cases = {
+            { beads, List.of("CHIEFHOWDY", "CHIEFGIFT") },
+            { guides, List.of("CHIEFHOWDY", "CHIEFGUIDES", "WELLSEASONED") },
+            { tales, List.of("CHIEFHOWDY", "CHIEFAREA") },
+            { bored, List.of("CHIEFHOWDY", "CHIEFBORED") },
+            { die, List.of("CHIEFKILL") },
+        };
+        for (Object[] c : cases) {
+            final StringTemplate st = (StringTemplate) c[0];
+            keep.boxes.clear();
+            gui.showInformationPanel(is, st);               // posted
+            SwingUtilities.invokeAndWait(() -> { });
+            if (t == null) {
+                assertEquals(st.getId(), 1, keep.boxes.size());
+                continue;
+            }
+            assertEquals(st.getId(), c[1], ids(keep.boxes));
+        }
+        if (t == null) return;
+        // The greeting's words, chief and pace.
+        keep.boxes.clear();
+        SwingUtilities.invokeAndWait(() -> gui.showInformationPanel(is, tales));
+        final ClassicAdvisorBox.Request howdy = keep.boxes.get(0);
+        assertEquals("IND2A0.SS.000", howdy.portrait.sprite);
+        assertTrue(howdy.isNotice());
+        for (String s : new String[] { "Erfahrene Pelzjäger", "Werkzeuge",
+                                       "Handelswaren", "Rum" }) {
+            assertTrue(s + " in " + howdy.plainText(), howdy.plainText().contains(s));
+        }
+        assertEquals(ClassicNotices.SPEAK_CHAIN_MS, howdy.chainMs);
+        assertEquals(ClassicNotices.AREA_CHAIN_MS, keep.boxes.get(1).chainMs);
+        keep.boxes.clear();
+        SwingUtilities.invokeAndWait(() -> gui.showInformationPanel(is, guides));
+        assertEquals(ClassicNotices.SPEAK_CHAIN_MS, keep.boxes.get(1).chainMs);
+        final ClassicAdvisorBox.Request seasoned = keep.boxes.get(2);
+        assertSame(ClassicAdvisorBox.Portrait.SCOUT, seasoned.portrait);
+        assertTrue(seasoned.isNotice());
+        assertEquals(ClassicNotices.SEASONED_CHAIN_MS, seasoned.chainMs);
+        assertTrue(seasoned.plainText(), seasoned.plainText().contains("Kampferprobten"));
+        // D-B3c: a taught skill is still named.
+        is.setLearnableSkill(null);
+        is.setTaughtSkill(spec().getUnitType("model.unit.masterCottonPlanter"));
+        keep.boxes.clear();
+        SwingUtilities.invokeAndWait(() -> gui.showInformationPanel(is, beads));
+        assertEquals(List.of("CHIEFHOWDY", "CHIEFGIFT"), ids(keep.boxes));
+        assertTrue(keep.boxes.get(0).plainText(),
+                   keep.boxes.get(0).plainText().contains("Meister-Baumwollpflanzer"));
+        // No skill at all (a save from before part O): the result alone.
+        is.setTaughtSkill(null);
+        keep.boxes.clear();
+        SwingUtilities.invokeAndWait(() -> gui.showInformationPanel(is, beads));
+        assertEquals(List.of("CHIEFGIFT"), ids(keep.boxes));
+        // Two wanted goods only (D-B3d): the result alone.
+        is.setLearnableSkill(spec().getUnitType("model.unit.seasonedScout"));
+        is.setWantedGoods(2, null);
+        keep.boxes.clear();
+        SwingUtilities.invokeAndWait(() -> gui.showInformationPanel(is, beads));
+        assertEquals(List.of("CHIEFGIFT"), ids(keep.boxes));
+        is.setWantedGoods(2, spec().getGoodsType("model.goods.horses"));
+        keep.boxes.clear();
+        SwingUtilities.invokeAndWait(() -> gui.showInformationPanel(is, beads));
+        assertEquals(List.of("CHIEFHOWDY", "CHIEFGIFT"), ids(keep.boxes));
+        assertTrue(keep.boxes.get(0).plainText().contains("Kampferprobte Späher"));
+        assertTrue(keep.boxes.get(0).plainText().contains("Pferde"));
+    }
+
+    /**
+     * Part O B4: the colonist the religious unrest brought is the
+     * original's @UNREST with the priest (V playthrough-1 #15383, landfall
+     * #18247, playthrough-3 #99674): «Holland», «Amsterdam» and the
+     * colonist's @JOB column 2 («Erfahrene Farmer», «Freie Siedler»); the
+     * same for FreeCol's survival recruit (I); without the colonist (a
+     * notice about the player) FreeCol's words.
+     */
+    public void testUnrestNotice() {
+        final ClassicText t = texts("testUnrestNotice");
+        if (t == null) return;
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Unit farmer = new ServerUnit(game, dutch.getEurope(), dutch,
+            spec().getUnitType("model.unit.expertFarmer"));
+        final Unit free = new ServerUnit(game, dutch.getEurope(), dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        final ModelMessage m = dutch.getEmigrationMessage(farmer);
+        final ClassicAdvisorBox.Request r = ClassicNotices.request(t, "message",
+            m, Messages.message(m), farmer, dutch, "t", null);
+        assertEquals("UNREST", r.id);
+        assertSame(ClassicAdvisorBox.Portrait.PRIEST, r.portrait);
+        assertTrue(r.isNotice());
+        for (String s : new String[] { "Holland", "Amsterdam", "Erfahrene Farmer" }) {
+            assertTrue(s + " in " + r.plainText(), r.plainText().contains(s));
+        }
+        final ModelMessage auto = new ModelMessage(ModelMessage.MessageType.UNIT_ADDED,
+            "model.player.autoRecruit", dutch, free)
+            .addNamed("%europe%", dutch.getEurope())
+            .addStringTemplate("%unit%", free.getLabel());
+        final ClassicAdvisorBox.Request a = ClassicNotices.request(t, "message",
+            auto, Messages.message(auto), free, dutch, "t", null);
+        assertEquals("UNREST", a.id);
+        assertTrue(a.plainText(), a.plainText().contains("Freie Siedler"));
+        // Without the colonist: FreeCol's words.
+        assertEquals("message", ClassicNotices.request(t, "message", m,
+            Messages.message(m), dutch, dutch, "t", null).id);
+    }
+
+    /**
+     * Part O B2: the controller's new success notice is the original's
+     * @LEARNDONE with the tribe and the job («Araukaner», «Meister-
+     * Baumwollpflanzer»; V playthrough-1 C29), the chief, 271 ms (19
+     * frames) after the box before.
+     */
+    public void testLearnDoneNotice() {
+        final ClassicText t = texts("testLearnDoneNotice");
+        final Game game = getStandardGame();
+        final IndianSettlement is = arawakVillage(game);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final StringTemplate done = StringTemplate.template("learnSkill.done")
+            .addNamed("%skill%", spec().getUnitType("model.unit.masterCottonPlanter"));
+        assertTrue(Messages.containsKey("learnSkill.done"));
+        final ClassicAdvisorBox.Request r = ClassicNotices.request(t, "notice",
+            done, Messages.message(done), is, dutch, "t", null);
+        if (t == null) {
+            assertEquals("notice", r.id);
+            return;
+        }
+        assertEquals("LEARNDONE", r.id);
+        assertEquals("IND2A0.SS.000", r.portrait.sprite);
+        assertTrue(r.plainText(), r.plainText().contains("Araukaner"));
+        assertTrue(r.plainText(), r.plainText().contains("Meister-Baumwollpflanzer"));
+        assertEquals(ClassicNotices.DONE_CHAIN_MS, r.chainMs);
     }
 
 
@@ -559,6 +760,18 @@ public class ClassicNoticesTest extends FreeColTestCase {
     private static int[] compare(BufferedImage frame, int ox, int oy,
                                  ClassicAdvisorBox.Request r, ClassicPackFiles pack,
                                  Rectangle box) {
+        return compare(frame, ox, oy, r, pack, box, -1);
+    }
+
+    /**
+     * {@link #compare(BufferedImage, int, int, ClassicAdvisorBox.Request,
+     * ClassicPackFiles, Rectangle)} with the bar drawn on a row.
+     *
+     * @param bar The bar's row, or -1 for none.
+     */
+    private static int[] compare(BufferedImage frame, int ox, int oy,
+                                 ClassicAdvisorBox.Request r, ClassicPackFiles pack,
+                                 Rectangle box, int bar) {
         final ClassicFont tiny = pack.font(ClassicFont.TINY);
         final BufferedImage pic = (r.portrait.sprite == null) ? null
             : pack.image(ClassicPackFiles.ssKey(r.portrait.sprite));
@@ -568,7 +781,7 @@ public class ClassicNoticesTest extends FreeColTestCase {
             BufferedImage.TYPE_INT_RGB);
         final Graphics2D g = canvas.createGraphics();
         g.drawImage(frame, ox, oy, null);
-        ClassicAdvisorBox.paint(g, l, -1, pack.image(ClassicMenuBar.WOOD_KEY), tiny);
+        ClassicAdvisorBox.paint(g, l, bar, pack.image(ClassicMenuBar.WOOD_KEY), tiny);
         g.dispose();
         final Raster idx = (frame.getColorModel() instanceof IndexColorModel)
             ? frame.getRaster() : null;
@@ -655,5 +868,137 @@ public class ClassicNoticesTest extends FreeColTestCase {
             + arrow + " arrow px excused");
         assertEquals("pixels off:" + fails, 0, fails.length());
         assertTrue("arrow pixels " + arrow, arrow <= 100);
+    }
+
+    /** A village of a tribe on the test map, teaching and wanting as given. */
+    private static IndianSettlement village(Game game, String nation, int x, int y,
+                                            String skill, String taught,
+                                            String... wanted) {
+        final IndianSettlement is = new IndianSettlementBuilder(game)
+            .player(game.getPlayerByNationId(nation))
+            .settlementTile(game.getMap().getTile(x, y)).build();
+        is.setLearnableSkill((skill == null) ? null
+            : spec().getUnitType("model.unit." + skill));
+        is.setTaughtSkill((taught == null) ? null
+            : spec().getUnitType("model.unit." + taught));
+        for (int i = 0; i < wanted.length; i++) {
+            is.setWantedGoods(i, spec().getGoodsType("model.goods." + wanted[i]));
+        }
+        return is;
+    }
+
+    /**
+     * Part O, bundle B, golden (the pack and {@code -Dclassic.clips}): each
+     * new box as the game builds it, from FreeCol's model and the pack's
+     * texts, drawn over the frame that shows it: the box, its words and
+     * values, its bar and its portrait 0 px off (the original's mouse
+     * arrow excused).  @CHIEFHOWDY three times (the Apache's scouts and
+     * «Rum», «Nahrungsmittel», «Pferde», playthrough-1 #47458; the Inca's
+     * silver miners, playthrough-2 #15301; the Iroquois' sugar planters
+     * after they taught one, playthrough-1 #82938, D-B3c), @UNREST three
+     * times (playthrough-1 #15418 «Meister-Schreiner», #48094 «Freie
+     * Siedler», playthrough-2 #5758 «Erfahrene Fischer»), @LEARNSTAY with
+     * its bar (playthrough-1 #9449, playthrough-2 #27101), @LEARNDONE
+     * (playthrough-1 #9713), @LEARNLATER (playthrough-2 #27250),
+     * @WELLSEASONED (clip008 #47096), @INDIANWELCOME with its bar
+     * (playthrough-1 #4742, playthrough-3 #103212), @INDIANPEACE and
+     * @INDIANCOME (playthrough-2 #18984, #19091).
+     */
+    public void testBundleBAgainstTheClips() throws Exception {
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        final File dir = (clips == null) ? null : new File(clips);
+        if (dir == null || !new File(dir, "playthrough-1").isDirectory()) {
+            System.err.println(getClass().getSimpleName()
+                + ": bundle B golden skipped, no recordings (-D"
+                + ClassicTerrainGoldenTest.CLIPS_PROPERTY + ")");
+            return;
+        }
+        final ClassicText t = texts("testBundleBAgainstTheClips");
+        if (t == null) return;
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final Game game = getStandardGame();
+        game.changeMap(getTestMap());
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final IndianSettlement apache = village(game, "model.nation.apache", 3, 3,
+            "seasonedScout", null, "rum", "food", "horses");
+        final IndianSettlement inca = village(game, "model.nation.inca", 12, 3,
+            "expertSilverMiner", null, "tools", "tradeGoods", "rum");
+        final IndianSettlement iroquois = village(game, "model.nation.iroquois", 3, 14,
+            null, "masterSugarPlanter", "tools", "rum", "coats");
+        final IndianSettlement arawak = village(game, "model.nation.arawak", 12, 14,
+            "expertFarmer", null);
+        final StringTemplate done = StringTemplate.template("learnSkill.done")
+            .addNamed("%skill%", spec().getUnitType("model.unit.masterSugarPlanter"));
+        final Object[][] cases = {
+            // frame, the box, its place, the bar
+            { "playthrough-1/frame_047458.png", ClassicNotices.howdy(t, apache).build(),
+              new Rectangle(84, 79, 236, 42), -1 },
+            { "playthrough-2/frame_015301.png", ClassicNotices.howdy(t, inca).build(),
+              new Rectangle(78, 79, 236, 42), -1 },
+            { "playthrough-1/frame_082938.png", ClassicNotices.howdy(t, iroquois).build(),
+              new Rectangle(84, 79, 236, 42), -1 },
+            { "playthrough-1/frame_015418.png", unrest(t, dutch, "masterCarpenter"),
+              new Rectangle(47, 108, 226, 36), -1 },
+            { "playthrough-1/frame_048094.png", unrest(t, dutch, "freeColonist"),
+              new Rectangle(47, 108, 226, 36), -1 },
+            { "playthrough-2/frame_005758.png", unrest(t, dutch, "expertFisherman"),
+              new Rectangle(47, 108, 226, 36), -1 },
+            { "playthrough-1/frame_009449.png", ClassicNotices.learnStay(t, iroquois,
+                  spec().getUnitType("model.unit.masterSugarPlanter")).build(),
+              new Rectangle(84, 74, 236, 52), 0 },
+            { "playthrough-2/frame_027101.png", ClassicNotices.learnStay(t, arawak,
+                  arawak.getLearnableSkill()).build(),
+              new Rectangle(7, 74, 236, 52), 0 },
+            { "playthrough-1/frame_009713.png", ClassicNotices.request(t, "notice", done,
+                  Messages.message(done), iroquois, dutch, "t", null),
+              new Rectangle(84, 79, 236, 42), -1 },
+            { "playthrough-2/frame_027250.png", ClassicNotices.learnLater(t, 2).build(),
+              new Rectangle(7, 88, 236, 24), -1 },
+            { "clip008/frame_047096.png", ClassicNotices.wellSeasoned(t).build(),
+              new Rectangle(42, 132, 236, 24), -1 },
+            { "playthrough-1/frame_004742.png", ClassicNotices.welcome(t, 3, 18).build(),
+              new Rectangle(84, 68, 236, 64), 0 },
+            { "playthrough-3/frame_103212.png", ClassicNotices.welcome(t, 1, 6).build(),
+              new Rectangle(5, 68, 236, 64), 0 },
+            { "playthrough-2/frame_018984.png", ClassicNotices.contactNotice(t,
+                  "INDIANPEACE", 2, dutch).build(), new Rectangle(7, 82, 236, 36), -1 },
+            { "playthrough-2/frame_019091.png", ClassicNotices.contactNotice(t,
+                  "INDIANCOME", 2, dutch).build(), new Rectangle(7, 82, 236, 36), -1 },
+        };
+        final StringBuilder fails = new StringBuilder();
+        int compared = 0, arrow = 0;
+        for (Object[] c : cases) {
+            final ClassicAdvisorBox.Request r = (ClassicAdvisorBox.Request) c[1];
+            final BufferedImage frame = ImageIO.read(new File(dir, (String) c[0]));
+            assertNotNull((String) c[0], frame);
+            final int[] got = compare(frame, 0, 0, r, pack, (Rectangle) c[2],
+                                      (Integer) c[3]);
+            compared += got[0];
+            arrow += got[2];
+            // At most one mouse arrow per frame (its 7x12 sprite: under 90 px).
+            assertTrue(c[0] + " arrow px " + got[2], got[2] <= 90);
+            if (got[1] > 0) {
+                fails.append(' ').append(c[0]).append(' ').append(r.id).append('=')
+                    .append(got[1]);
+            }
+        }
+        System.out.println(getClass().getSimpleName() + ": bundle B golden, "
+            + cases.length + " boxes, " + compared + " px compared, off:"
+            + ((fails.length() == 0) ? " none" : fails.toString()) + ", "
+            + arrow + " arrow px excused");
+        assertEquals("pixels off:" + fails, 0, fails.length());
+        assertTrue(compared > 100000);
+    }
+
+    /** @UNREST as the GUI builds it for a colonist of a type on our docks. */
+    private static ClassicAdvisorBox.Request unrest(ClassicText t, Player dutch,
+                                                    String type) {
+        final Unit u = new ServerUnit(dutch.getGame(), dutch.getEurope(), dutch,
+            spec().getUnitType("model.unit." + type));
+        final ModelMessage m = dutch.getEmigrationMessage(u);
+        final ClassicAdvisorBox.Request r = ClassicNotices.request(t, "message", m,
+            Messages.message(m), u, dutch, "t", null);
+        assertEquals(type, "UNREST", r.id);
+        return r;
     }
 }

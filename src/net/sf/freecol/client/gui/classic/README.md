@@ -1521,13 +1521,17 @@ ignored, our colony opens, its guard kept, Enter still ends),
   (D acceptance D5), so Down then Enter pays. The first contact with a native nation (`showFirstContactDialog`)
   takes "Ja", the peace, on Enter: `@INDIANWELCOME` lists "Ja" first and
   has no `@default`, and FreeCol's `FirstContactDialog` defaults to "yes"
-  (D acceptance review). A refusal costs dearly -- the server adds major
-  tension and bans missions for that nation (`nativeFirstContact`), the
-  land on offer is lost, and the original answers with `@INDIANSHUN` ("Das
-  bedeutet KRIEG!") -- and several such boxes can come at one turn start.
-  Escape still refuses (W0e, Roger's rule; an open question for him), as
-  at a native demand. `askEvent` takes the row Enter picks, and whether
-  Escape does nothing (`mustChoose`), from its caller.
+  (D acceptance review). Since part O (B1, Roger 2026-10-13: "Nein beim
+  ersten Treffen mit einem Stamm heisst Krieg"), «Nein» is war, as the
+  original's `@INDIANSHUN` says ("Das bedeutet KRIEG!"): the server sets
+  WAR both ways (`nativeFirstContact`, on top of FreeCol's major tension
+  and mission ban; the land on offer stays the tribe's), and the client
+  sends the answer also without a land offer (before, `firstContact`
+  dropped it). So Escape and a click outside do nothing there (`noEscape`,
+  as at the King's decisions); a box closed without a row answers «Ja».
+  The box is the original's own (`ClassicNotices.welcome`; the chain
+  below, "The first contact"). `askEvent` takes the row Enter picks, and
+  whether Escape does nothing (`mustChoose`), from its caller.
 - **Back to Europe from anywhere (C trap 2).** BEFEHLE row 16 "Zurück nach
   Europa" (ships only) and its gold letter R fire FreeCol's new
   `ReturnToEuropeAction` (`returnToEuropeAction`), which calls
@@ -1906,8 +1910,8 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
   (every confirm: FreeCol's words, its "yes" row first, the bar on
   `defaultOk`'s row, Escape "no"); the event boxes through `askEvent`: the
   King's (the King at the left; the tax rise opens on "kiss the ring", the
-  mercenaries on their "no", listed first), the first contact (the tribe's
-  chief on its side; "Ja" first and barred; FreeCol's words until W8c),
+  mercenaries on their "no", listed first), the first contact (its own
+  seam since part O: GAME.TXT's @INDIANWELCOME chain, below),
   the natives' demands (the refusal first and barred); `sailHomeKey`
   (GAME.TXT @SAILHOME with the admiral); `askLandfall` (GAME.TXT @LANDFALL
   with the frontiersman, in both landing seams); `confirmFortifyWar`
@@ -1929,8 +1933,8 @@ dago-colony clips (the bar); V where verified on the pixels, I inferred.
   without the pack's FONTTINY, or when the rows do not fit on the screen,
   the stopgap stays (`ClassicDialog`, the selection list for a choice).
 - **Not yet.** FreeCol's words in the FreeCol boxes (the GAME.TXT texts of
-  the villages' menus, the rumours' questions, the first contact chain, the
-  King's texts are W8c-W8f, W24; the landing's is below; the notices that
+  the villages' menus, the rumours' questions, the King's texts are
+  W8c-W8f, W24; the landing's is below; the notices that
   have a GAME.TXT text are below); the
   @LANDHO input field; the King's KING2 gesture (W24). The list boxes of
   the colony and Europe screens (D6, D7, D9c) are built on the list-box
@@ -2023,6 +2027,8 @@ same notice (`ClassicNotices.RULES`), else in FreeCol's:
 | `scoutSettlement.speakTales`, `speakNothing`, `speakDie` | @CHIEFAREA, @CHIEFBORED, @CHIEFKILL (I) | chief |
 | `info.noMoreSkill` | @LEARNALREADY (V #37156) | chief |
 | `learnSkill.leave`, `learnSkill.die` | @LEARNMAD, @CHIEFKILL (I) | chief |
+| `learnSkill.done` (part O B2: the controller's new success notice) | @LEARNDONE (the tribe, @JOB column 1; V playthrough-1 #9713), 271 ms after the box before | chief |
+| `model.player.emigrate`, `model.player.autoRecruit` (part O B4) | @UNREST (@COUNTRY, @HOMEPORT, the colonist's @JOB column 2; V playthrough-1 #15383, #48067, playthrough-2 #5758) | priest MSS4 |
 | `buildColony.badUnit` | @ONLYCOL (I); the GUI first takes the unit's own cause (Refusals below) | none |
 | the rumours: mounds empty / gift / treasure | @BURIAL1 (V landfall #20177), @BURIAL2, @BURIAL3 | frontiersman |
 | the rumours: nothing, vanished, chief's gift, ruins, Cibola, fountain, survivors | @LOSTCITY6, 5, 7, 3, 2, 1, 9 | frontiersman |
@@ -2071,6 +2077,55 @@ words with the pack, the GUI's two seams; the dropped notices,
 `testTheServerSendsTheDroppedMeetingNotice`; and `testGoldenAgainstTheClips`:
 @BURIAL1, @CHIEFGUIDES, @LEARNALREADY and @CHIEFGIFT as the GUI builds
 them from FreeCol's messages, 0 px off on box and portrait).
+
+### The natives' chains (part O, bundle B; prep `o/prep/B-boxes.md`)
+
+Roger's decisions of 2026-10-13: the original everywhere.
+
+- **The first contact** (`showFirstContactDialog`, `contactChain`): the
+  woodcut once per game, then `@INDIANWELCOME` (`ClassicNotices.welcome`:
+  the tribe, its settlement count, the plural of its kind, NAMES @LEVELS
+  column 3 at @TRIBES column 4: Inka/Azteken «Städte», Araukaner/Irokesen/
+  Cherokee «Dörfer», Apachen/Sioux/Tupi «Lager»; the template adds the
+  «n»), rows «Ja» / «Nein» from the file, the bar on «Ja», the tribe's
+  chief; Escape and a click outside do nothing. After the server has the
+  answer, 185 ms (13 frames) apart: «Ja» `@INDIANPEACE` (the tribe,
+  «Holl.») and, in our own turn and not for the Inca, `@INDIANCOME`
+  (Roger's D-B1c: 7 of 7 recorded contacts); «Nein» `@INDIANSHUN` and war
+  (the server, `nativeFirstContact`: WAR both ways, no FreeCol notice of it
+  to us; FreeCol's tension and mission ban kept). The land: FreeCol's rule
+  (a gift only at a first landing on the tribe's land), the original's
+  text. The box keeps the id `first-contact <tribe>`. The native AI keeps
+  such a war like any other (`TensionTest.testWarFromTheFirstContact`); an
+  AI European always says yes (`AIPlayer.firstContactHandler`).
+- **Learning** (`askLearn`, the learn question of `moveLearnSkill`):
+  `@LEARNSTAY` with the chief (the tribe, @JOB column 1 of the skill), the
+  bar on «Dann will ich ein Meister-... werden.», Escape «Im Moment
+  nicht, danke.»; its «no», Escape included, brings `@LEARNLATER` 250 ms
+  later and costs nothing (house rule `cancelKeepsMove`); «yes» learns and
+  the controller's new `learnSkill.done` is `@LEARNDONE`. Without a
+  village that teaches the named skill: FreeCol's question as before.
+- **Speaking to the chief** (`ClassicNotices.requests`): before
+  @CHIEFGIFT, @CHIEFGUIDES, @CHIEFAREA and @CHIEFBORED (not before
+  @CHIEFKILL, D-B3b) `@CHIEFHOWDY` 236 ms after the menu: the skill (@JOB
+  column 2), the three wanted goods (@CARGO); the result 236 ms after it
+  (@CHIEFAREA 607); after @CHIEFGUIDES `@WELLSEASONED` with the
+  frontiersman 700 ms later. The skill is the one the village teaches,
+  else the one it taught (D-B3c: `IndianSettlement.taughtSkill`, set by the
+  server's `learnFromIndianSettlement`, saved and sent like the learnable
+  skill; a save from before part O has none). No HOWDY when a value is
+  unknown (no skill, fewer than three wanted goods: D-B3d), the recorder
+  logs `notice-howdy-skipped`.
+- **The chief's side**: the Aztec at the right at (244,10) (B5, above).
+
+Tests: `ClassicGUISeamTest.testFirstContactChain`, `ClassicNativeBoxesTest`
+(FreeCol's real client controller and a real server: the first contact's
+answer and the war, the learning with its moves, the taught skill named),
+`ClassicNoticesTest` (`testChiefHowdyChain`, `testUnrestNotice`,
+`testLearnDoneNotice`, `testBundleBAgainstTheClips`: 15 boxes as the game
+builds them over the frames that show them, 0 px off), the server's
+`InGameControllerTest.testRefusedFirstContactIsWar`,
+`testTaughtSkillIsKept`, `TensionTest.testWarFromTheFirstContact`.
 
 ### Refusals (`ClassicIllegalMoves`; R3, Part H1)
 
@@ -2705,7 +2760,7 @@ options box's row = FreeCol's `model.option.guiShowTutorial`). FreeCol's own
 | Tip | Advisor | Trigger | When |
 |---|---|---|---|
 | 2 | admiral | the @LANDHO box closed (`landNamed`) | +457 ms (V LF #3185 -> #3217) |
-| 5 | admiral | the notice of FreeCol's `model.player.emigrate` / `autoRecruit` closed (`unrestClosed`; W8e's @UNREST later) | +457 ms (V @UNREST #18247 -> #18279) |
+| 5 | admiral | the notice of FreeCol's `model.player.emigrate` / `autoRecruit` (since part O B4 the original's @UNREST with the priest) closed (`unrestClosed`) | +457 ms (V @UNREST #18247 -> #18279) |
 | 11 | admiral | an empty ship (no units, no goods) on the map | at the switch (below) |
 | 13 | frontiersman | a pioneer on land | at the switch |
 | 14 | soldier | a soldier on land | at the switch |

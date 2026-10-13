@@ -251,6 +251,127 @@ public class InGameControllerTest extends FreeColTestCase {
         }
     }
 
+    /**
+     * Part O B1 (Roger 2026-10-13, "Nein beim ersten Treffen mit einem
+     * Stamm heisst Krieg."): the original's @INDIANSHUN, "Das bedeutet
+     * KRIEG!".  The contact sets peace at once (FreeCol); «Ja» keeps it;
+     * «Nein» is war between the two, with FreeCol's tension and mission
+     * ban kept, and no FreeCol notice of the war to the refusing player
+     * (the chief's box says it), also without a land offer (which the
+     * client never sent before); with an offer the land stays the
+     * tribe's on «Nein» and is given on «Ja».
+     */
+    public void testRefusedFirstContactIsWar() {
+        final Game game = ServerTestHelper.startServerGame(getTestMap());
+        final InGameController igc = ServerTestHelper.getInGameController();
+        final ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+        dutch.setAI(false);
+        final ServerPlayer arawak = getServerPlayer(game, "model.nation.arawak");
+        final ServerPlayer sioux = getServerPlayer(game, "model.nation.sioux");
+        final String declared = Stance.WAR.getStanceChangeKey();
+
+        // «Ja», no land offer: peace.
+        dutch.csNativeFirstContact(arawak, null,
+            new net.sf.freecol.common.networking.ChangeSet());
+        assertEquals(Stance.PEACE, dutch.getStance(arawak));
+        assertEquals(Stance.PEACE, arawak.getStance(dutch));
+        igc.nativeFirstContact(dutch, arawak, null, true);
+        assertEquals(Stance.PEACE, dutch.getStance(arawak));
+        assertEquals(Stance.PEACE, arawak.getStance(dutch));
+        assertFalse(arawak.missionsBanned(dutch));
+
+        // «Nein», no land offer: war both ways.
+        dutch.csNativeFirstContact(sioux, null,
+            new net.sf.freecol.common.networking.ChangeSet());
+        assertEquals(Stance.PEACE, sioux.getStance(dutch));
+        final net.sf.freecol.common.networking.ChangeSet cs
+            = igc.nativeFirstContact(dutch, sioux, null, false);
+        assertEquals(Stance.WAR, dutch.getStance(sioux));
+        assertEquals(Stance.WAR, sioux.getStance(dutch));
+        assertTrue("FreeCol's mission ban kept", sioux.missionsBanned(dutch));
+        assertEquals(Level.HATEFUL, sioux.getTension(dutch).getLevel());
+        assertEquals(cs.toString(), 0, messages(cs, declared, dutch));
+        // The native AI keeps the war (its stance follows the tension).
+        assertEquals(Stance.WAR, sioux.getStance(dutch)
+                     .getStanceFromTension(sioux.getTension(dutch)));
+
+        // A first landing on the tribe's land, with the offer.
+        final ServerPlayer tupi = getServerPlayer(game, "model.nation.tupi");
+        final ServerPlayer cherokee = getServerPlayer(game, "model.nation.cherokee");
+        final Map map = game.getMap();
+        for (ServerPlayer tribe : new ServerPlayer[] { tupi, cherokee }) {
+            final boolean refuse = tribe == tupi;
+            final Tile at = map.getTile((refuse) ? 4 : 12, 4);
+            final IndianSettlement is = new FreeColTestCase.IndianSettlementBuilder(game)
+                .player(tribe).settlementTile(at).build();
+            final Tile land = at.getNeighbourOrNull(Direction.S);
+            assertSame(tribe, land.getOwner());
+            assertSame(is, land.getOwningSettlement());
+            new ServerUnit(game, land, dutch, colonistType);
+            dutch.csNativeFirstContact(tribe, land,
+                new net.sf.freecol.common.networking.ChangeSet());
+            igc.nativeFirstContact(dutch, tribe, land, !refuse);
+            if (refuse) {
+                assertEquals(Stance.WAR, dutch.getStance(tribe));
+                assertEquals(Stance.WAR, tribe.getStance(dutch));
+                assertSame("the land stays the tribe's", tribe, land.getOwner());
+            } else {
+                assertEquals(Stance.PEACE, dutch.getStance(tribe));
+                assertEquals(Stance.PEACE, tribe.getStance(dutch));
+                assertSame("the land is the gift", dutch, land.getOwner());
+            }
+        }
+    }
+
+    /**
+     * Part O D-B3c (Roger 2026-10-13: "Fähigkeit des Indianerdorfs immer
+     * nennen: Ja."): a village keeps the skill it taught
+     * ({@code IndianSettlement.taughtSkill}), while FreeCol forgets its
+     * learnable skill; it is saved, sent to a player who visited the
+     * village as the skill is, and a save without it (made before part O)
+     * loads with none.
+     */
+    public void testTaughtSkillIsKept() throws Exception {
+        final Game game = ServerTestHelper.startServerGame(getTestMap());
+        final InGameController igc = ServerTestHelper.getInGameController();
+        final ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+        dutch.setAI(false);
+        final ServerPlayer french = getServerPlayer(game, "model.nation.french");
+        final ServerIndianSettlement camp = (ServerIndianSettlement)
+            new FreeColTestCase.IndianSettlementBuilder(game).capital(false).build();
+        Player.makeContact(camp.getOwner(), dutch);
+        camp.setContacted(dutch);
+        final UnitType skill = camp.getLearnableSkill();
+        assertNotNull(skill);
+        assertNull(camp.getTaughtSkill());
+        final ServerUnit colonist = new ServerUnit(game,
+            camp.getTile().getNeighbourOrNull(Direction.N), dutch, colonistType);
+        igc.askLearnSkill(dutch, colonist, camp);
+        igc.learnFromIndianSettlement(dutch, colonist, camp);
+        assertEquals(skill, colonist.getType());
+        assertNull("FreeCol forgets it", camp.getLearnableSkill());
+        assertEquals("the village keeps it", skill, camp.getTaughtSkill());
+
+        // Saved, and read back.
+        final String save = camp.serialize(
+            net.sf.freecol.common.io.FreeColXMLWriter.WriteScope.toSave());
+        assertTrue(save, save.contains("taughtSkill=\"" + skill.getId() + "\""));
+        final IndianSettlement loaded = camp.copy(game, IndianSettlement.class);
+        assertEquals(skill, loaded.getTaughtSkill());
+        // Sent to the visitor, not to a nation that never visited.
+        assertTrue(camp.serialize(dutch).contains("taughtSkill="));
+        assertFalse(camp.serialize(french).contains("taughtSkill="));
+        // A save from before part O: none.
+        final String old = save.replace("taughtSkill=\"" + skill.getId() + "\"", "");
+        try (net.sf.freecol.common.io.FreeColXMLReader xr
+             = new net.sf.freecol.common.io.FreeColXMLReader(
+                 new java.io.StringReader(old))) {
+            final IndianSettlement before = xr.copy(game, IndianSettlement.class);
+            assertNotNull(before);
+            assertNull(before.getTaughtSkill());
+        }
+    }
+
     private void learnSkillQuestion(Game game, InGameController igc,
                                     Specification spec) {
 

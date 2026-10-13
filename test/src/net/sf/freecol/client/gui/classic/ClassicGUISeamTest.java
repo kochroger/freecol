@@ -1228,9 +1228,9 @@ public class ClassicGUISeamTest extends FreeColTestCase {
      * refusal first with the bar on it, as the original's @INDIANGOLD,
      * @WANTSTUFF, @INDIANBEGFOOD do (no @default; D acceptance D5), so
      * Enter and Escape refuse and only Down then Enter pays.  The first
-     * contact box, through the same code, takes "Ja" (the peace) on Enter
-     * (GAME.TXT @INDIANWELCOME lists "Ja" first, no @default; FreeCol's
-     * own default), Escape still answers "no" (D acceptance review), and
+     * contact box takes "Ja" (the peace) on Enter (GAME.TXT @INDIANWELCOME
+     * lists "Ja" first, no @default; FreeCol's own default); since part O
+     * B1 Escape does nothing there ({@link #testFirstContactChain}), and
      * the tribe's chief stands at the box (W7).
      */
     public void testNativeDemandEnterRefuses() {
@@ -1279,24 +1279,7 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             assertEquals("yes, " + what, Boolean.TRUE, last(answers));
         }
         final Player dutch = colony.getOwner();
-        fake.answer = 0;                   // Enter: its row 0, "Ja"
-        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
-        assertEquals(Messages.message("yes"), last(fake.asked)[0]);
-        assertEquals(Messages.message("no"), last(fake.asked)[1]);
-        assertEquals("Enter's row, first contact", Integer.valueOf(0),
-                     last(fake.defaults));
-        assertEquals(1, last(fake.boxes).cancelRow);
-        assertEquals("IND0A0.SS.000", last(fake.boxes).portrait.sprite);
-        assertSame(ClassicAdvisorBox.Portrait.Kind.CHIEF,
-                   last(fake.boxes).portrait.kind);
-        assertEquals(Boolean.TRUE, last(answers));
-        fake.answer = -1;                  // Escape: no
-        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
-        assertEquals("Escape, first contact", Boolean.FALSE, last(answers));
-        fake.answer = 1;
-        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
-        assertEquals(Boolean.FALSE, last(answers));
-        assertEquals(3 * demands.length + 3, answers.size());
+        assertEquals(3 * demands.length, answers.size());
 
         // The tribes and their chiefs: NAMES.TXT @TRIBES order.
         assertEquals(2, ClassicGUI.tribeIndex(
@@ -1322,19 +1305,6 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         keys.press("DOWN", "DOWN", "ENTER");          // no row past the last
         gui.showNativeDemandDialog(brave, colony, null, 50, answers::add);
         assertEquals(Boolean.TRUE, last(answers));
-        keys.press("ENTER");
-        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
-        assertEquals(Boolean.TRUE, last(answers));
-        keys.press("DOWN", "ENTER");
-        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
-        assertEquals(Boolean.FALSE, last(answers));
-        keys.press("ESC");
-        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
-        assertEquals(Boolean.FALSE, last(answers));
-        // G1 leaves them as they are: Escape answers "Nein" (not answered
-        // by Roger yet), unlike the King's decisions.
-        assertTrue(last(keys.boxes).escapes);
-        assertEquals(1, last(keys.boxes).escapeAnswer());
         keys.press("DOWN", "ESC");
         gui.showNativeDemandDialog(brave, colony, null, 50, answers::add);
         assertEquals(Boolean.FALSE, last(answers));
@@ -1349,13 +1319,194 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         keys.press("OUT", "DOWN", "ENTER");
         gui.showNativeDemandDialog(brave, colony, null, 50, answers::add);
         assertEquals(Boolean.TRUE, last(answers));
-        keys.press("OUT");
-        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
-        assertFalse(last(keys.boxes).outsideCancels);
-        assertEquals(0, keys.lastRow);                 // still up, on "Ja"
-        keys.press("OUT", "OUT", "ENTER");
-        gui.showFirstContactDialog(dutch, inca, null, 3, answers::add);
-        assertEquals("peace after stray clicks", Boolean.TRUE, last(answers));
+    }
+
+    /**
+     * A classic GUI without a client for the first contact: the game and
+     * our player the test's, boxes answered by {@link #keys}.
+     */
+    private static final class ContactGUI extends ClassicGUI {
+
+        final Game game;
+        final Player me;
+
+        ContactGUI(Game game, Player me) {
+            super(null);
+            this.game = game;
+            this.me = me;
+            this.woodcutter = (k, notBefore, followMs) -> 1L;
+        }
+
+        @Override
+        protected Game getGame() {
+            return this.game;
+        }
+
+        @Override
+        Player myPlayer() {
+            return this.me;
+        }
+
+        @Override
+        protected Player getMyPlayer() {
+            return this.me;
+        }
+    }
+
+    /**
+     * Part O B1 (Roger 2026-10-13: "Nein beim ersten Treffen mit einem
+     * Stamm heisst Krieg. Ja, das ist gut."): the first contact is the
+     * original's chain.  With the pack: @INDIANWELCOME in GAME.TXT's words
+     * with the tribe, its settlements and their kind («Azteken», «6
+     * Städten»; «Irokesen», «18 Dörfern»; «Sioux», «21 Lagern»: V), the
+     * rows «Ja» / «Nein» from the file, the bar on «Ja», the chief; Escape
+     * and a click outside do nothing (the box stays up on «Ja»); «Ja» brings
+     * @INDIANPEACE («Holl.») and, in our own turn and not for the Inca,
+     * @INDIANCOME, each 185 ms (13 frames) after the box before; «Nein»
+     * brings @INDIANSHUN; the answer reaches the handler before the chain.
+     * Without the pack: FreeCol's words, the same keys.
+     */
+    public void testFirstContactChain() throws Exception {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player aztec = game.getPlayerByNationId("model.nation.aztec");
+        final Player inca = game.getPlayerByNationId("model.nation.inca");
+        final Player iroquois = game.getPlayerByNationId("model.nation.iroquois");
+        final Player sioux = game.getPlayerByNationId("model.nation.sioux");
+        final ContactGUI gui = new ContactGUI(game, dutch);
+        final KeyPrompter keys = new KeyPrompter();
+        gui.prompter = keys;
+        final List<Boolean> answers = new ArrayList<>();
+        final List<Integer> boxesAtAnswer = new ArrayList<>();
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        game.setCurrentPlayer(dutch);                    // our own turn
+
+        // Enter: "Ja", the peace, then PEACE and COME.
+        keys.press("ENTER");
+        onEdt(() -> gui.showFirstContactDialog(dutch, aztec, null, 6, b -> {
+                    answers.add(b);
+                    boxesAtAnswer.add(keys.boxes.size());
+                }));
+        assertEquals(Boolean.TRUE, last(answers));
+        assertEquals("answered before the chain", Integer.valueOf(1), last(boxesAtAnswer));
+        final ClassicAdvisorBox.Request w = keys.boxes.get(0);
+        assertEquals("first-contact aztec", w.id);
+        assertEquals("IND1A0.SS.000", w.portrait.sprite);
+        assertSame(ClassicAdvisorBox.Portrait.Kind.CHIEF, w.portrait.kind);
+        assertEquals(0, w.defaultRow);
+        assertFalse("Escape does nothing", w.escapes);
+        assertFalse(w.outsideCancels);
+        if (t != null) {
+            assertEquals(1, w.paragraphs.size());                // GAME.TXT's words
+            assertTrue(w.plainText(), w.plainText().contains("Azteken"));
+            assertTrue(w.plainText(), w.plainText().contains("6 Städten"));
+            assertEquals(Arrays.asList("Ja", "Nein"), Arrays.asList(w.plainRows()));
+            assertEquals(3, keys.boxes.size());
+            assertEquals("INDIANPEACE", keys.boxes.get(1).id);
+            assertTrue(keys.boxes.get(1).plainText().contains("Holl."));
+            assertTrue(keys.boxes.get(1).plainText().contains("Azteken"));
+            assertEquals("IND1A0.SS.000", keys.boxes.get(1).portrait.sprite);
+            assertEquals(ClassicNotices.CONTACT_CHAIN_MS, keys.boxes.get(1).chainMs);
+            assertEquals("INDIANCOME", keys.boxes.get(2).id);
+            assertTrue(keys.boxes.get(2).plainText().contains("Azteken"));
+            assertEquals(ClassicNotices.CONTACT_CHAIN_MS, keys.boxes.get(2).chainMs);
+            assertTrue(keys.boxes.get(2).isNotice());
+        } else {
+            System.err.println("ClassicGUISeamTest: testFirstContactChain without"
+                + " the pack: FreeCol's words only");
+            assertEquals(Messages.message("yes"), w.plainRows()[0]);
+            assertEquals(Messages.message("no"), w.plainRows()[1]);
+            assertEquals(1, keys.boxes.size());
+        }
+        // Escape and clicks outside: nothing, the box stays up on "Ja".
+        for (String[] k : new String[][] { { "ESC" }, { "OUT" }, { "DOWN", "ESC" } }) {
+            keys.boxes.clear();
+            keys.press(k);
+            final int before = answers.size();
+            final int[] rowAtAnswer = { -3 };
+            onEdt(() -> gui.showFirstContactDialog(dutch, aztec, null, 6, b -> {
+                        answers.add(b);
+                        rowAtAnswer[0] = keys.lastRow;  // the welcome box's
+                    }));
+            assertEquals(String.join(" ", k), (k.length == 1) ? 0 : 1, rowAtAnswer[0]);
+            // The KeyPrompter reports a box left open as closed without a
+            // row: such a box answers "Ja" (the game asks it again).
+            assertEquals(before + 1, answers.size());
+            assertEquals(Boolean.TRUE, last(answers));
+        }
+        assertTrue(ClassicGUI.eventAnswer(keys.boxes.get(0), 0,
+                                          ClassicAdvisorBox.Bar.DISMISSED));
+        // "Nein": the war, then SHUN.
+        keys.boxes.clear();
+        keys.press("DOWN", "ENTER");
+        onEdt(() -> gui.showFirstContactDialog(dutch, aztec, null, 6, answers::add));
+        assertEquals(Boolean.FALSE, last(answers));
+        assertEquals(2, keys.boxes.size());
+        final ClassicAdvisorBox.Request shun = keys.boxes.get(1);
+        assertEquals("IND1A0.SS.000", shun.portrait.sprite);
+        assertEquals(ClassicNotices.CONTACT_CHAIN_MS, shun.chainMs);
+        if (t != null) {
+            assertEquals("INDIANSHUN", shun.id);
+            assertTrue(shun.plainText(), shun.plainText().contains("Azteken"));
+            assertTrue(shun.plainText(), shun.plainText().contains("KRIEG"));
+        } else {
+            assertEquals("first-contact war", shun.id);
+        }
+        // Up from "Nein" and Enter: the peace again.
+        keys.boxes.clear();
+        keys.press("DOWN", "UP", "ENTER");
+        onEdt(() -> gui.showFirstContactDialog(dutch, aztec, null, 6, answers::add));
+        assertEquals(Boolean.TRUE, last(answers));
+        if (t == null) return;
+        // The Inca: no COME (playthrough-2), "Städte".
+        keys.boxes.clear();
+        keys.press("ENTER");
+        onEdt(() -> gui.showFirstContactDialog(dutch, inca, null, 7, answers::add));
+        assertTrue(keys.boxes.get(0).plainText().contains("7 Städten"));
+        assertEquals(Arrays.asList("first-contact inca", "INDIANPEACE"), ids(keys.boxes));
+        // Not our turn (clip004: the Sioux met in their own phase): no COME.
+        game.setCurrentPlayer(sioux);
+        keys.boxes.clear();
+        keys.press("ENTER");
+        onEdt(() -> gui.showFirstContactDialog(dutch, sioux, null, 21, answers::add));
+        assertTrue(keys.boxes.get(0).plainText().contains("21 Lagern"));
+        assertEquals(Arrays.asList("first-contact sioux", "INDIANPEACE"), ids(keys.boxes));
+        assertEquals("IND6A0.SS.000", keys.boxes.get(0).portrait.sprite);
+        // "Dörfer" for the Iroquois, in our turn with COME.
+        game.setCurrentPlayer(dutch);
+        keys.boxes.clear();
+        keys.press("ENTER");
+        onEdt(() -> gui.showFirstContactDialog(dutch, iroquois, null, 18, answers::add));
+        assertTrue(keys.boxes.get(0).plainText().contains("18 Dörfern"));
+        assertEquals(Arrays.asList("first-contact iroquois", "INDIANPEACE", "INDIANCOME"),
+                     ids(keys.boxes));
+        // The kinds of every tribe (NAMES @TRIBES column 4, @LEVELS column 3).
+        final String[] kinds = { "Städte", "Städte", "Dörfer", "Dörfer", "Dörfer",
+                                 "Lager", "Lager", "Lager" };
+        for (int i = 0; i < kinds.length; i++) {
+            assertEquals("tribe " + i, kinds[i], ClassicNotices.levelPlural(t, i));
+        }
+        assertNull(ClassicNotices.levelPlural(t, 8));
+        assertNull(ClassicNotices.levelPlural(t, -1));
+    }
+
+    /**
+     * The woodcuts and first-contact questions of a box order, without the
+     * chain's notices after them (part O B1, {@link #testFirstContactChain}).
+     */
+    private static List<String> meetings(List<String> order) {
+        final List<String> out = new ArrayList<>();
+        for (String s : order) {
+            if (s.startsWith("woodcut") || s.startsWith("first-contact")) out.add(s);
+        }
+        return out;
+    }
+
+    /** The ids of boxes, in order. */
+    private static List<String> ids(List<ClassicAdvisorBox.Request> boxes) {
+        final List<String> out = new ArrayList<>();
+        for (ClassicAdvisorBox.Request r : boxes) out.add(r.id);
+        return out;
     }
 
     /**
@@ -3014,6 +3165,13 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         onEdt(() -> gui.showModelMessages(List.of(dutch.getEmigrationMessage(farmer))));
         onEdt(() -> { });
         assertEquals(1, gui.order.size());                     // the notice
+        if (ClassicText.load(ClassicPackFiles.runtime()) != null) {
+            // Part O B4: the original's @UNREST with the priest.
+            assertEquals("UNREST", gui.order.get(0));
+            assertSame(ClassicAdvisorBox.Portrait.PRIEST,
+                       fake.boxes.get(fake.boxes.size() - 1).portrait);
+            assertTrue(fake.texts.get(fake.texts.size() - 1).contains("Amsterdam"));
+        }
         assertEquals(1, gui.pendingTips().size());
         final ClassicGUI.Tip unrest = gui.pendingTips().get(0);
         assertEquals(ClassicTips.UNREST, unrest.k);
@@ -3127,7 +3285,7 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         final WoodcutGUI gui = new WoodcutGUI(game, dutch);
         gui.shows = ClassicAdvisorLayer.NOT_SHOWN;      // no canvas: not marked
         onEdt(() -> gui.showFirstContactDialog(dutch, arawak, null, 3, b -> { }));
-        assertEquals(List.of("woodcut 3", "first-contact arawak"), gui.order);
+        assertEquals(List.of("woodcut 3", "first-contact arawak"), meetings(gui.order));
         assertEquals(0, gui.woodcutsShown());
         gui.shows = 1L;
         gui.order.clear();
@@ -3138,7 +3296,7 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         onEdt(() -> gui.showFirstContactDialog(dutch, aztec, null, 3, b -> { }));
         assertEquals(List.of("woodcut 3", "first-contact arawak", "first-contact sioux",
                              "woodcut 4", "first-contact aztec", "woodcut 5",
-                             "first-contact inca", "first-contact aztec"), gui.order);
+                             "first-contact inca", "first-contact aztec"), meetings(gui.order));
         assertEquals(ClassicWoodcut.bit(3) | ClassicWoodcut.bit(4) | ClassicWoodcut.bit(5),
                      gui.woodcutsShown());
         assertEquals(gui.woodcutsShown(), dutch.getClassicWoodcuts());
@@ -3151,7 +3309,7 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         onEdt(() -> gui2.showFirstContactDialog(d2, g2.getPlayerByNationId("model.nation.tupi"),
                                                 null, 3, b -> { }));
         assertEquals(List.of("woodcut 4", "first-contact aztec", "first-contact tupi"),
-                     gui2.order);
+                     meetings(gui2.order));
         assertTrue(gui2.woodcutShown(ClassicWoodcut.NATIVES));
         // Europeans: the native meeting sound shows nothing, the European's 10.
         gui.order.clear();

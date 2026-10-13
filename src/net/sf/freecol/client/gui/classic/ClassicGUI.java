@@ -107,6 +107,7 @@ import net.sf.freecol.common.model.StringTemplate;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Topology;
 import net.sf.freecol.common.model.Unit;
+import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.common.option.BooleanOption;
 import net.sf.freecol.common.option.MapGeneratorOptions;
 import net.sf.freecol.common.resources.ImageCache;
@@ -5403,14 +5404,19 @@ public class ClassicGUI extends GUI {
             ClassicFrameRecorder.event("notice-dropped", id);
             return null;
         }
-        final ClassicAdvisorBox.Request r = ClassicNotices.request(
+        // A result of speaking to a chief comes with his greeting before it
+        // and, after the guides, the frontiersman's word (part O B3).
+        final List<ClassicAdvisorBox.Request> rs = ClassicNotices.requests(
             ClassicText.load(ClassicPackFiles.runtime()), "notice " + id, template,
             Messages.message(template), displayObject, myPlayer(),
             Messages.message("classic.dialog.messages"), iconOf(displayObject));
+        final Runnable ask = () -> {
+            for (ClassicAdvisorBox.Request r : rs) this.prompter.ask(r);
+        };
         if (SwingUtilities.isEventDispatchThread()) {
-            this.prompter.ask(r);
+            ask.run();
         } else {
-            SwingUtilities.invokeLater(() -> this.prompter.ask(r));
+            SwingUtilities.invokeLater(ask);
         }
         return null;
     }
@@ -6280,49 +6286,149 @@ public class ClassicGUI extends GUI {
     /**
      * {@inheritDoc}
      *
-     * Meeting a native nation for the first time.  The handler carries the
-     * player's response back to {@code firstContact}, so — like the monarch and
-     * demand dialogs — a no-op dropped the exchange.  Mirrors
-     * {@code FirstContactDialog}: the welcome text (offer variant when a
-     * {@code tile} is on the table), a per-nation meeting header, over the
-     * meeting illustration.  Enter takes "Ja", the peace: the original's
-     * {@code @INDIANWELCOME} has no {@code @default}, so its bar opens on
-     * row 1 "Ja", and FreeCol's own box defaults to "yes".  A refusal costs
-     * dearly (major tension, a mission ban for that nation, the offered
-     * land; the original's {@code @INDIANSHUN}: war).  Escape still answers
-     * "no" (W0e, Roger's rule; an open question for him).  In the advisor
-     * box (W7) the tribe's chief stands under the box on its side
-     * ({@link ClassicAdvisorBox.Portrait#chief}); the words are still
-     * FreeCol's (the original's chain {@code @INDIANWELCOME},
-     * {@code @INDIANPEACE}, {@code @INDIANCOME} is W8c).
+     * Meeting a native nation for the first time (part O B1, Roger
+     * 2026-10-13: "Nein beim ersten Treffen mit einem Stamm heisst Krieg.
+     * Ja, das ist gut.").  The handler carries the player's answer back to
+     * {@code firstContact}, which now sends it also without a land offer.
+     * <ul>
+     *   <li>The question is the original's @INDIANWELCOME
+     *       ({@link ClassicNotices#welcome}: the tribe, its settlements and
+     *       their kind) with the tribe's chief on its side, the rows «Ja» /
+     *       «Nein» from the file, the bar on «Ja» (no {@code @default}; every
+     *       recorded box closed on it); the first meeting's woodcut before
+     *       it (W9, N17).  Without the pack or for a tribe the original
+     *       does not have: FreeCol's words in the same box.</li>
+     *   <li>Escape does nothing, and a click outside neither (Roger: «Nein»
+     *       is war, so it must be chosen, as at the King's decisions); a
+     *       box that closed with no row answers «Ja».</li>
+     *   <li>After the answer has reached the server, 13 frames apart
+     *       (playthrough-3 #219-#221): «Ja» brings @INDIANPEACE and, in our
+     *       own turn and not for the Inca, @INDIANCOME (Roger's D-B1c: it
+     *       fits all 7 recorded contacts; clip004's Sioux, met in their
+     *       turn, and playthrough-2's Inca had none); «Nein» brings
+     *       @INDIANSHUN, and the server's war
+     *       ({@code InGameController.nativeFirstContact}).</li>
+     *   <li>The land: FreeCol's rule stands, a gift only at the first
+     *       landing on the tribe's land (D-B1d), while the original's text
+     *       always offers it.</li>
+     * </ul>
      */
     @Override
     public void showFirstContactDialog(Player player, Player other, Tile tile,
                                        int settlementCount,
                                        DialogHandler<Boolean> handler) {
-        final String messageId = (tile != null)
-            ? "firstContactDialog.welcomeOffer.text"
-            : "firstContactDialog.welcomeSimple.text";
-        final String type = ((IndianNationType) other.getNationType())
-            .getSettlementTypeKey(true);
-        final StringTemplate msg = StringTemplate.template(messageId)
-            .addStringTemplate("%nation%", other.getNationLabel())
-            .addName("%camps%", Integer.toString(settlementCount))
-            .add("%settlementType%", type);
+        final int tribe = tribeIndex(other);
+        final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
+        final String id = "first-contact " + other.getNation().getSuffix();
         String hdrKey = "firstContactDialog.meeting."
             + other.getNation().getSuffix();
         if (!Messages.containsKey(hdrKey)) {
             hdrKey = "firstContactDialog.meeting.natives";
         }
-        // The first meeting's woodcut, before the box (W9, N17).
+        final ClassicAdvisorBox.Builder original = ClassicNotices.welcome(text,
+            tribe, settlementCount);
+        final ClassicAdvisorBox.Builder b;
+        if (original != null) {
+            b = original.id(id);
+        } else {
+            final String messageId = (tile != null)
+                ? "firstContactDialog.welcomeOffer.text"
+                : "firstContactDialog.welcomeSimple.text";
+            final String type = ((IndianNationType) other.getNationType())
+                .getSettlementTypeKey(true);
+            final StringTemplate msg = StringTemplate.template(messageId)
+                .addStringTemplate("%nation%", other.getNationLabel())
+                .addName("%camps%", Integer.toString(settlementCount))
+                .add("%settlementType%", type);
+            b = ClassicAdvisorBox.Request.builder(id)
+                .freeColText(Messages.message(msg))
+                .rows(ClassicAdvisorBox.literal(Messages.message("yes")),
+                      ClassicAdvisorBox.literal(Messages.message("no")))
+                .defaultRow(0)
+                .portrait(ClassicAdvisorBox.Portrait.chief(tribe));
+        }
+        final ClassicAdvisorBox.Request r = b.cancelRow(1).noEscape()
+            .outsideCancels(false)
+            .stopgap(Messages.message(hdrKey), meetingIcon(other))
+            .build();
         onEventThread(() -> {
+                // The first meeting's woodcut, before the box (W9, N17).
                 contactWoodcut(other);
+                int chosen = ClassicAdvisorBox.Bar.DISMISSED;
+                boolean peace = true;
+                try {
+                    chosen = askUntilAnswered(r);
+                    peace = eventAnswer(r, 0, chosen);
+                } finally {
+                    if (handler != null) handler.handle(peace);
+                }
+                ClassicFrameRecorder.event("first-contact", other.getNation().getSuffix()
+                    + " chosen=" + chosen + ((peace) ? " peace" : " war"));
+                for (ClassicAdvisorBox.Request n
+                         : contactChain(text, player, other, peace)) {
+                    this.prompter.ask(n);
+                }
                 return null;
             }, null);
-        askEvent("first-contact " + other.getNation().getSuffix(),
-                 ImageLibrary.getMeetingImage(other), Messages.message(hdrKey),
-                 msg, "yes", "no", true, false, false,
-                 ClassicAdvisorBox.Portrait.chief(tribeIndex(other)), handler);
+    }
+
+    /**
+     * The boxes after the first contact's answer (part O B1,
+     * {@link #showFirstContactDialog}): «Ja» @INDIANPEACE, then in our own
+     * turn and not for the Inca @INDIANCOME; «Nein» @INDIANSHUN, without
+     * the pack FreeCol-style words of the war (no peace notice then).
+     *
+     * @param text The pack's texts, or null.
+     * @param player Our player.
+     * @param other The tribe.
+     * @param peace The answer.
+     * @return The boxes, in order.
+     */
+    List<ClassicAdvisorBox.Request> contactChain(ClassicText text, Player player,
+                                                 Player other, boolean peace) {
+        final List<ClassicAdvisorBox.Request> out = new ArrayList<>(2);
+        final int tribe = tribeIndex(other);
+        final String title = Messages.message("classic.dialog.messages");
+        if (!peace) {
+            final ClassicAdvisorBox.Builder shun = ClassicNotices.contactNotice(text,
+                "INDIANSHUN", tribe, player);
+            out.add(((shun != null) ? shun : ClassicAdvisorBox.Request
+                     .builder("first-contact war")
+                     .freeColText(Messages.message(StringTemplate
+                         .template("classic.firstContact.war")
+                         .addStringTemplate("%nation%", other.getNationLabel())))
+                     .portrait(ClassicAdvisorBox.Portrait.chief(tribe))
+                     .chain(ClassicNotices.CONTACT_CHAIN_MS))
+                    .stopgap(title, null).build());
+            return out;
+        }
+        final ClassicAdvisorBox.Builder welcome = ClassicNotices.contactNotice(text,
+            "INDIANPEACE", tribe, player);
+        if (welcome == null) return out;
+        out.add(welcome.stopgap(title, null).build());
+        final Game game = (player == null) ? null : player.getGame();
+        final boolean ourTurn = game != null && game.getCurrentPlayer() == player;
+        if (ourTurn && tribe != TRIBE_INCA) {
+            final ClassicAdvisorBox.Builder come = ClassicNotices.contactNotice(text,
+                "INDIANCOME", tribe, player);
+            if (come != null) out.add(come.stopgap(title, null).build());
+        }
+        return out;
+    }
+
+    /** The Inca's {@link #TRIBES} index: no @INDIANCOME (playthrough-2, D-B1c). */
+    static final int TRIBE_INCA = 0;
+
+    /**
+     * The stopgap's picture of a first contact: FreeCol's meeting
+     * illustration.  A test without FreeCol's image resources replaces it
+     * (their missing fallback image is fatal there).
+     *
+     * @param other The tribe.
+     * @return The picture, or null.
+     */
+    java.awt.Image meetingIcon(Player other) {
+        return ImageLibrary.getMeetingImage(other);
     }
 
     /**
@@ -7058,8 +7164,13 @@ public class ClassicGUI extends GUI {
             return askDisband(getActiveUnit());
         }
         // The learn question is a village box: the first entry's woodcut
-        // before it when no key brought one (W9).
-        if (template != null && LEARN_QUESTION.equals(template.getId())) villageWoodcut();
+        // before it when no key brought one (W9); then the chief's offer
+        // in the original's words (part O B2).
+        if (template != null && LEARN_QUESTION.equals(template.getId())) {
+            villageWoodcut();
+            final Boolean learn = askLearn(tile, template);
+            if (learn != null) return learn;
+        }
         final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request
             .builder("confirm " + template.getId())
             .freeColText(Messages.message(template))
@@ -7106,6 +7217,65 @@ public class ClassicGUI extends GUI {
 
     /** FreeCol's question at a village's teacher ({@code moveLearnSkill}). */
     static final String LEARN_QUESTION = "learnSkill.text";
+
+    /**
+     * The chief's offer to teach (part O B2; V playthrough-1 C27-C29,
+     * landfall #16263-#17017, playthrough-2 N13/N14): GAME.TXT @LEARNSTAY
+     * with the tribe's chief ({@link ClassicNotices#learnStay}), the bar on
+     * «Dann will ich ein Meister-... werden.», Escape on «Im Moment nicht,
+     * danke.».  Its «no», Escape included, brings @LEARNLATER 17-18 frames
+     * later and costs nothing (Roger's house rule: the move is kept,
+     * {@code InGameController.askLearnSkill}).  Its «yes» lets FreeCol's
+     * controller learn; the result's notice is @LEARNDONE ({@code
+     * learnSkill.done}), @LEARNMAD or @CHIEFKILL.
+     *
+     * @param tile The colonist's tile.
+     * @param template FreeCol's question, with the {@code %skill%}.
+     * @return Whether to learn, or null without the original's words
+     *     (FreeCol's box then).
+     */
+    Boolean askLearn(Tile tile, StringTemplate template) {
+        final IndianSettlement is = learnVillage(tile, template);
+        final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
+        final ClassicAdvisorBox.Builder b = (is == null) ? null
+            : ClassicNotices.learnStay(text, is, is.getLearnableSkill());
+        if (b == null) return null;
+        final ClassicAdvisorBox.Request r = b.stopgap(colony(tile), null).build();
+        final int chosen = onEventThread(() -> this.prompter.ask(r),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        ClassicFrameRecorder.event("learn", "LEARNSTAY chosen=" + chosen);
+        if (chosen == 0) return Boolean.TRUE;
+        final ClassicAdvisorBox.Builder later = ClassicNotices.learnLater(text,
+            tribeIndex(is.getOwner()));
+        if (later != null) {
+            final ClassicAdvisorBox.Request l = later.stopgap(colony(tile), null).build();
+            onEventThread(() -> this.prompter.ask(l), ClassicAdvisorBox.Bar.DISMISSED);
+        }
+        return Boolean.FALSE;
+    }
+
+    /**
+     * The village FreeCol's learn question is about: the first one next to
+     * the colonist, in {@link Direction} order, that teaches the skill the
+     * question names ({@code %skill%}, the type's name key).
+     *
+     * @param tile The colonist's tile, or null.
+     * @param template The question.
+     * @return The village, or null.
+     */
+    static IndianSettlement learnVillage(Tile tile, StringTemplate template) {
+        final StringTemplate s = (template == null) ? null
+            : template.getReplacement("%skill%");
+        final String key = (s == null) ? null : s.getId();
+        if (tile == null || key == null) return null;
+        for (Direction d : Direction.values()) {
+            final Tile t = tile.getNeighbourOrNull(d);
+            final IndianSettlement is = (t == null) ? null : t.getIndianSettlement();
+            final UnitType skill = (is == null) ? null : is.getLearnableSkill();
+            if (skill != null && key.equals(skill.getNameKey())) return is;
+        }
+        return null;
+    }
 
     /**
      * Whether a confirm is answered "no" without a box: FreeCol's high-seas

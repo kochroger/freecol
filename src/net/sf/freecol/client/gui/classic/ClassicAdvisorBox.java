@@ -934,7 +934,7 @@ final class ClassicAdvisorBox {
     /** Builds a {@link Request}. */
     static final class Builder {
 
-        private final String id;
+        private String id;
         private final List<List<String>> paragraphs = new ArrayList<>();
         private int width = FREECOL_WIDTH;
         private Integer x = null;
@@ -968,6 +968,19 @@ final class ClassicAdvisorBox {
 
         private Builder(String id) {
             this.id = (id == null) ? "box" : id;
+        }
+
+        /**
+         * Another id than the GAME.TXT section {@link #fromGameText} gives
+         * (the first contact keeps its "first-contact &lt;tribe&gt;", which
+         * the scripted runs wait for).
+         *
+         * @param newId The id, or null for no change.
+         * @return This builder.
+         */
+        Builder id(String newId) {
+            if (newId != null) this.id = newId;
+            return this;
         }
 
         /**

@@ -121,4 +121,80 @@ public class TensionTest extends FreeColTestCase {
         assertEquals(Tension.TENSION_ADD_LAND_TAKEN, tension.getValue());
         assertEquals(Stance.PEACE, stance);
     }
+
+    /**
+     * Part O B1: a «Nein» at the first contact is war from the start (the
+     * original's @INDIANSHUN).  The native AI takes it as any war: its
+     * turns run without an exception (the first turn's missions, then a
+     * later turn's gifts, tribute and missions), it keeps the war (its
+     * stance follows the tension, which the refusal and the war made
+     * hateful), and it brings no gift to the enemy's colony.  An AI
+     * European always accepts ({@code AIPlayer.firstContactHandler}), so
+     * it never gets this war.
+     */
+    public void testWarFromTheFirstContact() {
+        Game game = ServerTestHelper.startServerGame(getTestMap(plainsType));
+        Map map = game.getMap();
+        InGameController igc = ServerTestHelper.getInGameController();
+        AIMain aiMain = ServerTestHelper.getServer().getAIMain();
+        ServerPlayer european = getServerPlayer(game, "model.nation.dutch");
+        european.setAI(false);
+        ServerPlayer indian = getServerPlayer(game, "model.nation.tupi");
+        NativeAIPlayer indianAI = (NativeAIPlayer)aiMain.getAIPlayer(indian);
+
+        Tile tile = map.getTile(6, 9);
+        IndianSettlement is = new FreeColTestCase.IndianSettlementBuilder(game)
+            .player(indian).settlementTile(tile).capital(true).build();
+        for (int i = 0; i < is.getType().getMaximumSize(); i++) {
+            Unit unit = new ServerUnit(game, is, indian,
+                                       spec().getDefaultUnitType(indian));
+            unit.changeHomeIndianSettlement(is);
+            unit.setLocation((i < 2) ? tile : is);
+        }
+        Tile near = map.getTile(6, 6);
+        new ServerUnit(game, near, european,
+                       spec().getUnitType("model.unit.freeColonist"));
+        european.exploreForUnit(near.getFirstUnit());
+
+        // The contact (peace at once), then «Nein».
+        european.csNativeFirstContact(indian, null,
+            new net.sf.freecol.common.networking.ChangeSet());
+        assertEquals(Stance.PEACE, indian.getStance(european));
+        igc.nativeFirstContact(european, indian, null, false);
+        assertEquals(Stance.WAR, indian.getStance(european));
+        assertEquals(Stance.WAR, european.getStance(indian));
+        assertEquals(Tension.Level.HATEFUL, indian.getTension(european).getLevel());
+
+        // The natives' first turn and a later one: no exception (thrown
+        // or only logged), still war.
+        final java.util.List<java.util.logging.LogRecord> thrown
+            = new java.util.ArrayList<>();
+        final java.util.logging.Handler catcher = new java.util.logging.Handler() {
+                @Override
+                public void publish(java.util.logging.LogRecord r) {
+                    if (r.getThrown() != null) thrown.add(r);
+                }
+                @Override
+                public void flush() {}
+                @Override
+                public void close() {}
+            };
+        final java.util.logging.Logger root = java.util.logging.Logger.getLogger("");
+        root.addHandler(catcher);
+        try {
+            game.setCurrentPlayer(indian);
+            indianAI.startWorking();
+            assertEquals(Stance.WAR, indian.getStance(european));
+            ServerTestHelper.newTurn();
+            game.setCurrentPlayer(indian);
+            indianAI.startWorking();
+        } finally {
+            root.removeHandler(catcher);
+        }
+        for (java.util.logging.LogRecord r : thrown) {
+            fail("logged: " + r.getMessage() + " " + r.getThrown());
+        }
+        assertEquals(Stance.WAR, indian.getStance(european));
+        assertEquals(Stance.WAR, european.getStance(indian));
+    }
 }

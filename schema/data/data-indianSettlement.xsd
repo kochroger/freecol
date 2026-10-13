@@ -68,6 +68,9 @@
 		                default="false"/>
       <xs:attribute name="learnableSkill" type="UnitTypeId"
 		                use="optional"/>
+      <!-- Classic UI, part O D-B3c: the skill last taught. -->
+      <xs:attribute name="taughtSkill" type="UnitTypeId"
+		                use="optional"/>
       <xs:attribute name="mostHated" type="PlayerId" use="optional"/>
      
       <xs:attribute name="wantedGoods0" type="GoodsTypeId" use="optional"/>

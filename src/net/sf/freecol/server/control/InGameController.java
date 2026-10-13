@@ -2691,6 +2691,8 @@ public final class InGameController extends Controller {
             sUnit.changeType(skill);//-vis(serverPlayer)
             serverPlayer.invalidateCanSeeTiles();//+vis(serverPlayer)
             cs.add(See.perhaps(), sUnit);
+            // Classic UI, part O D-B3c: the chief still names it.
+            is.setTaughtSkill(skill);
             if (!is.isCapital()
                 && !(is.hasMissionary(serverPlayer)
                     && spec.getBoolean(GameOptions.ENHANCED_MISSIONARIES))) {
@@ -3036,6 +3038,12 @@ public final class InGameController extends Controller {
             ((ServerPlayer)other).csModifyTension(serverPlayer,
                 Tension.TENSION_ADD_MAJOR, cs);//+til
             ((ServerPlayer)other).addMissionBan(serverPlayer);
+            // Classic UI, part O B1 (Roger 2026-10-13: "Nein beim ersten
+            // Treffen mit einem Stamm heisst Krieg"): the original's
+            // @INDIANSHUN, "Das bedeutet KRIEG!".  War between the two,
+            // and no FreeCol notice of it to the refusing player: the
+            // chief's box says it (as at a treaty breach, B3).
+            serverPlayer.csChangeStance(Stance.WAR, other, true, false, cs);
         }
         if (session != null) session.completeFirstContact(cs);
         getGame().sendToOthers(serverPlayer, cs);

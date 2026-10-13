@@ -2014,6 +2014,12 @@ public final class InGameController extends FreeColClientHolder {
                         showInformationPanel(is, "learnSkill.die");
                     } else if (unit.getType() != skill) {
                         showInformationPanel(is, "learnSkill.leave");
+                    } else {
+                        // The success had no word (Classic UI, part O B2:
+                        // the original's @LEARNDONE).
+                        showInformationPanel(is, StringTemplate
+                            .template("learnSkill.done")
+                            .addNamed("%skill%", skill));
                     }
                 }
             }
@@ -3757,10 +3763,17 @@ public final class InGameController extends FreeColClientHolder {
      */
     private boolean firstContact(Player player, Player other, Tile tile,
                                  boolean result) {
-        if (player == null || player == other || tile == null) return false;
+        // Also without a land offer (tile null) the answer goes to the
+        // server: a refusal costs something (Classic UI, part O B1: the
+        // original's war; FreeCol's tension and mission ban), and before
+        // it was never sent.
+        if (player == null || player == other) return false;
 
         boolean ret = askServer().firstContact(player, other, tile, result);
-        if (ret) {
+        // Only a land offer changes the map.  Without one the contact may
+        // come in the natives' turn (one of theirs next to ours), when
+        // updateGUI must not select units or run their goto orders.
+        if (ret && tile != null) {
             updateGUI(tile, false);
         }
         return ret;
