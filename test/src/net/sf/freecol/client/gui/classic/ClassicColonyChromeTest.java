@@ -125,6 +125,13 @@ public class ClassicColonyChromeTest extends FreeColTestCase {
     private static final Rectangle BUTTONS = new Rectangle(303, 129, 17, 49);
 
 
+    /** The warehouse's selection is global: back to food after each test. */
+    @Override
+    protected void tearDown() throws Exception {
+        ClassicColonyPanel.selectWarehouseGood(0);
+        super.tearDown();
+    }
+
     /** A client of the test's game: its game and our player, nothing else. */
     private static FreeColClient client(Game game, Player me) throws Exception {
         final Class<?> uc = Class.forName("sun.misc.Unsafe");
