@@ -159,6 +159,42 @@ public class MapGeneratorOptions {
     public static final String RUMOUR_NUMBER
         = "model.option.rumourNumber";
 
+    /**
+     * The least distance between two native settlements of a new map,
+     * the same on every level (the original's villages are never next
+     * to each other, the nearest mostly 3 or 4 tiles away).  A "levi"
+     * option: with it a new map places the natives as the original does
+     * ({@code net.sf.freecol.server.generator.OriginalNatives}); rules
+     * without it space them by the level's
+     * {@link GameOptions#SETTLEMENT_NUMBER}, as FreeCol does.
+     */
+    public static final String NATIVE_SETTLEMENT_SPACING
+        = "model.option.nativeSettlementSpacing";
+
+    /**
+     * The least number of settlements of every tribe of a new map
+     * (Roger 2026-10-13: 6; the original gives 1 to 22).  A "levi"
+     * option, read with {@link #NATIVE_SETTLEMENT_SPACING}.
+     */
+    public static final String NATIVE_SETTLEMENTS_MINIMUM
+        = "model.option.nativeSettlementsMinimum";
+
+    /**
+     * The largest number of settlements of a tribe of a new map (Roger
+     * 2026-10-13: 21).  A "levi" option, read with
+     * {@link #NATIVE_SETTLEMENT_SPACING}.
+     */
+    public static final String NATIVE_SETTLEMENTS_MAXIMUM
+        = "model.option.nativeSettlementsMaximum";
+
+    /**
+     * The largest number of native settlements of a new map (the
+     * original's limit, MAPEDIT.TXT @HELP5: 84).  A "levi" option, read
+     * with {@link #NATIVE_SETTLEMENT_SPACING}.
+     */
+    public static final String NATIVE_SETTLEMENTS_TOTAL
+        = "model.option.nativeSettlementsTotal";
+
     /** Option for setting the percentage of forests on the map. */
     public static final String FOREST_NUMBER 
         = "model.option.forestNumber";

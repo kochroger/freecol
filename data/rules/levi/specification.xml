@@ -36,7 +36,11 @@
     coastal colony is lost; the game goes on open-ended after
     independence (no victory).  The map is the original's New World
     (part P1): its land generator and its world questions LANDMASSE and
-    LANDFORM, at the end of this file.  The original's colony names, leader
+    LANDFORM, at the end of this file; its natives (part P2): the
+    original's home radius, sizes and no grown land (the native nation
+    types below), and its villages (6 to 21 per tribe, as many as the
+    land carries, at most 84, the tribes' homes; the options at the end
+    of this file).  The original's colony names, leader
     names and Spain's home port come with the names (NameCache), keyed
     by the parent "classic" (mod.xml) and by "levi".
 
@@ -73,6 +77,251 @@
       <event id="model.event.resetBannedMissions"/>
     </founding-father>
   </founding-fathers>
+
+  <!-- The original's native land and sizes (part P2).  The original
+       (manual, the colony chapter): "Camps and villages have a home
+       radius of one square; cities have a home radius of two
+       squares"; nothing gives a capital more, and nothing grows: the
+       original's saves have exactly these populations at the start
+       (camp 3, its capital 4; village 5 / 7; Aztec 7 / 10; Inca 9 / 13)
+       and, in Roger's playthrough game 80 turns on, every tribe's sum is
+       still its start value.  FreeCol (classic): capitals one more
+       radius (cities 3), 1 to 14 more tiles grown at the start, a brave
+       may claim up to 2 tiles beyond the radius, random sizes 4 to 12.
+       Here: claimable-radius camp/village 1, Inca/Aztec 2, capitals the
+       same; extra-claimable-radius 1, so a brave claims a free tile only
+       inside its home radius (ServerUnit: d < radius + 1); minimum =
+       maximum size = the original's population; growth 0 (no tiles
+       grown).  Everything else is classic's, byte for byte.  The six
+       camp and village tribes are copied too: a nation type copies its
+       parent's settlement types when it is read, so only a re-read
+       picks up the new camp and village.  "default" and "city" stay
+       classic's. -->
+  <indian-nation-types>
+    <indian-nation-type id="camp" abstract="true" extends="default">
+      <settlement id="model.settlement.camp" capital="false"
+                  claimable-radius="1" extra-claimable-radius="1"
+                  minimum-size="3" maximum-size="3"
+                  minimum-growth="0" maximum-growth="0"
+                  trade-bonus="1" convert-threshold="100">
+        <plunder id="plunder.camp" probability="20"
+                 minimum="2" maximum="3" factor="100">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="false"/>
+        </plunder>
+        <plunder id="plunder.camp.extra" probability="100"
+                 minimum="3" maximum="6" factor="100">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="true"/>
+        </plunder>
+        <gifts probability="100" minimum="2" maximum="3" factor="100" />
+        <modifier id="model.modifier.defence" index="50"
+                  type="percentage" value="50"/>
+      </settlement>
+      <settlement id="model.settlement.camp.capital" capital="true"
+                  claimable-radius="1" extra-claimable-radius="1"
+                  minimum-size="4" maximum-size="4"
+                  minimum-growth="0" maximum-growth="0"
+                  trade-bonus="2" convert-threshold="100">
+        <plunder id="plunder.camp.capital" probability="100"
+                 minimum="2" maximum="4" factor="200">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="false"/>
+        </plunder>
+        <plunder id="plunder.camp.capital.extra" probability="100"
+                 minimum="2" maximum="4" factor="300">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="true"/>
+        </plunder>
+        <gifts probability="100" minimum="3" maximum="6" factor="200" />
+        <modifier id="model.modifier.defence" index="50"
+                  type="percentage" value="100"/>
+      </settlement>
+    </indian-nation-type>
+    <indian-nation-type id="village" abstract="true" extends="default">
+      <settlement id="model.settlement.village" capital="false"
+                  claimable-radius="1" extra-claimable-radius="1"
+                  minimum-size="5" maximum-size="5"
+                  minimum-growth="0" maximum-growth="0"
+                  trade-bonus="2" convert-threshold="100">
+        <plunder id="plunder.village" probability="50"
+                 minimum="3" maximum="8" factor="100">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="false"/>
+        </plunder>
+        <plunder id="plunder.village.extra" probability="100"
+                 minimum="4" maximum="12" factor="100">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="true"/>
+        </plunder>
+        <gifts probability="100" minimum="3" maximum="6" factor="100" />
+        <modifier id="model.modifier.defence" index="50"
+                  type="percentage" value="50"/>
+      </settlement>
+      <settlement id="model.settlement.village.capital" capital="true"
+                  claimable-radius="1" extra-claimable-radius="1"
+                  minimum-size="7" maximum-size="7"
+                  minimum-growth="0" maximum-growth="0"
+                  trade-bonus="3" convert-threshold="100">
+        <plunder id="plunder.village.capital" probability="100"
+                 minimum="3" maximum="8" factor="200">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="false"/>
+        </plunder>
+        <plunder id="plunder.village.capital.extra" probability="100"
+                 minimum="3" maximum="8" factor="300">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="true"/>
+        </plunder>
+        <gifts probability="100" minimum="4" maximum="8" factor="200" />
+        <modifier id="model.modifier.defence" index="50"
+                  type="percentage" value="100"/>
+      </settlement>
+    </indian-nation-type>
+    <indian-nation-type id="model.nationType.apache" extends="camp"
+                        number-of-settlements="average" aggression="high">
+      <skill id="model.unit.masterCottonPlanter" probability="20"/>
+      <skill id="model.unit.expertFarmer" probability="10"/>
+      <skill id="model.unit.masterSugarPlanter" probability="3"/>
+      <skill id="model.unit.masterTobaccoPlanter" probability="3"/>
+      <region id="model.region.center" />
+    </indian-nation-type>
+    <indian-nation-type id="model.nationType.sioux" extends="camp"
+                        number-of-settlements="average" aggression="average">
+      <skill id="model.unit.masterTobaccoPlanter" probability="20"/>
+      <skill id="model.unit.expertFurTrapper" probability="10"/>
+      <skill id="model.unit.seasonedScout" probability="10"/>
+      <skill id="model.unit.expertFarmer" probability="3"/>
+      <region id="model.region.northWest" />
+    </indian-nation-type>
+    <indian-nation-type id="model.nationType.tupi" extends="camp"
+                        number-of-settlements="high" aggression="low">
+      <skill id="model.unit.masterSugarPlanter" probability="20"/>
+      <skill id="model.unit.seasonedScout" probability="10"/>
+      <skill id="model.unit.masterCottonPlanter" probability="10"/>
+      <skill id="model.unit.expertFurTrapper" probability="3"/>
+      <skill id="model.unit.masterTobaccoPlanter" probability="3"/>
+      <region id="model.region.southEast" />
+      <region id="model.region.south" />
+    </indian-nation-type>
+    <indian-nation-type id="model.nationType.arawak" extends="village"
+                        number-of-settlements="low" aggression="high">
+      <skill id="model.unit.masterSugarPlanter" probability="20"/>
+      <skill id="model.unit.expertFisherman" probability="10"/>
+      <skill id="model.unit.masterFurTrader" probability="3"/>
+      <region id="model.region.east" />
+    </indian-nation-type>
+    <indian-nation-type id="model.nationType.cherokee" extends="village"
+                        number-of-settlements="average" aggression="low">
+      <skill id="model.unit.masterCottonPlanter" probability="20"/>
+      <skill id="model.unit.expertFisherman" probability="10"/>
+      <skill id="model.unit.expertOreMiner" probability="10"/>
+      <skill id="model.unit.seasonedScout" probability="10"/>
+      <skill id="model.unit.masterTobaccoPlanter" probability="3"/>
+      <skill id="model.unit.expertFarmer" probability="3"/>
+      <skill id="model.unit.masterFurTrader" probability="3"/>
+      <region id="model.region.north" />
+    </indian-nation-type>
+    <indian-nation-type id="model.nationType.iroquois" extends="village"
+                        number-of-settlements="average" aggression="average">
+      <skill id="model.unit.expertFurTrapper" probability="20"/>
+      <skill id="model.unit.expertFarmer" probability="10"/>
+      <skill id="model.unit.seasonedScout" probability="10"/>
+      <skill id="model.unit.masterCottonPlanter" probability="3"/>
+      <skill id="model.unit.masterTobaccoPlanter" probability="3"/>
+      <skill id="model.unit.expertFisherman" probability="3"/>
+      <skill id="model.unit.expertOreMiner" probability="3"/>
+      <skill id="model.unit.masterFurTrader" probability="3"/>
+      <region id="model.region.northEast" />
+    </indian-nation-type>
+    <indian-nation-type id="model.nationType.inca" extends="city"
+                        aggression="low">
+      <skill id="model.unit.expertOreMiner" probability="10"/>
+      <region id="model.region.southWest" />
+      <settlement id="model.settlement.inca" capital="false"
+                  claimable-radius="2" extra-claimable-radius="1"
+                  minimum-size="9" maximum-size="9"
+                  minimum-growth="0" maximum-growth="0"
+                  trade-bonus="3" convert-threshold="100">
+        <plunder id="plunder.inca" probability="100"
+                 minimum="2" maximum="6" factor="2100">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="false"/>
+        </plunder>
+        <plunder id="plunder.inca.extra" probability="100"
+                 minimum="2" maximum="6" factor="3100">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="true"/>
+        </plunder>
+        <gifts probability="100" minimum="3" maximum="6" factor="200" />
+        <modifier id="model.modifier.defence" index="50"
+                  type="percentage" value="100"/>
+      </settlement>
+      <settlement id="model.settlement.inca.capital" capital="true"
+                  claimable-radius="2" extra-claimable-radius="1"
+                  minimum-size="13" maximum-size="13"
+                  minimum-growth="0" maximum-growth="0"
+                  trade-bonus="4" convert-threshold="100">
+        <plunder id="plunder.inca.capital" probability="100"
+                 minimum="2" maximum="6" factor="3000">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="false"/>
+        </plunder>
+        <plunder id="plunder.inca.capital.extra" probability="100"
+                 minimum="3" maximum="8" factor="4000">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="true"/>
+        </plunder>
+        <gifts probability="100" minimum="4" maximum="8" factor="300" />
+        <modifier id="model.modifier.defence" index="50"
+                  type="percentage" value="200"/>
+      </settlement>
+    </indian-nation-type>
+    <indian-nation-type id="model.nationType.aztec" extends="city"
+                        aggression="high">
+      <skill id="model.unit.masterSugarPlanter" probability="3"/>
+      <skill id="model.unit.expertOreMiner" probability="3"/>
+      <region id="model.region.west" />
+      <settlement id="model.settlement.aztec" capital="false"
+                  claimable-radius="2" extra-claimable-radius="1"
+                  minimum-size="7" maximum-size="7"
+                  minimum-growth="0" maximum-growth="0"
+                  trade-bonus="3" convert-threshold="100">
+        <plunder id="plunder.aztec" probability="100"
+                 minimum="5" maximum="9" factor="1000">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="false"/>
+        </plunder>
+        <plunder id="plunder.aztec.extra" probability="100"
+                 minimum="11" maximum="15" factor="1000">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="true"/>
+        </plunder>
+        <gifts probability="100" minimum="4" maximum="8" factor="200" />
+        <modifier id="model.modifier.defence" index="50"
+                  type="percentage" value="100"/>
+      </settlement>
+      <settlement id="model.settlement.aztec.capital" capital="true"
+                  claimable-radius="2" extra-claimable-radius="1"
+                  minimum-size="10" maximum-size="10"
+                  minimum-growth="0" maximum-growth="0"
+                  trade-bonus="4" convert-threshold="100">
+        <plunder id="plunder.aztec.capital" probability="100"
+                 minimum="7" maximum="12" factor="1000">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="false"/>
+        </plunder>
+        <plunder id="plunder.aztec.capital.extra" probability="100"
+                 minimum="16" maximum="19" factor="1000">
+          <scope ability-id="model.ability.plunderNatives"
+                 ability-value="true"/>
+        </plunder>
+        <gifts probability="100" minimum="5" maximum="10" factor="300" />
+        <modifier id="model.modifier.defence" index="50"
+                  type="percentage" value="200"/>
+      </settlement>
+    </indian-nation-type>
+  </indian-nation-types>
 
   <options>
     <optionGroup id="gameOptions">
@@ -196,6 +445,29 @@
           <selectValue label="model.option.originalLandForm.continents"
                        value="2"/>
         </selectOption>
+      </optionGroup>
+      <optionGroup id="mapGeneratorOptions.terrainGenerator">
+        <!-- The original's villages (part P2, OriginalNatives): the
+             same on every level (FreeCol spaces them by the level's
+             settlementNumber, 10 to 5: 12 to 31 villages); as many as
+             the original puts on that much land (Roger's 13 games of
+             2026-10-13: 39 to 84, e.g. 60 and 61 with everything
+             Normal), each tribe 6 to 21 (Roger 2026-10-13: "fix 6 bis 21
+             pro Stamm"; the original gives 1 to 22), at most 84 on a
+             map (MAPEDIT.TXT @HELP5), one capital each, never two
+             next to each other (spacing 3; a top-up site 2); the Inca
+             and Aztec in the west, the Iroquois and Arawak in the east,
+             north and south drawn per map, the other four anywhere.
+             The classic and freecol rules have none of these options
+             and keep FreeCol's placement. -->
+        <integerOption id="model.option.nativeSettlementSpacing"
+                       defaultValue="3" minimumValue="2" maximumValue="10"/>
+        <integerOption id="model.option.nativeSettlementsMinimum"
+                       defaultValue="6" minimumValue="1" maximumValue="21"/>
+        <integerOption id="model.option.nativeSettlementsMaximum"
+                       defaultValue="21" minimumValue="1" maximumValue="99"/>
+        <integerOption id="model.option.nativeSettlementsTotal"
+                       defaultValue="84" minimumValue="8" maximumValue="999"/>
       </optionGroup>
     </optionGroup>
   </options>

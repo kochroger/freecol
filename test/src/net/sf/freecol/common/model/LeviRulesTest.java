@@ -420,6 +420,121 @@ public class LeviRulesTest extends FreeColTestCase {
         }
     }
 
+    /**
+     * The original's native land and sizes (part P2): levi's settlement
+     * types have the original's home radius (camps and villages 1, the
+     * Inca and Aztec cities 2, capitals the same; manual, the colony
+     * chapter), the original's populations (camp 3 / 4, village 5 / 7,
+     * Aztec 7 / 10, Inca 9 / 13; its saves), no grown land, and a brave
+     * claims only inside the home radius (extra radius 1); everything
+     * else of each tribe is classic's.  Classic keeps FreeCol's types.
+     * The levi rules load without a warning.
+     */
+    public void testNativeTypesAsTheOriginal() {
+        final java.util.List<String> warnings = new java.util.ArrayList<>();
+        final java.util.logging.Logger root = java.util.logging.Logger.getLogger("");
+        final java.util.logging.Handler h = new java.util.logging.Handler() {
+                @Override public void publish(java.util.logging.LogRecord r) {
+                    if (r.getLevel().intValue()
+                        >= java.util.logging.Level.WARNING.intValue()) {
+                        warnings.add(r.getMessage());
+                    }
+                }
+                @Override public void flush() {}
+                @Override public void close() {}
+            };
+        root.addHandler(h);
+        final Specification levi;
+        try {
+            levi = net.sf.freecol.FreeCol.loadSpecification(
+                FreeColRules.getFreeColRulesFile(LEVI), null,
+                "model.difficulty.veryEasy");
+        } finally {
+            root.removeHandler(h);
+        }
+        // The known warning of the levi land generator's fifth value
+        // (part P1, the classic group's select option is read first).
+        warnings.removeIf(w -> w != null
+            && w.startsWith("selectOption.setValue invalid value: 4"));
+        assertEquals(warnings.toString(), 0, warnings.size());
+
+        final Specification classic = spec("classic");
+        final Map<String, int[]> original = new HashMap<>();
+        // radius, extra radius, size
+        original.put("model.settlement.camp", new int[] { 1, 1, 3 });
+        original.put("model.settlement.camp.capital", new int[] { 1, 1, 4 });
+        original.put("model.settlement.village", new int[] { 1, 1, 5 });
+        original.put("model.settlement.village.capital", new int[] { 1, 1, 7 });
+        original.put("model.settlement.aztec", new int[] { 2, 1, 7 });
+        original.put("model.settlement.aztec.capital", new int[] { 2, 1, 10 });
+        original.put("model.settlement.inca", new int[] { 2, 1, 9 });
+        original.put("model.settlement.inca.capital", new int[] { 2, 1, 13 });
+        int tribes = 0;
+        for (IndianNationType nt : levi.getIndianNationTypes()) {
+            if (nt.isAbstractType()) continue;
+            tribes++;
+            final IndianNationType ct = (IndianNationType)classic
+                .getNationType(nt.getId());
+            final String id = nt.getId();
+            assertEquals(id, 2, nt.getSettlementTypes().size());
+            assertEquals(id, ct.getSettlementTypes().size(),
+                         nt.getSettlementTypes().size());
+            for (SettlementType st : nt.getSettlementTypes()) {
+                final int[] o = original.get(st.getId());
+                assertNotNull(id + " " + st.getId(), o);
+                assertEquals(st.getId(), o[0], st.getClaimableRadius());
+                assertEquals(st.getId(), o[1], st.getExtraClaimableRadius());
+                assertEquals(st.getId(), o[2], st.getMinimumSize());
+                assertEquals(st.getId(), o[2], st.getMaximumSize());
+                assertEquals(st.getId(), 0, st.getMinimumGrowth());
+                assertEquals(st.getId(), 0, st.getMaximumGrowth());
+                final SettlementType cst = ct.getSettlementType(st.getId());
+                assertEquals(st.getId(), cst.isCapital(), st.isCapital());
+                assertEquals(st.getId(), cst.getTradeBonus(), st.getTradeBonus());
+                assertEquals(st.getId(), cst.getConvertThreshold(),
+                             st.getConvertThreshold());
+                assertEquals(st.getId(), cst.getVisibleRadius(),
+                             st.getVisibleRadius());
+                assertEquals(st.getId(), cst.getPlunderTypes().size(),
+                             st.getPlunderTypes().size());
+                assertEquals(st.getId(), cst.getGifts().getMinimum(),
+                             st.getGifts().getMinimum());
+                assertEquals(st.getId(), cst.getGifts().getMaximum(),
+                             st.getGifts().getMaximum());
+                assertEquals(st.getId(), toList(cst.getModifiers()).size(),
+                             toList(st.getModifiers()).size());
+            }
+            assertEquals(id, ct.getSkills().size(), nt.getSkills().size());
+            assertEquals(id, ct.getRegions(), nt.getRegions());
+            assertEquals(id, ct.getAggression(), nt.getAggression());
+            assertEquals(id, ct.getNumberOfSettlements(),
+                         nt.getNumberOfSettlements());
+            assertEquals(id, toList(ct.getAbilities()).size(),
+                         toList(nt.getAbilities()).size());
+        }
+        assertEquals(8, tribes);
+        // Every tribe's nation takes the new types.
+        for (Nation n : levi.getIndianNations()) {
+            final boolean city = n.getType().getId().endsWith("inca")
+                || n.getType().getId().endsWith("aztec");
+            assertEquals(n.getId(), (city) ? 2 : 1,
+                n.getType().getSettlementType(false).getClaimableRadius());
+            assertEquals(n.getId(), (city) ? 2 : 1,
+                n.getType().getSettlementType(true).getClaimableRadius());
+        }
+        // Classic: FreeCol's.
+        final SettlementType camp = classic
+            .getNationType("model.nationType.apache").getSettlementType(true);
+        assertEquals(2, camp.getClaimableRadius());
+        assertEquals(2, camp.getExtraClaimableRadius());
+        assertEquals(6, camp.getMinimumSize());
+        assertEquals(8, camp.getMaximumSize());
+        final SettlementType inca = classic
+            .getNationType("model.nationType.inca").getSettlementType(true);
+        assertEquals(3, inca.getClaimableRadius());
+        assertEquals(14, inca.getMaximumGrowth());
+    }
+
     /** Spain sails home to Sevilla, as in the original. */
     public void testSpainsHomePort() {
         Game game = getStandardGame(LEVI);

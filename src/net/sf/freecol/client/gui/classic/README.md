@@ -151,10 +151,9 @@ save plays on as it was (R1b re-applies the rules on load, later).
   both topologies): every tribe has at least one village on every map
   (`MapGeneratorTest.testEveryTribeGetsASettlement`,
   `testATribeWithNothingIsRetiredSilently`, `testFallbackSiteSteps`).
-  Open: the original has far more villages (its first-contact boxes:
-  Iroquois 18 and Apache 13 in playthrough-1, at "Entdecker", Sioux 21 in
-  clip004, Araukaner 6 in landfall); ours have about 12 in all on the
-  easiest level, 19 on medium.
+  Since part P2 the levi rules place the villages as the original does
+  (below, "The original's natives"); the fallback and the retirement stay
+  as the safety net (not used in 1600 census maps).
 - **The original's New World** (part P1; Roger 2026-10-13: "Indianerland
   wie im Original", "funktionieren müssen natürlich alle Parameter"; his 13
   games in the original, `prep2/W-landtests.md`). The levi rules' land
@@ -201,6 +200,61 @@ save plays on as it was (R1b re-applies the rules on load, later).
     setting and topology: land, masses, coasts, rivers, terrain, Pacific,
     lanes, start); `OriginalWorldTest`, `OriginalWorldSettingsTest`,
     `ClassicWorldSetupTest`. A save keeps its own map and rules.
+- **The original's natives** (part P2; Roger 2026-10-13: "auf jeder Stufe 6
+  bis 21 Dörfer pro Stamm vergeben, halte dich ans Original", "lass uns fix
+  6 bis 21 pro Stamm machen", "Inkas und Azteken … immer im Westen, meist in
+  der Nähe des Pazifik"; preps `o/prep/V-villages.md`,
+  `prep2/P-nativeland.md`, `prep2/W-worldgen.md`, his games
+  `prep2/W-landtests.md`). Four levi map options
+  (`model.option.nativeSettlementSpacing` 3,
+  `nativeSettlementsMinimum` 6, `nativeSettlementsMaximum` 21,
+  `nativeSettlementsTotal` 84; `MapGeneratorOptions`) switch on
+  `server.generator.OriginalNatives` in
+  `SimpleMapGenerator.makeNativeSettlements`; rules without them (classic,
+  freecol) keep FreeCol's placement by the level's
+  `model.option.settlementNumber` and its nine regions, and their maps.
+  - *How many*: the same on every level, as many as the original puts on
+    that much land (`OriginalNatives.getVillages`, the line through the
+    means of his settings: «Neue Welt» 515 land tiles / 43.7 villages,
+    Klein and Inselgruppe 701 / 54.3, everything Normal 886.5 / 60.5, Groß
+    1131.5 / 81.5, Große Kontinente 1191 / 82, no more above), but at
+    least 6 a tribe (48 on any map) and at most 84.
+  - *Where*: each tribe has a home: the Inca on the Pacific (at most 2
+    tiles from it, or as near as can be) in the western third of their
+    half of the land (north or south drawn per map), the Aztec in the
+    western third of the other half, the Iroquois and the Arawak likewise
+    in the eastern thirds, the other four anywhere (each the farthest from
+    the homes before it of 3 random tiles). A site belongs to the nearest
+    home that may have it: the Inca and Aztec only sites in the western
+    third of the land's half, the Iroquois and Arawak only in the eastern
+    third (`OriginalNatives.Bands`).
+  - *Which*: FreeCol's spaced sites in the generator's random order,
+    first 4 apart, then 3 (the original's nearest village is mostly 3 or
+    4 away; never two next to each other); first the 6 of every tribe,
+    then the others until the map has its number, no tribe above 21. A
+    tribe with too few takes the spaced sites nearest to its home that no
+    tribe has or that a tribe with more than 6 has, else new ones at least
+    2 from every other (the original's closest villages are 2 apart). The
+    halves, the free tribes' order and their homes are drawn from the
+    generator's random numbers, so a seed fixes the map.
+  - *Native land and sizes* (data, the levi native nation types): the
+    original's home radius (camps and villages 1, the Inca and Aztec
+    cities 2, capitals the same; FreeCol's capitals one more), no land
+    grown at the start (FreeCol 1 to 14 tiles), a brave claims a free tile
+    only inside its home radius (`extra-claimable-radius` 1;
+    `ServerUnit.csMove`), and every settlement starts with the original's
+    population (camp 3, its capital 4, village 5 / 7, Aztec 7 / 10, Inca
+    9 / 13; FreeCol random 4 to 12). FreeCol's one birth above that and its
+    braves' moves between villages stay.
+  - Measured with `net.sf.freecol.tools.NativeLandCensus` (all world
+    settings, both topologies, «Sehr einfach» and «Mittel», 40 seeds:
+    villages, per tribe, capitals, native land, people, sizes, nearest
+    village, where the tribes live, `--expect` for the rules);
+    `OriginalNativesTest`, `OriginalNativesPlacementTest`,
+    `LeviRulesTest.testNativeTypesAsTheOriginal`,
+    `ServerUnitTest.testBraveClaimsOnlyInsideTheHomeRadius`. A save keeps
+    its own rules and villages: only a new game has the original's
+    natives.
 
 ## `ClassicGUI` — the view facade
 

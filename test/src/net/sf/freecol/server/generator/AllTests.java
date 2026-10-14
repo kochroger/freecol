@@ -30,6 +30,8 @@ public class AllTests {
         //$JUnit-BEGIN$
         suite.addTestSuite(MapGeneratorTest.class);
         suite.addTestSuite(OriginalWorldTest.class);
+        suite.addTestSuite(OriginalNativesTest.class);
+        suite.addTestSuite(OriginalNativesPlacementTest.class);
         //$JUnit-END$
         return suite;
     }

@@ -41,6 +41,7 @@ import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitChangeType;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.common.model.WorkLocation;
+import net.sf.freecol.common.networking.ChangeSet;
 import net.sf.freecol.common.option.GameOptions;
 import static net.sf.freecol.common.util.CollectionUtils.*;
 import net.sf.freecol.server.ServerTestHelper;
@@ -565,6 +566,54 @@ public class ServerUnitTest extends FreeColTestCase {
             assertEquals(Unit.UnitState.SENTRY, other.getState());
         } finally {
             spec.setBoolean(GameOptions.FORTIFY_KEEPS_MOVES, false);
+        }
+    }
+
+    /**
+     * The original's native land (part P2): a brave that walks onto a
+     * free tile claims it for its home only inside the home radius
+     * (levi: extra claimable radius 1, so d &lt; radius + 1); FreeCol
+     * (classic: extra radius 2) also claims a free tile one beyond it.
+     * The claim's chance, 1 in d + 1, is forced here.
+     */
+    public void testBraveClaimsOnlyInsideTheHomeRadius() {
+        final java.util.Random always = new java.util.Random() {
+                @Override public int nextInt(int n) { return 0; }
+            };
+        for (String rules : new String[] { "levi", "classic" }) {
+            final Game game = getStandardGame(rules);
+            final Specification spec = game.getSpecification();
+            game.changeMap(getTestMap(spec.getTileType("model.tile.plains"), true));
+            final Map map = game.getMap();
+            final Player apache = game.getPlayerByNationId("model.nation.apache");
+            final Tile home = map.getTile(8, 7);
+            assertNotNull(home);
+            final ServerIndianSettlement camp = new ServerIndianSettlement(game,
+                apache, "Camp", home, false, null, null);
+            apache.addSettlement(camp);
+            camp.placeSettlement(true);
+            assertEquals(rules, 1, camp.getRadius());
+            final Tile near = home.getNeighbourOrNull(Direction.E);
+            final Tile far = near.getNeighbourOrNull(Direction.E);
+            assertEquals(1, near.getDistanceTo(home));
+            assertEquals(2, far.getDistanceTo(home));
+            assertEquals(rules, camp, near.getOwningSettlement());
+            assertNull(rules, far.getOwner());
+            near.changeOwnership(null, null);
+
+            final ServerUnit brave = new ServerUnit(game, home, apache,
+                spec.getDefaultUnitType(apache));
+            brave.setHomeIndianSettlement(camp);
+            camp.addOwnedUnit(brave);
+            brave.setMovesLeft(brave.getInitialMovesLeft() * 3);
+            brave.csMove(near, always, new ChangeSet());
+            assertEquals(rules + ": inside the radius", apache, near.getOwner());
+            brave.csMove(far, always, new ChangeSet());
+            if ("levi".equals(rules)) {
+                assertNull("levi: beyond the radius", far.getOwner());
+            } else {
+                assertEquals("classic: one beyond", apache, far.getOwner());
+            }
         }
     }
 }

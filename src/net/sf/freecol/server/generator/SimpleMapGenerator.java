@@ -28,6 +28,7 @@ import static net.sf.freecol.common.util.CollectionUtils.isNotNull;
 import static net.sf.freecol.common.util.CollectionUtils.isNull;
 import static net.sf.freecol.common.util.CollectionUtils.map;
 import static net.sf.freecol.common.util.CollectionUtils.matchKeyEquals;
+import static net.sf.freecol.common.util.CollectionUtils.none;
 import static net.sf.freecol.common.util.CollectionUtils.toListNoNulls;
 import static net.sf.freecol.common.util.CollectionUtils.transform;
 import static net.sf.freecol.common.util.RandomUtils.getRandomMember;
@@ -368,24 +369,58 @@ public class SimpleMapGenerator implements MapGenerator {
         // native settlements such that can be guaranteed at least one
         // layer of surrounding tiles to own.
         final List<Tile> allTiles = map.getShuffledTiles(random);
-        final int minDistance = spec.getRange(GameOptions.SETTLEMENT_NUMBER);
-        
+        // The "levi" rules place the natives as the original does
+        // (OriginalNatives): spaced the same on every level, as many as
+        // the land carries, 6 to 21 a tribe, the tribes' homes.  Not
+        // on a map whose tribes have starting areas (the map editor's).
+        final OptionGroup mgo = game.getMapGeneratorOptions();
+        final boolean original = OriginalNatives.applies(mgo)
+            && none(nativePlayers, p -> {
+                    final Area a = game.getNationStartingArea(p.getNation());
+                    return a != null && !a.isEmpty();
+                });
+        final int minDistance = (original)
+            ? mgo.getInteger(MapGeneratorOptions.NATIVE_SETTLEMENT_SPACING)
+            : spec.getRange(GameOptions.SETTLEMENT_NUMBER);
+
+        // The original's nearest village is mostly 3 or 4 tiles away
+        // (V: 29 to 49 % at 3, 35 to 46 % at 4, 13 to 17 % at 5): its
+        // sites are first spaced one more, then the spacing.
+        final int[] spacings = (original)
+            ? new int[] { minDistance + 1, minDistance }
+            : new int[] { minDistance };
         final Set<Tile> settlementTiles = new LinkedHashSet<>();
-        for (Tile tile : allTiles) {
-            if (tile.isPolar() || tile.isOuterRing()) {
-                continue;
+        for (int spacing : spacings) {
+            for (Tile tile : allTiles) {
+                if (tile.isPolar() || tile.isOuterRing()) {
+                    continue;
+                }
+                if (!suitableForNativeSettlement(tile)) {
+                    continue;
+                }
+                if (any(settlementTiles, t -> t.getDistanceTo(tile) < spacing)) {
+                    continue;
+                }
+                settlementTiles.add(tile);
             }
-            if (!suitableForNativeSettlement(tile)) {
-                continue;
-            }
-            if (any(settlementTiles, t -> t.getDistanceTo(tile) < minDistance)) {
-                continue;
-            }
-            settlementTiles.add(tile);
         }
         
         final java.util.Map<Player, Set<Tile>> designatedArea = new HashMap<>();
+        if (original) {
+            final OriginalNatives.Placement placement
+                = new OriginalNatives.Placement(map, nativePlayers,
+                    new ArrayList<>(settlementTiles), allTiles,
+                    this::suitableForNativeSettlement, random,
+                    mgo.getInteger(MapGeneratorOptions.NATIVE_SETTLEMENTS_MINIMUM),
+                    mgo.getInteger(MapGeneratorOptions.NATIVE_SETTLEMENTS_MAXIMUM),
+                    mgo.getInteger(MapGeneratorOptions.NATIVE_SETTLEMENTS_TOTAL))
+                .place(lb);
+            settlementTiles.clear();
+            settlementTiles.addAll(placement.getSites());
+            designatedArea.putAll(placement.getAreas());
+        }
         for (Player player : nativePlayers) {
+            if (original) break;
             final Area area = map.getGame().getNationStartingArea(player.getNation());
             if (area != null && !area.isEmpty()) {
                 final Set<Tile> settlementTilesForNation = area.getTiles().stream()
@@ -398,7 +433,7 @@ public class SimpleMapGenerator implements MapGenerator {
             }
         }
         for (Player player : nativePlayers) {
-            if (designatedArea.containsKey(player)) {
+            if (original || designatedArea.containsKey(player)) {
                 continue;
             }
 
