@@ -191,6 +191,21 @@ final class ClassicColonyGolden {
      * @exception IOException if it cannot be read.
      */
     Mask content(String name, Rectangle region) throws IOException {
+        return content(name, region, l -> true);
+    }
+
+    /**
+     * {@link #content(String, Rectangle)} of the model's lines a filter keeps
+     * (e.g. all but the figure row's, whose pixels a test compares).
+     *
+     * @param name The model's file name, or null.
+     * @param region The model's region.
+     * @param keep Which lines (trimmed) count.
+     * @return The mask, or null when there is no such model.
+     * @exception IOException if it cannot be read.
+     */
+    Mask content(String name, Rectangle region,
+                 java.util.function.Predicate<String> keep) throws IOException {
         if (name == null) return null;
         final File f = new File(new File(this.recordings, MODELS), name);
         if (!f.isFile()) return null;
@@ -198,7 +213,7 @@ final class ClassicColonyGolden {
         final ClassicFont tiny = this.pack.font(ClassicFont.TINY);
         for (String raw : Files.readAllLines(f.toPath(), StandardCharsets.UTF_8)) {
             final String l = raw.trim();
-            if (l.isEmpty() || l.startsWith("#")) continue;
+            if (l.isEmpty() || l.startsWith("#") || !keep.test(l)) continue;
             final String[] q = l.split("\\s+");
             switch (q[0]) {
             case "tile":

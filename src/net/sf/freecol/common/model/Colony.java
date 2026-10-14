@@ -157,6 +157,17 @@ public class Colony extends Settlement implements TradeLocation {
     // Will only be used on enemy colonies:
     protected int displayUnitCount = -1;
 
+    /**
+     * The classic UI's colony picture: which of the original's building
+     * families stands in which of its 15 slots ({@code "RATHAUS=L1
+     * ZIMMEREI=M4 ..."}; client.gui.classic.ClassicColonyBuildings), set by
+     * the colony screen when a family first shows and kept in the save, so
+     * a building keeps its place (the original's layout is its own per
+     * colony, a new family takes a free slot when it is built).  Null when
+     * not yet set.
+     */
+    protected volatile String classicSlots = null;
+
     // Do not serialize below.
 
     /** Contains information about production and consumption. */
@@ -431,6 +442,24 @@ public class Colony extends Settlement implements TradeLocation {
      */
     public int getDisplayUnitCount() {
         return this.displayUnitCount;
+    }
+
+    /**
+     * Get the classic UI's colony picture layout.
+     *
+     * @return The layout, or null.
+     */
+    public String getClassicSlots() {
+        return this.classicSlots;
+    }
+
+    /**
+     * Set the classic UI's colony picture layout.
+     *
+     * @param classicSlots The layout, or null.
+     */
+    public void setClassicSlots(String classicSlots) {
+        this.classicSlots = classicSlots;
     }
 
     /**
@@ -3063,6 +3092,9 @@ public class Colony extends Settlement implements TradeLocation {
         this.setBuildQueue(o.getBuildQueue());
         this.setPopulationQueue(o.getPopulationQueue());
         this.displayUnitCount = o.getDisplayUnitCount();
+        // The classic layout: an update without it (another player's
+        // view, a server copy that never had it) keeps ours.
+        if (o.getClassicSlots() != null) this.classicSlots = o.getClassicSlots();
 
         for (WorkLocation wl : getAllWorkLocationsList()) wl.setColony(this);
 
@@ -3074,6 +3106,7 @@ public class Colony extends Settlement implements TradeLocation {
     // Serialization
 
     private static final String BUILD_QUEUE_TAG = "buildQueueItem";
+    private static final String CLASSIC_SLOTS_TAG = "classicSlots";
     private static final String ESTABLISHED_TAG = "established";
     private static final String IMMIGRATION_TAG = "immigration";
     private static final String LIBERTY_TAG = "liberty";
@@ -3116,6 +3149,10 @@ public class Colony extends Settlement implements TradeLocation {
             xw.writeAttribute(IMMIGRATION_TAG, immigration);
 
             xw.writeAttribute(PRODUCTION_BONUS_TAG, productionBonus);
+
+            if (classicSlots != null && !classicSlots.isEmpty()) {
+                xw.writeAttribute(CLASSIC_SLOTS_TAG, classicSlots);
+            }
 
         } else {
             int uc = getApparentUnitCount();
@@ -3200,6 +3237,8 @@ public class Colony extends Settlement implements TradeLocation {
         productionBonus = xr.getAttribute(PRODUCTION_BONUS_TAG, 0);
 
         displayUnitCount = xr.getAttribute(UNIT_COUNT_TAG, -1);
+
+        classicSlots = xr.getAttribute(CLASSIC_SLOTS_TAG, (String)null);
     }
 
     /**

@@ -45,6 +45,9 @@
       
       <xs:attribute name="id" type="ColonyId" use="required"/>
 
+      <!-- The Classic UI's colony picture: each building family's slot
+           ("RATHAUS=L1 ZIMMEREI=M4 ...", M4.2). -->
+      <xs:attribute name="classicSlots" type="xs:string" use="optional"/>
       <xs:attribute name="currentlyBuilding" type="xs:string" use="optional"/>
       <xs:attribute name="established" type="xs:int" use="optional"
                     default="1"/>

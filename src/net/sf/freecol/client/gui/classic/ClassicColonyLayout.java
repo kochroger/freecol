@@ -372,6 +372,454 @@ final class ClassicColonyLayout {
     }
 
 
+    // The building area: the 15 slots (spec M4.2; L §3.1, dago §2.1, buildset §2)
+
+    /**
+     * A slot's size class (NAMES.TXT {@code @BUILDING}'s 4th column; V by
+     * the sprite sizes): its sprite size, the placeholder drawn while its
+     * family is not built, where its production row and its workers go,
+     * and the row model's two numbers (dago §2.6).
+     */
+    enum SlotClass {
+        /** 23x27, class 0: the houses; tree 044. */
+        HOUSE(23, 27, 44, 4, -2, 13, 20, 12),
+        /** 44x22, class 1; tree 043. */
+        MID(44, 22, 43, 10, 2, 9, 22, 12),
+        /** 53x37, class 2; tree 042. */
+        LARGE(53, 37, 42, 14, 2, 23, 30, 20),
+        /** 75x48, class 4: the harbour; the water scene 045, no row, no workers. */
+        DOCKS(75, 48, 45, 0, 0, 0, 0, 0),
+        /** 73x18, class 3: the fortification; the fence 016, the units outside on it. */
+        FENCE(73, 18, 16, 0, 0, 5, 0, 0);
+
+        /** The sprite's size. */
+        final int w, h;
+
+        /** The placeholder's BUILDING.SS frame. */
+        final int placeholder;
+
+        /** The production row's anchor x (from the sprite's x) and its icon y (from its y). */
+        final int rowAnchor, rowY;
+
+        /** The workers' y (from the sprite's y); the fence's units outside. */
+        final int workerY;
+
+        /**
+         * The row model's span S (a spaced row's pitch is at most
+         * floor((S - w)/(m - 1))) and its stack threshold T (more than T
+         * icons halve: k doubles); dago §2.6, S_large 30 by L §3.4 (V);
+         * S_mid 22 or 23 and T_mid 12 or 13, T_large 20-23 (V bounds, the
+         * lower taken, I).
+         */
+        final int span, most;
+
+        SlotClass(int w, int h, int placeholder, int rowAnchor, int rowY, int workerY,
+                  int span, int most) {
+            this.w = w;
+            this.h = h;
+            this.placeholder = placeholder;
+            this.rowAnchor = rowAnchor;
+            this.rowY = rowY;
+            this.workerY = workerY;
+            this.span = span;
+            this.most = most;
+        }
+    }
+
+    /** One of the 15 fixed places of the building area. */
+    static final class Slot {
+
+        /** Its name (ours): M1-M4, H1-H7, L1, L2, W, X. */
+        final String id;
+
+        /** Its class. */
+        final SlotClass cls;
+
+        /** The sprite's top-left corner. */
+        final int x, y;
+
+        /** Its index in {@link #SLOTS} (the draw order). */
+        final int index;
+
+        Slot(String id, SlotClass cls, int x, int y, int index) {
+            this.id = id;
+            this.cls = cls;
+            this.x = x;
+            this.y = y;
+            this.index = index;
+        }
+
+        /** @return The sprite's rectangle. */
+        Rectangle bounds() {
+            return new Rectangle(this.x, this.y, this.cls.w, this.cls.h);
+        }
+
+        @Override
+        public String toString() {
+            return this.id;
+        }
+    }
+
+    /**
+     * The 15 slots in the original's draw order (dago's, V: 0 px in 3 dago
+     * colonies and in the 5 building areas of clip 020; only M2 under W
+     * overlaps): M1, H2, H1, L1, H3, H4, H5, M2, H7, H6, W, M3, L2, M4, X.
+     */
+    static final Slot[] SLOTS = slots();
+
+    private static Slot[] slots() {
+        final Object[][] t = {
+            { "M1", SlotClass.MID, 6, 14 }, { "H2", SlotClass.HOUSE, 145, 15 },
+            { "H1", SlotClass.HOUSE, 56, 13 }, { "L1", SlotClass.LARGE, 87, 11 },
+            { "H3", SlotClass.HOUSE, 173, 18 }, { "H4", SlotClass.HOUSE, 8, 41 },
+            { "H5", SlotClass.HOUSE, 37, 45 }, { "M2", SlotClass.MID, 128, 53 },
+            { "H7", SlotClass.HOUSE, 96, 53 }, { "H6", SlotClass.HOUSE, 67, 54 },
+            { "W", SlotClass.DOCKS, 123, 55 }, { "M3", SlotClass.MID, 10, 76 },
+            { "L2", SlotClass.LARGE, 66, 87 }, { "M4", SlotClass.MID, 15, 102 },
+            { "X", SlotClass.FENCE, 123, 106 },
+        };
+        final Slot[] out = new Slot[t.length];
+        for (int i = 0; i < t.length; i++) {
+            out[i] = new Slot((String) t[i][0], (SlotClass) t[i][1], (Integer) t[i][2],
+                              (Integer) t[i][3], i);
+        }
+        return out;
+    }
+
+    /**
+     * A slot by its name.
+     *
+     * @param id The name, e.g. {@code "H3"}.
+     * @return The slot, or null.
+     */
+    static Slot slot(String id) {
+        for (Slot s : SLOTS) if (s.id.equals(id)) return s;
+        return null;
+    }
+
+    /**
+     * The hover label's box top over a slot (dago §2.1, clip008 §2.3; V 30
+     * labels): the sprite's top for the built houses, mid slots and the
+     * fortification slot; vertically centred, sy + floor((h - 6)/2), for
+     * the large slots, the harbour and every placeholder but the fence
+     * (042 +15, 043 +8, 044 +10, 045 +21; the fence 016 at its top).
+     *
+     * @param s The slot.
+     * @param placeholder Whether it shows its placeholder.
+     * @return The box's y.
+     */
+    static int hoverY(Slot s, boolean placeholder) {
+        final boolean centred = s.cls == SlotClass.LARGE || s.cls == SlotClass.DOCKS
+            || (placeholder && s.cls != SlotClass.FENCE);
+        return (centred) ? s.y + (s.cls.h - 6) / 2 : s.y;
+    }
+
+    /** The Ställe's «2» (the warehouse expansion): white FONTTINY, no box, at sprite + (21,8) (V dago). */
+    static final int EXPANSION_DX = 21, EXPANSION_DY = 8;
+
+
+    // Production rows (spec M4.3 target 1; dago §2.6, L §3.4)
+
+    /** A production row: m icons of one good from {@link #x}(0), a count label when stacked. */
+    static final class Row {
+
+        /** The amount shown, the halving factor, the icons drawn and their pitch. */
+        final int n, k, m, pitch;
+
+        /** The first icon's x, the icons' y. */
+        final int first, y;
+
+        /** Whether the row is a stack (pitch 1) that carries a count label. */
+        final boolean stacked;
+
+        Row(int n, int k, int m, int pitch, int first, int y, boolean stacked) {
+            this.n = n;
+            this.k = k;
+            this.m = m;
+            this.pitch = pitch;
+            this.first = first;
+            this.y = y;
+            this.stacked = stacked;
+        }
+
+        /**
+         * @param j The icon, 0 ... m - 1.
+         * @return Its x.
+         */
+        int x(int j) {
+            return this.first + j * this.pitch;
+        }
+
+        /** @return The count label's box x: first + 2 (dago). */
+        int labelX() {
+            return countLabelX(this.first);
+        }
+
+        /** @return The count label's box y: the icons' y + 1 (dago). */
+        int labelY() {
+            return this.y + 1;
+        }
+
+        @Override
+        public String toString() {
+            return "n" + this.n + " k" + this.k + " m" + this.m + " p" + this.pitch + " x"
+                + this.first + (this.stacked ? " label" : "");
+        }
+    }
+
+    /**
+     * A building's production row (dago §2.6, V 18 rows there and 6 in
+     * clip 020): k = 1, m = n; while m &gt; T: k *= 2, m = n / k (integer
+     * division); a spaced row's pitch p = min(w + 1, floor((S - w)/(m -
+     * 1))); a stack (k &gt; 1, or p &lt; 2) has pitch 1 and a count label n;
+     * total = (m - 1)p + w; first = sx + a - floor((total - 1)/2); the icons
+     * at the class's y (Ställe: sy + 11).  V: 4 bells pitch 6 from 88 and
+     * 6 bells pitch 4 from 87 in the Rathaus (#2260, #134173), 3 rum pitch
+     * 6 from 3 and 9 rum stacked from 5 with «9» at (7,40) (H4), 12
+     * hammers stacked from 16 with «12» at (18,105) (M4).
+     *
+     * @param s The slot.
+     * @param stables Whether the sprite is the Ställe's (046/047: its row at sy + 11).
+     * @param n The amount (at most 0: no row).
+     * @param w The icon's width.
+     * @return The row, or null.
+     */
+    static Row buildingRow(Slot s, boolean stables, int n, int w) {
+        if (n <= 0 || s.cls.span == 0) return null;
+        int k = 1, m = n;
+        while (m > s.cls.most) {
+            k *= 2;
+            m = n / k;
+        }
+        int p = (m > 1) ? Math.min(w + 1, Math.floorDiv(s.cls.span - w, m - 1)) : w + 1;
+        final boolean stacked = k > 1 || (m > 1 && p < 2);
+        if (stacked) p = 1;
+        final int total = (m - 1) * p + w;
+        final int first = s.x + s.cls.rowAnchor - Math.floorDiv(total - 1, 2);
+        final int y = s.y + ((stables) ? STABLES_ROW_Y : s.cls.rowY);
+        return new Row(n, k, m, p, first, y, stacked);
+    }
+
+    /** The Ställe draw their row at sy + 11 (dago, V 3 colonies). */
+    static final int STABLES_ROW_Y = 11;
+
+
+    // Figures (spec M4.3 targets 2, 3; dago §2.7, L §3.5-3.6)
+
+    /**
+     * Where the workers of a building stand: x offsets from the sprite's x
+     * (y at sy + the class's worker y), each with its 2-px shadow in ink
+     * 95 (V).
+     * <ul>
+     *   <li>large: one +35; two +31, +40; three +27, +35, +43 (V dago);</li>
+     *   <li>mid: one +27 (V ×4, widths 6 and 8); two +22, +33 (V M1 dago,
+     *   M4 clip 020 #3500), in M2 +23, +33 (V dago ×2); three +18, +27,
+     *   +36 (I: centred on +27, pitch 9);</li>
+     *   <li>house: one +9 in H4 and H6, +8 in H3 and H7 (V clip 020 #2398,
+     *   #2747, #19349, #31050, #47246, #2620; clip008 H6, H7: per slot,
+     *   not by width), +9 in H1, H2, H5 (I); two or more from +5 at pitch
+     *   floor((15 - w)/(n - 1)), w the widest (V: +5/+12 for 8 px, +5/+14
+     *   for 6 px, +5/+8/+11, +5/+9/+13).</li>
+     * </ul>
+     * More than three (no building of the original holds more) continue
+     * the class's pitch (I).
+     *
+     * @param s The slot.
+     * @param n The workers.
+     * @param w The widest worker's sprite width.
+     * @return The x offsets.
+     */
+    static int[] workerOffsets(Slot s, int n, int w) {
+        final int[] out = new int[Math.max(0, n)];
+        if (n <= 0) return out;
+        switch (s.cls) {
+        case LARGE:
+            return pick(n, new int[][] { { 35 }, { 31, 40 }, { 27, 35, 43 } }, 8);
+        case MID:
+            return pick(n, new int[][] { { 27 },
+                    ("M2".equals(s.id)) ? new int[] { 23, 33 } : new int[] { 22, 33 },
+                    { 18, 27, 36 } }, 9);
+        case HOUSE:
+            if (n == 1) {
+                out[0] = ("H3".equals(s.id) || "H7".equals(s.id)) ? 8 : 9;
+                return out;
+            }
+            final int p = Math.max(1, Math.floorDiv(15 - w, n - 1));
+            for (int i = 0; i < n; i++) out[i] = 5 + i * p;
+            return out;
+        default:
+            return new int[0];          // the harbour, the fortification: no workers
+        }
+    }
+
+    /** A table's row for n, or the last row continued at the pitch. */
+    private static int[] pick(int n, int[][] rows, int pitch) {
+        if (n <= rows.length) return rows[n - 1].clone();
+        final int[] last = rows[rows.length - 1], out = new int[n];
+        for (int i = 0; i < n; i++) {
+            out[i] = (i < last.length) ? last[i] : last[last.length - 1] + (i - last.length + 1) * pitch;
+        }
+        return out;
+    }
+
+    /** The figures' shadow: their silhouette at x - 2 in ink 95 (V dago, L). */
+    static final int SHADOW_DX = -2;
+
+    /**
+     * The units outside the colony on the fortification slot (V #6560,
+     * #46350, #46039; p1): x = 163 - ceil(11n/2) + 11i, y 111 (sy + 5): one
+     * at 157, two at 152/163, three at 146/157/168.  When the row would
+     * leave the slot (more than six, I) the pitch closes so that it stays
+     * inside x 123-198, centred (I).
+     *
+     * @param n The units.
+     * @param w The widest one's sprite width.
+     * @return Their x.
+     */
+    static int[] outsideX(int n, int w) {
+        final int[] out = new int[Math.max(0, n)];
+        if (n <= 0) return out;
+        final Slot x = SLOTS[SLOTS.length - 1];
+        final int first = 163 - (11 * n + 1) / 2;
+        if (first >= x.x && first + 11 * (n - 1) + w <= BUILDING_AREA.width) {
+            for (int i = 0; i < n; i++) out[i] = first + 11 * i;
+            return out;
+        }
+        final int room = BUILDING_AREA.width - x.x;      // x 123-198
+        final int p = (n > 1) ? Math.max(1, (room - w) / (n - 1)) : 0;
+        final int f = x.x + Math.max(0, (room - ((n - 1) * p + w)) / 2);
+        for (int i = 0; i < n; i++) out[i] = f + i * p;
+        return out;
+    }
+
+    /** The units outside stand at y 111 (the fortification slot's sy + 5). */
+    static final int OUTSIDE_Y = 111;
+
+    /**
+     * The selected figure's green frame (ink 10), around the figure and
+     * its shadow: x - 3 ... x + w, y + 1 ... y + 16 (V #3500: the
+     * Holzfäller at (37,111), frame x 34-45, y 112-127; clip008 the
+     * Zimmerei's x 34-43, y 86-101), drawn right after the figure.
+     *
+     * @param x The figure's x.
+     * @param y The figure's y.
+     * @param w Its width.
+     * @return The frame.
+     */
+    static Rectangle workerFrame(int x, int y, int w) {
+        return new Rectangle(x - 3, y + 1, w + 4, 16);
+    }
+
+
+    // The figure row in the band (L §5.2, dago §4.2; the look only)
+
+    /** The figure row's y (no shadow). */
+    static final int FIGURE_ROW_Y = 142;
+
+    /** The figure row's last pixel column (V: 95 accepted, 97 rejected; I: 96). */
+    static final int FIGURE_ROW_END = 96;
+
+    /**
+     * The figure row's x (L §5.2, dago §4.2): from 2, each next one at x +
+     * w + 1 - c with the least compression c (-3, the pitch w + 2, V clip
+     * 020; 0 ... 3, V dago) that keeps the row's last pixel at x 96 at most;
+     * 4 px more before the first unit outside the colony (V #6560: 44,
+     * #46039: 52).  dago's x(i+1) = x(i) + w(i) - 1 - c.
+     *
+     * @param widths The figures' widths: the colonists, then the units outside.
+     * @param colonists How many are colonists.
+     * @return Their x.
+     */
+    static int[] figureRow(int[] widths, int colonists) {
+        final int n = widths.length;
+        final int[] out = new int[n];
+        int widest = 1;
+        for (int w : widths) widest = Math.max(widest, w);
+        // Beyond c = widest - 2 every step is 1 px: the row cannot close more.
+        for (int c = -3; ; c++) {
+            int x = 2;
+            for (int i = 0; i < n; i++) {
+                if (i > 0) {
+                    x += Math.max(1, widths[i - 1] - 1 - c);
+                    if (i == colonists) x += 4;
+                }
+                out[i] = x;
+            }
+            if (n == 0 || out[n - 1] + widths[n - 1] - 1 <= FIGURE_ROW_END
+                || c >= widest - 2) return out;
+        }
+    }
+
+    /**
+     * The selected figure's green frame in the figure row: x - 1 ... x + w,
+     * y 143-158 (V #2260, #134173, #14817), drawn right after it.
+     *
+     * @param x The figure's x.
+     * @param w Its width.
+     * @return The frame.
+     */
+    static Rectangle figureFrame(int x, int w) {
+        return new Rectangle(x - 1, FIGURE_ROW_Y + 1, w + 2, 16);
+    }
+
+    /**
+     * NAMES.TXT {@code @JOB}'s index of a work (the order of the figure
+     * row, L §5.2: Farmer 0, Zuckerpflanzer 1 ... Fischer 8, Schnapsbrenner
+     * 9 ... Staatsmann 17, Lehrer 18, Siedler 19, Pionier 20, Soldat 21,
+     * Späher 22, Dragoner 23, Missionar 24, Knecht 25, Krimineller 26), by
+     * the good the work makes.
+     *
+     * @param goodsId The good's FreeCol id.
+     * @return The index, or -1 for none.
+     */
+    static int jobOf(String goodsId) {
+        if (goodsId == null) return -1;
+        // FreeCol's farmed food kinds (stored as food): the Farmer.
+        if ("model.goods.grain".equals(goodsId) || "model.goods.meat".equals(goodsId)) return 0;
+        for (int i = 0; i < JOB_GOODS.length; i++) {
+            if (JOB_GOODS[i].equals(goodsId)) return i;
+        }
+        return -1;
+    }
+
+    /** The goods of NAMES {@code @JOB} 0-17, in their order. */
+    private static final String[] JOB_GOODS = {
+        "model.goods.food", "model.goods.sugar", "model.goods.tobacco",
+        "model.goods.cotton", "model.goods.furs", "model.goods.lumber",
+        "model.goods.ore", "model.goods.silver", "model.goods.fish",
+        "model.goods.rum", "model.goods.cigars", "model.goods.cloth",
+        "model.goods.coats", "model.goods.hammers", "model.goods.tools",
+        "model.goods.muskets", "model.goods.crosses", "model.goods.bells",
+    };
+
+    /** NAMES {@code @JOB}: Lehrer, Siedler, Pionier, Soldat, Späher, Dragoner, Missionar, Knecht, Krimineller. */
+    static final int JOB_TEACHER = 18, JOB_COLONIST = 19, JOB_PIONEER = 20,
+        JOB_SOLDIER = 21, JOB_SCOUT = 22, JOB_DRAGOON = 23, JOB_MISSIONARY = 24,
+        JOB_SERVANT = 25, JOB_CRIMINAL = 26;
+
+    /**
+     * The ICONS.SS frame of a good in a production row (dago §2.6): the 16
+     * warehouse goods 022-037, fish 057, hammers 054, crosses 056, bells 062.
+     *
+     * @param goodsId The good's FreeCol id.
+     * @return The frame, or -1.
+     */
+    static int goodsIcon(String goodsId) {
+        if (goodsId == null) return -1;
+        for (int i = 0; i < WAREHOUSE_GOODS.length; i++) {
+            if (WAREHOUSE_GOODS[i].equals(goodsId)) return ICON_GOODS + i;
+        }
+        switch (goodsId) {
+        case "model.goods.grain": case "model.goods.meat": return ICON_GOODS;
+        case "model.goods.fish": return 57;
+        case "model.goods.hammers": return 54;
+        case "model.goods.crosses": return 56;
+        case "model.goods.bells": return 62;
+        default: return -1;
+        }
+    }
+
+
     // Timings (spec §1.4)
 
     /** One frame of the original: 70.0863 Hz. */

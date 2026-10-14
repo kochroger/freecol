@@ -175,9 +175,8 @@ public class ClassicColonyChromeTest extends FreeColTestCase {
     private Colony colonyOf(Game game, Ref r) {
         final Colony colony = createStandardColony(2);
         colony.setName(r.name);
-        // No current build: the first slice's construction plate (M4.2
-        // removes it) then needs no FreeCol picture, which a headless
-        // test cannot make.
+        // No current build (the first slice's construction plate needed a
+        // FreeCol picture of it; the plate is gone since M4.2).
         colony.setBuildQueue(new ArrayList<>());
         game.setTurn(turnOf(r.year));
         colony.getOwner().setGold(r.gold);
@@ -319,13 +318,11 @@ public class ClassicColonyChromeTest extends FreeColTestCase {
             if (ground != null) {
                 ds.add(ClassicColonyGolden.compare("parchment", chrome, theirs,
                     ClassicColonyLayout.BUILDING_AREA, arrow, ground));
-                // The screen's own ground where its first-slice buildings
-                // never draw: below their last row (y 122-127) and left of
-                // their first column (x 0-3, under the construction plate).
-                ds.add(ClassicColonyGolden.compare("ground (screen)", ours, theirs,
-                    new Rectangle(0, 122, 199, 6), arrow, ground));
-                ds.add(ClassicColonyGolden.compare("ground left", ours, theirs,
-                    new Rectangle(0, 19, 4, 103), arrow, ground));
+                // The screen's own ground, with the buildings on it, is
+                // compared whole since M4.2 (ClassicColonyBuildingsTest:
+                // each frame's colony rebuilt with its buildings in their
+                // slots); the S1 regions where the first slice's flow layout
+                // never drew (y 122-127, x 0-3) hold slot sprites now.
             }
             ds.add(ClassicColonyGolden.compare("band row y128", ours, theirs, BAND_ROW, arrow, null));
             ds.add(ClassicColonyGolden.compare("band picture", chrome, theirs,

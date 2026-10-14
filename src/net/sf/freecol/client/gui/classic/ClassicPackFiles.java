@@ -229,6 +229,27 @@ final class ClassicPackFiles {
     }
 
     /**
+     * The key an alias stands for: {@code resources.properties} maps many
+     * keys to another one ({@code resource:<key>}, e.g. the units' map
+     * sprites {@code image.unit.model.unit.veteranSoldier} to
+     * {@code image.classic_original.ss.ICONS.SS.059}); followed to the end.
+     *
+     * @param key A key.
+     * @return The key at the end of its aliases (the key itself when it is
+     *     none), or null when the key is not in the pack.
+     */
+    String resolve(String key) {
+        String k = key;
+        for (int hops = 0; hops < 8 && k != null; hops++) {
+            final String v = this.props.get(k);
+            if (v == null) return (hops == 0) ? null : k;
+            if (!v.startsWith("resource:")) return k;
+            k = v.substring("resource:".length()).trim();
+        }
+        return k;
+    }
+
+    /**
      * A bitmap font from its atlas and metrics, the same pair
      * {@link ClassicFont#get} reads through the resource manager.
      *

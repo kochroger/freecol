@@ -31,9 +31,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import javax.swing.AbstractAction;
 import javax.swing.ActionMap;
@@ -71,11 +69,12 @@ import net.sf.freecol.common.model.Unit;
  *   <li><b>Top line</b> — the original's (M4.1, {@link ClassicColonyChrome}):
  *   «Name.   Jahreszeit, Jahr.  Gold: n¤» in FONTTINY on the wood rows, or a
  *   gold notice in its place ({@link ClassicColonyNotice}).</li>
- *   <li><b>Buildings pane</b> (left) — the colony's buildings on the
- *   original's parchment ground (PARCH.SS, M4.1), each with the colonists
- *   working in it and a black production tag ({@code amount} + goods icon),
- *   drawn from the original {@code BUILDING.SS} sprite set (the first
- *   slice's flow layout until the 15 slots, M4.2).</li>
+ *   <li><b>Building area</b> (left) — the original's (M4.2, M4.3,
+ *   {@link ClassicColonyBuildings}): the 15 fixed slots on the parchment
+ *   ground (PARCH.SS, M4.1), each family's {@code BUILDING.SS} sprite at
+ *   its level or the class's placeholder, the production rows of icons,
+ *   the workers' figures with their shadows, the units outside the colony
+ *   on the fortification slot, the NAMES.TXT name as the hover label.</li>
  *   <li><b>Tile pane</b> (right) — the 3&times;3 grid of the colony's work
  *   tiles, 24-px cells in the original's black frame on the wood panel
  *   ({@code WOODTILE.SS}, M4.1), each worked tile carrying its colonist and
@@ -83,9 +82,11 @@ import net.sf.freecol.common.model.Unit;
  *   colony itself.</li>
  *   <li><b>Bottom band</b> — the original {@code COLONY.PIK} chrome
  *   (320&times;72) with its black first row, with the Sons-of-Liberty /
- *   population figures and the units outside the colony on the left, the
- *   ships in port in the middle, the net production on the right (the first
- *   slice's until M4.5-M4.7), and the original's 16-box <b>warehouse</b> row
+ *   population figures (the first slice's until M4.5) and the original's
+ *   figure row (the colonists by their job, then the units outside) on
+ *   the left, the ships in port in the middle, the net production on the
+ *   right (the first slice's until M4.6-M4.7; a click there opens the build
+ *   list until M4.7's ÄNDERN), and the original's 16-box <b>warehouse</b> row
  *   along the bottom (M4.1: icons, numbers in their inks, the selected
  *   good's green frame) with «Abb» over the exit.</li>
  * </ul>
@@ -97,17 +98,6 @@ import net.sf.freecol.common.model.Unit;
  * ({@link #holdNotice}, {@link #showNotice}); the completion dissolve
  * ({@link ClassicColonyDissolve}).  Nothing on the screen can be dragged
  * yet, so its presses act as before (M4.8-M4.10).
- *
- * <p><b>Building frame map.</b> {@code BUILDING.SS} holds 48 frames.  The
- * seven buildings a new colony starts with are matched against the
- * original's colony screen (clip008, population 1: every sprite found with
- * match 1.000): the town hall, the carpenter's and the five craft houses.
- * Their upgrades are inferred as the consecutive frames after each house,
- * the fortifications and harbour scenes by their size and slot; the
- * buildings no frame could be tied to yet (custom house, armory chain)
- * draw no sprite.  See {@link #BUILDING_FRAMES}.  Each
- * building also carries its localized <b>name tag</b>, which the original
- * only shows on hover, so a mis-mapped sprite stays legible.
  *
  * <p>Interaction is click-to-select, click-to-target — the same style as every
  * other classic screen (order buttons, report rows, the build queue, Europe
@@ -123,26 +113,6 @@ final class ClassicColonyPanel extends JPanel {
     /** The original VGA canvas this screen is laid out in. */
     private static final int VW = ClassicColonyLayout.W;
     private static final int VH = ClassicColonyLayout.H;
-
-    /**
-     * The colony area (buildings + work tiles) sits between the top line
-     * (y 0-6, its black row 7) and the band (spec §1.1, M4.1).
-     */
-    private static final int AREA_Y = ClassicColonyLayout.BUILDING_AREA.y;
-
-    /** The building area's width: x 0-198, the black column at 199. */
-    private static final int BUILD_W = ClassicColonyLayout.BUILDING_AREA.width;
-
-    /**
-     * The construction indicator — current build + progress, clickable to open
-     * the build-queue screen ({@link ClassicBuildQueuePanel}) — sits atop the
-     * buildings pane, mirroring FreeCol's own {@code ConstructionPanel} (whose
-     * click opens {@code GUI.showBuildQueuePanel} the same way).
-     */
-    private static final int CONSTR_H = 11;
-
-    /** The {@code COLONY.PIK} chrome occupies the bottom 72 rows. */
-    private static final int BAND_Y = ClassicColonyLayout.BAND_Y;
 
     /**
      * Work-tile cells: the original's 24x24 at (224 + 24c, 32 + 24r) in
@@ -163,95 +133,11 @@ final class ClassicColonyPanel extends JPanel {
     private static final int PANEL2_X = 122;
     private static final int PANEL3_X = 207;
 
-    private static final Color GOLD = new Color(0xC8, 0xB0, 0x40);
     private static final Color TAG_BG = new Color(0x00, 0x00, 0x00, 0xC0);
     private static final Color TAG_FG = new Color(0xFF, 0xFF, 0xFF);
-    private static final Color WOOD = new Color(0x49, 0x28, 0x1C);
     private static final Color SELECT = new Color(0x40, 0xE0, 0x40);
     private static final Color PICKED = new Color(0xFF, 0xFF, 0x00);
     private static final Color WORK_HINT = new Color(0xE8, 0xC8, 0x40);
-
-    /**
-     * FreeCol building-type id (minus the {@code model.building.} prefix) to
-     * {@code BUILDING.SS} frame.  Types absent from the map draw no sprite:
-     * {@code depot} and {@code country}, which have no structure of their own
-     * in the original, and the ones no frame is tied to yet.
-     *
-     * <p>Sources (plan D0e; clip008 {@code 01-colony.md} &sect;2.3):
-     * <ul>
-     *   <li><b>Matched</b> on the original's colony screen at population 1:
-     *   the town hall and the six houses a new colony starts with.</li>
-     *   <li><b>Inferred</b>: each house's two upgrades are the next two
-     *   frames (same size class, the original numbers each chain in a row);
-     *   the lumber mill follows the carpenter's, the church and cathedral are
-     *   the two other 53&times;37 frames after it; the harbour scenes and
-     *   the walls by their size and slot (where tree frame 45 and the fence
-     *   16 stand in a new colony).  The schools, chapel, press, storage and
-     *   stables are older guesses by look, kept until a developed colony is
-     *   seen.</li>
-     *   <li><b>Unmapped</b> until a capture shows them: the custom house and
-     *   the armory, magazine and arsenal.  The 23&times;27 frames 18-20 are
-     *   likely candidates (20 is the newspaper's older guess), but they do
-     *   not fit one-to-one.</li>
-     * </ul>
-     */
-    private static final Map<String, Integer> BUILDING_FRAMES = new HashMap<>();
-    static {
-        // Fortification walls (inferred: the fence 16's size and slot).
-        BUILDING_FRAMES.put("stockade", 0);
-        BUILDING_FRAMES.put("fort", 1);
-        BUILDING_FRAMES.put("fortress", 2);
-        // Harbour scenes (inferred: tree frame 45 is the scene without a pier).
-        BUILDING_FRAMES.put("docks", 6);
-        BUILDING_FRAMES.put("drydock", 7);
-        BUILDING_FRAMES.put("shipyard", 8);
-        // The town hall (matched).
-        BUILDING_FRAMES.put("townHall", 9);
-        // The press (by look).
-        BUILDING_FRAMES.put("printingPress", 13);
-        BUILDING_FRAMES.put("newspaper", 20);
-        // Churches: the chapel by look, the two 53x37 frames inferred.
-        BUILDING_FRAMES.put("chapel", 12);
-        BUILDING_FRAMES.put("church", 37);
-        BUILDING_FRAMES.put("cathedral", 38);
-        // Schooling (by look).
-        BUILDING_FRAMES.put("schoolhouse", 3);
-        BUILDING_FRAMES.put("college", 4);
-        BUILDING_FRAMES.put("university", 5);
-        // The goods chains: each house matched, its upgrades the next frames.
-        BUILDING_FRAMES.put("weaverHouse", 21);
-        BUILDING_FRAMES.put("weaverShop", 22);
-        BUILDING_FRAMES.put("textileMill", 23);
-        BUILDING_FRAMES.put("tobacconistHouse", 24);
-        BUILDING_FRAMES.put("tobacconistShop", 25);
-        BUILDING_FRAMES.put("cigarFactory", 26);
-        BUILDING_FRAMES.put("distillerHouse", 27);
-        BUILDING_FRAMES.put("rumDistillery", 28);
-        BUILDING_FRAMES.put("rumFactory", 29);
-        BUILDING_FRAMES.put("furTraderHouse", 32);
-        BUILDING_FRAMES.put("furTradingPost", 33);
-        BUILDING_FRAMES.put("furFactory", 34);
-        BUILDING_FRAMES.put("carpenterHouse", 35);
-        BUILDING_FRAMES.put("lumberMill", 36);
-        BUILDING_FRAMES.put("blacksmithHouse", 39);
-        BUILDING_FRAMES.put("blacksmithShop", 40);
-        BUILDING_FRAMES.put("ironWorks", 41);
-        // Storage and livestock (by look).
-        BUILDING_FRAMES.put("warehouse", 47);
-        BUILDING_FRAMES.put("warehouseExpansion", 15);
-        BUILDING_FRAMES.put("stables", 46);
-    }
-
-    /**
-     * The {@code BUILDING.SS} frame of a building type.
-     *
-     * @param typeId The building type's id, with or without the
-     *     {@code model.building.} prefix.
-     * @return The frame, or null when the type draws no sprite.
-     */
-    static Integer buildingFrame(String typeId) {
-        return BUILDING_FRAMES.get(shortId(typeId));
-    }
 
     private final FreeColClient freeColClient;
     private final ImageLibrary lib;
@@ -347,45 +233,64 @@ final class ClassicColonyPanel extends JPanel {
      */
     private final ClassicDragGesture gesture = new ClassicDragGesture();
 
-    /** Cache of {@code BUILDING.SS} frames, loaded on demand. */
-    private final Map<Integer, BufferedImage> buildingCache = new HashMap<>();
+    /** The building area's sprites (M4.2, M4.3), from the pack. */
+    private final ClassicColonyBuildings.Assets buildingArt;
 
     /**
-     * Per-building hover targets, rebuilt each paint: virtual-space bounds and
-     * the localized name.  The original shows a building's name only when the
-     * pointer is over it, which also keeps the names from overlapping.
+     * The building area as the last paint drew it ({@link
+     * ClassicColonyBuildings#model}): the 15 slots with their labels, work
+     * targets and figures; the hover label and the presses read it.
      */
-    private final java.util.List<java.awt.Rectangle> buildingBounds
-        = new java.util.ArrayList<>();
-    private final java.util.List<String> buildingNames = new java.util.ArrayList<>();
-
-    /** The {@link Building}s parallel to {@link #buildingBounds}, as work targets. */
-    private final List<Building> buildingTargets = new ArrayList<>();
+    private ClassicColonyBuildings.Model area
+        = new ClassicColonyBuildings.Model(new ArrayList<>());
 
     /**
-     * While recording: each drawn building's type, frame and place, as
-     * the last paint left them, and as last logged (see
-     * {@link #recordBuildings}).
+     * Where the colony's founding families stand, or null for the
+     * colony's own layout ({@link ClassicColonyBuildings.Founding#of(long)}
+     * from its id); a clip's colony in the golden tests.
      */
-    private final StringBuilder buildingsDrawn = new StringBuilder();
+    private ClassicColonyBuildings.Founding founding = null;
+
+    /**
+     * While recording: what the building area drew (each slot's sprite,
+     * row and figures), as the last paint left it and as last logged
+     * ({@link #recordBuildings}).
+     */
+    private String buildingsDrawn = "";
     private String buildingsLogged = null;
+
+    /** The figure row's colonists as this paint orders them ({@link #figureOrder}). */
+    private List<Unit> rowOrder = new ArrayList<>();
+
+    /** The band's figure row as last painted. */
+    private List<ClassicColonyBuildings.Figure> figures = new ArrayList<>();
+
+    /** @return The band's figure row as last painted (tests, the report). */
+    List<ClassicColonyBuildings.Figure> rowFigures() {
+        return this.figures;
+    }
 
     /** The stills taken so far, for their names (EDT only). */
     private static int stills = 0;
 
-    /** The construction indicator's clickable band, set on each paint. */
-    private final java.awt.Rectangle constructionBounds
-        = new java.awt.Rectangle(0, AREA_Y, BUILD_W, CONSTR_H);
+    /**
+     * Until the right panel's ÄNDERN (M4.7, M4.10) opens the build list, a
+     * press on the right panel does (the first slice's black construction
+     * plate over the buildings is gone: the original shows the build only
+     * in its hammer panel, M4.2).
+     */
+    private static final Rectangle BUILD_LIST_AREA = ClassicColonyLayout.RIGHT_PANEL;
 
-    /** Index into {@link #buildingBounds} of the hovered building, or -1. */
+    /** The slot of {@link #area} under the pointer (its hover label), or -1. */
     private int hovered = -1;
 
     /** The warehouse box under the pointer (its good's hover label), or -1. */
     private int hoveredBox = -1;
 
     /**
-     * Whether the production numbers are drawn, read at each paint: on the
-     * buildings ("Beschriftung an Gebäuden"), and on the work tiles and
+     * Whether the production numbers are drawn, read at each paint: the
+     * count labels of the buildings' stacked rows ("Beschriftung an
+     * Gebäuden", M4.3), and the numbers on the work tiles and
      * under the net production ("Beschriftung an Waren und Terrain";
      * {@link ClassicPrefs#BUILDING_LABELS},
      * {@link ClassicPrefs#GOODS_TERRAIN_LABELS}).  The warehouse's amounts
@@ -461,6 +366,7 @@ final class ClassicColonyPanel extends JPanel {
         final ClassicPackFiles pack = ClassicPackFiles.runtime();
         this.tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
         this.chrome = ClassicColonyChrome.Assets.load(pack);
+        this.buildingArt = ClassicColonyBuildings.Assets.load(pack);
         this.blink = new ClassicBlink(clock, SwingUtilities::invokeLater,
                                       this::blinkToggled, threadedBlink);
         setOpaque(true);
@@ -498,19 +404,6 @@ final class ClassicColonyPanel extends JPanel {
                     if (gesture.motion(e.getX(), e.getY())) dragStarted();
                 }
             });
-    }
-
-
-    // Assets
-
-    private static String ssKey(String set, int frame) {
-        return String.format("image.classic_original.ss.%s.%03d", set, frame);
-    }
-
-    /** Load (and cache) a {@code BUILDING.SS} frame; null when the pack is absent. */
-    private BufferedImage buildingImage(int frame) {
-        return this.buildingCache.computeIfAbsent(frame,
-            n -> ImageLibrary.getUnscaledImage(ssKey("BUILDING.SS", n)));
     }
 
 
@@ -626,7 +519,7 @@ final class ClassicColonyPanel extends JPanel {
 
     private void pressAt(int vx, int vy) {
         this.pressedBand = null;
-        if (this.constructionBounds.contains(vx, vy)) {
+        if (BUILD_LIST_AREA.contains(vx, vy)) {
             this.freeColClient.getGUI().showBuildQueuePanel(this.colony);
             return;
         }
@@ -648,11 +541,14 @@ final class ClassicColonyPanel extends JPanel {
             }
         }
         if (this.selectedUnit == null) return;
-        for (int i = 0; i < this.buildingBounds.size(); i++) {
-            if (this.buildingBounds.get(i).contains(vx, vy)) {
-                assignWork(this.buildingTargets.get(i));
-                return;
-            }
+        // A building with workplaces (not a placeholder, the harbour, the
+        // fortification or the Lagerhaus' slot).
+        final int slot = slotAt(vx, vy);
+        if (slot >= 0) {
+            final Building target = (slot < this.area.slots.size())
+                ? this.area.slots.get(slot).target : null;
+            if (target != null) assignWork(target);
+            return;
         }
         for (int i = 0; i < this.tileBounds.size(); i++) {
             if (this.tileBounds.get(i).contains(vx, vy)) {
@@ -660,6 +556,23 @@ final class ClassicColonyPanel extends JPanel {
                 return;
             }
         }
+    }
+
+    /**
+     * The slot of the building area under a point: the topmost (the last
+     * drawn) whose sprite rectangle holds it (the slots are fixed, so this
+     * needs no paint; I: the rectangles, clip008: a label does not depend
+     * on where in its sprite the pointer is).
+     *
+     * @param vx The x.
+     * @param vy The y.
+     * @return Its index in {@link ClassicColonyLayout#SLOTS}, or -1.
+     */
+    static int slotAt(int vx, int vy) {
+        for (int i = ClassicColonyLayout.SLOTS.length - 1; i >= 0; i--) {
+            if (ClassicColonyLayout.SLOTS[i].bounds().contains(vx, vy)) return i;
+        }
+        return -1;
     }
 
     /** Select (or, on a second click of the same unit, deselect) a colonist to move. */
@@ -698,13 +611,7 @@ final class ClassicColonyPanel extends JPanel {
      * @param vy The y.
      */
     void hoverAt(int vx, int vy) {
-        int found = -1;
-        for (int i = 0; i < this.buildingBounds.size(); i++) {
-            if (this.buildingBounds.get(i).contains(vx, vy)) {
-                found = i;
-                break;
-            }
-        }
+        final int found = (vx < 0) ? -1 : slotAt(vx, vy);
         final int box = (vx < 0) ? -1 : ClassicColonyLayout.warehouseBoxAt(vx, vy);
         if (found != this.hovered || box != this.hoveredBox) {
             this.hovered = found;
@@ -932,13 +839,14 @@ final class ClassicColonyPanel extends JPanel {
         g.clipRect(0, 0, VW, VH);
 
         // Rebuilt across paintBuildings/paintWorkTiles/paintPopulation below,
-        // so cleared once here rather than per-method (unlike buildingBounds,
-        // which only one method populates).
+        // so cleared once here rather than per method.
         this.unitBounds.clear();
         this.unitTargets.clear();
         // The numbers, as SPIEL "Koloniebericht-Optionen" switches them
-        // (W14): FreeCol's own figures, a house improvement on the
-        // original's icon rows (Regeln-Auswahl).
+        // (W14): the count labels of the buildings' stacked rows (M4.3; I:
+        // the option's meaning in the original), and the first slice's
+        // figures on the work tiles and the net production (until M4.4,
+        // M4.7).
         final ClassicPrefs prefs = ClassicPrefs.get();
         this.buildingNumbers = prefs.is(ClassicPrefs.BUILDING_LABELS);
         this.goodsTerrainNumbers = prefs.is(ClassicPrefs.GOODS_TERRAIN_LABELS);
@@ -957,7 +865,6 @@ final class ClassicColonyPanel extends JPanel {
         ClassicColonyChrome.paintGround(g, this.chrome);
         ClassicColonyChrome.paintWoodPanel(g, this.chrome);
         paintBuildings(g);
-        paintConstruction(g);
         paintWorkTiles(g);
         paintBand(g);
         paintHover(g);
@@ -978,141 +885,137 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * While the acceptance recorder runs: log which sprite frame each
-     * building got and where ({@code colony-buildings}), and save the
+     * While the acceptance recorder runs: log what each slot of the
+     * building area shows ({@code colony-buildings}: its sprite frame, row
+     * and figures, {@link ClassicColonyBuildings.Model}), and save the
      * canvas as a still, whenever that changes (since M4.0 the screen is
      * hosted in the HUD, so the recorder's frames hold it too).
      */
     private void recordBuildings() {
         if (!ClassicFrameRecorder.on()) return;
-        final String drawn = this.buildingsDrawn.toString();
+        final String drawn = this.buildingsDrawn;
         if (drawn.equals(this.buildingsLogged)) return;
         this.buildingsLogged = drawn;
         final String name = "colony-" + (++stills);
         ClassicFrameRecorder.event("colony-buildings",
-            name + " " + this.colony.getId() + drawn);
+            name + " " + this.colony.getId() + " " + drawn);
         ClassicFrameRecorder.still(name, canvas());
     }
 
     /**
-     * The construction indicator: the colony's current build target, an icon
-     * and its name, plus the goods still needed to finish it — clicking
-     * anywhere in the band opens the build-queue screen. Mirrors FreeCol's own
-     * {@code ConstructionPanel} (same click target, same seam), over its own
-     * dark plate atop the buildings pane so it reads regardless of what
-     * building sprite happens to be underneath.
-     */
-    private void paintConstruction(Graphics2D g) {
-        g.setColor(TAG_BG);
-        g.fillRect(0, AREA_Y, BUILD_W, CONSTR_H);
-        g.setColor(GOLD);
-        g.drawRect(0, AREA_Y, BUILD_W - 1, CONSTR_H - 1);
-
-        final net.sf.freecol.common.model.BuildableType current
-            = this.colony.getCurrentlyBuilding();
-        g.setFont(font(6f, Font.PLAIN));
-        if (current == null) {
-            g.setColor(TAG_FG);
-            g.drawString(Messages.message("classic.buildQueue.empty"),
-                         3, AREA_Y + CONSTR_H - 3);
-            return;
-        }
-        final BufferedImage icon = this.lib.getSmallBuildableTypeImageWithWithSize(
-            current, this.colony.getOwner(),
-            new Dimension(CONSTR_H - 2, CONSTR_H - 2));
-        if (icon != null) g.drawImage(icon, 1, AREA_Y + 1, null);
-        g.setColor(TAG_FG);
-        g.drawString(Messages.getName(current), CONSTR_H + 2,
-                     AREA_Y + CONSTR_H - 3);
-    }
-
-    /**
-     * The buildings pane: every building in the colony on the parchment
-     * ({@link ClassicColonyChrome#paintGround}) -- its sprite, the
-     * colonists working inside it, its production tag and its name.  The
-     * original places each building at a fixed spot on the ground; this
-     * first slice flows them left-to-right in rows instead (a documented
-     * deviation until M4.2, the 15 slots), inside the building area.
+     * The building area (M4.2, M4.3; {@link ClassicColonyBuildings}): the
+     * 15 slots with their families' sprites or placeholders, the rows,
+     * the workers and the units outside, clipped to x 0-198, y 8-127; the
+     * figures become click targets (a press selects, as the first slice's).
      */
     private void paintBuildings(Graphics2D g0) {
+        final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
+        final List<Unit> outside = outside();
+        this.rowOrder = figureOrder();
+        this.area = ClassicColonyBuildings.model(this.colony, text, this.buildingArt,
+                                                 this.founding, outside, this.rowOrder);
+        this.buildingsDrawn = this.area.toString();
+        keepLayout(this.area.layout);
         final Graphics2D g = (Graphics2D) g0.create();
-        final Rectangle area = ClassicColonyLayout.BUILDING_AREA;
-        g.clipRect(area.x, area.y, area.width, area.height);
+        final Rectangle r = ClassicColonyLayout.BUILDING_AREA;
+        g.clipRect(r.x, r.y, r.width, r.height);
         try {
-            paintBuildingsIn(g);
+            ClassicColonyBuildings.paint(g, this.chrome, this.buildingArt, this.area,
+                                         this.selectedUnit, this.buildingNumbers);
         } finally {
             g.dispose();
         }
-    }
-
-    /** {@link #paintBuildings}, clipped to the building area. */
-    private void paintBuildingsIn(Graphics2D g) {
-        this.buildingBounds.clear();
-        this.buildingNames.clear();
-        this.buildingTargets.clear();
-        this.buildingsDrawn.setLength(0);
-        final boolean record = ClassicFrameRecorder.on();
-        int x = 4;
-        int y = AREA_Y + CONSTR_H + 5;
-        int rowH = 0;
-        for (Building b : this.colony.getBuildings()) {
-            final Integer frame = buildingFrame(b.getType().getId());
-            final BufferedImage img = (frame == null) ? null : buildingImage(frame);
-            final int w = (img != null) ? img.getWidth() : 24;
-            final int h = (img != null) ? img.getHeight() : 20;
-            if (x + w > BUILD_W - 4) {           // wrap
-                x = 4;
-                y += rowH + 12;
-                rowH = 0;
+        // The workers are click targets (select, then a building or tile);
+        // the units outside on the fence not yet (M4.8: the job menu).
+        for (ClassicColonyBuildings.Placed p : this.area.slots) {
+            if (p.slot.cls == ClassicColonyLayout.SlotClass.FENCE) continue;
+            for (ClassicColonyBuildings.Figure f : p.figures) {
+                if (f.unit == null) continue;
+                this.unitBounds.add(f.bounds());
+                this.unitTargets.add(f.unit);
             }
-            if (y + h > BAND_Y - 6) break;       // out of ground; rest are hidden
-            if (record) {
-                this.buildingsDrawn.append(' ')
-                    .append(shortId(b.getType().getId())).append('=')
-                    .append((frame == null) ? "-" : frame.toString())
-                    .append('@').append(x).append(',').append(y);
-                if (img != null) {
-                    this.buildingsDrawn.append(':').append(w).append('x').append(h);
-                }
-            }
-            if (img != null) {
-                g.drawImage(img, x, y, null);
-            } else {
-                g.setColor(WOOD);
-                g.fillRect(x, y + h - 6, w, 6);
-            }
-            paintWorkers(g, b.getUnitList(), x + 2, y + h - 2);
-            if (this.buildingNumbers) {
-                paintProductionTag(g, b.getProductionInfo(), x, y - 1);
-            }
-            // The name is drawn only for the hovered building (see paintHover),
-            // as in the original — so record the target instead of drawing now.
-            this.buildingBounds.add(new java.awt.Rectangle(x, y, w, h));
-            this.buildingNames.add(Messages.getName(b.getType()));
-            this.buildingTargets.add(b);
-            // A colonist is selected: hint every building it could move into.
-            if (this.selectedUnit != null) {
-                g.setColor(WORK_HINT);
-                g.drawRect(x, y, w - 1, h - 1);
-            }
-            rowH = Math.max(rowH, h);
-            x += w + 6;
         }
     }
 
     /**
-     * The hovered building's name over everything, the original's hover
-     * label (spec §1.2, M4.0 target 5): white FONTTINY on its black box,
-     * centred over the sprite and clamped to the building area, at the
-     * sprite's top (the class rule and NAMES.TXT's names come with the 15
-     * slots, M4.2; until then FreeCol's names).
+     * The colony keeps its picture's layout ({@code Colony.classicSlots}:
+     * a family's slot from its first showing on, M4.2), on our copy and, in
+     * a single player game, on the server's, whose state every save writes
+     * (as {@code ClassicGUI.markTip}).
+     *
+     * @param layout The layout ({@link ClassicColonyBuildings.Model#layout}).
+     */
+    private void keepLayout(String layout) {
+        if (layout == null || layout.isEmpty()
+            || layout.equals(this.colony.getClassicSlots())) return;
+        this.colony.setClassicSlots(layout);
+        final net.sf.freecol.server.FreeColServer server = (this.freeColClient == null)
+            ? null : this.freeColClient.getFreeColServer();
+        final Game sg = (server == null) ? null : server.getGame();
+        final Colony sc = (sg == null) ? null
+            : sg.getFreeColGameObject(this.colony.getId(), Colony.class);
+        if (sc != null && sc != this.colony) sc.setClassicSlots(layout);
+    }
+
+    /**
+     * The units outside the colony in the order they stand
+     * ({@link ClassicColonyBuildings#outside}): the screen's row order
+     * ({@link Units#order}, the units moved to the front first) within
+     * one figure job.
+     *
+     * @return The units.
+     */
+    private List<Unit> outside() {
+        return ClassicColonyBuildings.outside(this.buildingArt, this.colony,
+            (this.units == null) ? null : this.units::order);
+    }
+
+    /**
+     * The hovered slot's name over everything, the original's hover label
+     * (spec §1.2, M4.2 target 4): white FONTTINY on its black box, centred
+     * over the sprite and clamped to the building area, at the sprite's top
+     * for the houses, the mid slots and the fortification, centred for the
+     * large slots, the harbour and the trees; NAMES.TXT's names, «Bäume»,
+     * «(Außerhalb der Kolonie)».
      */
     private void paintHover(Graphics2D g) {
-        if (this.hovered < 0 || this.hovered >= this.buildingBounds.size()) return;
-        final java.awt.Rectangle r = this.buildingBounds.get(this.hovered);
-        final String name = this.buildingNames.get(this.hovered);
-        if (name == null || name.isEmpty()) return;
-        ClassicColonyChrome.paintHoverLabel(g, this.chrome, name, r.x, r.width, r.y);
+        if (this.hovered < 0 || this.hovered >= this.area.slots.size()) return;
+        final ClassicColonyBuildings.Placed p = this.area.slots.get(this.hovered);
+        if (p.label == null || p.label.isEmpty()) return;
+        ClassicColonyChrome.paintHoverLabel(g, this.chrome, p.label, p.slot.x,
+                                            p.slot.cls.w, p.labelY);
+    }
+
+    /**
+     * Where the colony's founding families stand (a clip's colony in the
+     * golden tests; null: the colony's own).
+     *
+     * @param f The layout, or null.
+     */
+    void setFounding(ClassicColonyBuildings.Founding f) {
+        this.founding = f;
+        repaint();
+    }
+
+    /** @return The building area as last painted (tests). */
+    ClassicColonyBuildings.Model area() {
+        return this.area;
+    }
+
+    /**
+     * Select a unit as a click on its figure does (tests: a clip's
+     * selected colonist).
+     *
+     * @param u The unit, or null.
+     */
+    void select(Unit u) {
+        this.selectedUnit = u;
+        repaint();
+    }
+
+    /** @return The selected unit, or null (tests). */
+    Unit selected() {
+        return this.selectedUnit;
     }
 
     /**
@@ -1239,7 +1142,20 @@ final class ClassicColonyPanel extends JPanel {
         }
     }
 
-    /** Left panel: the SoL / tory split and the units standing in the colony. */
+    /**
+     * Left panel: the SoL / Tory split (the first slice's until M4.5) and
+     * the original's figure row (L §5.2; {@link
+     * ClassicColonyBuildings#figureRow}): every colonist by his job now,
+     * then the units outside after 4 px more, at y 142 without shadow
+     * (V clip 020 #2260, #6560, #134173; clip 019 #1290: no artillery
+     * there, it stands only in the musket panel's «Vorhandene Einheiten»).
+     * A press on a colonist selects him (as on his building or tile); a
+     * press on a unit standing in the colony opens its box (@COLONYUNIT,
+     * M2) on the release, as the first slice's row did.  Until the musket
+     * panel (M4.7) lists them, the colony tile's other units (artillery, a
+     * wagon train, a treasure) follow at the row's end so that their box
+     * stays at hand (not the original's).
+     */
     private void paintPopulation(Graphics2D g) {
         final int sol = this.colony.getSonsOfLiberty();
         final int count = this.colony.getUnitCount();
@@ -1258,33 +1174,84 @@ final class ClassicColonyPanel extends JPanel {
         for (Unit u : tile.getUnitList()) {
             if (!u.isNaval()) standing.add(u);         // ships go in the port
         }
-        final List<Unit> row = (this.units == null) ? standing
+        final List<Unit> ordered = (this.units == null) ? standing
             : this.units.order(standing);
-        final int pitch = bandPitch(row.size());
-        int x = PANEL1_X + 3;
-        for (Unit u : row) {
-            final Rectangle r = new Rectangle(x, PANEL_Y + 12, 16, 16);
-            paintStanding(g, u, r.x, r.y);
-            if (u == this.selectedUnit) {
-                g.setColor(PICKED);
-                g.drawRect(r.x, r.y, r.width - 1, r.height - 1);
-            }
-            this.bandUnits.add(u);
-            this.bandBounds.add(r);
-            if (this.units == null) {
+        final List<Unit> outside = outside();
+        final List<Unit> row = new ArrayList<>(outside);
+        for (Unit u : ordered) if (!row.contains(u)) row.add(u);
+        final List<ClassicColonyBuildings.Figure> figures
+            = ClassicColonyBuildings.figureRow(this.buildingArt, this.rowOrder, row);
+        this.figures = figures;
+        final Graphics2D g2 = (Graphics2D) g.create();
+        final Rectangle left = ClassicColonyLayout.LEFT_PANEL;
+        g2.clipRect(left.x, left.y, left.width, left.height);
+        try {
+            ClassicColonyBuildings.paintFigureRow(g2, this.chrome, this.buildingArt,
+                                                  figures, this.selectedUnit);
+        } finally {
+            g2.dispose();
+        }
+        for (ClassicColonyBuildings.Figure f : figures) {
+            final Rectangle r = f.bounds();
+            if (standing.contains(f.unit)) {
+                this.bandUnits.add(f.unit);
+                this.bandBounds.add(r);
+                if (this.units == null) {
+                    this.unitBounds.add(r);
+                    this.unitTargets.add(f.unit);
+                }
+            } else {
                 this.unitBounds.add(r);
-                this.unitTargets.add(u);
+                this.unitTargets.add(f.unit);
             }
-            x += pitch;
         }
     }
 
     /**
-     * The step between the cells of the colony's row: the original's 18
-     * px (clip 019 #1290: the dragoon from x 213, the artillery from 231,
-     * 249, 267), closer when more units stand there than 18 px cells fit
-     * in the band's left panel, so that every one stays in it and can be
-     * clicked (the topmost wins where cells overlap).
+     * Each colony's figure row this turn (EDT): its game, the turn's
+     * number and the colonists' order ({@link
+     * ClassicColonyBuildings#keepOrder}).
+     */
+    private static final java.util.Map<String, Object[]> figureOrders
+        = new java.util.HashMap<>();
+
+    /**
+     * The colonists' order in the figure row: by job at the turn's first
+     * paint of the colony, then kept (a colonist with a new job keeps his
+     * place, one who joined follows at the end; V during a visit, #3500,
+     * #46350, #47291, #130343; by job again in a later turn, #134173; I:
+     * the original's moment of sorting is not seen, ours the turn's first
+     * look at the colony).
+     *
+     * @return The colonists in the row's order.
+     */
+    @SuppressWarnings("unchecked")
+    private List<Unit> figureOrder() {
+        final List<Unit> byJob = ClassicColonyBuildings.colonistsByJob(this.buildingArt,
+                                                                       this.colony);
+        final Game game = this.colony.getGame();
+        final int turn = (game == null || game.getTurn() == null) ? -1
+            : game.getTurn().getNumber();
+        final Object[] was = figureOrders.get(this.colony.getId());
+        final List<Unit> order = (was != null && was[0] == game && (Integer) was[1] == turn)
+            ? ClassicColonyBuildings.keepOrder((List<Unit>) was[2], byJob) : byJob;
+        figureOrders.put(this.colony.getId(), new Object[] { game, turn, order });
+        return order;
+    }
+
+    /** Forget the figure rows' orders (tests: each frame's state is a fresh visit). */
+    static void forgetFigureOrders() {
+        figureOrders.clear();
+    }
+
+    /**
+     * The step between the cells of the musket panel's «Vorhandene
+     * Einheiten» (M4.7; the first slice drew them in the left panel, which
+     * shows the original's figure row since M4.3): the original's 18 px
+     * (clip 019 #1290: the dragoon from x 213, the artillery from 231,
+     * 249, 267), closer when more units stand there than 18 px cells fit,
+     * so that every one can be clicked (the topmost wins where cells
+     * overlap).
      *
      * @param n The number of units.
      * @return The step, 18 at most, 1 at least.
@@ -1460,12 +1427,6 @@ final class ClassicColonyPanel extends JPanel {
         final int w = Math.max(1, (int) Math.round(img.getWidth() * s));
         final int h = Math.max(1, (int) Math.round(img.getHeight() * s));
         g.drawImage(img, x + (size - w) / 2, y + (size - h) / 2, w, h, null);
-    }
-
-    /** The last segment of a FreeCol id ({@code model.building.townHall} → {@code townHall}). */
-    private static String shortId(String id) {
-        final int i = id.lastIndexOf('.');
-        return (i < 0) ? id : id.substring(i + 1);
     }
 
     /** A font in <em>virtual</em> pixels — the paint transform scales it up. */

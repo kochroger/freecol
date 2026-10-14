@@ -3498,14 +3498,51 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   (x 0–198, y 8–127), the black column x 199, the wood panel x 200–319 with the 3×3
   map's black frame x 223–296 × y 31–104, `COLONY.PIK` at (0,128) unscaled with its
   first row black. All drawn from the pack in the original's colours.
-- **Buildings pane** (left) — the colony's buildings on that ground, each drawn
-  from the original **`BUILDING.SS`** sprite
-  set with the colonists working inside it and a black production tag
-  (`amount` + goods icon). Names show **on hover** only (as in the original),
-  which also keeps them from overlapping; the hover targets are the building
-  bounds recorded during paint. *This slice flows the buildings left-to-right in
-  rows rather than at the original's fixed ground positions — a documented
-  deviation pending the expert's slot map.*
+- **Building area** (M4.2, M4.3, `ClassicColonyBuildings`; every number in
+  `ClassicColonyLayout`) — the original's **15 fixed slots** (L §3.1: M1 (6,14),
+  H2 (145,15), H1 (56,13), L1 (87,11), H3 (173,18), H4 (8,41), H5 (37,45), M2
+  (128,53), H7 (96,53), H6 (67,54), W (123,55), M3 (10,76), L2 (66,87), M4 (15,102),
+  X (123,106); classes 23×27, 44×22, 53×37, the harbour 75×48, the fortification
+  73×18), drawn in that order: each of the 15 families (upgrade chains) at its
+  built level's `BUILDING.SS` frame (= NAMES.TXT `@BUILDING` row; buildset §6),
+  else the class's placeholder (trees 042/043/044, the water scene 045, the
+  fence 016); FreeCol's own base levels (chapel, depot, country) are
+  placeholders; the Lagerhaus 015, with Ställe 047, Ställe alone 046, the
+  expansion's white «2» at sprite + (21,8). **Which family in which slot:** the
+  founding set from the colony's id (FreeCol keeps no layout; the original's is
+  random per colony): the Rathaus in L1, the Zimmerei in one of the mid slots,
+  the five craft houses in five house slots; the harbour W, the fortification X,
+  the Kirche the other large slot; every other family when it first shows, in the
+  order its building was made (its FreeCol id; an upgrade keeps the object), the
+  first free slot of its class in the draw order (V: Verlag → H2 with H1 free,
+  Lagerhaus → M1; dago: the Lagerhaus after the College). The colony keeps the
+  layout (`Colony.classicSlots`, a new optional attribute of the save, like
+  `Player.classicTips`; written by the screen on our copy and, in a single player
+  game, the server's): a building keeps its slot across reloads and later
+  completions. Without it (an old save, another player's server) the layout is
+  rebuilt from the ids. **On and in the buildings:** the
+  production row (dago §2.6 with S_large 30: a spaced row up to w + 1 apart, a
+  stack at pitch 1 with its count label at (first + 2, y + 1) when «Beschriftung an
+  Gebäuden» is on), the most the building can make with its workers (FreeCol's
+  maximum production: a row even without the input, as the original), none on a
+  building that makes nothing; the workers as their type's map sprite (an expert
+  81 + his expertise, a free colonist 100, the veteran soldier 059, the seasoned
+  scout 060) at the class's places (L +35 / +31 +40 / +27 +35 +43; M +27 / +22 +33
+  (M2 +23 +33); H +9 (H3, H7 +8) / from +5 at floor((15 − w)/(n − 1))) with a
+  2-px shadow in ink 95, in the figure row's order; the selected one's green
+  frame x − 3…x + w, y + 1…y + 16; the units outside (the persons on the colony
+  tile, by their figure's job) on the fortification slot at 163 − ceil(11n/2) +
+  11i, y 111, with their role's sprite (the soldier 102). **Hover label:** the
+  slot under the pointer (the topmost sprite rectangle), NAMES.TXT's name
+  («Hafenanlagen», «Sägewerk», «Haus des Gerbers»), «Bäume» on a placeholder,
+  « (Außerhalb der Kolonie)» on the fence (a leading blank: its box from x 110,
+  V clip 020 ×5 and clip008 ×2) or «Festung (Außerhalb der Kolonie)», at the
+  sprite's top for houses, mid slots and the fortification, centred for the
+  large slots, the harbour and the trees. The pack's index 12 (#FF5555, 10 pixels
+  of BUILDING.SS) is drawn in the game palette's #FF0000. The first slice's
+  black construction plate is gone (the original shows the build only in its
+  hammer panel); until ÄNDERN (M4.7) a press on the right panel opens the build
+  list.
 - **Tile pane** (right) — the **3×3 work-tile grid** on the wood panel
   (`WOODTILE.SS`), the colony in the centre cell and its eight neighbours around
   it. Each cell is placed by the work tile's compass `Direction` from the colony
@@ -3517,9 +3554,15 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   original's finer art is M4.4's open point), plus the colonist working it
   (green-boxed) and its production tag, clipped to its cell.
 - **Bottom band** — the original **`COLONY.PIK`** chrome (320×72), with the live
-  figures over it: the SoL/tory split and the units standing in the colony (left),
-  the ships in port or the empty-dock caption (middle), the net production (right)
-  — the first slice's until M4.5–M4.7 — and the original's 16-box **warehouse**
+  figures over it: the SoL/tory split (the first slice's until M4.5) and the
+  original's **figure row** (M4.3; L §5.2: every colonist by his job now, NAMES
+  `@JOB`, then the units outside after 4 px more, at y 142 without shadow, pitch
+  w + 2 closing as the row fills; during a turn a colonist keeps his place when his
+  job changes and a newcomer goes to the colonists' end, V clip 020 ×4; a press on
+  a colonist selects him, on a unit standing in the colony opens its box as in M2;
+  until the musket panel lists them, artillery, wagon trains and treasures follow at
+  its end), the ships in port or the empty-dock caption (middle), the net
+  production (right) — the first slice's until M4.6–M4.7 — and the original's 16-box **warehouse**
   row (M4.1): ICONS.SS.(22 + i) at (19i + 10 − floor(w/2), 181), the amount at
   glyph top 194 and x = 19i + 1 + floor((20 − 4d)/2), its last two digits in ink 61
   and higher ones in ink 148, no capacity mark, the selected good's box framed
@@ -3535,8 +3578,13 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   (`ClassicColonyDissolve`: the changed rectangles' pixels, 19 frames after the
   complete screen, in 55 frames, the woodcuts' fixed order) and the harness's
   `sdrag ax ay bx by [shift]`. Every formula is in `ClassicColonyLayout`.
-- **Golden tests** (`ClassicColonyChromeTest`, `ClassicColonyKitTest`, with the pack
-  and `-Dclassic.clips`): the state of clip 020 #2260, #14817, #123003, #134173 and
+- **Golden tests** (`ClassicColonyChromeTest`, `ClassicColonyKitTest`,
+  `ClassicColonyBuildingsTest`, with the pack and `-Dclassic.clips`): the building
+  area (x 0–198, y 8–127) and the figure row (x 0–118, y 142–158) of 14 frames of
+  clip 020 (Base 1539, 1546, 1561, 1571, Provisorische Kolonie, Silver City; slots,
+  rows, stacks, workers, selection, 1–3 units outside, hover labels; a visit
+  replayed where the row's order depends on it) 0 px, the arrow and the cursor left
+  out (S2); the state of clip 020 #2260, #14817, #123003, #134173 and
   #118448 rebuilt in a test game, the screen's canvas against the frames: top
   line, separators, wood panel, band row, warehouse and exit 0 px; the parchment
   and the band picture 0 px where the original draws nothing over them (the
@@ -3544,22 +3592,17 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   #10116) and the hover label (#2398, #96680) 0 px; the dissolve against the
   clip's three completions (start, length, the end inside its rectangles 0 px).
 - **The numbers** follow SPIEL "Koloniebericht-Optionen" (W14, read at each
-  paint): "Beschriftung an Gebäuden" the production tags on the buildings,
+  paint): "Beschriftung an Gebäuden" the count labels of the buildings' stacked
+  rows (since M4.3; I: the option's meaning in the original),
   "Beschriftung an Waren und Terrain" those on the work tiles and the
   figures under the net production. The warehouse amounts always show.
   The figures are FreeCol's, a house improvement on the original's icon
   rows (Regeln-Auswahl).
 
-**`BUILDING.SS` frame map (`BUILDING_FRAMES`, plan D0e).** The seven buildings
-a new colony starts with are matched on the original's colony screen (clip008,
-population 1): town hall 9, carpenter's 35, distiller's 27, weaver's 21,
-tobacconist's 24, fur trader's 32, blacksmith's 39. Each house's two upgrades
-are inferred as the next two frames (22/23, 25/26, 28/29, 33/34, 40/41; lumber
-mill 36), church and cathedral as the other two 53×37 frames 37/38, walls and
-harbour scenes by size and slot. The custom house and the armory chain draw no
-sprite until a capture shows them (the old townHall 19 / customHouse 9 were
-wrong: 9 is the town hall). Schools, chapel, press, storage and stables are
-older guesses by look; the hover name keeps a mis-mapped sprite legible.
+**`BUILDING.SS` frame map** (`ClassicColonyBuildings.frameOf`, since M4.2 buildset
+§6): the frame is the NAMES.TXT `@BUILDING` row (stockade 0 … blacksmith's 39–41,
+the armory chain 3–5, the schools 12–14, the Lagerhaus 15, the custom house 18,
+the press 19/20); the first slice's table (plan D0e) had 25 of 39 entries wrong.
 
 **Verified live (2026-07-14):** sailed the start ship to land, disembarked a
 pioneer (the multi-unit disembark choice dialog now works), founded a colony with
@@ -3569,6 +3612,10 @@ screen renders (buildings, the filled 3×3 grid with the colony centred, the
 Escape closes it. 0 SEVERE.
 
 ### The build queue (`ClassicBuildQueuePanel`) — the first hard blocker, closed
+
+*Since M4.2 the construction indicator described below is gone (the original
+shows the build only in its hammer panel): until the right panel's ÄNDERN (M4.7)
+a press on the right panel (x 208–302, y 129–177) opens the list.*
 
 Until this slice, `GUI.showBuildQueuePanel(Colony)` returned `null` unconditionally (an unoverridden
 no-op): a colony could accumulate hammers/tools but the player had no way to ever tell it what to

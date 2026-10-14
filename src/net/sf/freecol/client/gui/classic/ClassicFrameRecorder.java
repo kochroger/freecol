@@ -100,7 +100,8 @@ import javax.swing.JComponent;
  * {@code terrain}, {@code focus}, {@code pan} or {@code default}),
  * {@code music-request}, {@code music-mode} (the jukebox switched to the
  * title or the in-game playlist), {@code pref}, {@code colony-buildings}
- * (the sprite frame and place of each building on the colony screen),
+ * (each slot of the colony screen's building area: its sprite frame, row
+ * and figures, {@link ClassicColonyBuildings.Model}),
  * {@code still}, {@code terrain} (W6e: whether the pack holds the index
  * pipeline, {@code index ...} or {@code fallback ...}; a {@link #note},
  * so it is also a line of {@code summary.txt}), {@code palette-step}
