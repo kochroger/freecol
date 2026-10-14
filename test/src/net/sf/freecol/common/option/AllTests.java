@@ -28,6 +28,7 @@ public class AllTests {
     public static Test suite() {
 	TestSuite suite = new TestSuite("Test for net.sf.freecol.common.option");
         suite.addTestSuite(OptionTest.class);
+        suite.addTestSuite(OriginalWorldSettingsTest.class);
         return suite;
     }
 

@@ -53,6 +53,12 @@ public class LandMap {
     /** Number of land tiles on the map. */
     private int numberOfLandTiles;
 
+    /**
+     * How far inside the box of the original's land its walks start
+     * ({@link #createOriginalLandMap}), in columns and in tiles of rows.
+     */
+    private static final int START_MARGIN_X = 3, START_MARGIN_Y = 4;
+
 
     /**
      * Create a new land map with specified dimensions.
@@ -105,6 +111,11 @@ public class LandMap {
         int minNumberOfTiles = mgo.getInteger(MapGeneratorOptions.LAND_MASS)
             * getWidth() * getHeight() / 100;
         int gen = mgo.getSelection(MapGeneratorOptions.LAND_GENERATOR_TYPE);
+        if (gen == MapGeneratorOptions.LAND_GENERATOR_ORIGINAL) {
+            createOriginalLandMap(mgo);
+            cleanMap();
+            return;
+        }
         logger.info("Using land generator "
             + mgo.getSelectionName(MapGeneratorOptions.LAND_GENERATOR_TYPE)
             + " to make " + width + "x" + height + " map"
@@ -152,6 +163,19 @@ public class LandMap {
      */
     public boolean isLand(int x, int y) {
         return (isValid(x, y)) ? this.map[x][y] : false;
+    }
+
+    /**
+     * Is a row one of the polar rows this land map fills with land
+     * (the generators' {@code addPolarRegions}: the first
+     * {@code Topology.polarHeight()} rows and the last one more)?
+     *
+     * @param y The row.
+     * @return True for a polar row.
+     */
+    public boolean isPolarRow(int y) {
+        final int polarHeight = Topology.current().polarHeight();
+        return y < polarHeight || y >= this.height - 1 - polarHeight;
     }
 
     /**
@@ -287,6 +311,107 @@ public class LandMap {
             setLand(x, y, distanceToEdge);
         }
         addPolarRegions();
+    }
+
+    /**
+     * Create the land of the original game's New World
+     * ({@link OriginalWorld}): pieces of land, each a random walk of
+     * three-tile stamps (the tile and its east and south neighbours, on
+     * the isometric map the matching two edge neighbours) in random
+     * edge directions, until the land has the amount the map drew for
+     * its LANDMASSE and LANDFORM.  As in Civilization's generator, a
+     * walk ends when it leaves its box; the land stops when half a
+     * piece more would reach the amount, so that the last piece
+     * overshoots it about as often and as far as it falls short.
+     *
+     * The box keeps the land off the edges so that every row still
+     * leads to Europe on both sides: the high seas need
+     * {@code distanceToHighSea} tiles of water from any land and lie
+     * inside the outer ring, where a map has one; one row of water
+     * separates the land from the polar rows.  The original's land runs
+     * from column 3-5 to 51-53 and from row 2 to 69 of its 58x72 map;
+     * here it is columns 6 to 51 and rows 2 to 68 on that map.
+     *
+     * @param mgo The map generator options.
+     */
+    private void createOriginalLandMap(OptionGroup mgo) {
+        final Topology topology = Topology.current();
+        final int mass = OriginalWorld.getLandMass(mgo);
+        final int form = OriginalWorld.getLandForm(mgo);
+        final int target = OriginalWorld.drawLand(mass, form,
+            getWidth(), getHeight(), this.cache);
+        final int shortest = OriginalWorld.getShortestWalk(form);
+        final int longest = OriginalWorld.getLongestWalk(form);
+        // The box of the land tiles.
+        final int ring = (topology == Topology.SQUARE) ? 1 : 0;
+        final int sea = mgo.getInteger(MapGeneratorOptions.DISTANCE_TO_HIGH_SEA);
+        final int xMin = ring + sea + 1;
+        final int xMax = getWidth() - 1 - ring - sea - 1;
+        final int polar = topology.polarHeight();
+        final int gap = topology.rowFactor();
+        final int yMin = polar + gap;                    // rows 0..polar-1 are polar
+        final int yMax = getHeight() - 1 - polar - 1 - gap; // and h-1-polar..h-1
+        final List<Direction> edges = topology.edgeDirections();
+        // The stamp: the tile and its "east" and "south" edge neighbours
+        // (square: E and S; the isometric edges are turned by 45 degrees).
+        final Direction stampA = edges.get(1), stampB = edges.get(2);
+        logger.info("Using the original's land generator to make "
+            + width + "x" + height + " map with " + target
+            + " land tiles (mass " + mass + ", form " + form
+            + ", walks " + shortest + "-" + longest
+            + ", box x " + xMin + "-" + xMax + " y " + yMin + "-" + yMax + ")");
+        if (xMax <= xMin || yMax <= yMin) return;
+        // The walks start further in (the original's land thins out over
+        // the outer 4-5 columns and rows of its box).
+        final int sxMin = Math.min(xMin + START_MARGIN_X, (xMin + xMax) / 2);
+        final int sxMax = Math.max(xMax - START_MARGIN_X, sxMin);
+        final int syMin = Math.min(yMin + START_MARGIN_Y * gap, (yMin + yMax) / 2);
+        final int syMax = Math.max(yMax - START_MARGIN_Y * gap, syMin);
+        final int room = (xMax - xMin + 1) * (yMax - yMin + 1);
+        final int want = Math.min(target, room * 9 / 10);
+        int pieces = 0;
+        // The new tiles of the recent pieces (a running mean): the land
+        // stops a half piece short of the amount, so that it overshoots
+        // and falls short of it alike, whatever the size of the pieces.
+        double recent = 0.0;
+        while (this.numberOfLandTiles + recent / 2 < want && pieces < 100000) {
+            pieces++;
+            final int before = this.numberOfLandTiles;
+            int x = sxMin + this.cache.nextInt(sxMax - sxMin + 1);
+            int y = syMin + this.cache.nextInt(syMax - syMin + 1);
+            final int steps = shortest
+                + this.cache.nextInt(longest - shortest + 1);
+            for (int i = 0; i < steps; i++) {
+                stampLand(x, y, xMin, xMax, yMin, yMax);
+                Position p = new Position(x, y);
+                Position a = new Position(p, stampA);
+                stampLand(a.getX(), a.getY(), xMin, xMax, yMin, yMax);
+                Position b = new Position(p, stampB);
+                stampLand(b.getX(), b.getY(), xMin, xMax, yMin, yMax);
+                Position n = new Position(p,
+                    edges.get(this.cache.nextInt(edges.size())));
+                x = n.getX();
+                y = n.getY();
+                if (x < xMin || x > xMax || y < yMin || y > yMax) break;
+            }
+            recent = 0.75 * recent + 0.25 * (this.numberOfLandTiles - before);
+        }
+        addPolarRegions();
+    }
+
+    /**
+     * Set a tile to land if it lies in the box of the original's land.
+     *
+     * @param x The x coordinate.
+     * @param y The y coordinate.
+     * @param xMin The westernmost land column.
+     * @param xMax The easternmost land column.
+     * @param yMin The northernmost land row.
+     * @param yMax The southernmost land row.
+     */
+    private void stampLand(int x, int y, int xMin, int xMax,
+                           int yMin, int yMax) {
+        if (x >= xMin && x <= xMax && y >= yMin && y <= yMax) setLand(x, y);
     }
 
     /**

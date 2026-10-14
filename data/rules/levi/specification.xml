@@ -34,7 +34,9 @@
     defeated when his last colony is lost (from the mandatory colony
     year on, and at once after the declaration), not when his last
     coastal colony is lost; the game goes on open-ended after
-    independence (no victory).  The original's colony names, leader
+    independence (no victory).  The map is the original's New World
+    (part P1): its land generator and its world questions LANDMASSE and
+    LANDFORM, at the end of this file.  The original's colony names, leader
     names and Spain's home port come with the names (NameCache), keyed
     by the parent "classic" (mod.xml) and by "levi".
 
@@ -146,6 +148,54 @@
              as in the original. -->
         <booleanOption id="model.option.lastColonyDefeat"
                        defaultValue="true"/>
+      </optionGroup>
+    </optionGroup>
+    <optionGroup id="mapGeneratorOptions">
+      <optionGroup id="mapGeneratorOptions.landGenerator">
+        <!-- The original's New World (OriginalWorld, LandMap): the
+             land grows from random walks, as in Civilization's
+             generator, until it has the amount the original gives
+             the world questions LANDMASSE and LANDFORM (Roger's 13
+             games of 2026-10-13: everything Normal 872 and 901 land
+             tiles, Klein 673 and 732, Gross 1079 and 1184,
+             Inselgruppe 698, Grosse Kontinente 1191), each map
+             varied by 5 %.  Both topologies; landMass is not used.
+             The classic and freecol rules keep FreeCol's
+             generators. -->
+        <selectOption id="model.option.landGeneratorType"
+                      defaultValue="4" localizedLabels="true">
+          <selectValue label="model.option.landGeneratorType.classic"
+                       value="0"/>
+          <selectValue label="model.option.landGeneratorType.continent"
+                       value="1"/>
+          <selectValue label="model.option.landGeneratorType.archipelago"
+                       value="2"/>
+          <selectValue label="model.option.landGeneratorType.islands"
+                       value="3"/>
+          <selectValue label="model.option.landGeneratorType.original"
+                       value="4"/>
+        </selectOption>
+        <!-- LANDMASSE (GAME.TXT @CLAND): Klein / Normal / Gross. -->
+        <selectOption id="model.option.originalLandMass"
+                      defaultValue="1" localizedLabels="true">
+          <selectValue label="model.option.originalLandMass.small"
+                       value="0"/>
+          <selectValue label="model.option.originalLandMass.normal"
+                       value="1"/>
+          <selectValue label="model.option.originalLandMass.large"
+                       value="2"/>
+        </selectOption>
+        <!-- LANDFORM (GAME.TXT @CCONT): Inselgruppe / Normal / Grosse
+             Kontinente. -->
+        <selectOption id="model.option.originalLandForm"
+                      defaultValue="1" localizedLabels="true">
+          <selectValue label="model.option.originalLandForm.islands"
+                       value="0"/>
+          <selectValue label="model.option.originalLandForm.normal"
+                       value="1"/>
+          <selectValue label="model.option.originalLandForm.continents"
+                       value="2"/>
+        </selectOption>
       </optionGroup>
     </optionGroup>
   </options>

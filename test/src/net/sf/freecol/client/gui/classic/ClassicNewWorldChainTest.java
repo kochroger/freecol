@@ -227,6 +227,9 @@ public class ClassicNewWorldChainTest extends TestCase {
         assertEquals("model.nation.dutch", s.nationId);
         assertEquals("model.difficulty.veryEasy", s.difficultyId);
         assertEquals("Levi", s.playerName);
+        // «Neue Welt» is everything Normal until «Individualisieren» (P1).
+        assertEquals(net.sf.freecol.common.option.OriginalWorldSettings
+                     .CLASSIC_UI_NEW_WORLD, s.world);
 
         final ClassicNewWorldChain h = chain();
         h.last();

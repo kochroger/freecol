@@ -110,6 +110,7 @@ import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.common.option.BooleanOption;
 import net.sf.freecol.common.option.MapGeneratorOptions;
+import net.sf.freecol.common.option.OriginalWorldSettings;
 import net.sf.freecol.common.resources.ImageCache;
 import net.sf.freecol.common.resources.ResourceManager;
 import net.sf.freecol.server.FreeColServer;
@@ -1074,11 +1075,26 @@ public class ClassicGUI extends GUI {
         final String nationId;
         /** The leader's name, or null for {@code FreeCol.getName()}. */
         final String playerName;
+        /**
+         * The answers to the original's world questions: the title
+         * menu's «Neue Welt» is {@link
+         * OriginalWorldSettings#CLASSIC_UI_NEW_WORLD} (everything
+         * Normal) until «Individualisieren» has its screen.
+         */
+        final OriginalWorldSettings world;
 
         NewWorldSetup(String difficultyId, String nationId, String playerName) {
+            this(difficultyId, nationId, playerName,
+                 OriginalWorldSettings.CLASSIC_UI_NEW_WORLD);
+        }
+
+        NewWorldSetup(String difficultyId, String nationId, String playerName,
+                      OriginalWorldSettings world) {
             this.difficultyId = difficultyId;
             this.nationId = nationId;
             this.playerName = playerName;
+            this.world = (world == null)
+                ? OriginalWorldSettings.CLASSIC_UI_NEW_WORLD : world;
         }
 
         /** FreeCol's current defaults (command line or rules difficulty). */
@@ -1205,13 +1221,12 @@ public class ClassicGUI extends GUI {
                 }
                 logger.info("ClassicGUI: new game on the rules " + spec.getId()
                     + ", difficulty " + spec.getDifficultyLevel());
-                // A new game is played on the original's square map, with
-                // its map size and land shares, unless -Dfreecol.topology
-                // says otherwise.  The server's new map takes the topology
-                // in use, so set it before the server starts.
-                Topology.setCurrent(Topology.forNewGame(Topology.SQUARE));
-                MapGeneratorOptions.applyTopologyDefaults(
-                    spec.getMapGeneratorOptions());
+                // A new game is played on the original's square map (unless
+                // -Dfreecol.topology says otherwise) and in the original's
+                // New World of the setup's answers.  The server's new map
+                // takes the topology in use, so set it before the server
+                // starts.
+                prepareNewWorldMap(spec, setup);
                 if (setup.playerName != null) {
                     final String name = setup.playerName.trim();
                     if (!isFreePlayerName(spec, name, setup.nationId)) {
@@ -1239,6 +1254,25 @@ public class ClassicGUI extends GUI {
                     StringTemplate.key("classic.mainMenu.startFailed"));
             }
         });
+    }
+
+    /**
+     * Prepare the map of a new game in the New World: the topology
+     * ({@code -Dfreecol.topology}, else the original's square map), the
+     * topology's map options ({@link MapGeneratorOptions#applyTopologyDefaults})
+     * and the original's world of the setup's answers
+     * ({@link OriginalWorldSettings#apply}; rules without the original's
+     * world keep their own).
+     *
+     * @param spec The new game's rules.
+     * @param setup The player's choices.
+     */
+    static void prepareNewWorldMap(Specification spec, NewWorldSetup setup) {
+        Topology.setCurrent(Topology.forNewGame(Topology.SQUARE));
+        MapGeneratorOptions.applyTopologyDefaults(spec.getMapGeneratorOptions());
+        final OriginalWorldSettings world = (setup == null)
+            ? OriginalWorldSettings.CLASSIC_UI_NEW_WORLD : setup.world;
+        world.apply(spec.getMapGeneratorOptions());
     }
 
     /**

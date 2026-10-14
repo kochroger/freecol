@@ -60,6 +60,7 @@ import net.sf.freecol.common.model.LandMap;
 import net.sf.freecol.common.model.LostCityRumour;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Nation;
+import net.sf.freecol.common.model.OriginalWorld;
 import net.sf.freecol.common.model.NationType;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Specification;
@@ -188,6 +189,10 @@ public class SimpleMapGenerator implements MapGenerator {
      */
     private int getApproximateLandCount(Game game) {
         final OptionGroup mapOptions = game.getMapGeneratorOptions();
+        // The original's land is not a share of the map: count it.
+        if (OriginalWorld.isOriginal(mapOptions) && game.getMap() != null) {
+            return OriginalWorld.countLand(game.getMap());
+        }
         return mapOptions.getInteger(MapGeneratorOptions.MAP_WIDTH)
             * mapOptions.getInteger(MapGeneratorOptions.MAP_HEIGHT)
             * mapOptions.getInteger(MapGeneratorOptions.LAND_MASS) / 100;

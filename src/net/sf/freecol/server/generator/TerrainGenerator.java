@@ -30,6 +30,7 @@ import java.util.logging.Logger;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.LandMap;
 import net.sf.freecol.common.model.Map;
+import net.sf.freecol.common.model.OriginalWorld;
 import net.sf.freecol.common.model.Area;
 import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.Region;
@@ -74,6 +75,13 @@ public class TerrainGenerator {
     private List<TileType> landTileTypes = null;
     private List<TileType> oceanTileTypes = null;
 
+    /**
+     * Is the map the original's New World ({@link OriginalWorld}): its
+     * climate bands, no arctic outside the polar rows, and the polar
+     * rows all arctic?  Set by {@link #generateMap}.
+     */
+    private boolean original = false;
+
 
     /**
      * Creates a new {@code TerrainGenerator}.
@@ -105,10 +113,26 @@ public class TerrainGenerator {
      */
     private int getApproximateLandCount(Game game) {
         final OptionGroup mapOptions = game.getMapGeneratorOptions();
+        // The original's land is not a share of the map: count it.
+        if (OriginalWorld.isOriginal(mapOptions) && game.getMap() != null) {
+            return OriginalWorld.countLand(game.getMap());
+        }
         return mapOptions.getInteger(MapGeneratorOptions.MAP_WIDTH)
             * mapOptions.getInteger(MapGeneratorOptions.MAP_HEIGHT)
             * mapOptions.getInteger(MapGeneratorOptions.LAND_MASS)
             / 100;
+    }
+
+    /**
+     * Is a tile kept as it is by the mountains, hills and rivers of the
+     * original's New World: a polar tile, which stays arctic (the
+     * original's polar rows are all ice)?
+     *
+     * @param tile The {@code Tile} to check.
+     * @return True if nothing may be built on the tile.
+     */
+    private boolean offLimits(Tile tile) {
+        return this.original && tile.isPolar();
     }
 
     /**
@@ -197,6 +221,13 @@ public class TerrainGenerator {
         default:
             break;
         }
+        if (this.original) {
+            // The original's climate bands (OriginalWorld).
+            poleTemperature
+                = OriginalWorld.getPoleTemperature(temperaturePreference);
+            equatorTemperature
+                = OriginalWorld.getEquatorTemperature(temperaturePreference);
+        }
 
         int temperatureRange = equatorTemperature-poleTemperature;
         int localeTemperature = poleTemperature + (90 - Math.abs(latitude))
@@ -204,10 +235,13 @@ public class TerrainGenerator {
         int temperatureDeviation = 7; // +/- 7 degrees randomization
         localeTemperature += this.cache.nextInt(temperatureDeviation * 2)
             - temperatureDeviation;
-        localeTemperature = limitToRange(localeTemperature, -20, 40);
+        localeTemperature = limitToRange(localeTemperature,
+            (this.original) ? OriginalWorld.LOWEST_LAND_TEMPERATURE : -20, 40);
 
         // humidity calculation
         int localeHumidity = spec.getRange(MapGeneratorOptions.HUMIDITY);
+        // The original's climates are milder than the option's values.
+        if (this.original) localeHumidity = OriginalWorld.getHumidity(localeHumidity);
         int humidityDeviation = 20; // +/- 20% randomization
         localeHumidity += this.cache.nextInt(humidityDeviation * 2)
             - humidityDeviation;
@@ -462,7 +496,7 @@ public class TerrainGenerator {
 
         // Generate the mountain ranges
         List<Tile> tiles = new ArrayList<>();
-        map.forEachTile(t -> t.isGoodMountainTile(),
+        map.forEachTile(t -> t.isGoodMountainTile() && !offLimits(t),
                         t -> tiles.add(t));
         randomShuffle(logger, "Randomize mountain tiles", tiles, this.random);
 
@@ -492,7 +526,7 @@ public class TerrainGenerator {
                 // to surrounding tiles if suitable and not already a
                 // mountain
                 for (Tile t : tile.getSurroundingTiles(1)) {
-                    if (!t.isGoodHillTile()
+                    if (!t.isGoodHillTile() || offLimits(t)
                         || t.getType().isMountains()) continue;
                     int r = this.cache.nextInt(8);
                     if (r < 2) {
@@ -513,7 +547,7 @@ public class TerrainGenerator {
                     }
                 }
                 tile = tile.getNeighbourOrNull(direction);
-                if (tile == null || !tile.isLand()) break;
+                if (tile == null || !tile.isLand() || offLimits(tile)) break;
             }
             int scoreValue = 2 * mountainRegion.getSize();
             mountainRegion.setScoreValue(scoreValue);
@@ -528,7 +562,7 @@ public class TerrainGenerator {
 
         // and sprinkle a few random hills/mountains here and there
         tiles.clear();
-        map.forEachTile(Tile::isGoodHillTile, t -> tiles.add(t));
+        map.forEachTile(t -> t.isGoodHillTile() && !offLimits(t), t -> tiles.add(t));
         randomShuffle(logger, "Randomize hill tiles", tiles, this.random);
 
         number = (int) (getApproximateLandCount(game) * randomHillsRatio)
@@ -820,6 +854,11 @@ public class TerrainGenerator {
         final OptionGroup mapOptions = game.getMapGeneratorOptions();
         final int width = landMap.getWidth();
         final int height = landMap.getHeight();
+        this.original = importMap == null
+            && OriginalWorld.isOriginal(mapOptions);
+        final TileType arctic = (this.original)
+            ? game.getSpecification().getTileType("model.tile.arctic")
+            : null;
         final boolean importBonuses = (importMap != null)
             && mapOptions.getBoolean(MapGeneratorOptions.IMPORT_BONUSES);
         final boolean importRumours = (importMap != null)
@@ -892,9 +931,11 @@ public class TerrainGenerator {
                     }
                 } else {
                     final int latitude = map.getLatitude(y);
-                    TileType tt = (landMap.isLand(x, y))
-                        ? getRandomLandTileType(game, latitude)
-                        : getRandomOceanTileType(game, latitude);
+                    TileType tt = (!landMap.isLand(x, y))
+                        ? getRandomOceanTileType(game, latitude)
+                        : (this.original && arctic != null && landMap.isPolarRow(y))
+                        ? arctic // The original's polar rows are all ice.
+                        : getRandomLandTileType(game, latitude);
                     t = new Tile(game, tt, x, y);
                 }
                 return t;

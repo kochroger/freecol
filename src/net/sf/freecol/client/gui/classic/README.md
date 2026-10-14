@@ -155,6 +155,52 @@ save plays on as it was (R1b re-applies the rules on load, later).
   Iroquois 18 and Apache 13 in playthrough-1, at "Entdecker", Sioux 21 in
   clip004, Araukaner 6 in landfall); ours have about 12 in all on the
   easiest level, 19 on medium.
+- **The original's New World** (part P1; Roger 2026-10-13: "Indianerland
+  wie im Original", "funktionieren müssen natürlich alle Parameter"; his 13
+  games in the original, `prep2/W-landtests.md`). The levi rules' land
+  generator is `model.option.landGeneratorType` 4, "original"
+  (`LandMap.createOriginalLandMap`, `OriginalWorld`), on both topologies;
+  the classic and freecol rules keep FreeCol's generators and their maps
+  (`OriginalWorldTest.testFreeColRulesKeepTheirMaps`). The original's four
+  world questions are map options (`OriginalWorldSettings`): LANDMASSE
+  `model.option.originalLandMass` and LANDFORM `model.option.originalLandForm`
+  (both new, levi only), TEMPERATUR `model.option.temperature` chilly /
+  temperate / warm, KLIMA `model.option.humidity` dry / normal / wet;
+  `model.option.landMass` is not used.
+  - *Land*: each setting has the original's mean (58x72, rows 1-70, no
+    arctic): everything Normal 886 (his games 872, 901), Klein 702 (673,
+    732), Groß 1131 (1079, 1184), Inselgruppe 698, Große Kontinente 1191,
+    Groß + Kontinente 1373 (with Warm and Feucht); the unplayed ones add
+    the landform's difference at Normal (Klein + Inselgruppe 514, Klein +
+    Kontinente 1007, Groß + Inselgruppe 943). Each map draws its amount
+    around the mean (5 %, at most 12 %), the isometric map in proportion to
+    its 4000 tiles. The land grows from random walks of three-tile stamps,
+    as Civilization's generator (the original's base), until the amount is
+    reached: walks of 1-64 steps for Inselgruppe, 1-128 Normal, 64-256
+    Kontinente give the original's shapes (Inselgruppe 10 masses of 10+
+    tiles, coast 0.74 per land tile; the original 9 and 0.78). The land
+    keeps columns 6-51 and rows 2-68 (square) so that every row keeps its
+    high seas on both sides; one water row separates it from the poles.
+  - *Climate*: the land is typed by FreeCol's climate bands with the
+    original's temperatures (`OriginalWorld.getPoleTemperature`: Gemäßigt
+    -5 to 35 degrees gives the original's 6.6 % tundra and 11.9 % savannah;
+    Warm 0 to 37 his warm game; Kühl the mirror) and a mild KLIMA (humidity
+    38 / 40 / 42: FreeCol's 35 / 55 would turn 14 % into desert or a
+    quarter into swamp). No land outside the polar rows is arctic, and the
+    polar rows are all arctic, without hills, mountains or rivers
+    (`TerrainGenerator.offLimits`). The mountains and the rumours are made
+    for the land the map has (`OriginalWorld.countLand`).
+  - *The title menu*: «Neue Welt» starts everything Normal
+    (`OriginalWorldSettings.CLASSIC_UI_NEW_WORLD`, the world Roger and Levi
+    play with «Individualisieren»), through
+    `ClassicGUI.prepareNewWorldMap` and `NewWorldSetup.world`; the
+    original's «Neue Welt» (427, 469, 650 land tiles, the amount of Klein +
+    Inselgruppe) is `OriginalWorldSettings.ORIGINAL_NEW_WORLD`, for when the
+    Classic UI has its «Individualisieren» screen.
+  - Measured with `net.sf.freecol.tools.WorldSettingsCensus` (60 seeds per
+    setting and topology: land, masses, coasts, rivers, terrain, Pacific,
+    lanes, start); `OriginalWorldTest`, `OriginalWorldSettingsTest`,
+    `ClassicWorldSetupTest`. A save keeps its own map and rules.
 
 ## `ClassicGUI` — the view facade
 

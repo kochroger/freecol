@@ -85,7 +85,39 @@ public class MapGeneratorOptions {
     public static final int LAND_GENERATOR_CLASSIC     = 0,
                             LAND_GENERATOR_CONTINENT   = 1,
                             LAND_GENERATOR_ARCHIPELAGO = 2,
-                            LAND_GENERATOR_ISLANDS     = 3;
+                            LAND_GENERATOR_ISLANDS     = 3,
+                            /**
+                             * The original game's New World
+                             * ({@link net.sf.freecol.common.model.OriginalWorld}),
+                             * offered by the "levi" rules only.
+                             */
+                            LAND_GENERATOR_ORIGINAL    = 4;
+
+    /**
+     * The original's first world question, LANDMASSE (GAME.TXT
+     * {@code @CLAND}: Klein / Normal / Groß), read by
+     * {@link #LAND_GENERATOR_ORIGINAL} only.  A "levi" option.
+     */
+    public static final String ORIGINAL_LAND_MASS
+        = "model.option.originalLandMass";
+
+    /**
+     * The original's second world question, LANDFORM (GAME.TXT
+     * {@code @CCONT}: Inselgruppe / Normal / Große Kontinente), read by
+     * {@link #LAND_GENERATOR_ORIGINAL} only.  A "levi" option.
+     */
+    public static final String ORIGINAL_LAND_FORM
+        = "model.option.originalLandForm";
+
+    /** The values of {@link #ORIGINAL_LAND_MASS}. */
+    public static final int ORIGINAL_LAND_MASS_SMALL  = 0,
+                            ORIGINAL_LAND_MASS_NORMAL = 1,
+                            ORIGINAL_LAND_MASS_LARGE  = 2;
+
+    /** The values of {@link #ORIGINAL_LAND_FORM}. */
+    public static final int ORIGINAL_LAND_FORM_ISLANDS    = 0,
+                            ORIGINAL_LAND_FORM_NORMAL     = 1,
+                            ORIGINAL_LAND_FORM_CONTINENTS = 2;
 
     /** Option for setting the preferred distance to the map edge. */
     public static final String PREFERRED_DISTANCE_TO_EDGE
@@ -136,8 +168,13 @@ public class MapGeneratorOptions {
         = "model.option.bonusNumber";
 
     /** Option for setting the humidity of the map. */
-    public static final String HUMIDITY 
+    public static final String HUMIDITY
         = "model.option.humidity";
+
+    /** Some of the settings used by {@link #HUMIDITY} (the rules' values). */
+    public static final int HUMIDITY_DRY    = 35,
+                            HUMIDITY_NORMAL = 40,
+                            HUMIDITY_WET    = 55;
 
     /** Option for setting the temperature of the map. */
     public static final String TEMPERATURE 
@@ -161,8 +198,11 @@ public class MapGeneratorOptions {
      * maps are mostly ocean), about three quarters of the land
      * forested, and sea lanes on both sides.  The specification
      * defaults are left alone, as the "freecol" rules and the test
-     * suite inherit them.  The values could move into a ruleset or
-     * mod of their own once the Classic UI has one.
+     * suite inherit them.  The land mass is that of FreeCol's own land
+     * generators; the "levi" rules' default generator, the original's
+     * New World ({@link #LAND_GENERATOR_ORIGINAL}), does not use it
+     * and gets its land from {@link #ORIGINAL_LAND_MASS} and
+     * {@link #ORIGINAL_LAND_FORM} on both topologies.
      *
      * @param mgo The map generator {@code OptionGroup} to adjust.
      */
