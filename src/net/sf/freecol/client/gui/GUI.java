@@ -2187,6 +2187,29 @@ public class GUI extends FreeColClientHolder {
                                        DialogHandler<Boolean> handler) {}
 
     /**
+     * Show a first contact dialog, knowing whether the contact came in
+     * the contacting player's own turn (read when the server's message
+     * was handled, before the dialog waits for the event thread).  By
+     * default the turn is not needed and this is
+     * {@link #showFirstContactDialog(Player, Player, Tile, int,
+     * DialogHandler)}; the Classic UI's chain needs it.
+     *
+     * @param player The {@code Player} making contact.
+     * @param other The {@code Player} being contacted.
+     * @param tile The {@code Tile} where the contact occurs.
+     * @param settlementCount A count of settlements described by the
+     *     other player.
+     * @param ownTurn True if the contact came in {@code player}'s turn.
+     * @param handler A callback to handle the player decision to be friendly.
+     */
+    public void showFirstContactDialog(final Player player, final Player other,
+                                       final Tile tile, int settlementCount,
+                                       boolean ownTurn,
+                                       DialogHandler<Boolean> handler) {
+        showFirstContactDialog(player, other, tile, settlementCount, handler);
+    }
+
+    /**
      * Show the Game options dialog.
      *
      * @param editable True if the options can be edited.

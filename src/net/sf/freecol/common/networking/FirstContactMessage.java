@@ -73,10 +73,20 @@ public class FirstContactMessage extends AttributeMessage {
 
     /**
      * {@inheritDoc}
+     *
+     * After the stance and the updates of the same reply, before the
+     * owned changes and the late messages (the land's name): the client
+     * may answer the question while it handles this reply (a contact made
+     * by our own move, its box on the event thread), and the answer's own
+     * reply (the Classic UI's war on «Nein», the tile given on «Ja») must
+     * not be undone by this reply's provisional peace and its copy of the
+     * tile, which came after it while this was EARLY (the O fixer, review
+     * of part O; the unit also stands on its new tile while the chief
+     * speaks).
      */
     @Override
     public MessagePriority getPriority() {
-        return Message.MessagePriority.EARLY;
+        return Message.MessagePriority.NORMAL;
     }
 
     /**

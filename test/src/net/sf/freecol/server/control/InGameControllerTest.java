@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
+import net.sf.freecol.FreeCol;
 import net.sf.freecol.common.model.Ability;
 import net.sf.freecol.common.model.AbstractGoods;
 import net.sf.freecol.common.model.AbstractUnit;
@@ -259,9 +260,50 @@ public class InGameControllerTest extends FreeColTestCase {
      * ban kept, and no FreeCol notice of the war to the refusing player
      * (the chief's box says it), also without a land offer (which the
      * client never sent before); with an offer the land stays the
-     * tribe's on «Nein» and is given on «Ja».
+     * tribe's on «Nein» and is given on «Ja».  The war only in the Classic
+     * UI (the O fixer; FreeCol's own UI:
+     * {@link #testRefusedFirstContactInFreeColsUI}).
      */
     public void testRefusedFirstContactIsWar() {
+        final boolean classic = FreeCol.getClassic();
+        FreeCol.setClassic(true);
+        try {
+            refusedFirstContactIsWar();
+        } finally {
+            FreeCol.setClassic(classic);
+        }
+    }
+
+    /**
+     * FreeCol's own UI keeps FreeCol's rule (the O fixer, review of part
+     * O): «No» at a first contact is FreeCol's tension and mission ban,
+     * no war (its dialog has no @INDIANSHUN that would say so).
+     */
+    public void testRefusedFirstContactInFreeColsUI() {
+        final boolean classic = FreeCol.getClassic();
+        FreeCol.setClassic(false);
+        try {
+            final Game game = ServerTestHelper.startServerGame(getTestMap());
+            final InGameController igc = ServerTestHelper.getInGameController();
+            final ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+            dutch.setAI(false);
+            final ServerPlayer sioux = getServerPlayer(game, "model.nation.sioux");
+            dutch.csNativeFirstContact(sioux, null,
+                new net.sf.freecol.common.networking.ChangeSet());
+            final net.sf.freecol.common.networking.ChangeSet cs
+                = igc.nativeFirstContact(dutch, sioux, null, false);
+            assertEquals(Stance.PEACE, dutch.getStance(sioux));
+            assertEquals(Stance.PEACE, sioux.getStance(dutch));
+            assertTrue("FreeCol's mission ban", sioux.missionsBanned(dutch));
+            assertEquals(Tension.TENSION_ADD_MAJOR, sioux.getTension(dutch).getValue());
+            assertEquals(cs.toString(), 0,
+                messages(cs, Stance.WAR.getStanceChangeKey(), dutch));
+        } finally {
+            FreeCol.setClassic(classic);
+        }
+    }
+
+    private void refusedFirstContactIsWar() {
         final Game game = ServerTestHelper.startServerGame(getTestMap());
         final InGameController igc = ServerTestHelper.getInGameController();
         final ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");

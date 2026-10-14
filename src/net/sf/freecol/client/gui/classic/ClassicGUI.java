@@ -3565,12 +3565,17 @@ public class ClassicGUI extends GUI {
 
     /**
      * Whether anything is up that the end of turn and the next unit must
-     * wait for: the first scene, a menu, a modal box, a classic screen.
+     * wait for: the first scene, a menu, a modal box, a first contact's
+     * chain, a classic screen.  Package-private for the tests.  EDT only.
      *
      * @return True if so.
      */
-    private boolean turnBlocked() {
+    boolean turnBlocked() {
         if (this.sceneShowing || modalDialogShowing() || boxBusy()) return true;
+        // A first contact's chain between its boxes (acceptance F2/F3,
+        // the O fixer): the boxes after the answer are asked only once
+        // the server has it.
+        if (contactChainHolds()) return true;
         if (this.menuStrip != null && this.menuStrip.isMenuOpen()) return true;
         return classicScreenUp();
     }
@@ -6308,14 +6313,48 @@ public class ClassicGUI extends GUI {
      *       turn, and playthrough-2's Inca had none); «Nein» brings
      *       @INDIANSHUN, and the server's war
      *       ({@code InGameController.nativeFirstContact}).</li>
-     *   <li>The land: FreeCol's rule stands, a gift only at the first
-     *       landing on the tribe's land (D-B1d), while the original's text
-     *       always offers it.</li>
+     *   <li>The land: FreeCol's rule stands (D-B1d): the server offers the
+     *       tile only at the very first landing of the whole game, when it
+     *       is the tribe's ({@code ServerUnit.csNewContactCheck}); the
+     *       original's text always offers it.</li>
      * </ul>
+     *
+     * <p>Without the turn's flag this variant reads the turn now; the
+     * controller passes it from the moment the server's message came
+     * ({@link #showFirstContactDialog(Player, Player, Tile, int, boolean,
+     * DialogHandler)}).
      */
     @Override
     public void showFirstContactDialog(Player player, Player other, Tile tile,
                                        int settlementCount,
+                                       DialogHandler<Boolean> handler) {
+        final Game game = (player == null) ? null : player.getGame();
+        showFirstContactDialog(player, other, tile, settlementCount,
+            game != null && game.getCurrentPlayer() == player, handler);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The first contact's question and chain
+     * ({@link #showFirstContactDialog(Player, Player, Tile, int,
+     * DialogHandler)}).  {@code ownTurn} is whose turn it was when the
+     * server's message came (the O fixer, acceptance F3): a contact one of
+     * theirs made in the natives' turn comes after their moves, when the
+     * current player is already ours, and brings no @INDIANCOME
+     * (clip004 #5094).
+     *
+     * <p>One chain after the other (acceptance F2): a second contact that
+     * comes while a chain is still asked (it is posted behind the first,
+     * and the first's boxes let the event thread run it) waits until the
+     * first chain's last box has been asked.  While a chain is asked or
+     * waits, the turn flow is held ({@link #turnBlocked}): the turn's wipe
+     * and our first unit do not fall into the 185 ms between its boxes
+     * (clip004 #5094: the chain belongs to the natives' phase).
+     */
+    @Override
+    public void showFirstContactDialog(Player player, Player other, Tile tile,
+                                       int settlementCount, boolean ownTurn,
                                        DialogHandler<Boolean> handler) {
         final int tribe = tribeIndex(other);
         final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
@@ -6351,25 +6390,117 @@ public class ClassicGUI extends GUI {
             .outsideCancels(false)
             .stopgap(Messages.message(hdrKey), meetingIcon(other))
             .build();
+        final Runnable contact = () -> askContact(r, text, player, other,
+                                                  ownTurn, handler);
         onEventThread(() -> {
-                // The first meeting's woodcut, before the box (W9, N17).
-                contactWoodcut(other);
-                int chosen = ClassicAdvisorBox.Bar.DISMISSED;
-                boolean peace = true;
-                try {
-                    chosen = askUntilAnswered(r);
-                    peace = eventAnswer(r, 0, chosen);
-                } finally {
-                    if (handler != null) handler.handle(peace);
+                this.contactChains++;
+                if (this.contactChains > 1) {
+                    this.contactsWaiting.add(contact);
+                    ClassicFrameRecorder.event("first-contact-waits",
+                        other.getNation().getSuffix());
+                    return null;
                 }
-                ClassicFrameRecorder.event("first-contact", other.getNation().getSuffix()
-                    + " chosen=" + chosen + ((peace) ? " peace" : " war"));
-                for (ClassicAdvisorBox.Request n
-                         : contactChain(text, player, other, peace)) {
-                    this.prompter.ask(n);
+                Runnable next = contact;
+                while (next != null) {
+                    try {
+                        next.run();
+                    } catch (RuntimeException e) {
+                        logger.log(Level.WARNING, "Classic first contact failed.", e);
+                    }
+                    next = this.contactsWaiting.poll();
                 }
                 return null;
             }, null);
+    }
+
+    /**
+     * First-contact chains asked or waiting ({@link #showFirstContactDialog(
+     * Player, Player, Tile, int, boolean, DialogHandler)}): while there is
+     * one, the turn flow is held.  Each chain counts itself off once, just
+     * before its last box is asked (that box is due then, so its close
+     * resumes the flow), or at its end.  EDT only.
+     */
+    private int contactChains = 0;
+
+    /** The contacts that came while a chain was asked, in order.  EDT only. */
+    private final java.util.ArrayDeque<Runnable> contactsWaiting
+        = new java.util.ArrayDeque<>();
+
+    /**
+     * Whether a first contact's chain is asked or waits, which holds the
+     * turn flow ({@link #turnBlocked}).  Package-private for the tests.
+     * EDT only.
+     *
+     * @return True if so.
+     */
+    boolean contactChainHolds() {
+        return this.contactChains > 0;
+    }
+
+    /**
+     * One first contact: its woodcut, @INDIANWELCOME, the answer to the
+     * server, then the chain.  EDT only.
+     *
+     * @param r The question.
+     * @param text The pack's texts, or null.
+     * @param player Our player.
+     * @param other The tribe.
+     * @param ownTurn The contact came in our own turn.
+     * @param handler FreeCol's answer ({@code InGameController.firstContact}).
+     */
+    private void askContact(ClassicAdvisorBox.Request r, ClassicText text,
+                            Player player, Player other, boolean ownTurn,
+                            DialogHandler<Boolean> handler) {
+        boolean counted = true;
+        try {
+            // The first meeting's woodcut, before the box (W9, N17).
+            contactWoodcut(other);
+            int chosen = ClassicAdvisorBox.Bar.DISMISSED;
+            boolean peace = true;
+            try {
+                chosen = askUntilAnswered(r);
+                peace = eventAnswer(r, 0, chosen);
+            } finally {
+                if (handler != null) handler.handle(peace);
+            }
+            ClassicFrameRecorder.event("first-contact", other.getNation().getSuffix()
+                + " chosen=" + chosen + ((peace) ? " peace" : " war"));
+            final List<ClassicAdvisorBox.Request> chain
+                = contactChain(text, player, other, peace, ownTurn);
+            for (int i = 0; i < chain.size(); i++) {
+                if (i == chain.size() - 1) {
+                    this.contactChains--;
+                    counted = false;
+                }
+                this.prompter.ask(chain.get(i));
+            }
+        } finally {
+            if (counted) {
+                // No box after the answer: nothing due whose close would
+                // resume the turn flow.
+                this.contactChains--;
+                if (this.contactChains == 0 && this.turnFlow != null) {
+                    this.turnFlow.boxClosed();
+                }
+            }
+        }
+    }
+
+    /**
+     * The boxes after the first contact's answer, our own turn read now
+     * ({@link #contactChain(ClassicText, Player, Player, boolean, boolean)}).
+     *
+     * @param text The pack's texts, or null.
+     * @param player Our player.
+     * @param other The tribe.
+     * @param peace The answer.
+     * @return The boxes, in order.
+     */
+    List<ClassicAdvisorBox.Request> contactChain(ClassicText text, Player player,
+                                                 Player other, boolean peace) {
+        final Game game = (player == null) ? null : player.getGame();
+        return contactChain(text, player, other, peace,
+            game != null && game.getCurrentPlayer() == player);
     }
 
     /**
@@ -6382,10 +6513,12 @@ public class ClassicGUI extends GUI {
      * @param player Our player.
      * @param other The tribe.
      * @param peace The answer.
+     * @param ownTurn The contact came in our own turn.
      * @return The boxes, in order.
      */
     List<ClassicAdvisorBox.Request> contactChain(ClassicText text, Player player,
-                                                 Player other, boolean peace) {
+                                                 Player other, boolean peace,
+                                                 boolean ownTurn) {
         final List<ClassicAdvisorBox.Request> out = new ArrayList<>(2);
         final int tribe = tribeIndex(other);
         final String title = Messages.message("classic.dialog.messages");
@@ -6406,9 +6539,7 @@ public class ClassicGUI extends GUI {
             "INDIANPEACE", tribe, player);
         if (welcome == null) return out;
         out.add(welcome.stopgap(title, null).build());
-        final Game game = (player == null) ? null : player.getGame();
-        final boolean ourTurn = game != null && game.getCurrentPlayer() == player;
-        if (ourTurn && tribe != TRIBE_INCA) {
+        if (ownTurn && tribe != TRIBE_INCA) {
             final ClassicAdvisorBox.Builder come = ClassicNotices.contactNotice(text,
                 "INDIANCOME", tribe, player);
             if (come != null) out.add(come.stopgap(title, null).build());

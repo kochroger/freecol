@@ -3807,8 +3807,14 @@ public final class InGameController extends FreeColClientHolder {
      */
     public void firstContactHandler(Player player, Player other, Tile tile,
                                     int n) {
+        // Whose turn it is now, as the server's message comes: a contact
+        // one of theirs made in the natives' turn is shown only after
+        // their moves, when the current player is already ours (Classic
+        // UI, part O, Roger's D-B1c: no @INDIANCOME then).
+        final Game game = getGame();
+        final boolean ownTurn = game != null && game.getCurrentPlayer() == player;
         invokeLater(() ->
-            getGUI().showFirstContactDialog(player, other, tile, n,
+            getGUI().showFirstContactDialog(player, other, tile, n, ownTurn,
                 (Boolean b) -> firstContact(player, other, tile, b)));
     }
 

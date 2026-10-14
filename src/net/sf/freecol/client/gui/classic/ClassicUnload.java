@@ -39,12 +39,19 @@ import net.sf.freecol.common.model.Unit;
  * the Classic UI's U and O ({@code ClassicGUI.classicUnload}) and Shift-D
  * in a colony ({@code ClassicGUI.askDisband}) go through a {@link Cargo}.
  *
- * <p><b>U in a colony</b> (BEFEHLE «Fracht entladen», manual p. 23
- * "Unload most valuable cargo"; manual:115 "repeatedly pressing the
- * unload key eventually unloads an entire ship"): one press unloads one
- * hold, the most valuable one ({@link #mostValuable}: the hold's worth
- * at Amsterdam's bid; I: how the original weighs it is not known), into
- * the warehouse.  Before, FreeCol's U unloaded everything at once.  When
+ * <p><b>U in a colony</b> (BEFEHLE «Fracht entladen»; the manual's map
+ * keys, p. 23: "Active ship/wagon, Unload most valuable cargo ... U"):
+ * one press unloads one hold, the most valuable one
+ * ({@link #mostValuable}: the hold's worth at Amsterdam's bid; I: how the
+ * original weighs it is not known), into the warehouse.  The manual's
+ * colony display says otherwise (its keys, "Unload cargo from ship ...
+ * U", and its unloading shortcut, manual:115: U empties "the cargo from
+ * your first hold into the warehouse. Repeatedly pressing the unload key
+ * (U) eventually unloads an entire ship"): this map U follows p. 23
+ * (Roger's bundle A default); the colony screen's U, when it is built
+ * (M4), takes the first hold unless Roger picks one rule for both (the O
+ * fixer, review of part O).  Before, FreeCol's U unloaded everything at
+ * once.  When
  * no goods are left, U puts the units aboard ashore as FreeCol's U did
  * (I: the manual's "cargo" are goods; whether the original's U lands
  * units is not known).

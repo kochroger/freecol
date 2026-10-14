@@ -130,9 +130,19 @@ public class TensionTest extends FreeColTestCase {
      * stance follows the tension, which the refusal and the war made
      * hateful), and it brings no gift to the enemy's colony.  An AI
      * European always accepts ({@code AIPlayer.firstContactHandler}), so
-     * it never gets this war.
+     * it never gets this war.  The war is the Classic UI's (the O fixer).
      */
     public void testWarFromTheFirstContact() {
+        final boolean classic = net.sf.freecol.FreeCol.getClassic();
+        net.sf.freecol.FreeCol.setClassic(true);
+        try {
+            warFromTheFirstContact();
+        } finally {
+            net.sf.freecol.FreeCol.setClassic(classic);
+        }
+    }
+
+    private void warFromTheFirstContact() {
         Game game = ServerTestHelper.startServerGame(getTestMap(plainsType));
         Map map = game.getMap();
         InGameController igc = ServerTestHelper.getInGameController();

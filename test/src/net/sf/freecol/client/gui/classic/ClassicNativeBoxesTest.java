@@ -257,8 +257,19 @@ public class ClassicNativeBoxesTest extends FreeColTestCase {
         return t;
     }
 
+    /** FreeCol's classic flag before the test (the war is the Classic UI's). */
+    private boolean savedClassic;
+
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+        this.savedClassic = net.sf.freecol.FreeCol.getClassic();
+        net.sf.freecol.FreeCol.setClassic(true);
+    }
+
     @Override
     protected void tearDown() throws Exception {
+        net.sf.freecol.FreeCol.setClassic(this.savedClassic);
         ServerTestHelper.stopServerGame();
         super.tearDown();
     }
@@ -296,6 +307,47 @@ public class ClassicNativeBoxesTest extends FreeColTestCase {
             assertEquals(keys, (war) ? List.of("first-contact arawak", "INDIANSHUN")
                 : List.of("first-contact arawak", "INDIANPEACE", "INDIANCOME"), asked);
             assertEquals("IND2A0.SS.000", r.keys.boxes.get(1).portrait.sprite);
+        }
+    }
+
+    /**
+     * A contact one of theirs made in the natives' turn (acceptance F3):
+     * the server's message comes then, on the client's network thread,
+     * with the tribe as the current player; the box comes only after the
+     * natives' moves, when the current player is already ours.  Whose
+     * turn it was is the message's time: «Ja» brings @INDIANPEACE and no
+     * @INDIANCOME (Roger's D-B1c; clip004 #5094, the Sioux met in their
+     * phase).  In our own turn the same call brings @INDIANCOME.
+     */
+    public void testAContactInTheNativesTurn() throws Exception {
+        final ClassicText t = pack("testAContactInTheNativesTurn");
+        for (boolean theirs : new boolean[] { true, false }) {
+            final Rig r = rig();
+            final ServerPlayer sioux = getServerPlayer(r.game, "model.nation.sioux");
+            r.dutch.csNativeFirstContact(sioux, null, new ChangeSet());
+            r.game.setCurrentPlayer((theirs) ? sioux : r.dutch);
+            r.keys.press("ENTER");
+            // The event thread is busy (the natives' moves) until our turn.
+            final java.util.concurrent.CountDownLatch slides
+                = new java.util.concurrent.CountDownLatch(1);
+            SwingUtilities.invokeLater(() -> {
+                    try {
+                        slides.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+            assertFalse(SwingUtilities.isEventDispatchThread());
+            r.igc().firstContactHandler(r.dutch, sioux, null, 21);
+            r.game.setCurrentPlayer(r.dutch);   // our turn, before the box
+            slides.countDown();
+            flush();
+            assertEquals("theirs=" + theirs, List.of("firstContact sioux true"), r.api.log);
+            assertEquals(Stance.PEACE, r.dutch.getStance(sioux));
+            if (t == null) continue;
+            assertEquals("theirs=" + theirs, (theirs)
+                ? List.of("first-contact sioux", "INDIANPEACE")
+                : List.of("first-contact sioux", "INDIANPEACE", "INDIANCOME"), r.asked());
         }
     }
 

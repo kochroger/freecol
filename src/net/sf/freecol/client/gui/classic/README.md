@@ -2093,11 +2093,34 @@ Roger's decisions of 2026-10-13: the original everywhere.
   «Holl.») and, in our own turn and not for the Inca, `@INDIANCOME`
   (Roger's D-B1c: 7 of 7 recorded contacts); «Nein» `@INDIANSHUN` and war
   (the server, `nativeFirstContact`: WAR both ways, no FreeCol notice of it
-  to us; FreeCol's tension and mission ban kept). The land: FreeCol's rule
-  (a gift only at a first landing on the tribe's land), the original's
-  text. The box keeps the id `first-contact <tribe>`. The native AI keeps
-  such a war like any other (`TensionTest.testWarFromTheFirstContact`); an
-  AI European always says yes (`AIPlayer.firstContactHandler`).
+  to us; FreeCol's tension and mission ban kept; the war only with
+  `FreeCol.getClassic()`, FreeCol's own UI keeps FreeCol's rule). The
+  land: FreeCol's rule, the original's text: the server offers the tile
+  only at the **very first landing of the whole game**, when the tile is
+  the tribe's (`ServerUnit.csNewContactCheck`: `firstLanding` is "the New
+  World not named yet"); every later tribe's chief says «bieten wir Euch
+  das Land ... als Geschenk», but «Ja» gives nothing and @INDIANLAND asks
+  for the land there (an open question for Roger). The box keeps the id
+  `first-contact <tribe>`. The native AI keeps such a war like any other
+  (`TensionTest.testWarFromTheFirstContact`); an AI European always says
+  yes (`AIPlayer.firstContactHandler`).
+- **The first contact's order** (the O fixer, review of part O): a contact
+  our own move makes is asked while the move's reply is handled (the box
+  nested in the key's event). `FirstContactMessage` is therefore NORMAL
+  (after the stance and the updates of the same reply, before the owned
+  changes and the land's name; it was EARLY): the reply's provisional
+  PEACE and its copy of the tile no longer undo the answer's war or the
+  land given at the first landing, and the unit stands on its new tile
+  while the chief speaks. "Our own turn" is read when the server's
+  message is handled (`firstContactHandler`, passed as `ownTurn`): a
+  contact one of theirs made in the natives' turn is shown only after
+  their moves, in our turn, and brings no @INDIANCOME. One chain after
+  the other: a contact that comes while a chain is asked waits until its
+  last box; while a chain is asked or waits, the turn flow is held
+  (`turnBlocked`: the turn's wipe and our first unit come after the
+  chain). Tests: `ClassicFirstContactOrderTest` (the client with its own
+  game, every reply over XML through the client's handlers),
+  `ClassicNativeBoxesTest.testAContactInTheNativesTurn`.
 - **Learning** (`askLearn`, the learn question of `moveLearnSkill`):
   `@LEARNSTAY` with the chief (the tribe, @JOB column 1 of the skill), the
   bar on «Dann will ich ein Meister-... werden.», Escape «Im Moment
@@ -5400,6 +5423,26 @@ delete, move or rename of a file in `src` (pinned by
 Not a delete, still open: writing an autosave whose name exists overwrites
 it (a game loaded from an older autosave and played on writes the same
 `Autosave-<game>_<nation>_<year>_<season>.fsg` names again).
+
+## Part O outside the Classic UI (FreeCol's own UI)
+
+Part O changed a few things that FreeCol's own UI (and the AI) see too
+(the O fixer, review of part O). The owner plays only the Classic UI.
+
+- **The first contact's answer** is sent also without a land offer (client
+  `firstContact`; before, it was dropped). In FreeCol's own UI a «No» now
+  costs FreeCol's own +300 tension and mission ban, as its server always
+  meant; the war on «Nein» is the Classic UI's only
+  (`FreeCol.getClassic()` in `nativeFirstContact`; FreeCol's dialog has no
+  @INDIANSHUN to say so). An AI European always says yes.
+- **`FirstContactMessage` is NORMAL**, not EARLY (after the stance and the
+  updates of its reply). FreeCol's dialog is not modal and answers after
+  the reply anyway; the order only mattered for the Classic UI's box.
+- **`learnSkill.done`**: FreeCol's UI now also says when a colonist has
+  learnt a village's skill (before: no word).
+- **`model.option.autosaveValidity`** defaults to 0 (no age limit) for
+  every UI on a new install, and the last-turn autosave is replaced by one
+  atomic move in every UI (above).
 
 ## Full screen, Alt+Enter and exit (`ClassicGUI`)
 
