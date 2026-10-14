@@ -376,7 +376,13 @@ final class ClassicVoyages {
             /** Take the band away (the menu bar again). */
             void clearBand();
 
-            /** @return Whether a box is up (Europe waits for its close). */
+            /**
+             * @return Whether a box is up, or a screen other than Europe
+             *     (the colony, its build list): the bands, Europe and the
+             *     New World part wait for its close (the Q review: a
+             *     colony that a report window's row opened while the chain
+             *     ran).
+             */
             boolean boxUp();
 
             /**
@@ -564,7 +570,14 @@ final class ClassicVoyages {
                 this.host.event("arrival-europe closed");
                 return toNewWorld(now);
             case NEW_WORLD_JUMP: {
-                if (this.host.boxUp()) return now + nanos(POLL_MS);
+                // The view jumps and the band comes on the shown map only:
+                // not under a box or a colony (boxUp), nor under a Europe
+                // screen up again (one that opened after its time ran out,
+                // EUROPE_WAIT, or was opened anew); Europe's close steps
+                // the chain at once (ClassicGUI.europeGone).
+                if (this.host.boxUp() || this.host.europeOpen()) {
+                    return now + nanos(POLL_MS);
+                }
                 final Unit ship = this.arrivals.newWorld.get(this.next);
                 this.host.jumpTo(ship);
                 this.state = State.NEW_WORLD_BAND;

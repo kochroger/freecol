@@ -2618,9 +2618,9 @@ public class ClassicGUI extends GUI {
 
     /**
      * Tests: host the screens on a pane of the test's own (no game view);
-     * Europe's close after the last ship gets its timer on
-     * {@link #waitClock}, run by the test ({@link ClassicOneShot#runIfDue}).
-     * EDT only.
+     * Europe's close after the last ship and its {@code @TUTORIAL17} get
+     * their timers on {@link #waitClock}, run by the test
+     * ({@link ClassicOneShot#runIfDue}).  EDT only.
      *
      * @param stack The stack.
      */
@@ -2630,11 +2630,20 @@ public class ClassicGUI extends GUI {
             this.europeCloseTimer = new ClassicOneShot(waitClock(),
                 SwingUtilities::invokeLater, false, "ClassicEuropeClose");
         }
+        if (this.tipTimer == null) {
+            this.tipTimer = new ClassicOneShot(waitClock(),
+                SwingUtilities::invokeLater, false, "ClassicEuropeTip");
+        }
     }
 
     /** @return Europe's close timer (tests), or null. */
     ClassicOneShot europeCloseTimer() {
         return this.europeCloseTimer;
+    }
+
+    /** @return The timer of Europe's {@code @TUTORIAL17} (tests), or null. */
+    ClassicOneShot europeTipTimer() {
+        return this.tipTimer;
     }
 
     /**
@@ -4352,6 +4361,13 @@ public class ClassicGUI extends GUI {
                         return;
                     }
                 }
+                // Its tip is timed from here, before the push's paint: on
+                // the first open of a session that paint loads the screen's
+                // pictures (~0.1 s), which the tip does not wait on, as on
+                // P, where the window painted after this moment (V:
+                // woodcut 2 -> screen -> @TUTORIAL4 328 + 514 ms, clip008
+                // #4009 -> #4032 -> #4068; the Q review).
+                final long shownAt = waitClock().now();
                 // The new screen on first, then the older one (a colony,
                 // Europe) goes from under it: no map in between (H5).
                 this.screens.push(ClassicScreenStack.Kind.COLONY, panel, boxes,
@@ -4368,7 +4384,7 @@ public class ClassicGUI extends GUI {
                 this.colonyBoxes = boxes;
                 ClassicFrameRecorder.event("colony-open", colony.getName()
                     + ((founding) ? " founding" : ""));
-                colonyScreenShown(colony, waitClock().now(), founding);
+                colonyScreenShown(colony, shownAt, founding);
             } catch (Exception e) {
                 logger.log(Level.WARNING, "ClassicGUI: could not show colony "
                     + "screen for " + colony.getId(), e);
@@ -4515,6 +4531,10 @@ public class ClassicGUI extends GUI {
                 final ClassicAdvisorLayer boxes = new ClassicAdvisorLayer(
                     new ScreenBoxHost(pack), waitClock(),
                     SwingUtilities::invokeLater, true);
+                // @TUTORIAL17 is timed from here, before the push's paint
+                // (its first one loads the pictures, ~0.07-0.12 s), as on
+                // P (the Q review; V: landfall #27917 -> #27956).
+                final long shownAt = waitClock().now();
                 // The new screen on first, then the older one goes from
                 // under it: no map in between (H5).
                 this.screens.push(ClassicScreenStack.Kind.EUROPE, panel, boxes,
@@ -4533,7 +4553,7 @@ public class ClassicGUI extends GUI {
                 ClassicFrameRecorder.event("europe-open", "turn=" + turnNumber());
                 if (this.tipTimer != null && !tipShown(player,
                         ClassicBands.TUTORIAL_EUROPE_NUMBER)) {
-                    this.tipTimer.schedule(waitClock().now() + ClassicVoyages
+                    this.tipTimer.schedule(shownAt + ClassicVoyages
                         .nanos(ClassicVoyages.TUTORIAL_MS), this::europeTip);
                 }
             } catch (Exception e) {
@@ -4968,8 +4988,11 @@ public class ClassicGUI extends GUI {
         }
     }
 
-    /** What the arrival chain drives. */
-    private final class VoyageHost implements ClassicVoyages.Chain.Host {
+    /**
+     * What the arrival chain drives.  Package-private for the tests
+     * ({@code ClassicScreenStackTest}).
+     */
+    final class VoyageHost implements ClassicVoyages.Chain.Host {
 
         @Override
         public void band(String text) {
@@ -4986,9 +5009,23 @@ public class ClassicGUI extends GUI {
             ClassicGUI.this.clearBand();
         }
 
+        /**
+         * A box, a scene or a modal dialog up, or a hosted colony screen
+         * (with or without its build list): the chain waits for its
+         * close.  A colony can come while the chain runs: in windowed play
+         * a report window (decision H7) left beside the active map does not
+         * hold the turn start, and its colony row opens the colony in the
+         * main window, which replaces the Europe screen the chain waits for
+         * (decision H5; the Q review).  The New World part (the view's
+         * jump, the band) then comes on the shown map after the colony's
+         * close, not under it, and an arrival's Europe waits for the
+         * colony's close instead of replacing it.  Europe itself is the
+         * chain's own screen: up already at its time it is brought up to
+         * date (U5, {@link #openEurope}).
+         */
         @Override
         public boolean boxUp() {
-            return sceneShowing || modalDialogShowing() || boxBusy();
+            return sceneShowing || modalDialogShowing() || boxBusy() || colonyHosted();
         }
 
         @Override
@@ -5045,7 +5082,8 @@ public class ClassicGUI extends GUI {
 
     /**
      * {@code @TUTORIAL17} once per game, {@link ClassicVoyages#TUTORIAL_MS}
-     * after the game's first Europe screen is drawn, whatever opened it
+     * after the game's first Europe screen is pushed (before its paint,
+     * which loads its pictures on the first open), whatever opened it
      * (U7), with Tutortips on: the wood box over the Europe screen
      * ({@link #europeBox}; a key or a click closes it).  Kept in the save
      * ({@code Player.classicTips}).  EDT only.
@@ -9678,7 +9716,7 @@ public class ClassicGUI extends GUI {
      * #4068), over the screen.  EDT only.
      *
      * @param colony The colony.
-     * @param shownNanos When the screen was shown.
+     * @param shownNanos When the screen was pushed (before its paint).
      * @param founding Whether the colony was just founded.
      */
     void colonyScreenShown(Colony colony, long shownNanos, boolean founding) {
@@ -9693,7 +9731,12 @@ public class ClassicGUI extends GUI {
      * The seam of D10: a ship docked and its colony screen opened:
      * {@code @TUTORIAL12} {@link ClassicTips#DOCK_TIP_MS} later (V:
      * clip008 #30022 -&gt; #30059).  Nobody calls it yet (D10 is not
-     * built: FreeCol opens no screen on a docking).  EDT only.
+     * built): FreeCol opens the colony screen only when a carrier reaches
+     * its goto destination ({@code InGameController.moveToDestination},
+     * {@code moveTile}: {@code showColonyPanelWithCarrier}), without this
+     * tip; the original opens it at every docking, a keyboard move too,
+     * after the band LABELS {@code @MISC} 23 (clip008 #29957 -&gt;
+     * #30021).  EDT only.
      *
      * @param colony The colony.
      * @param shownNanos When its screen was shown.

@@ -1977,8 +1977,35 @@ the owner of popups, re-framing on Alt+Enter, the focus); most bugs with Europe 
 - **Turn.** A hosted screen holds the turn flow and the blink, also while the window is minimized
   (decision H4). Europe's close after its last ship sailed (J1, 357 ms) is identified by its panel; the
   pop shows the map before `europeGone`.
+- **The arrival chain** (`ClassicVoyages.Chain`) counts a hosted colony (with or without its build
+  list) as a box (the Q review): in windowed play a report window (H7) left beside the active map does
+  not hold the turn start, and its colony row can open the colony while the chain runs, replacing the
+  Europe screen the chain waits for (so H5 is reachable in play). The chain's New World part (the
+  view's jump, the band) then comes on the shown map after the colony's close, not under it, and an
+  arrival's Europe waits for a colony that is up at its time instead of replacing it; a Europe up again
+  at the New World part holds it too. A Europe up already at an arrival is brought up to date (U5).
+  Tests: `ClassicScreenStackTest.testTheArrivalChainWaitsForAColony`, `ClassicVoyagesTest
+  .testChainNewWorldWaitsForAScreen`.
+- **Tips over a screen** are timed from its push, before the push's paint (the Q review): on the first
+  open of a session that paint loads the screen's pictures (colony ~0.1 s, build list ~0.14 s, Europe
+  ~0.07-0.12 s; Q acceptance F1), so the screen itself still comes that much late (preloading: later),
+  but `@TUTORIAL4` comes 328 + 514 ms after woodcut 2's map as in the original (clip008 #4009 -> #4032
+  -> #4068) and as on P, `@TUTORIAL17` 557 ms after the push. Test `ClassicScreenStackTest
+  .testTheTipsAreTimedFromThePush`.
 - **Alt+F4** is always the main window's quit question (decision H3; Escape leaves a screen). Popups
   over a screen are owned by the main frame; only the report screens are still windows (decision H7).
+  Its words are FreeCol's («Möchtet Ihr das Spiel wirklich beenden?», Okay / Abbrechen); the original
+  has no Alt+F4, but its own quit box GAME.TXT `@DOS` («Abbrechen zu DOS?», Ja / Nein, the bar on Nein),
+  reached from the map (the manual's map keys: Esc «Exit game») - later.
+- **Not yet as the original** (named by the Q review): the adviser keys F2-F10 are off over colony and
+  Europe like every HUD key, while the original's keyboard card says they work «at any time (even when
+  not on the map)» (manual.txt l.23; on P the screens' windows did not have them either); the colony
+  opens at the founding, a click, a goto arrival (`InGameController`: `showColonyPanelWithCarrier`)
+  and the colony report's row, but not yet at every docking after the band LABELS `@MISC` 23 (the
+  original, also by a keyboard move: clip008 #29957 -> #30021, spec D10) nor from the «Zur Kolonie
+  zoomen.» row (LABELS 49/50) of the turn boxes `@BUILT`, `@NEEDTOOLS`, `@CARGOREADY0` (V: playthrough
+  3, `02-colony-operations.md` §11, 7 visits) and, by the same plan, `@ORE` (OP20), which do not exist
+  here yet.
 - **Recorder.** The screens are children of the recorded HUD pane, so colony and Europe are filmed
   frame by frame; the map's index hint is off while one is up (`ClassicMapViewer.indexHint`). Events
   `screen-push <kind> <name>`, `screen-pop <kind> <why>` (`why`: player, auto, replaced, close,

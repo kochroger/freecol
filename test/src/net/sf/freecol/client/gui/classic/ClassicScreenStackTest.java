@@ -63,7 +63,9 @@ import net.sf.freecol.util.test.FreeColTestCase;
  * disabled while a screen is hosted ({@link ClassicKeyMap}), the GUI's
  * host model (the colony and Europe replacing each other, the keys' home,
  * Europe's close after its last ship on a fake clock), the recorder's index
- * hint, and a census of the window machinery that went.
+ * hint, and a census of the window machinery that went; from the Q review
+ * the arrival chain under a colony that replaced its Europe (T3b) and the
+ * tips' moment at a screen's push.
  */
 public class ClassicScreenStackTest extends FreeColTestCase {
 
@@ -216,10 +218,18 @@ public class ClassicScreenStackTest extends FreeColTestCase {
 
         /** The full paints at once (the swap in one paint, also minimized). */
         int paintsNow = 0;
+        /**
+         * Run in each full paint at once, or null (a first open's paint
+         * that loads the screen's pictures: the test moves its clock).
+         */
+        Runnable inFullPaint = null;
         final JLayeredPane pane = new JLayeredPane() {
                 @Override
                 public void paintImmediately(int x, int y, int w, int h) {
-                    if (w >= getWidth() && h >= getHeight()) paintsNow++;
+                    if (w >= getWidth() && h >= getHeight()) {
+                        paintsNow++;
+                        if (inFullPaint != null) inFullPaint.run();
+                    }
                     super.paintImmediately(x, y, w, h);
                 }
             };
@@ -274,6 +284,9 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         /** At each {@link #europeGone}: were the game parts showing again? */
         final List<Boolean> goneWithMap = new ArrayList<>();
 
+        /** Each {@link #colonyScreenShown}'s moment. */
+        final List<Long> colonyShownAt = new ArrayList<>();
+
         Rig rig;
 
         HostGUI(Game game, Player me, FakeClock clock) {
@@ -312,6 +325,19 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         void europeGone() {
             this.goneWithMap.add(this.rig != null && this.rig.partsShown());
             super.europeGone();
+        }
+
+        @Override
+        void colonyScreenShown(Colony colony, long shownNanos, boolean founding) {
+            this.colonyShownAt.add(shownNanos);
+            super.colonyScreenShown(colony, shownNanos, founding);
+        }
+
+        /** What is on top: {@code map} or the stack's probe. */
+        String top() {
+            final ClassicScreenStack s = screens();
+            final String p = (s == null) ? null : s.probe();
+            return (p == null) ? "map" : p;
         }
 
         /** Host the screens on a rig of the test. */
@@ -625,6 +651,203 @@ public class ClassicScreenStackTest extends FreeColTestCase {
                 return null;
             });
         if (h2 != null) assertEquals(ClassicAdvisorBox.Bar.DISMISSED, h2.get());
+    }
+
+    /** The arrival chain's calls with what was on top at each (T3b). */
+    private static ClassicVoyages.Chain.Host logged(HostGUI gui,
+            ClassicVoyages.Chain.Host real, List<String> log) {
+        return new ClassicVoyages.Chain.Host() {
+            @Override public void band(String t) {
+                log.add("band " + t + " over " + gui.top());
+                real.band(t);
+            }
+            @Override public void timedBand(String t) {
+                log.add("timedBand " + t + " over " + gui.top());
+                real.timedBand(t);
+            }
+            @Override public void clearBand() { real.clearBand(); }
+            @Override public boolean boxUp() { return real.boxUp(); }
+            @Override public boolean openEurope() {
+                log.add("openEurope over " + gui.top());
+                return real.openEurope();
+            }
+            @Override public boolean europeOpen() { return real.europeOpen(); }
+            @Override public void keepEuropeUp() { real.keepEuropeUp(); }
+            @Override public void jumpTo(Unit s) {
+                log.add("jumpTo " + s.getId() + " over " + gui.top());
+                real.jumpTo(s);
+            }
+            @Override public void done() {
+                log.add("done over " + gui.top());
+                real.done();
+            }
+            @Override public void event(String w) { }
+        };
+    }
+
+    /**
+     * Step a chain on the event thread, as its timer would, until
+     * {@code untilMs} after {@code now[0]} or its end.
+     */
+    private static void steps(ClassicVoyages.Chain c, long[] now, double untilMs)
+        throws Exception {
+        final long end = now[0] + ClassicVoyages.nanos(untilMs);
+        while (now[0] <= end && !c.isDone()) {
+            final long t = now[0];
+            final long due = edt(() -> c.step(t));
+            flush();
+            if (due < 0) break;
+            now[0] = Math.max(t + 1, due);
+        }
+    }
+
+    /**
+     * T3b, the Q review (decision H5 in play): in windowed play a report
+     * window (H7) left beside the active map does not hold the turn start,
+     * and its colony row opens the colony in the main window, which
+     * replaces the Europe screen the arrival chain waits for.  The real
+     * {@code VoyageHost} counts a hosted colony as a box: the chain's New
+     * World part (the view's jump, the band, its end) waits for the
+     * colony's close and comes on the shown map, not under the colony; a
+     * colony up when Europe's time comes makes Europe wait for its close
+     * (the colony is not replaced); a Europe up already at its time is
+     * brought up to date, not opened again (U5).
+     */
+    public void testTheArrivalChainWaitsForAColony() throws Exception {
+        final Game game = getStandardGame();
+        final Map map = getTestMap(true);
+        game.changeMap(map);
+        final Colony colony = createStandardColony();
+        final Player dutch = colony.getOwner();
+        final Unit inEurope = new ServerUnit(game, dutch.getEurope(), dutch, merchantman);
+        final Unit back = new ServerUnit(game, colony.getTile(), dutch, merchantman);
+        final HostGUI gui = new HostGUI(game, dutch, null);
+        gui.host();
+        final ClassicVoyages.Chain.Host real = edt(() -> gui.new VoyageHost());
+        final List<String> log = new ArrayList<>();
+        final ClassicVoyages.Chain c = new ClassicVoyages.Chain(logged(gui, real, log),
+            new ClassicVoyages.Arrivals(List.of(inEurope), List.of(back)),
+            u -> "EU", u -> "NW");
+        final long[] now = { 1_000_000_000_000L };
+        for (int i = 0; i < 60 && c.state() != ClassicVoyages.Chain.State.EUROPE_CLOSE; i++) {
+            steps(c, now, 0);
+        }
+        assertEquals(ClassicVoyages.Chain.State.EUROPE_CLOSE, c.state());
+        assertTrue(edt(gui::europeHosted));
+        assertFalse(edt(real::boxUp));
+        // The report's colony row: the colony replaces Europe.
+        gui.showColonyPanel(colony, null);
+        flush();
+        assertTrue(edt(gui::colonyHosted));
+        assertFalse(edt(gui::europeHosted));
+        assertTrue("a hosted colony holds the chain", edt(real::boxUp));
+        steps(c, now, 5000);
+        assertFalse(c.isDone());
+        assertEquals(ClassicVoyages.Chain.State.NEW_WORLD_JUMP, c.state());
+        assertEquals(List.of("band EU over map", "openEurope over map"), log);
+        // The colony's Escape: the New World part on the shown map.
+        final ClassicColonyPanel cp = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
+        edt(() -> {
+                cp.getActionMap().get("classic_closeColony").actionPerformed(
+                    new ActionEvent(cp, ActionEvent.ACTION_PERFORMED, "esc"));
+                return null;
+            });
+        flush();
+        assertFalse(edt(real::boxUp));
+        steps(c, now, 5000);
+        assertTrue(c.isDone());
+        assertEquals(List.of("band EU over map", "openEurope over map",
+                             "jumpTo " + back.getId() + " over map",
+                             "timedBand NW over map", "done over map"), log);
+        // A colony up when Europe's time comes: Europe after its close.
+        log.clear();
+        final ClassicVoyages.Chain c2 = new ClassicVoyages.Chain(logged(gui, real, log),
+            new ClassicVoyages.Arrivals(List.of(inEurope), List.of()), u -> "EU", u -> "NW");
+        steps(c2, now, 0);                      // the band
+        assertEquals(ClassicVoyages.Chain.State.EUROPE_OPEN, c2.state());
+        gui.showColonyPanel(colony, null);
+        flush();
+        steps(c2, now, 5000);
+        assertEquals(ClassicVoyages.Chain.State.EUROPE_OPEN, c2.state());
+        assertTrue("the colony stays", edt(gui::colonyHosted));
+        final ClassicColonyPanel cp2 = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
+        edt(() -> {
+                cp2.getActionMap().get("classic_closeColony").actionPerformed(
+                    new ActionEvent(cp2, ActionEvent.ACTION_PERFORMED, "esc"));
+                return null;
+            });
+        flush();
+        for (int i = 0; i < 60 && c2.state() != ClassicVoyages.Chain.State.EUROPE_CLOSE; i++) {
+            steps(c2, now, 0);
+        }
+        assertEquals(List.of("band EU over map", "openEurope over map"), log);
+        assertTrue(edt(gui::europeHosted));
+        assertEquals(1, edt(() -> gui.screens().slots().size()).intValue());
+        // U5: Europe up already at the next arrival's time: the same screen.
+        final ClassicEuropePanel europe = edt(() -> (ClassicEuropePanel) gui.hostedScreen());
+        final String eTop = gui.top();
+        assertTrue(eTop, eTop.startsWith("europe:"));
+        log.clear();
+        final ClassicVoyages.Chain c3 = new ClassicVoyages.Chain(logged(gui, real, log),
+            new ClassicVoyages.Arrivals(List.of(inEurope), List.of()), u -> "EU", u -> "NW");
+        for (int i = 0; i < 60 && c3.state() != ClassicVoyages.Chain.State.EUROPE_CLOSE; i++) {
+            steps(c3, now, 0);
+        }
+        assertEquals(ClassicVoyages.Chain.State.EUROPE_CLOSE, c3.state());
+        assertSame(europe, edt(gui::hostedScreen));
+        assertEquals(List.of("band EU over " + eTop, "openEurope over " + eTop), log);
+        edt(() -> {
+                europe.getActionMap().get("classic_closeEurope").actionPerformed(
+                    new ActionEvent(europe, ActionEvent.ACTION_PERFORMED, "esc"));
+                return null;
+            });
+        flush();
+        assertFalse(edt(gui::screenHosted));
+        steps(c3, now, 1000);
+        assertTrue(c3.isDone());
+    }
+
+    /**
+     * The Q review: the tips over a screen are timed from its push, before
+     * the push's paint, which on the first open of a session loads the
+     * screen's pictures (~0.1 s; here the test's paint moves the clock
+     * 100 ms): the colony's moment for {@code @TUTORIAL4} (514 ms later;
+     * V: woodcut 2 -&gt; screen -&gt; tip 328 + 514 ms, clip008 #4009 -&gt;
+     * #4032 -&gt; #4068; P stamped before its window's paint too), and
+     * {@code @TUTORIAL17} {@link ClassicVoyages#TUTORIAL_MS} after the
+     * first Europe's push.
+     */
+    public void testTheTipsAreTimedFromThePush() throws Exception {
+        final FakeClock clock = new FakeClock();
+        final Game game = getStandardGame();
+        final Map map = getTestMap(true);
+        game.changeMap(map);
+        final Colony colony = createStandardColony();
+        final Player dutch = colony.getOwner();
+        final HostGUI gui = new HostGUI(game, dutch, clock);
+        final Rig r = gui.host();
+        r.inFullPaint = () -> clock.advanceMs(100);
+        final long beforeColony = clock.now;
+        gui.showColonyPanel(colony, null);
+        flush();
+        assertTrue(edt(gui::colonyHosted));
+        assertEquals("the push's paint took its 100 ms",
+                     beforeColony + ClassicVoyages.nanos(100), clock.now);
+        assertEquals(List.of(beforeColony), gui.colonyShownAt);
+        final long beforeEurope = clock.now;
+        gui.showEuropePanel();
+        flush();
+        assertTrue(edt(gui::europeHosted));
+        assertEquals(beforeEurope + ClassicVoyages.nanos(100), clock.now);
+        final ClassicOneShot tip = edt(gui::europeTipTimer);
+        assertNotNull(tip);
+        assertTrue(edt(tip::isScheduled));
+        assertEquals(beforeEurope + ClassicVoyages.nanos(ClassicVoyages.TUTORIAL_MS),
+                     edt(tip::dueNanos).longValue());
+        edt(() -> {
+                gui.screens().popAll("test");
+                return null;
+            });
     }
 
     /**

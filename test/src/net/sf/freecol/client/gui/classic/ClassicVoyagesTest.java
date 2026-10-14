@@ -564,6 +564,50 @@ public class ClassicVoyagesTest extends FreeColTestCase {
     }
 
     /**
+     * The Q review: the New World part comes on the shown map only.  A
+     * colony screen that replaced the Europe screen the chain waited for
+     * (a report window's colony row; the GUI's host counts a hosted colony
+     * as a box) holds it until the colony's close: the jump 50 ms after
+     * it at the latest, then the band and the end as usual; a Europe
+     * screen up again at that point (opened after its time ran out, or
+     * anew) holds it likewise.
+     */
+    public void testChainNewWorldWaitsForAScreen() {
+        final Unit a = atSea(merchantman, true), b = atSea(galleon, false);
+        final FakeHost h = new FakeHost();
+        final ClassicVoyages.Chain c = chain(h, List.of(a), List.of(b));
+        final long[] due = { c.step(0L) };
+        run(c, h, due, 1000);
+        assertEquals(ClassicVoyages.Chain.State.EUROPE_CLOSE, c.state());
+        h.europeOpen = false;                   // the colony replaced Europe ...
+        h.boxUp = true;                         // ... and stays up
+        run(c, h, due, 5000);
+        assertFalse(c.isDone());
+        assertEquals(ClassicVoyages.Chain.State.NEW_WORLD_JUMP, c.state());
+        assertEquals(List.of("band E " + a.getId() + " @0", "open @542", "clear @592"),
+                     h.calls);
+        h.boxUp = false;                        // the colony's Escape
+        run(c, h, due, 6000);
+        assertTrue(c.isDone());
+        assertEquals(List.of("jump " + b.getId() + " @5042",
+                             "timed N " + b.getId() + " @5056", "done @5184"),
+                     h.calls.subList(3, h.calls.size()));
+        // Europe up at the New World part: after its close.
+        final FakeHost h2 = new FakeHost();
+        h2.europeOpen = true;
+        final ClassicVoyages.Chain c2 = chain(h2, List.of(), List.of(b));
+        final long[] due2 = { c2.step(0L) };
+        run(c2, h2, due2, 3000);
+        assertFalse(c2.isDone());
+        assertTrue(h2.calls.isEmpty());
+        h2.europeOpen = false;
+        run(c2, h2, due2, 4000);
+        assertTrue(c2.isDone());
+        assertEquals(List.of("jump " + b.getId() + " @3050",
+                             "timed N " + b.getId() + " @3064", "done @3192"), h2.calls);
+    }
+
+    /**
      * H REVIEW2 M1: an arrival while the Europe screen is open but behind
      * the map or minimized brings it up (no second screen); while the hold
      * waits for its close, a Europe that goes behind the map again comes
