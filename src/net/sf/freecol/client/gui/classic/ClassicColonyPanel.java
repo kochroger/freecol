@@ -75,11 +75,15 @@ import net.sf.freecol.common.model.Unit;
  *   its level or the class's placeholder, the production rows of icons,
  *   the workers' figures with their shadows, the units outside the colony
  *   on the fortification slot, the NAMES.TXT name as the hover label.</li>
- *   <li><b>Tile pane</b> (right) — the 3&times;3 grid of the colony's work
- *   tiles, 24-px cells in the original's black frame on the wood panel
- *   ({@code WOODTILE.SS}, M4.1), each worked tile carrying its colonist and
- *   a production tag (the first slice's until M4.4).  The centre cell is the
- *   colony itself.</li>
+ *   <li><b>Tile pane</b> (right) — the original's 3&times;3 colony map
+ *   (M4.4, {@link ClassicColonyTiles}): the colony's nine tiles in 24-px
+ *   cells in the black frame on the wood panel ({@code WOODTILE.SS}, M4.1),
+ *   each with our map's art of it scaled to 24 (the original's finer art is
+ *   the open point), its water cycling with the map's palette; the colony's
+ *   sprite and its two rows on the centre; the workers with their rows, a
+ *   worker who makes nothing under the red sign; the totem on native land;
+ *   an enemy at war on his tile; the selected colonist's green frame, the
+ *   blinking white cursor, the tile's hover label.</li>
  *   <li><b>Bottom band</b> — the original {@code COLONY.PIK} chrome
  *   (320&times;72) with its black first row, with the Sons-of-Liberty /
  *   population figures (the first slice's until M4.5) and the original's
@@ -114,15 +118,6 @@ final class ClassicColonyPanel extends JPanel {
     private static final int VW = ClassicColonyLayout.W;
     private static final int VH = ClassicColonyLayout.H;
 
-    /**
-     * Work-tile cells: the original's 24x24 at (224 + 24c, 32 + 24r) in
-     * their black frame (spec §1.1, V 0 px); what a cell shows is still
-     * the first slice's until M4.4 (our map art scaled to 24, the plates).
-     */
-    private static final int GRID_CELL = ClassicColonyLayout.TILE;
-    private static final int GRID_X = ClassicColonyLayout.TILES_X;
-    private static final int GRID_Y = ClassicColonyLayout.TILES_Y;
-
     /** The exit's hit area: from the warehouse row's last box on (M4.11 makes it the E). */
     private static final int WARE_Y = 178;
     private static final int WARE_W = 306;
@@ -135,9 +130,6 @@ final class ClassicColonyPanel extends JPanel {
 
     private static final Color TAG_BG = new Color(0x00, 0x00, 0x00, 0xC0);
     private static final Color TAG_FG = new Color(0xFF, 0xFF, 0xFF);
-    private static final Color SELECT = new Color(0x40, 0xE0, 0x40);
-    private static final Color PICKED = new Color(0xFF, 0xFF, 0x00);
-    private static final Color WORK_HINT = new Color(0xE8, 0xC8, 0x40);
 
     private final FreeColClient freeColClient;
     private final ImageLibrary lib;
@@ -259,6 +251,49 @@ final class ClassicColonyPanel extends JPanel {
     private String buildingsDrawn = "";
     private String buildingsLogged = null;
 
+    /** The 3x3 map's terrain (M4.4): our map's tiles scaled to 24. */
+    private final ClassicColonyTiles.Art tileArt;
+
+    /**
+     * The 3x3 map as the last paint drew it ({@link ClassicColonyTiles#model}):
+     * the nine tiles with their rows, workers, signs and labels.
+     */
+    private ClassicColonyTiles.Model tiles = new ClassicColonyTiles.Model(null);
+
+    /** What draws a tile's terrain: the art (null), or a test's. */
+    private ClassicColonyTiles.Ground ground = null;
+
+    /**
+     * The water's cycling phase the map's terrain shows now (the game's
+     * terrain layer; the original cycles one hardware palette for the map
+     * and this screen), 0 without one.
+     */
+    private java.util.function.IntSupplier waterPhase = () -> 0;
+
+    /** Whether the last paint drew a tile holding a cycling index (its water). */
+    private boolean tilesCycle = false;
+
+    /** The 3x3 map's tile under the pointer (its hover label), or -1. */
+    private int hoveredTile = -1;
+
+    /**
+     * The white cursor's tile (0-8, the centre 4), or {@link #CURSOR_OFF_TILES}
+     * when it stands on a figure (the figure row's look is M4.5's): global,
+     * as the warehouse's selection, so it carries over to the next visit
+     * (V clip 020: openings with it on Mitte, NW, NO, N, SW or on a figure;
+     * I: across colonies).  The centre at the first opening (V #2260).  A
+     * press on a tile or its worker brings it there, a press on another
+     * colonist takes it off the tiles (dago §3: the press moves the cursor;
+     * the keys that move it in the original come with M4.8).  EDT only.
+     */
+    private static int tileCursor = ClassicColonyLayout.CENTRE_TILE;
+
+    /** {@link #tileCursor} on a figure, not on a tile. */
+    static final int CURSOR_OFF_TILES = -1;
+
+    /** The tiles as last logged by the recorder ({@link #recordBuildings}). */
+    private String tilesLogged = null;
+
     /** The figure row's colonists as this paint orders them ({@link #figureOrder}). */
     private List<Unit> rowOrder = new ArrayList<>();
 
@@ -315,9 +350,12 @@ final class ClassicColonyPanel extends JPanel {
     private final List<Rectangle> unitBounds = new ArrayList<>();
     private final List<Unit> unitTargets = new ArrayList<>();
 
-    /** The work-tile grid's clickable cells (excluding the centre), rebuilt each paint. */
+    /** The 3x3 map's clickable cells (excluding the centre), rebuilt each paint. */
     private final List<Rectangle> tileBounds = new ArrayList<>();
     private final List<ColonyTile> tileTargets = new ArrayList<>();
+
+    /** The workers of the tiles among {@link #unitTargets} (a press on one brings the cursor). */
+    private final List<Unit> tileWorkers = new ArrayList<>();
 
     /** Device-space scale + origin of the virtual canvas, set on each paint. */
     private int scale = 1;
@@ -367,6 +405,7 @@ final class ClassicColonyPanel extends JPanel {
         this.tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
         this.chrome = ClassicColonyChrome.Assets.load(pack);
         this.buildingArt = ClassicColonyBuildings.Assets.load(pack);
+        this.tileArt = ClassicColonyTiles.Art.load(pack, lib);
         this.blink = new ClassicBlink(clock, SwingUtilities::invokeLater,
                                       this::blinkToggled, threadedBlink);
         setOpaque(true);
@@ -524,6 +563,12 @@ final class ClassicColonyPanel extends JPanel {
             return;
         }
         if (vx >= WARE_W && vy >= WARE_Y) { close(); return; }
+        // The white cursor goes to a pressed tile (its worker's or an
+        // empty one: dago §3, playthrough-1 #75221), off the tiles to
+        // another pressed colonist (M4.4; the original's keys move it too,
+        // M4.8).
+        final int tile = ClassicColonyLayout.tileAt(vx, vy);
+        if (tile >= 0 && this.tiles.cell(tile) != null) tileCursor = tile;
 
         // A unit standing in the colony (the original's "Vorhandene
         // Einheiten"): the press selects it, its release opens its box.
@@ -531,15 +576,19 @@ final class ClassicColonyPanel extends JPanel {
         if (band >= 0 && this.units != null) {
             this.pressedBand = this.bandUnits.get(band);
             this.selectedUnit = this.pressedBand;
+            tileCursor = CURSOR_OFF_TILES;
             repaint();
             return;
         }
         for (int i = 0; i < this.unitBounds.size(); i++) {
             if (this.unitBounds.get(i).contains(vx, vy)) {
-                selectUnit(this.unitTargets.get(i));
+                final Unit u = this.unitTargets.get(i);
+                if (!this.tileWorkers.contains(u)) tileCursor = CURSOR_OFF_TILES;
+                selectUnit(u);
                 return;
             }
         }
+        if (tile >= 0) repaint();
         if (this.selectedUnit == null) return;
         // A building with workplaces (not a placeholder, the harbour, the
         // fortification or the Lagerhaus' slot).
@@ -613,9 +662,12 @@ final class ClassicColonyPanel extends JPanel {
     void hoverAt(int vx, int vy) {
         final int found = (vx < 0) ? -1 : slotAt(vx, vy);
         final int box = (vx < 0) ? -1 : ClassicColonyLayout.warehouseBoxAt(vx, vy);
-        if (found != this.hovered || box != this.hoveredBox) {
+        // A tile of the 3x3 map: its terrain's words (dago §3.5).
+        final int tile = (vx < 0) ? -1 : ClassicColonyLayout.tileAt(vx, vy);
+        if (found != this.hovered || box != this.hoveredBox || tile != this.hoveredTile) {
             this.hovered = found;
             this.hoveredBox = box;
+            this.hoveredTile = tile;
             repaint();
         }
     }
@@ -843,9 +895,9 @@ final class ClassicColonyPanel extends JPanel {
         this.unitBounds.clear();
         this.unitTargets.clear();
         // The numbers, as SPIEL "Koloniebericht-Optionen" switches them
-        // (W14): the count labels of the buildings' stacked rows (M4.3; I:
-        // the option's meaning in the original), and the first slice's
-        // figures on the work tiles and the net production (until M4.4,
+        // (W14): the count labels of the buildings' stacked rows (M4.3) and
+        // of the tiles' (M4.4; I: the options' meaning in the original),
+        // and the first slice's figures under the net production (until
         // M4.7).
         final ClassicPrefs prefs = ClassicPrefs.get();
         this.buildingNumbers = prefs.is(ClassicPrefs.BUILDING_LABELS);
@@ -887,18 +939,32 @@ final class ClassicColonyPanel extends JPanel {
     /**
      * While the acceptance recorder runs: log what each slot of the
      * building area shows ({@code colony-buildings}: its sprite frame, row
-     * and figures, {@link ClassicColonyBuildings.Model}), and save the
-     * canvas as a still, whenever that changes (since M4.0 the screen is
-     * hosted in the HUD, so the recorder's frames hold it too).
+     * and figures, {@link ClassicColonyBuildings.Model}) and each tile of
+     * the 3x3 map ({@code colony-tiles}: its rows, worker, sign, totem,
+     * enemy, and the cursor's place, {@link ClassicColonyTiles.Model}), and
+     * save the canvas as a still, whenever that changes (since M4.0 the
+     * screen is hosted in the HUD, so the recorder's frames hold it too).
      */
     private void recordBuildings() {
         if (!ClassicFrameRecorder.on()) return;
         final String drawn = this.buildingsDrawn;
-        if (drawn.equals(this.buildingsLogged)) return;
+        final String tilesDrawn = this.tiles.toString();
+        final boolean area = !drawn.equals(this.buildingsLogged);
+        final boolean map = !tilesDrawn.equals(this.tilesLogged);
+        if (!area && !map) return;
         this.buildingsLogged = drawn;
+        this.tilesLogged = tilesDrawn;
         final String name = "colony-" + (++stills);
-        ClassicFrameRecorder.event("colony-buildings",
-            name + " " + this.colony.getId() + " " + drawn);
+        if (area) {
+            ClassicFrameRecorder.event("colony-buildings",
+                name + " " + this.colony.getId() + " " + drawn);
+        }
+        // The 3x3 map (M4.4): each tile's rows, worker, sign, totem.
+        if (map) {
+            ClassicFrameRecorder.event("colony-tiles",
+                name + " " + this.colony.getId() + " " + tilesDrawn + " cursor="
+                + ((tileCursor >= 0) ? ClassicColonyLayout.TILE_NAMES[tileCursor] : "figure"));
+        }
         ClassicFrameRecorder.still(name, canvas());
     }
 
@@ -979,6 +1045,9 @@ final class ClassicColonyPanel extends JPanel {
      * «(Außerhalb der Kolonie)».
      */
     private void paintHover(Graphics2D g) {
+        if (this.hoveredTile >= 0) {
+            ClassicColonyTiles.paintLabel(g, this.chrome, this.tiles.cell(this.hoveredTile));
+        }
         if (this.hovered < 0 || this.hovered >= this.area.slots.size()) return;
         final ClassicColonyBuildings.Placed p = this.area.slots.get(this.hovered);
         if (p.label == null || p.label.isEmpty()) return;
@@ -1019,96 +1088,160 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * The work-tile pane: inset in the wood panel and its black frame
-     * ({@link ClassicColonyChrome#paintWoodPanel}), the 3&times;3 grid of
-     * the colony's {@link ColonyTile}s — the colony itself in the centre
-     * cell and its eight neighbours around it, each drawn with the same
-     * terrain art as the map, plus the colonist working it and what that
-     * tile yields, each inside its 24-px cell (M4.4 brings the original's
-     * rows, figures and frames).
+     * The 3x3 colony map (M4.4, {@link ClassicColonyTiles}): inside the
+     * wood panel's black frame ({@link ClassicColonyChrome#paintWoodPanel}),
+     * the colony's nine tiles placed by their compass direction from the
+     * colony (FreeCol's isometric map: the raw offsets do not fill a
+     * square), each with our map's art scaled to 24 at the water's phase,
+     * the colony's sprite on the centre; the rows, the workers, the sign,
+     * the totem, an enemy at war at tile + (4,4) with his flag (M2,
+     * war-french #13962); the selected colonist's green frame and the
+     * white cursor in its blink's on half (the blink: {@link #blinkOff}).
+     * The worked tiles' workers and the eight outer cells are click targets
+     * (the first slice's select, then a building or tile).
      */
-    private void paintWorkTiles(Graphics2D g0) {
+    private void paintWorkTiles(Graphics2D g) {
         this.tileBounds.clear();
         this.tileTargets.clear();
-        final Tile centre = this.colony.getTile();
-        for (ColonyTile ct : this.colony.getColonyTiles()) {
-            final Tile t = ct.getWorkTile();
-            if (t == null || centre == null) continue;
-            // Place each cell by the work tile's compass Direction from the
-            // colony, not its raw (x,y) offset: FreeCol's map is isometric, so
-            // the eight neighbours' raw offsets do not fill a -1..+1 square.
-            // The centre cell is the colony tile itself.
-            final int[] cell = (t == centre)
-                ? new int[] { 1, 1 } : cellForDirection(centre.getDirection(t));
-            if (cell == null) continue;
-            final int sx = GRID_X + cell[0] * GRID_CELL;
-            final int sy = GRID_Y + cell[1] * GRID_CELL;
-            final Graphics2D g = (Graphics2D) g0.create();
-            g.clipRect(sx, sy, GRID_CELL, GRID_CELL);
-            try {
-                paintCell(g, ct, t, t == centre, sx, sy);
-            } finally {
-                g.dispose();
+        this.tileWorkers.clear();
+        final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
+        final ClassicColonyTiles.Model m = ClassicColonyTiles.model(this.colony, text,
+                                                                    this.buildingArt);
+        this.tiles = (this.tilesAdjust == null) ? m : this.tilesAdjust.apply(m);
+        // The cursor blinks only where it stands on a tile (else nothing
+        // here asks the blink, so its toggles cost no repaint).
+        final int cursor = (tileCursor >= 0 && this.tiles.cell(tileCursor) != null
+                            && !blinkOff()) ? tileCursor : -1;
+        final ClassicColonyTiles.Ground ground = (this.ground != null) ? this.ground
+            : this::paintGround;
+        this.tilesCycle = ClassicColonyTiles.paint(g, this.chrome, this.buildingArt,
+            this.tiles, ground, this::paintStanding, this.tiles.placeOf(this.selectedUnit), cursor,
+            this.goodsTerrainNumbers);
+        for (ClassicColonyTiles.Cell c : this.tiles.cells) {
+            if (c == null) continue;
+            if (c.index != ClassicColonyLayout.CENTRE_TILE && c.colonyTile != null) {
+                this.tileBounds.add(c.bounds());
+                this.tileTargets.add(c.colonyTile);
+            }
+            if (c.worker != null && c.worker.unit != null) {
+                this.unitBounds.add(c.worker.bounds());
+                this.unitTargets.add(c.worker.unit);
+                this.tileWorkers.add(c.worker.unit);
             }
         }
     }
 
-    /** One cell of the 3x3 map, clipped to it. */
-    private void paintCell(Graphics2D g, ColonyTile ct, Tile t, boolean isCentre,
-                           int sx, int sy) {
-        // Our map art scaled to 24 px (the original's finer 24-px art comes
-        // from an unknown scaler, spec §M4.4: an Unsichtbarkeit).
-        final BufferedImage terrain = this.lib.getTerrainImage(
-            t.getType(), t.getX(), t.getY(), new Dimension(16, 16));
-        if (terrain != null) {
-            g.drawImage(terrain, sx, sy, GRID_CELL, GRID_CELL, null);
-        }
-        if (isCentre) {
-            final BufferedImage settlement
-                = this.lib.getScaledSettlementImage(this.colony);
-            if (settlement != null) {
-                drawFitted(g, settlement, sx, sy, GRID_CELL);
-            }
-            return;           // the centre tile works itself; not a target.
-        }
-        this.tileBounds.add(new Rectangle(sx, sy, GRID_CELL, GRID_CELL));
-        this.tileTargets.add(ct);
-        // A colonist is selected: hint every work tile it could move into.
-        if (this.selectedUnit != null) {
-            g.setColor(WORK_HINT);
-            g.drawRect(sx, sy, GRID_CELL - 1, GRID_CELL - 1);
-        }
-        final List<Unit> workers = ct.getUnitList();
-        if (!workers.isEmpty()) {
-            g.setColor(SELECT);
-            g.drawRect(sx, sy, GRID_CELL - 1, GRID_CELL - 1);
-            paintWorkers(g, workers, sx + GRID_CELL / 2 - 6,
-                         sy + GRID_CELL - 4);
-            if (this.goodsTerrainNumbers) {
-                // The plate inside the cell (its top at sy + 1).
-                paintProductionTag(g, ct.getProductionInfo(), sx + 1, sy + 9);
+    /**
+     * A tile's terrain: our map's art of it scaled to 24 ({@link
+     * ClassicColonyTiles.Art#tile}), with the colony's sprite on the
+     * centre as the map draws it (its flag in the owner's colours).
+     *
+     * @param g The canvas, clipped to the cell.
+     * @param c The cell.
+     * @return Whether it holds a cycling index.
+     */
+    private boolean paintGround(Graphics2D g, ClassicColonyTiles.Cell c) {
+        if (c.tile == null) return false;
+        BufferedImage settlement = null;
+        if (c.index == ClassicColonyLayout.CENTRE_TILE && this.lib != null) {
+            final BufferedImage art = this.lib.getScaledSettlementImage(this.colony);
+            if (art != null) {
+                settlement = ClassicHud.fitSettlement(
+                    ClassicHud.colonyFlag(art, this.colony.getOwner()));
             }
         }
-        // An enemy on the tile at war: his icon at cell + (4,4) with
-        // his flag (clip opening_018 #13962).
-        final Unit enemy = occupier(t, this.colony.getOwner());
-        if (enemy != null) paintStanding(g, enemy, sx + 4, sy + 4);
+        final boolean[] cycles = { false };
+        final BufferedImage img = this.tileArt.tile(c.tile.getMap(), c.tile, settlement,
+            this.waterPhase.getAsInt(), cycles);
+        if (img == null) return false;
+        final Rectangle r = c.bounds();
+        g.drawImage(img, r.x, r.y, null);
+        return cycles[0];
     }
 
-    /** The 3&times;3 grid cell {@code {col,row}} for a compass direction, or null. */
-    private static int[] cellForDirection(net.sf.freecol.common.model.Direction d) {
-        if (d == null) return null;
-        switch (d) {
-        case NW: return new int[] { 0, 0 };
-        case N:  return new int[] { 1, 0 };
-        case NE: return new int[] { 2, 0 };
-        case W:  return new int[] { 0, 1 };
-        case E:  return new int[] { 2, 1 };
-        case SW: return new int[] { 0, 2 };
-        case S:  return new int[] { 1, 2 };
-        case SE: return new int[] { 2, 2 };
-        default: return null;
-        }
+    /**
+     * The water's phase the map's terrain shows (the game's layer), read at
+     * each paint of the tiles.
+     *
+     * @param phase The phase's supplier.
+     */
+    void setWaterPhase(java.util.function.IntSupplier phase) {
+        this.waterPhase = (phase == null) ? () -> 0 : phase;
+    }
+
+    /**
+     * A step of the water's cycling (the game's {@code ClassicWaterCycle},
+     * its palette for the map and this screen as the original's one VGA
+     * palette): the 3x3 map is painted again when one of its tiles holds a
+     * cycling index (V clip 020: 144 px of its water every 40-41 frames).
+     */
+    void paletteStep() {
+        if (!this.tilesCycle || !isShowing() || this.scale <= 0) return;
+        final Rectangle f = ClassicColonyLayout.MAP_FRAME;
+        repaint(this.originX + f.x * this.scale, this.originY + f.y * this.scale,
+                f.width * this.scale, f.height * this.scale);
+    }
+
+    /**
+     * What draws the tiles' terrain (tests: a plain fill to tell what is
+     * drawn over it), or null for the art.
+     *
+     * @param g The painter, or null.
+     */
+    void setGround(ClassicColonyTiles.Ground g) {
+        this.ground = g;
+        repaint();
+    }
+
+    /** @return The 3x3 map as last painted (tests). */
+    ClassicColonyTiles.Model tiles() {
+        return this.tiles;
+    }
+
+    /** A test's change of the 3x3 map's model before it is drawn, or null. */
+    private java.util.function.UnaryOperator<ClassicColonyTiles.Model> tilesAdjust = null;
+
+    /**
+     * Change the 3x3 map's model before it is drawn (the golden tests: a
+     * clip's amount where FreeCol's rules make another, so that the
+     * drawing is checked apart from the rules).
+     *
+     * @param f The change, or null.
+     */
+    void setTilesAdjust(java.util.function.UnaryOperator<ClassicColonyTiles.Model> f) {
+        this.tilesAdjust = f;
+        repaint();
+    }
+
+    /**
+     * Put the blink in its on or off half (tests: a clip frame's phase).
+     *
+     * @param off Whether in its off half.
+     */
+    void blinkPhase(boolean off) {
+        this.blinkOff = off;
+        repaint();
+    }
+
+    /** @return Whether the last paint drew a tile holding a cycling index (tests). */
+    boolean tilesCycle() {
+        return this.tilesCycle;
+    }
+
+    /**
+     * Put the white cursor on a tile (tests: a clip's place), or off the
+     * tiles ({@link #CURSOR_OFF_TILES}).
+     *
+     * @param tile The tile, 0-8, or {@link #CURSOR_OFF_TILES}.
+     */
+    static void setTileCursor(int tile) {
+        tileCursor = (tile >= 0 && tile < ClassicColonyLayout.TILE_COUNT) ? tile
+            : CURSOR_OFF_TILES;
+    }
+
+    /** @return The white cursor's tile, or {@link #CURSOR_OFF_TILES}. */
+    static int tileCursor() {
+        return tileCursor;
     }
 
     /**
@@ -1293,13 +1426,7 @@ final class ClassicColonyPanel extends JPanel {
      * @return The unit, or null.
      */
     static Unit occupier(Tile t, Player owner) {
-        if (t == null || owner == null) return null;
-        for (Unit u : t.getUnitList()) {
-            final Player p = u.getOwner();
-            if (p != null && p != owner && u.isOffensiveUnit()
-                && owner.atWarWith(p)) return u;
-        }
-        return null;
+        return ClassicColonyTiles.occupier(t, owner);
     }
 
     /**
@@ -1367,45 +1494,6 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     // Shared drawing helpers
-
-    /** Draw the colonists of a work location in a row, ending at {@code (x, y)}. */
-    private void paintWorkers(Graphics2D g, List<Unit> units, int x, int y) {
-        for (Unit u : units) {
-            final BufferedImage img = this.lib.getScaledUnitImage(u);
-            if (img != null) drawFitted(g, img, x, y - 14, 14);
-            final Rectangle r = new Rectangle(x, y - 14, 14, 14);
-            if (u == this.selectedUnit) {
-                g.setColor(PICKED);
-                g.drawRect(r.x, r.y, r.width - 1, r.height - 1);
-            }
-            this.unitBounds.add(r);
-            this.unitTargets.add(u);
-            x += 10;
-        }
-    }
-
-    /**
-     * The original's production tag: a black plate carrying the amount produced
-     * and the goods icon, floating above the building or work tile.
-     */
-    private void paintProductionTag(Graphics2D g,
-                                    net.sf.freecol.common.model.ProductionInfo pi,
-                                    int x, int y) {
-        if (pi == null) return;
-        for (AbstractGoods ag : pi.getProduction()) {
-            if (ag.getAmount() <= 0) continue;
-            g.setFont(font(7f, Font.BOLD));
-            final String s = String.valueOf(ag.getAmount());
-            final int tw = g.getFontMetrics().stringWidth(s) + 13;
-            g.setColor(TAG_BG);
-            g.fillRect(x, y - 8, tw, 9);
-            g.setColor(TAG_FG);
-            g.drawString(s, x + 1, y - 1);
-            final BufferedImage icon = this.lib.getScaledGoodsTypeImage(ag.getType());
-            if (icon != null) drawFitted(g, icon, x + tw - 10, y - 8, 9);
-            x += tw + 1;
-        }
-    }
 
     /** A tiny black-plated number, as used under the net-production icons. */
     private void tag(Graphics2D g, String s, int x, int y) {

@@ -713,6 +713,131 @@ final class ClassicColonyLayout {
 
     // The figure row in the band (L §5.2, dago §4.2; the look only)
 
+    // The 3x3 colony map (spec M4.4; L §4.1, dago §3; V clip 020, 17 rows at 0 px)
+
+    /** The 3x3 map's tiles in their order: index = 3 * row + column, the centre 4. */
+    static final int TILE_COUNT = 9, CENTRE_TILE = 4;
+
+    /** The tiles' names in their order (the recorder, the reports). */
+    static final String[] TILE_NAMES = { "NW", "N", "NE", "W", "C", "E", "SW", "S", "SE" };
+
+    /**
+     * A tile's cell: 24x24 at (224 + 24c, 32 + 24r).
+     *
+     * @param i The tile, 0-8 (3 * row + column).
+     * @return Its rectangle.
+     */
+    static Rectangle tileCell(int i) {
+        return new Rectangle(TILES_X + TILE * (i % 3), TILES_Y + TILE * (i / 3), TILE, TILE);
+    }
+
+    /**
+     * The tile under a point.
+     *
+     * @param x The x.
+     * @param y The y.
+     * @return Its index, or -1 outside the 3x3 map's cells.
+     */
+    static int tileAt(int x, int y) {
+        if (x < TILES_X || y < TILES_Y || x >= TILES_X + 3 * TILE || y >= TILES_Y + 3 * TILE) {
+            return -1;
+        }
+        return 3 * ((y - TILES_Y) / TILE) + (x - TILES_X) / TILE;
+    }
+
+    /**
+     * A tile's production row's icon y: the tile's y + 1; the centre's
+     * second row (its other good) at y + 14 (V clip 020 #2260, #14817,
+     * #123003, #134173; dago Base, Fur City, Fur Town).
+     */
+    static final int TILE_ROW_DY = 1, TILE_SECOND_ROW_DY = 14;
+
+    /**
+     * A tile's production row (dago §3.3, V 29 rows there and 17 in clip
+     * 020 at 0 px): R = 24 - w; m = n; while (m &gt; 1 and m - 1 &gt; R) m
+     * /= 2; p = min(w + 1, floor(R/(m - 1))); total = (m - 1)p + w; first
+     * = tile x + floor((24 - total)/2); a count label n at (first + 2, row
+     * y + 1) when p &lt;= 1.  V: corn 5 from 224 at pitch 4, lumber 8 from
+     * 248 at 2, corn 6 from 249 at 3, sugar 3 from 248 at 8, ore 5 from 273
+     * at 3, fish 6 from 273 at 3, sugar 12 from 250 at 1 with «12» at
+     * (252,34), sugar 1 at 256, corn 4 from 249 at 5, sugar 2 from 251 at 9,
+     * silver 3 from 224 at 7, furs 3 from 248 at 7 (L §4.1); halved rows
+     * dago's 30 lumber (m 15), 18 ore, 22 tobacco, labelled (p 1).  A
+     * halved row with p &gt;= 2 (16 lumber: m 8 at 2) carries no label by
+     * this rule (I: never seen, L §4.1: it cannot be told from 8).
+     *
+     * @param tileX The tile's x.
+     * @param rowY The icons' y.
+     * @param n The amount (at most 0: no row).
+     * @param w The icon's width.
+     * @return The row, or null.
+     */
+    static Row tileRow(int tileX, int rowY, int n, int w) {
+        if (n <= 0) return null;
+        final int r = TILE - w;
+        int m = n, k = 1;
+        while (m > 1 && m - 1 > r) {
+            m /= 2;
+            k *= 2;
+        }
+        final int p = (m > 1) ? Math.min(w + 1, Math.floorDiv(r, m - 1)) : 0;
+        final int total = (m - 1) * p + w;
+        final int first = tileX + Math.floorDiv(TILE - total, 2);
+        return new Row(n, k, m, p, first, rowY, m > 1 && p <= 1);
+    }
+
+    /**
+     * A tile's worker: his figure at tile + (14,6), whatever its width,
+     * after the row, with a 2-px black shadow (ink 0; V clip 020 ×9, dago
+     * 24 workers).
+     */
+    static final int TILE_WORKER_DX = 14, TILE_WORKER_DY = 6;
+
+    /**
+     * A worker who makes nothing on his tile: the good's icon at
+     * {@link #zeroIconX}, the tile's y + 1, and over it the red prohibition
+     * sign ICONS.SS.064 (16x16) at the tile's corner (V: clip 020 #48712,
+     * #50260 and playthrough-1 #75026, #75313, each a sugar planter on
+     * hills: 0 px), then the worker.
+     */
+    static final int ICON_NO_PRODUCTION = 64;
+
+    /**
+     * The good's icon under the prohibition sign: centred in the sign's 16
+     * columns, x = tile x + floor((16 - w)/2) (V: sugar, w 8, at tile + 4;
+     * I for the other widths).
+     *
+     * @param tileX The tile's x.
+     * @param w The icon's width.
+     * @return Its x.
+     */
+    static int zeroIconX(int tileX, int w) {
+        return tileX + Math.floorDiv(16 - w, 2);
+    }
+
+    /** Native land: the totem ICONS.SS.108 at tile + (8,4) (V clip 020 #14817, NW, W, SW, S). */
+    static final int ICON_TOTEM = 108, TOTEM_DX = 8, TOTEM_DY = 4;
+
+    /**
+     * An enemy unit on a work tile at war: the map's unit icon with its
+     * flag at tile + (4,4) (V war-french #13962: the dragoon's flag at
+     * (228,60) on W, the soldier's at (284,91) on SE; part M2).
+     */
+    static final int ENEMY_DX = 4, ENEMY_DY = 4;
+
+    /**
+     * A tile's hover label's box x (dago §3.5, V «Ozean» x 226-246 on W,
+     * «Grünland/Straße/Gepflügt» x 213-306 on N): tile x + 12 - (w + 1)/2,
+     * not clamped; its y the tile's y.
+     *
+     * @param tileX The tile's x.
+     * @param w The label's text width.
+     * @return The box's x.
+     */
+    static int tileLabelX(int tileX, int w) {
+        return tileX + TILE / 2 - (w + 1) / 2;
+    }
+
     /** The figure row's y (no shadow). */
     static final int FIGURE_ROW_Y = 142;
 

@@ -101,7 +101,10 @@ import javax.swing.JComponent;
  * {@code music-request}, {@code music-mode} (the jukebox switched to the
  * title or the in-game playlist), {@code pref}, {@code colony-buildings}
  * (each slot of the colony screen's building area: its sprite frame, row
- * and figures, {@link ClassicColonyBuildings.Model}),
+ * and figures, {@link ClassicColonyBuildings.Model}), {@code colony-tiles}
+ * (each tile of its 3x3 map: its rows, the worker, the prohibition sign,
+ * the totem, an enemy, and the white cursor's place;
+ * {@link ClassicColonyTiles.Model}),
  * {@code still}, {@code terrain} (W6e: whether the pack holds the index
  * pipeline, {@code index ...} or {@code fallback ...}; a {@link #note},
  * so it is also a line of {@code summary.txt}), {@code palette-step}

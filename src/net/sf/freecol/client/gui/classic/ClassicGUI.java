@@ -1845,10 +1845,17 @@ public class ClassicGUI extends GUI {
                 this.mapViewer.setTerrain(layer, this.terrainOracle);
                 // The water cycling (W6c): the viewer's blocking waits and
                 // the panel's tick fire its steps on time.
+                // The colony screen's 3x3 map cycles with it (M4.4: the
+                // original's one palette; V clip 020 #2262, #2303, #2343).
                 this.waterCycle = new ClassicWaterCycle(ClassicSlide.SYSTEM,
                     SwingUtilities::invokeLater, SwingUtilities::isEventDispatchThread,
                     () -> ClassicPrefs.get().is(ClassicPrefs.WATER_CYCLING),
-                    this.mapViewer::paletteStep,
+                    (phase, k, due, serviced) -> {
+                        final ClassicMapViewer mv = this.mapViewer;
+                        if (mv != null) mv.paletteStep(phase, k, due, serviced);
+                        final ClassicColonyPanel cp = this.colonyPanel;
+                        if (cp != null) cp.paletteStep();
+                    },
                     (layer == null) ? null : layer.palette().cycle(), true);
                 this.mapViewer.setSlideClock(this.waterCycle.servicing(ClassicSlide.SYSTEM));
                 installInGameHud();
@@ -4364,6 +4371,12 @@ public class ClassicGUI extends GUI {
                         if (this.colonyPanel == self[0]) closeColonyPanel("player");
                     }, new ColonyUnits(), waitClock(), true);
                 self[0] = panel;
+                // Its 3x3 map's water at the map's cycling phase (M4.4).
+                panel.setWaterPhase(() -> {
+                    final ClassicMapViewer mv = this.mapViewer;
+                    final ClassicTerrainLayer l = (mv == null) ? null : mv.terrainLayer();
+                    return (l == null) ? 0 : l.phase();
+                });
                 // The arrow is hidden during the screen's drags (M4.0).
                 panel.addPropertyChangeListener(ClassicPointer.DRAGGING,
                                                 e -> arrowRefresh());

@@ -3543,16 +3543,45 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   black construction plate is gone (the original shows the build only in its
   hammer panel); until ÄNDERN (M4.7) a press on the right panel opens the build
   list.
-- **Tile pane** (right) — the **3×3 work-tile grid** on the wood panel
-  (`WOODTILE.SS`), the colony in the centre cell and its eight neighbours around
-  it. Each cell is placed by the work tile's compass `Direction` from the colony
-  (`cellForDirection`), **not** its raw `(x,y)` offset — FreeCol's map is
-  isometric, so the eight neighbours' raw offsets do not fill a −1..+1 square
-  (the same isometric-vs-rectangular gotcha as the map viewer; placing by raw
-  offset left cells empty). The cells are the original's 24×24 at (224 + 24c,
-  32 + 24r) (M4.1); each draws the same terrain art as the map scaled to 24 (the
-  original's finer art is M4.4's open point), plus the colonist working it
-  (green-boxed) and its production tag, clipped to its cell.
+- **3×3 colony map** (right; M4.4, `ClassicColonyTiles`, every number in
+  `ClassicColonyLayout`) — the colony's nine tiles in the original's 24×24 cells
+  at (224 + 24c, 32 + 24r) inside the black frame on the wood panel (M4.1). Each
+  cell is placed by the work tile's compass `Direction` from the colony
+  (`ClassicColonyTiles.placeOf`), **not** its raw `(x,y)` offset — FreeCol's map
+  is isometric, so the eight neighbours' raw offsets do not fill a −1..+1 square.
+  **Terrain: ours, not the original's** (L §4.2: its finer 24-px art comes from
+  a scaler nobody has found): each tile as our map composes it
+  (`ClassicTerrainComposer` over the pack's index sheets, through the game
+  palette; the map's RGBA tiles without them), the colony's sprite on the centre
+  where the map draws it (its flag in the owner's colours), the 16 px scaled to 24
+  by source pixel floor((2d + 1)/3); its water cycles with the map's palette
+  (the original's one VGA palette: 144 px of its 3×3 every 40–41 frames, clip 020
+  #2262, #2303, #2343; a palette step repaints the 3×3 when one of its tiles
+  holds a cycling index). **Over it, as the original:** each tile's production
+  row (dago §3.3: R = 24 − w, m halved while m − 1 > R, pitch min(w + 1,
+  floor(R/(m − 1))), centred, icon y = tile y + 1, a count label n at (first + 2,
+  y + 1) when the pitch is 1, if «Beschriftung an Waren und Terrain» is on); the
+  centre's food at y + 1 and its other good at y + 14, reaching 2 px into the tile
+  below; the worker (his type's map sprite) at tile + (14,6) after his row with a
+  2-px black shadow; a worker who makes nothing (FreeCol: his tile has no
+  production for him) shows his good's icon at tile + (floor((16 − w)/2), 1) under
+  the red prohibition sign **ICONS.SS.064** at the tile's corner (V clip 020
+  #48712, #50260, playthrough-1 #75026); the totem ICONS.SS.108 at tile + (8,4) on
+  native land the player would have to buy (none after Peter Minuit); an enemy at
+  war on his tile with his flag at + (4,4) (part M2); the selected colonist's
+  tile framed green (ink 10) and the white cursor (ink 15) over it in its blink's
+  on half. All the tiles' terrain is drawn first, then each tile's overlays in
+  their order, then the frames. **The cursor** is global, as the warehouse's
+  selection (V: openings with it on Mitte, NW, NO, N, SW or on a figure; I:
+  across colonies), on the centre at first; a press on a tile or its worker
+  brings it there, a press on another colonist takes it off the tiles (its look
+  on a figure is M4.5's; the keys that move it come with M4.8). **Hover label:**
+  the tile's terrain as the map's panel names it and its extras joined by '/'
+  («Tropen- Wald», «Hügellandschaft/Straße», «Sumpfland/Straße/Gepflügt»), its box
+  at tile x + 12 − (w + 1)/2, the tile's y, not clamped (dago §3.5). FreeCol's
+  numbers are the rows' (where they differ from the original's, see the S3
+  report). The recorder logs `colony-tiles` (each tile's rows, worker, sign,
+  totem, enemy, the cursor's place).
 - **Bottom band** — the original **`COLONY.PIK`** chrome (320×72), with the live
   figures over it: the SoL/tory split (the first slice's until M4.5) and the
   original's **figure row** (M4.3; L §5.2: every colonist by his job now, NAMES
@@ -3579,7 +3608,13 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   complete screen, in 55 frames, the woodcuts' fixed order) and the harness's
   `sdrag ax ay bx by [shift]`. Every formula is in `ClassicColonyLayout`.
 - **Golden tests** (`ClassicColonyChromeTest`, `ClassicColonyKitTest`,
-  `ClassicColonyBuildingsTest`, with the pack and `-Dclassic.clips`): the building
+  `ClassicColonyBuildingsTest`, `ClassicColonyTilesTest`, with the pack and
+  `-Dclassic.clips`): the 3×3 map of 8 frames of clip 020 (#2260, #48712, #50260,
+  #105689, #134173, #14817, #35057, #123003: rows, the stack «12», the workers,
+  the sign, the totems, the frames, the cursor, «Tropen- Wald») 0 px over
+  everything the original or ours draws on the terrain, the terrain counted, and
+  dago's four tile models drawn by the same painter against dago's frames 0 px
+  (S3); the building
   area (x 0–198, y 8–127) and the figure row (x 0–118, y 142–158) of 14 frames of
   clip 020 (Base 1539, 1546, 1561, 1571, Provisorische Kolonie, Silver City; slots,
   rows, stacks, workers, selection, 1–3 units outside, hover labels; a visit
@@ -3594,8 +3629,9 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
 - **The numbers** follow SPIEL "Koloniebericht-Optionen" (W14, read at each
   paint): "Beschriftung an Gebäuden" the count labels of the buildings' stacked
   rows (since M4.3; I: the option's meaning in the original),
-  "Beschriftung an Waren und Terrain" those on the work tiles and the
-  figures under the net production. The warehouse amounts always show.
+  "Beschriftung an Waren und Terrain" those of the tiles' stacked rows (since
+  M4.4, I likewise) and the figures under the net production. The warehouse
+  amounts always show.
   The figures are FreeCol's, a house improvement on the original's icon
   rows (Regeln-Auswahl).
 

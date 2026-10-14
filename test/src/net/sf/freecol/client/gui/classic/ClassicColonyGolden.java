@@ -173,6 +173,25 @@ final class ClassicColonyGolden {
                 m.sprite(s, x, y);
             }
         }
+        if (m.count() > 0) return m;
+        // A torn frame (the capture's tear, as dago §4.1's ghost): the
+        // arrow's rows from 1 to 4 on missing, the rest whole (clip 020
+        // #48712: rows 2-13 at (257,48)).  Only those rows are its.
+        for (int top = 1; top <= 4 && m.count() == 0; top++) {
+            for (int y = -top; y + s.getHeight() <= 200; y++) {
+                next: for (int x = 0; x + s.getWidth() <= 320; x++) {
+                    int n = 0;
+                    for (int[] o : opaque) {
+                        if (o[1] < top) continue;
+                        if (y + o[1] < 0) continue next;
+                        if (f[(y + o[1]) * 320 + x + o[0]] != o[2]) continue next;
+                        n++;
+                    }
+                    if (n < 20) continue;
+                    for (int[] o : opaque) if (o[1] >= top) m.set(x + o[0], y + o[1]);
+                }
+            }
+        }
         return m;
     }
 
@@ -207,11 +226,41 @@ final class ClassicColonyGolden {
     Mask content(String name, Rectangle region,
                  java.util.function.Predicate<String> keep) throws IOException {
         if (name == null) return null;
-        final File f = new File(new File(this.recordings, MODELS), name);
-        if (!f.isFile()) return null;
+        return content(new File(new File(this.recordings, MODELS), name), region, keep);
+    }
+
+    /**
+     * {@link #content(String, Rectangle, java.util.function.Predicate)} of
+     * a model file anywhere (another analysis', a test's own).
+     *
+     * @param f The model's file.
+     * @param region The model's region.
+     * @param keep Which lines (trimmed) count.
+     * @return The mask, or null when there is no such file.
+     * @exception IOException if it cannot be read.
+     */
+    Mask content(File f, Rectangle region,
+                 java.util.function.Predicate<String> keep) throws IOException {
+        if (f == null || !f.isFile()) return null;
+        return content(f.getName(), Files.readAllLines(f.toPath(), StandardCharsets.UTF_8),
+                       region, keep);
+    }
+
+    /**
+     * The mask of a model's lines (the ops of {@link #content(String, Rectangle)}).
+     *
+     * @param name The model's name (for errors).
+     * @param lines Its lines.
+     * @param region The model's region.
+     * @param keep Which lines (trimmed) count.
+     * @return The mask.
+     * @exception IOException for an op it does not know.
+     */
+    Mask content(String name, List<String> lines, Rectangle region,
+                 java.util.function.Predicate<String> keep) throws IOException {
         final Mask m = new Mask();
         final ClassicFont tiny = this.pack.font(ClassicFont.TINY);
-        for (String raw : Files.readAllLines(f.toPath(), StandardCharsets.UTF_8)) {
+        for (String raw : lines) {
             final String l = raw.trim();
             if (l.isEmpty() || l.startsWith("#") || !keep.test(l)) continue;
             final String[] q = l.split("\\s+");
