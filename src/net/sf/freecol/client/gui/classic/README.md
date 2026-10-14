@@ -189,13 +189,15 @@ save plays on as it was (R1b re-applies the rules on load, later).
     polar rows are all arctic, without hills, mountains or rivers
     (`TerrainGenerator.offLimits`). The mountains and the rumours are made
     for the land the map has (`OriginalWorld.countLand`).
-  - *The title menu*: «Neue Welt» starts everything Normal
-    (`OriginalWorldSettings.CLASSIC_UI_NEW_WORLD`, the world Roger and Levi
-    play with «Individualisieren»), through
-    `ClassicGUI.prepareNewWorldMap` and `NewWorldSetup.world`; the
-    original's «Neue Welt» (427, 469, 650 land tiles, the amount of Klein +
-    Inselgruppe) is `OriginalWorldSettings.ORIGINAL_NEW_WORLD`, for when the
-    Classic UI has its «Individualisieren» screen.
+  - *The title menu* (part P3): «Neue Welt INDIVIDUALISIEREN» opens the
+    original's world screen (see "New-game chain" below), whose four
+    answers reach the game through `NewWorldSetup.world` and
+    `ClassicGUI.prepareNewWorldMap`; everything Normal, the world Roger and
+    Levi play, is INDIVIDUALISIEREN and the footer, as in the original.
+    «Ein Spiel in der NEUEN WELT starten» plays the original's «Neue Welt»
+    (427, 469, 650 land tiles in Roger's three games, the amount of Klein +
+    Inselgruppe): `OriginalWorldSettings.CLASSIC_UI_NEW_WORLD` =
+    `ORIGINAL_NEW_WORLD` (from P1 until P3 it was everything Normal).
   - Measured with `net.sf.freecol.tools.WorldSettingsCensus` (60 seeds per
     setting and topology: land, masses, coasts, rivers, terrain, Pacific,
     lanes, start); `OriginalWorldTest`, `OriginalWorldSettingsTest`,
@@ -4688,10 +4690,12 @@ differing pixels.
     A pack converted before the chain's material existed (no `text/`) skips
     the chain: NEUE WELT then starts at once with `NewWorldSetup.defaults()`
     and logs one INFO line asking for `ant classic-assets`.
-  - AMERIKA and INDIVIDUALISIEREN show the notice "Diese Funktion folgt in
-    einer späteren Version." FreeCol's America maps would look about 3.6×
-    too tall in the rectangular view; the faithful route is converting
-    AMER2.MP.
+  - INDIVIDUALISIEREN → the original's world screen, then the same chain
+    (part P3, see "New-game chain"); a pack without CUSTOMIZ.PIK or its
+    labels keeps the notice below.
+  - AMERIKA shows the notice "Diese Funktion folgt in einer späteren
+    Version." FreeCol's America maps would look about 3.6× too tall in the
+    rectangular view; the faithful route is converting AMER2.MP.
   - SPIEL LADEN opens the load box (`ClassicSaveGames`). It lists manual saves,
     then autosaves, each newest first, with no "(EMPTY)" slots. Each row first
     shows the file name and date. A daemon thread then replaces it with the
@@ -4769,6 +4773,7 @@ run: `screenshots/start-sequence`.
 
 | # | Screen | Captures | Picture |
 |---|--------|----------|---------|
+| 0 | World (INDIVIDUALISIEREN only: four questions, twelve pictures) | land tests `opening_024`, `026`-`032` (Roger, 2026-10-13) | `CUSTOMIZ.PIK` |
 | 1 | Difficulty (five portraits) | Dutch 056-060 (each level highlighted), English 034 | `DIFFICUL.PIK` |
 | 2 | European power (four cards) | Dutch 061-064 (England, France, Spain, Holland), English 035 | `NATIONS.PIK` |
 | 3 | Leader name | Dutch 065 (Holland's default leader), English 036 | `WOODPANL.PIK` |
@@ -4782,6 +4787,57 @@ audience comes the departure (069-082, see "Departure" below), then the
 game opens on the original's first scene with the admiral (083/049, see
 "First scene" below) instead of the engine's own start message.
 
+- **The world screen** (part P3, «Neue Welt INDIVIDUALISIEREN»; the
+  recordings `video/recordings/landtests/2026-10-13_opening_024` and
+  `026`-`032`, decoded next to them; `ClassicNewWorldScreens.paintWorld`,
+  `World`, the chain's step `WORLD`). Measured:
+  - `CUSTOMIZ.PIK` 1:1 with twelve 72×48 pictures, columns LANDMASSE,
+    LANDFORM, TEMPERATUR, KLIMA at x 10/86/162/238, rows (the answers, top
+    to bottom = `OriginalWorldSettings` TOP/MIDDLE/BOTTOM) at y 16/76/135.
+  - Each column's chosen picture has a 1-px frame on its bounds and two
+    FONTTINY labels (`cardLabel`: black one pixel right, then the colour)
+    at its top +17 (the question with ':') and +25 (the answer): the
+    current column in yellow `0xDFBA00`, the other three in green
+    `0x04B610` (palette indices 14 and 10, as on the difficulty screen).
+  - Heading LABELS 159 in FONTINTR (ink, shade, black shadow) at y 4,
+    footer "(" LABELS 160 ")" in FONTTINY at y 190, both centred in a span
+    of 322 (`WORLD_SPAN`; 320 misses both by a pixel). Words: LABELS
+    `@MISC` 143-146 (questions), 147-158 (answers), 159, 160
+    (`ClassicText.MISC_WORLD_*`). GAME.TXT `@CLAND`, `@CCONT`, `@CTEMP`,
+    `@CCLIM` hold the same questions as text boxes; no recording shows
+    them.
+  - Behaviour (all eight clips): it opens with the middle row chosen in
+    every column and LANDMASSE current, also after a game with other
+    answers; a click on a picture chooses it in its column and makes that
+    column current (the one before turns green); the pointer over a
+    picture changes nothing (024 #371-#394); a click on the footer goes on
+    to the difficulty screen, which opens on its first card. The ten
+    recorded clicks on pictures, replayed through the chain at the arrow's
+    place, give every frame's state, and the eight footer clicks the
+    difficulty screen (each 0 px against its first settled frame).
+  - Pixels: of the 973 settled frames of the screen in the eight clips,
+    873 are 0 px with the arrow at its recorded place, 98 differ only by
+    an arrow caught mid-move, 2 are the start of the wipe that leaves the
+    screen; 23 frames catch the screen while it is drawn (scratch harness
+    `p/p3/tools/WorldPreview.java`, `p/p3/wp-run6.txt`;
+    `ClassicWorldScreenTest.testAgainstTheLandTestClips` checks twelve
+    frames and the following difficulty screen).
+  - Not recorded (Roger used the mouse only), so documented assumptions:
+    Left/Right (keypad 4/6) move the current column, Up/Down (8/2) its
+    answer, clamped; Enter = the footer; Escape or a right click goes
+    back (to the title with INDIVIDUALISIEREN barred; from the difficulty
+    screen back to the world screen, answers kept); a click on a chosen
+    picture only makes its column current; the click acts on the press,
+    as everywhere in the chain.
+  - Not reproduced (invisible): the original draws the screen in about
+    two frames (14 ms each: the picture with the yellow frame, then the
+    green ones), and after the footer click it clears the screen to black
+    and shows the difficulty screen about 0.1 s later (024 #1064-#1072);
+    here both are cuts, as between the chain's other screens.
+  - The answers become `NewWorldSetup.world` (`ClassicNewWorldChain.
+    worldSettings`); NEUE WELT has no world screen and plays
+    `OriginalWorldSettings.CLASSIC_UI_NEW_WORLD`, the original's small
+    world (Klein + Inselgruppe).
 - **Where it runs.** On the title canvas itself (`ClassicMainMenuPanel` mode
   `NEW_WORLD`): one panel, one letterbox, one arrow, no panel swap. The chain
   holds no engine state, so Escape at any point needs no teardown. Its art

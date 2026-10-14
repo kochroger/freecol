@@ -1056,9 +1056,10 @@ public class ClassicGUI extends GUI {
 
     /**
      * What the original's new-game screens collect before a game in the New
-     * World starts: the difficulty ({@code opening_056..060}), the European
-     * power ({@code 061..064}) and the leader's name ({@code 065}).  Null
-     * fields mean "FreeCol's default".
+     * World starts: the world (INDIVIDUALISIEREN's screen, landtests
+     * {@code opening_024}), the difficulty ({@code opening_056..060}), the
+     * European power ({@code 061..064}) and the leader's name
+     * ({@code 065}).  Null fields mean "FreeCol's default".
      *
      * <p>The chain ({@link ClassicNewWorldChain#setup}) fills it from two
      * index tables in the original's order, both in
@@ -1076,10 +1077,11 @@ public class ClassicGUI extends GUI {
         /** The leader's name, or null for {@code FreeCol.getName()}. */
         final String playerName;
         /**
-         * The answers to the original's world questions: the title
-         * menu's «Neue Welt» is {@link
-         * OriginalWorldSettings#CLASSIC_UI_NEW_WORLD} (everything
-         * Normal) until «Individualisieren» has its screen.
+         * The answers to the original's world questions: the world
+         * screen's of «Neue Welt INDIVIDUALISIEREN», or for the title
+         * menu's «Neue Welt» {@link
+         * OriginalWorldSettings#CLASSIC_UI_NEW_WORLD} (the original's
+         * small world, LANDMASSE Klein and LANDFORM Inselgruppe).
          */
         final OriginalWorldSettings world;
 
@@ -1146,7 +1148,8 @@ public class ClassicGUI extends GUI {
 
     /**
      * THE SEAM between the original's new-game screens and the engine.  The
-     * difficulty, nation, name, nation-page and audience screens run purely
+     * world (INDIVIDUALISIEREN only), difficulty, nation, name, nation-page
+     * and audience screens run purely
      * on the title canvas ({@link ClassicMainMenuPanel} mode NEW_WORLD, no
      * engine state, so going back needs no teardown); when the audience is
      * dismissed the panel freezes it and lands here with all three choices.

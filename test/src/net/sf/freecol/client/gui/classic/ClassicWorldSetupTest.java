@@ -32,9 +32,10 @@ import net.sf.freecol.util.test.FreeColTestCase;
 
 /**
  * A new game of the Classic UI is made in the original's New World of
- * the setup's answers (part P1): the title menu's «Neue Welt» with
- * everything Normal, any other answers as they are given, on the
- * topology of the new game.
+ * the setup's answers (parts P1, P3): the title menu's «Neue Welt» in
+ * the original's small world (LANDMASSE Klein, LANDFORM Inselgruppe),
+ * «Individualisieren»'s answers as they are given, on the topology of
+ * the new game.
  */
 public class ClassicWorldSetupTest extends FreeColTestCase {
 
@@ -45,15 +46,17 @@ public class ClassicWorldSetupTest extends FreeColTestCase {
 
     /**
      * The title menu's «Neue Welt» (the chain's setup, and FreeCol's
-     * defaults) is the original's world with everything Normal.
+     * defaults when a pack lacks the chain) is the original's «Neue
+     * Welt»: Klein and Inselgruppe (P3; P1 had everything Normal while
+     * «Individualisieren» had no screen).
      */
-    public void testNewWorldIsEverythingNormal() {
+    public void testNewWorldIsTheOriginalsSmallWorld() {
         final Topology saved = Topology.current();
         try {
-            assertEquals(OriginalWorldSettings.CLASSIC_UI_NEW_WORLD,
+            assertEquals(OriginalWorldSettings.ORIGINAL_NEW_WORLD,
                 new ClassicGUI.NewWorldSetup("model.difficulty.veryEasy",
                     "model.nation.dutch", "Levi").world);
-            assertEquals(OriginalWorldSettings.ALL_NORMAL,
+            assertEquals(OriginalWorldSettings.ORIGINAL_NEW_WORLD,
                 ClassicGUI.NewWorldSetup.defaults().world);
             final Specification spec = levi();
             final OptionGroup mgo = spec.getMapGeneratorOptions();
@@ -62,8 +65,7 @@ public class ClassicWorldSetupTest extends FreeColTestCase {
             mgo.setInteger(MapGeneratorOptions.ORIGINAL_LAND_MASS, 2);
             ClassicGUI.prepareNewWorldMap(spec, ClassicGUI.NewWorldSetup.defaults());
             assertTrue(OriginalWorld.isOriginal(mgo));
-            assertEquals(OriginalWorldSettings.ALL_NORMAL,
-                         OriginalWorldSettings.of(mgo));
+            assertEquals("KIgn", OriginalWorldSettings.of(mgo).getCode());
             assertEquals(Topology.forNewGame(Topology.SQUARE), Topology.current());
             if (Topology.current() == Topology.SQUARE) {
                 assertEquals(58, mgo.getInteger(MapGeneratorOptions.MAP_WIDTH));
@@ -75,7 +77,7 @@ public class ClassicWorldSetupTest extends FreeColTestCase {
     }
 
     /**
-     * Other answers (as «Individualisieren» will give them) reach the
+     * Other answers (as «Individualisieren» gives them) reach the
      * new game's options unchanged.
      */
     public void testTheAnswersReachTheGame() {

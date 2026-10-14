@@ -73,12 +73,13 @@ public final class OriginalWorldSettings {
         = new OriginalWorldSettings(TOP, TOP, MIDDLE, MIDDLE);
 
     /**
-     * The world the Classic UI's «Neue Welt» starts today: everything
-     * Normal, the world Roger and Levi play («Individualisieren», all
-     * Normal), as long as the Classic UI has no «Individualisieren»
-     * screen; with one, «Neue Welt» becomes {@link #ORIGINAL_NEW_WORLD}.
+     * The world the Classic UI's «Neue Welt» starts: the original's,
+     * {@link #ORIGINAL_NEW_WORLD} (part P3, now that «Neue Welt
+     * INDIVIDUALISIEREN» has its screen; from P1 until then it was
+     * {@link #ALL_NORMAL}, the world Roger and Levi play, which they now
+     * get as in the original: INDIVIDUALISIEREN and the footer).
      */
-    public static final OriginalWorldSettings CLASSIC_UI_NEW_WORLD = ALL_NORMAL;
+    public static final OriginalWorldSettings CLASSIC_UI_NEW_WORLD = ORIGINAL_NEW_WORLD;
 
     /** The temperature option value of each TEMPERATUR row. */
     private static final int[] TEMPERATURE_VALUES = {

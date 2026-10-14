@@ -101,6 +101,18 @@ final class ClassicText {
         MISC_DIFFICULTY = 162, MISC_DIFF_SUB0 = 164, MISC_CHOOSE_NATION = 169,
         MISC_POWER = 170, MISC_BONUS0 = 172;
 
+    /**
+     * LABELS.TXT {@code @MISC} of «Neue Welt INDIVIDUALISIEREN» (the same
+     * convention): 143..146 the four questions Landmasse, Landform,
+     * Temperatur, Klima (LABELS.TXT:159-162), 147..158 their answers, three
+     * a question in the order of the picture rows (Klein, Mittelgroß, Groß;
+     * Inselgruppe, Normal, Kontinente; Kühl, Gemäßigt, Warm; Trocken, Normal,
+     * Feucht; :163-174), 159 the heading NEUE WELT INDIVIDUALISIEREN (:175);
+     * its footer is {@link #MISC_DONE_CLICK} like the pickers'.
+     */
+    static final int MISC_WORLD_QUESTION0 = 143, MISC_WORLD_ANSWER0 = 147,
+        MISC_WORLD_HEAD = 159;
+
     /** Whether the "texts missing" INFO line was logged already. */
     private static boolean missLogged = false;
 

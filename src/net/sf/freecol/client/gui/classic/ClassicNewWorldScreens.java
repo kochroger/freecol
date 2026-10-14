@@ -34,7 +34,9 @@ import java.util.logging.Logger;
 
 /**
  * The painters of the original's <b>new-game screens</b> on the 320x200
- * canvas: difficulty ({@code opening_056..060}, English run {@code 034}),
+ * canvas: the world of «Neue Welt INDIVIDUALISIEREN» (Roger's land tests
+ * {@code landtests/opening_024}, {@code 026..032}; {@link #paintWorld}),
+ * difficulty ({@code opening_056..060}, English run {@code 034}),
  * European power ({@code 061..064}, {@code 035}), leader name ({@code 065},
  * {@code 036}), the chosen nation's history and bonus pages ({@code 066},
  * {@code 067}; {@code 037}, {@code 038}) and the audience ({@code 068},
@@ -171,6 +173,61 @@ final class ClassicNewWorldScreens {
     /** The pictures. */
     static final String DIFFICUL = "DIFFICUL.PIK", NATIONS = "NATIONS.PIK",
         WOODPANL = "WOODPANL.PIK", KINGLSS1 = "KINGLSS1.PIK";
+
+    /** The picture of «Neue Welt INDIVIDUALISIEREN». */
+    static final String CUSTOMIZ = "CUSTOMIZ.PIK";
+
+    /**
+     * «Neue Welt INDIVIDUALISIEREN» (Roger's land tests, recordings
+     * {@code landtests/2026-10-13_opening_024} and {@code 026..032}): the
+     * twelve pictures of CUSTOMIZ.PIK, four columns LANDMASSE, LANDFORM,
+     * TEMPERATUR, KLIMA at these left edges, three rows (the answers top
+     * to bottom, {@code OriginalWorldSettings} TOP/MIDDLE/BOTTOM) at these
+     * top edges, each 72x48.  The frame of a chosen picture is a 1-px
+     * outline exactly on these bounds (236 px each, e.g. {@code 024}
+     * #321: (10,76), (86,76), (162,76), (238,76); #461: (10,135);
+     * {@code 027} #2525: (10,16); {@code 030} #381: (86,16)), which are
+     * also the click rects.
+     */
+    static final int[] WORLD_X = { 10, 86, 162, 238 }, WORLD_Y = { 16, 76, 135 };
+
+    /** The size of a picture of the world screen. */
+    static final int WORLD_W = 72, WORLD_H = 48;
+
+    /**
+     * The frame and label colours of the world screen ({@code 024} #321
+     * ff.): the answer of the column last chosen -- LANDMASSE when the
+     * screen opens -- in yellow (CUSTOMIZ.PIK palette index 14, as the
+     * clip's palette shows), the answers of the other three columns in green
+     * (index 10).  The pointer over a picture changes nothing (024 #371-#394
+     * pass over the bottom row without a change).
+     */
+    static final int WORLD_CURRENT = 0xDFBA00, WORLD_CHOSEN = 0x04B610;
+
+    /** The two label lines of a chosen picture: its top + 17 and + 25. */
+    static final int WORLD_LABEL_DY = 17, WORLD_VALUE_DY = 25;
+
+    /**
+     * The span the world screen's heading and footer are centred in,
+     * {@code x = (span - w) / 2}, as {@link #DIFF_SPAN}: 322, one pixel
+     * right of the screen's centre (024 #321: the heading, 140 px, at 91,
+     * the footer, 111 px, at 105; 320 misses both by one pixel).
+     */
+    static final int WORLD_SPAN = 322;
+
+    /** The heading's top (FONTINTR, 024 #321 rows 4-11). */
+    static final int WORLD_HEAD_Y = 4;
+
+    /** The footer's top (FONTTINY, 024 #321 rows 190-194). */
+    static final int WORLD_FOOTER_Y = 190;
+
+    /**
+     * The footer's click rect: its FONTTINY line (x 106-213, rows 190-194
+     * in 024 #321) one pixel larger all round.  Roger's clicks that left the
+     * screen were at (194,192), (148,191), (197,193), (166,193), (153,190),
+     * (181,190), (176,193), (166,192) (024, 026-032).
+     */
+    static final Rectangle WORLD_FOOTER = new Rectangle(105, 189, 110, 7);
 
 
     private ClassicNewWorldScreens() {}
@@ -433,11 +490,89 @@ final class ClassicNewWorldScreens {
     }
 
 
+    /**
+     * The picture and words of «Neue Welt INDIVIDUALISIEREN»: CUSTOMIZ.PIK
+     * and LABELS.TXT {@code @MISC} (see
+     * {@link ClassicText#MISC_WORLD_QUESTION0}); its footer is the pickers'
+     * ({@link Texts#footer}).  GAME.TXT's {@code @CLAND}, {@code @CCONT},
+     * {@code @CTEMP} and {@code @CCLIM} hold the same questions as text
+     * boxes ("Große Kontinente" where the picture says "Kontinente"); no
+     * recording shows them, the game shows the pictures.
+     */
+    static final class World {
+
+        /** CUSTOMIZ.PIK. */
+        final BufferedImage picture;
+        /** The heading (LABELS 159). */
+        final String heading;
+        /** The four questions with the ':' the game adds (LABELS 143..146). */
+        final String[] questions;
+        /** The answers [question][row] (LABELS 147..158). */
+        final String[][] answers;
+
+        World(BufferedImage picture, String heading, String[] questions,
+              String[][] answers) {
+            this.picture = picture;
+            this.heading = heading;
+            this.questions = questions;
+            this.answers = answers;
+        }
+
+        /**
+         * Load from the pack.
+         *
+         * @param p The pack, or null.
+         * @param t The pack's texts, or null.
+         * @return The screen's material, or null when the pack lacks
+         *     CUSTOMIZ.PIK or a label (INDIVIDUALISIEREN then keeps its
+         *     "follows later" notice).
+         */
+        static World load(ClassicPackFiles p, ClassicText t) {
+            if (p == null || t == null) return null;
+            final BufferedImage pic = p.image(ClassicPackFiles.pikKey(CUSTOMIZ));
+            final String head = t.misc(ClassicText.MISC_WORLD_HEAD);
+            final String[] q = new String[WORLD_X.length];
+            final String[][] ans = new String[WORLD_X.length][WORLD_Y.length];
+            boolean ok = pic != null && head != null;
+            for (int c = 0; c < q.length && ok; c++) {
+                final String s = t.misc(ClassicText.MISC_WORLD_QUESTION0 + c);
+                ok = s != null;
+                q[c] = s + ":";
+                for (int r = 0; r < WORLD_Y.length && ok; r++) {
+                    ans[c][r] = t.misc(ClassicText.MISC_WORLD_ANSWER0
+                                       + WORLD_Y.length * c + r);
+                    ok = ans[c][r] != null;
+                }
+            }
+            if (!ok) {
+                logger.info("classic_original pack lacks CUSTOMIZ.PIK or its"
+                    + " labels -- Neue Welt INDIVIDUALISIEREN stays closed");
+                return null;
+            }
+            return new World(pic, head, q, ans);
+        }
+    }
+
+
     // Painters (1:1 at canvas coordinates; the caller draws the arrow)
 
-    /** Dispatch to the painter of the view's screen. */
+    /** Dispatch to the painter of the view's screen (no world screen). */
     static void paint(Graphics2D g, Assets a, Texts t, ClassicNewWorldChain.View v) {
+        paint(g, a, t, null, v);
+    }
+
+    /**
+     * Dispatch to the painter of the view's screen.
+     *
+     * @param w The world screen's material; only the world screen needs
+     *     it (without it that screen paints nothing).
+     */
+    static void paint(Graphics2D g, Assets a, Texts t, World w,
+                      ClassicNewWorldChain.View v) {
         switch (v.step) {
+        case WORLD:
+            if (w != null) paintWorld(g, a, t, w, v.worldRows, v.worldColumn);
+            break;
         case DIFFICULTY: paintDifficulty(g, a, t, v.diffSel); break;
         case NATION: paintNation(g, a, t, v.nationSel); break;
         case NAME: paintName(g, a, t, v.nationSel, v.name, v.nameSelected); break;
@@ -445,6 +580,41 @@ final class ClassicNewWorldScreens {
         case PAGE_B: paintNationPage(g, a, t, v.nationSel, true); break;
         case AUDIENCE: default: paintAudience(g, a, t, v.nationSel); break;
         }
+    }
+
+    /**
+     * «Neue Welt INDIVIDUALISIEREN» ({@code landtests/opening_024},
+     * {@code 026..032}): CUSTOMIZ.PIK, the FONTINTR heading centred in
+     * {@link #WORLD_SPAN} at {@link #WORLD_HEAD_Y} in the pickers' ink, the
+     * FONTTINY footer centred likewise at {@link #WORLD_FOOTER_Y}, and for each column the
+     * chosen picture's frame with its two labels (the question with ':'
+     * and the answer, {@link #cardLabel} at the picture's top + 17 and
+     * + 25), the current column's in yellow, the others in green.
+     *
+     * @param rows The chosen row of each column (0 top .. 2 bottom).
+     * @param current The current column (0..3).
+     */
+    static void paintWorld(Graphics2D g, Assets a, Texts t, World w, int[] rows,
+                           int current) {
+        g.drawImage(w.picture, 0, 0, null);
+        final int hw = a.intro.stringWidth(w.heading);
+        a.intro.draw(g, w.heading, (WORLD_SPAN - hw) / 2, WORLD_HEAD_Y,
+                     ClassicFont.colours(INK, SHADE, SHADOW_PICKER));
+        final int fw = a.tiny.stringWidth(t.footer);
+        a.tiny.draw(g, t.footer, (WORLD_SPAN - fw) / 2, WORLD_FOOTER_Y,
+                    ClassicFont.colours(INK));
+        for (int c = 0; c < WORLD_X.length; c++) {
+            final int[] r = worldCell(c, rows[c]);
+            final int rgb = (c == current) ? WORLD_CURRENT : WORLD_CHOSEN;
+            outline(g, r, rgb);
+            cardLabel(g, a.tiny, w.questions[c], r, r[1] + WORLD_LABEL_DY, rgb);
+            cardLabel(g, a.tiny, w.answers[c][rows[c]], r, r[1] + WORLD_VALUE_DY, rgb);
+        }
+    }
+
+    /** The picture of a column and row as {x, y, w, h}. */
+    static int[] worldCell(int column, int row) {
+        return new int[] { WORLD_X[column], WORLD_Y[row], WORLD_W, WORLD_H };
     }
 
     /**
@@ -592,10 +762,26 @@ final class ClassicNewWorldScreens {
         return -1;
     }
 
-    /** Whether a virtual point is on a picker's footer. */
+    /** Whether a virtual point is on a picker's or the world screen's footer. */
     static boolean footerHit(ClassicNewWorldChain.Step step, int x, int y) {
         return (step == ClassicNewWorldChain.Step.DIFFICULTY) ? DIFF_FOOTER.contains(x, y)
-            : (step == ClassicNewWorldChain.Step.NATION) && NATION_FOOTER.contains(x, y);
+            : (step == ClassicNewWorldChain.Step.NATION) ? NATION_FOOTER.contains(x, y)
+            : (step == ClassicNewWorldChain.Step.WORLD) && WORLD_FOOTER.contains(x, y);
+    }
+
+    /**
+     * The picture of the world screen under a virtual point.
+     *
+     * @return {column, row}, or null between the pictures.
+     */
+    static int[] worldCellAt(int x, int y) {
+        for (int c = 0; c < WORLD_X.length; c++) {
+            if (x < WORLD_X[c] || x >= WORLD_X[c] + WORLD_W) continue;
+            for (int r = 0; r < WORLD_Y.length; r++) {
+                if (y >= WORLD_Y[r] && y < WORLD_Y[r] + WORLD_H) return new int[] { c, r };
+            }
+        }
+        return null;
     }
 
     /** @return The laid-out lines of a nation page (for tests and review). */

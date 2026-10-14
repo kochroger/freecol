@@ -75,15 +75,15 @@ public class OriginalWorldSettingsTest extends FreeColTestCase {
      * The presets: everything Normal is the middle row; the title
      * menu's «Neue Welt» of the original is Klein and Inselgruppe (its
      * three games 427, 469 and 650 land tiles, mean 515; OriginalWorld
-     * gives that setting 514); the Classic UI's «Neue Welt» stays
-     * everything Normal (Roger and Levi play «Individualisieren», all
-     * Normal) until the Classic UI has «Individualisieren».  The levi
-     * rules' own defaults are everything Normal.
+     * gives that setting 514); since the Classic UI has «Individualisieren»
+     * (P3) its «Neue Welt» is that world too (Roger and Levi's everything
+     * Normal is «Individualisieren» and the footer, as in the original).
+     * The levi rules' own defaults are everything Normal.
      */
     public void testThePresets() {
         assertEquals("NNgn", OriginalWorldSettings.ALL_NORMAL.getCode());
         assertEquals("KIgn", OriginalWorldSettings.ORIGINAL_NEW_WORLD.getCode());
-        assertEquals(OriginalWorldSettings.ALL_NORMAL,
+        assertEquals(OriginalWorldSettings.ORIGINAL_NEW_WORLD,
                      OriginalWorldSettings.CLASSIC_UI_NEW_WORLD);
         assertEquals(514, OriginalWorld.getMeanLand(0, 0, 58, 72));
         assertEquals(886, OriginalWorld.getMeanLand(1, 1, 58, 72));

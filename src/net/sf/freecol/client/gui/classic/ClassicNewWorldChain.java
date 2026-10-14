@@ -19,13 +19,30 @@
 
 package net.sf.freecol.client.gui.classic;
 
+import java.util.Arrays;
 import java.util.function.ToIntFunction;
+
+import net.sf.freecol.common.option.OriginalWorldSettings;
 
 
 /**
  * The original's <b>new-game chain</b> as a Swing-free state machine:
  * difficulty, European power, leader name, the chosen nation's two text
- * pages and the audience, in that order ({@code opening_056..068}).
+ * pages and the audience, in that order ({@code opening_056..068}); from
+ * the title's «Neue Welt INDIVIDUALISIEREN» the world screen comes first
+ * (its four questions, Roger's land tests {@code opening_024},
+ * {@code 026..032}), from «Ein Spiel in der NEUEN WELT starten» not (the
+ * original's small world, {@link OriginalWorldSettings#CLASSIC_UI_NEW_WORLD}).
+ *
+ * <p>The world screen as recorded: it opens with the middle row chosen in
+ * every column and LANDMASSE current (yellow); a click on a picture chooses
+ * it in its column and makes that column current (the column before turns
+ * green); the pointer over a picture changes nothing; a click on the footer
+ * goes on to the difficulty screen, which opens on its first card as from
+ * the title.  Not recorded (Roger used the mouse only), so documented
+ * assumptions: Left/Right move the current column, Up/Down its answer (all
+ * clamped), Enter = the footer, Escape and a right click = back; a click
+ * on a chosen picture only makes its column current.
  *
  * <p>Why separate from the panel: everything here -- stepping, clicks,
  * Escape-back, the name editor -- is decided without a window, so it is unit
@@ -46,8 +63,8 @@ import java.util.function.ToIntFunction;
  */
 final class ClassicNewWorldChain {
 
-    /** The screens, in order. */
-    enum Step { DIFFICULTY, NATION, NAME, PAGE_A, PAGE_B, AUDIENCE }
+    /** The screens, in order (WORLD only from INDIVIDUALISIEREN). */
+    enum Step { WORLD, DIFFICULTY, NATION, NAME, PAGE_A, PAGE_B, AUDIENCE }
 
     /** What an operation means for the host. */
     enum Result {
@@ -68,15 +85,35 @@ final class ClassicNewWorldChain {
         final int diffSel, nationSel;
         final String name;
         final boolean nameSelected;
+        /** The world screen: the chosen row of each column (a copy). */
+        final int[] worldRows;
+        /** The world screen: the current column. */
+        final int worldColumn;
 
         View(Step step, int diffSel, int nationSel, String name, boolean nameSelected) {
+            this(step, diffSel, nationSel, name, nameSelected, DEFAULT_WORLD_ROWS, 0);
+        }
+
+        View(Step step, int diffSel, int nationSel, String name, boolean nameSelected,
+             int[] worldRows, int worldColumn) {
             this.step = step;
             this.diffSel = diffSel;
             this.nationSel = nationSel;
             this.name = name;
             this.nameSelected = nameSelected;
+            this.worldRows = worldRows.clone();
+            this.worldColumn = worldColumn;
         }
     }
+
+    /**
+     * The world screen's answers when it opens: the middle row in every
+     * column (every recording, also after a game with other answers:
+     * {@code 027} after {@code 024}).
+     */
+    static final int[] DEFAULT_WORLD_ROWS = {
+        OriginalWorldSettings.MIDDLE, OriginalWorldSettings.MIDDLE,
+        OriginalWorldSettings.MIDDLE, OriginalWorldSettings.MIDDLE };
 
     /**
      * Widest name in pixels: the box (79,98,167,14) of {@code opening_065}
@@ -104,9 +141,16 @@ final class ClassicNewWorldChain {
     /** Most characters in a name. */
     private final int maxLength;
 
-    private Step step = Step.DIFFICULTY;
+    /** Whether the chain began on the world screen (INDIVIDUALISIEREN). */
+    private final boolean world;
+
+    private Step step;
     private int diffSel = 0;
     private int nationSel = 0;
+
+    /** The world screen's chosen rows and current column. */
+    private final int[] worldRows = DEFAULT_WORLD_ROWS.clone();
+    private int worldColumn = 0;
     private final StringBuilder name = new StringBuilder();
 
     /** The name is the untouched, highlighted default. */
@@ -129,22 +173,45 @@ final class ClassicNewWorldChain {
      */
     ClassicNewWorldChain(String[] defaultLeaders, ToIntFunction<String> width,
                          int maxLength) {
+        this(defaultLeaders, width, maxLength, false);
+    }
+
+    /**
+     * Create a chain.
+     *
+     * @param defaultLeaders The four default leader names.
+     * @param width The drawn width of a name.
+     * @param maxLength The longest name in characters.
+     * @param world True to begin on the world screen (INDIVIDUALISIEREN),
+     *     false on the difficulty screen (NEUE WELT).
+     */
+    ClassicNewWorldChain(String[] defaultLeaders, ToIntFunction<String> width,
+                         int maxLength, boolean world) {
         this.defaultLeaders = defaultLeaders.clone();
         this.width = width;
         this.maxLength = (maxLength > 0) ? maxLength : DEFAULT_NAME_LENGTH;
+        this.world = world;
+        this.step = world ? Step.WORLD : Step.DIFFICULTY;
     }
 
     /** A chain over loaded texts, measuring names in {@code nameFont}. */
     static ClassicNewWorldChain create(ClassicNewWorldScreens.Texts t,
                                        final ClassicFont nameFont) {
+        return create(t, nameFont, false);
+    }
+
+    /** A chain over loaded texts, beginning on the world screen or not. */
+    static ClassicNewWorldChain create(ClassicNewWorldScreens.Texts t,
+                                       final ClassicFont nameFont, boolean world) {
         return new ClassicNewWorldChain(t.defaultLeaders, nameFont::stringWidth,
-                                        t.nameFieldLength);
+                                        t.nameFieldLength, world);
     }
 
     /** @return A snapshot of the current state. */
     View view() {
         return new View(this.step, this.diffSel, this.nationSel,
-                        this.name.toString(), this.nameSelected);
+                        this.name.toString(), this.nameSelected,
+                        this.worldRows, this.worldColumn);
     }
 
     /** @return The current screen. */
@@ -152,16 +219,75 @@ final class ClassicNewWorldChain {
         return this.step;
     }
 
+    /** @return Whether the chain began on the world screen. */
+    boolean beganWithWorld() {
+        return this.world;
+    }
+
     /**
      * The choices, after {@link Result#DONE}.
      *
-     * @return The setup for {@code ClassicGUI.beginNewWorldSetup}.
+     * @return The setup for {@code ClassicGUI.beginNewWorldSetup}: the
+     *     world screen's answers, or -- from NEUE WELT -- the original's
+     *     small world ({@link OriginalWorldSettings#CLASSIC_UI_NEW_WORLD}).
      */
     ClassicGUI.NewWorldSetup setup() {
         return new ClassicGUI.NewWorldSetup(
             ClassicNewWorldScreens.DIFFICULTY_IDS[this.diffSel],
             ClassicNewWorldScreens.NATION_IDS[this.nationSel],
-            (this.finalName != null) ? this.finalName : defaultLeader());
+            (this.finalName != null) ? this.finalName : defaultLeader(),
+            worldSettings());
+    }
+
+    /**
+     * The world of this chain.
+     *
+     * @return The world screen's answers (INDIVIDUALISIEREN), else
+     *     {@link OriginalWorldSettings#CLASSIC_UI_NEW_WORLD}.
+     */
+    OriginalWorldSettings worldSettings() {
+        return (this.world)
+            ? new OriginalWorldSettings(this.worldRows[0], this.worldRows[1],
+                                        this.worldRows[2], this.worldRows[3])
+            : OriginalWorldSettings.CLASSIC_UI_NEW_WORLD;
+    }
+
+
+    // The world screen
+
+    /**
+     * Choose a picture: its row in its column, and its column current.
+     *
+     * @param column The column (0 LANDMASSE .. 3 KLIMA).
+     * @param row The row (0 top .. 2 bottom).
+     * @return REPAINT if anything changed.
+     */
+    Result chooseWorld(int column, int row) {
+        if (this.step != Step.WORLD) return Result.STAY;
+        final int c = clamp(column, this.worldRows.length);
+        final int r = clamp(row, ClassicNewWorldScreens.WORLD_Y.length);
+        if (c == this.worldColumn && r == this.worldRows[c]) return Result.STAY;
+        this.worldColumn = c;
+        this.worldRows[c] = r;
+        return Result.REPAINT;
+    }
+
+    /** Left/Right on the world screen: the current column (clamped). */
+    Result moveWorldColumn(int delta) {
+        if (this.step != Step.WORLD) return Result.STAY;
+        final int c = clamp(this.worldColumn + delta, this.worldRows.length);
+        return chooseWorld(c, this.worldRows[c]);
+    }
+
+    /** Up/Down on the world screen: the current column's answer (clamped). */
+    Result moveWorldRow(int delta) {
+        if (this.step != Step.WORLD) return Result.STAY;
+        return chooseWorld(this.worldColumn, this.worldRows[this.worldColumn] + delta);
+    }
+
+    /** @return The world screen's chosen rows (a copy). */
+    int[] worldRows() {
+        return Arrays.copyOf(this.worldRows, this.worldRows.length);
     }
 
 
@@ -220,6 +346,10 @@ final class ClassicNewWorldChain {
      */
     Result confirm() {
         switch (this.step) {
+        case WORLD:
+            this.step = Step.DIFFICULTY;
+            this.diffSel = 0;           // forward entry: the first card (024 #1072)
+            return Result.REPAINT;
         case DIFFICULTY:
             this.step = Step.NATION;
             this.nationSel = 0;          // forward entry: England, as 035/061
@@ -253,11 +383,18 @@ final class ClassicNewWorldChain {
 
     /**
      * Escape (or a right click): one screen back, keeping the choices made
-     * there; from the difficulty screen, {@link Result#CANCEL}.
+     * there; from the first screen (the world screen, else the difficulty
+     * screen), {@link Result#CANCEL}.
      */
     Result back() {
         switch (this.step) {
+        case WORLD:
+            return Result.CANCEL;
         case DIFFICULTY:
+            if (this.world) {
+                this.step = Step.WORLD;
+                return Result.REPAINT;
+            }
             return Result.CANCEL;
         case NATION:
             this.step = Step.DIFFICULTY;
@@ -296,12 +433,18 @@ final class ClassicNewWorldChain {
     // Mouse
 
     /**
-     * A left click at a virtual point.  Pickers: a card selects it, the
+     * A left click at a virtual point.  World screen: a picture is chosen
+     * in its column, the footer goes on.  Pickers: a card selects it, the
      * highlighted card again or the footer confirms.  Name: a click in the
      * box drops the default's highlight.  Pages and audience: advance.
      */
     Result clickPrimary(int x, int y) {
         switch (this.step) {
+        case WORLD:
+            final int[] cell = ClassicNewWorldScreens.worldCellAt(x, y);
+            if (cell != null) return chooseWorld(cell[0], cell[1]);
+            return ClassicNewWorldScreens.footerHit(this.step, x, y)
+                ? confirm() : Result.STAY;
         case DIFFICULTY: case NATION:
             final int card = ClassicNewWorldScreens.cardAt(this.step, x, y);
             if (card >= 0) {

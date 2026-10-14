@@ -90,7 +90,8 @@ import net.sf.freecol.common.resources.ResourceManager;
  * that Escape opens on the title -- in borderless full screen there is no
  * window close button, see {@code ClassicGUI.applyFrameMode} -- and that
  * Alt+F4 opens too, see {@link #offerQuit}), {@link Mode#NEW_WORLD} (the
- * original's new-game chain -- difficulty, power, name, the nation's two
+ * original's new-game chain -- from INDIVIDUALISIEREN first the world
+ * screen, then difficulty, power, name, the nation's two
  * pages, the audience -- painted by {@link ClassicNewWorldScreens} and
  * driven by a {@link ClassicNewWorldChain}), {@link Mode#DEPARTURE} (the
  * original's ten-picture departure after the audience, painted by
@@ -121,8 +122,8 @@ final class ClassicMainMenuPanel extends JPanel {
     /** What the menu items do; implemented by {@link ClassicGUI}. */
     interface Actions {
         /**
-         * "Ein Spiel in der NEUEN WELT starten", once the new-game chain
-         * is through.
+         * "Ein Spiel in der NEUEN WELT starten" or "Neue Welt
+         * INDIVIDUALISIEREN", once the new-game chain is through.
          *
          * @param setupOrNull The player's choices, or null for FreeCol's
          *     defaults (a pack without the original texts skips the chain).
@@ -554,11 +555,15 @@ final class ClassicMainMenuPanel extends JPanel {
 
         final ClassicNewWorldScreens.Assets assets;
         final ClassicNewWorldScreens.Texts texts;
+        /** INDIVIDUALISIEREN's world screen, or null without its material. */
+        final ClassicNewWorldScreens.World world;
 
         ChainData(ClassicNewWorldScreens.Assets assets,
-                  ClassicNewWorldScreens.Texts texts) {
+                  ClassicNewWorldScreens.Texts texts,
+                  ClassicNewWorldScreens.World world) {
             this.assets = assets;
             this.texts = texts;
+            this.world = world;
         }
     }
 
@@ -1148,7 +1153,7 @@ final class ClassicMainMenuPanel extends JPanel {
                     g.drawImage(this.frozenFrame, 0, 0, null);
                 } else if (this.chain != null && this.chainData != null) {
                     ClassicNewWorldScreens.paint(g, this.chainData.assets,
-                        this.chainData.texts, this.chain.view());
+                        this.chainData.texts, this.chainData.world, this.chain.view());
                 } else {
                     paintBackground(g, a);
                 }
@@ -1417,9 +1422,12 @@ final class ClassicMainMenuPanel extends JPanel {
     private void activate(int item) {
         switch (item) {
         case ITEM_NEW_WORLD:
-            startChain();
+            startChain(false);
             break;
-        case ITEM_AMERICA: case ITEM_CUSTOMIZE:
+        case ITEM_CUSTOMIZE:
+            startChain(true);
+            break;
+        case ITEM_AMERICA:
             showNotice(Messages.message("classic.mainMenu.notYet"), Mode.TITLE);
             break;
         case ITEM_LOAD:
@@ -1453,9 +1461,11 @@ final class ClassicMainMenuPanel extends JPanel {
     private static ChainData loadChainData() {
         final ClassicPackFiles p = ClassicPackFiles.runtime();
         final ClassicNewWorldScreens.Assets a = ClassicNewWorldScreens.Assets.load(p);
+        final ClassicText text = (a == null) ? null : ClassicText.load(p);
         final ClassicNewWorldScreens.Texts t = (a == null) ? null
-            : ClassicNewWorldScreens.Texts.load(ClassicText.load(p));
-        return (a == null || t == null) ? null : new ChainData(a, t);
+            : ClassicNewWorldScreens.Texts.load(text);
+        return (a == null || t == null) ? null
+            : new ChainData(a, t, ClassicNewWorldScreens.World.load(p, text));
     }
 
     /** The prefetched chain data (joined), or null. */
@@ -1473,13 +1483,21 @@ final class ClassicMainMenuPanel extends JPanel {
     }
 
     /**
-     * NEUE WELT: open the original's new-game chain on this canvas.  A pack
-     * converted before the chain's material existed has no texts: then the
-     * game starts at once with FreeCol's defaults, as before, and one INFO
-     * line asks for {@code ant classic-assets}.
+     * NEUE WELT or INDIVIDUALISIEREN: open the original's new-game chain on
+     * this canvas, from INDIVIDUALISIEREN beginning on the world screen.  A
+     * pack converted before the chain's material existed has no texts: then
+     * NEUE WELT starts the game at once with FreeCol's defaults, as before,
+     * and one INFO line asks for {@code ant classic-assets}; INDIVIDUALISIEREN
+     * without CUSTOMIZ.PIK or its labels keeps its "follows later" notice.
+     *
+     * @param world True for INDIVIDUALISIEREN.
      */
-    private void startChain() {
+    private void startChain(boolean world) {
         final ChainData cd = joinChainData();
+        if (world && (cd == null || cd.world == null)) {
+            showNotice(Messages.message("classic.mainMenu.notYet"), Mode.TITLE);
+            return;
+        }
         if (cd == null) {
             if (!chainMissLogged) {
                 chainMissLogged = true;
@@ -1491,7 +1509,7 @@ final class ClassicMainMenuPanel extends JPanel {
             return;
         }
         this.chainData = cd;
-        this.chain = ClassicNewWorldChain.create(cd.texts, cd.assets.intro);
+        this.chain = ClassicNewWorldChain.create(cd.texts, cd.assets.intro, world);
         setMode(Mode.NEW_WORLD);
         requestFocusInWindow();
         repaint();
@@ -1517,10 +1535,12 @@ final class ClassicMainMenuPanel extends JPanel {
             repaint();
             break;
         case CANCEL:
-            // Back from the first screen: the title, NEUE WELT barred.
+            // Back from the first screen: the title, the item that opened
+            // the chain barred.
+            this.selected = (this.chain != null && this.chain.beganWithWorld())
+                ? ITEM_CUSTOMIZE : ITEM_NEW_WORLD;
             this.chain = null;
             this.chainData = null;
-            this.selected = ITEM_NEW_WORLD;
             setMode(Mode.TITLE);
             repaint();
             break;
@@ -1721,6 +1741,9 @@ final class ClassicMainMenuPanel extends JPanel {
      * which also keeps the menu's own key bindings out.
      *
      * <ul>
+     *   <li>World screen (INDIVIDUALISIEREN; no recording shows its keys, so
+     *       a documented assumption): Left/Right/keypad 4/6 = the current
+     *       column, Up/Down/keypad 8/2 = its answer, Enter = the footer.</li>
      *   <li>Pickers: Left/Up/keypad 4/8 = previous, Right/Down/keypad 6/2 =
      *       next in reading order, Home/End = first/last, Enter = confirm.</li>
      *   <li>Name: Enter = confirm, Backspace = delete (typing arrives via
@@ -1766,6 +1789,27 @@ final class ClassicMainMenuPanel extends JPanel {
             r = (k == KeyEvent.VK_ENTER) ? this.chain.confirm()
                 : (k == KeyEvent.VK_BACK_SPACE) ? this.chain.backspace()
                 : ClassicNewWorldChain.Result.STAY;
+        } else if (this.chain.step() == ClassicNewWorldChain.Step.WORLD) {
+            switch (k) {
+            case KeyEvent.VK_LEFT: case KeyEvent.VK_KP_LEFT: case KeyEvent.VK_NUMPAD4:
+                r = this.chain.moveWorldColumn(-1);
+                break;
+            case KeyEvent.VK_RIGHT: case KeyEvent.VK_KP_RIGHT: case KeyEvent.VK_NUMPAD6:
+                r = this.chain.moveWorldColumn(1);
+                break;
+            case KeyEvent.VK_UP: case KeyEvent.VK_KP_UP: case KeyEvent.VK_NUMPAD8:
+                r = this.chain.moveWorldRow(-1);
+                break;
+            case KeyEvent.VK_DOWN: case KeyEvent.VK_KP_DOWN: case KeyEvent.VK_NUMPAD2:
+                r = this.chain.moveWorldRow(1);
+                break;
+            case KeyEvent.VK_ENTER:
+                r = this.chain.confirm();
+                break;
+            default:
+                r = ClassicNewWorldChain.Result.STAY;
+                break;
+            }
         } else {
             switch (k) {
             case KeyEvent.VK_LEFT: case KeyEvent.VK_KP_LEFT: case KeyEvent.VK_NUMPAD4:
@@ -1858,6 +1902,11 @@ final class ClassicMainMenuPanel extends JPanel {
     /** @return The barred title item (tests). */
     int selectedItem() {
         return this.selected;
+    }
+
+    /** @return The running chain's view, or null without one (tests). */
+    ClassicNewWorldChain.View chainView() {
+        return (this.chain == null) ? null : this.chain.view();
     }
 
     /** @return The barred quit-box row (tests). */
