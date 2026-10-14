@@ -57,8 +57,11 @@ import javax.swing.JPanel;
 import javax.swing.KeyStroke;
 import javax.swing.Timer;
 
+import net.sf.freecol.FreeCol;
 import net.sf.freecol.client.gui.ImageLibrary;
 import net.sf.freecol.common.i18n.Messages;
+import net.sf.freecol.common.io.FreeColModFile;
+import net.sf.freecol.common.option.OriginalWorldSettings;
 import net.sf.freecol.common.resources.ResourceManager;
 
 
@@ -1457,15 +1460,34 @@ final class ClassicMainMenuPanel extends JPanel {
         t.start();
     }
 
-    /** Load the chain's assets and texts, or null when the pack lacks them. */
+    /**
+     * Load the chain's assets and texts, or null when the pack lacks them.
+     * The world screen also needs rules with the original's world
+     * ({@link OriginalWorldSettings#inRules}): a new program on older data
+     * (only {@code FreeCol.jar} copied, not the levi rules) would open the
+     * screen and ignore every answer, so there INDIVIDUALISIEREN keeps its
+     * notice and one WARNING says why.
+     */
     private static ChainData loadChainData() {
         final ClassicPackFiles p = ClassicPackFiles.runtime();
         final ClassicNewWorldScreens.Assets a = ClassicNewWorldScreens.Assets.load(p);
         final ClassicText text = (a == null) ? null : ClassicText.load(p);
         final ClassicNewWorldScreens.Texts t = (a == null) ? null
             : ClassicNewWorldScreens.Texts.load(text);
-        return (a == null || t == null) ? null
-            : new ChainData(a, t, ClassicNewWorldScreens.World.load(p, text));
+        if (a == null || t == null) return null;
+        ClassicNewWorldScreens.World w = ClassicNewWorldScreens.World.load(p, text);
+        if (w != null) {
+            final FreeColModFile rules = FreeCol.getClassicNewGameRulesFile();
+            if (!OriginalWorldSettings.inRules(rules)) {
+                logger.warning("Classic UI: the new-game rules "
+                    + ((rules == null) ? "(none)" : rules.getId())
+                    + " have no original world (data older than the"
+                    + " program? copy data/rules/levi/specification.xml);"
+                    + " INDIVIDUALISIEREN keeps its notice.");
+                w = null;
+            }
+        }
+        return new ChainData(a, t, w);
     }
 
     /** The prefetched chain data (joined), or null. */
@@ -1488,7 +1510,9 @@ final class ClassicMainMenuPanel extends JPanel {
      * pack converted before the chain's material existed has no texts: then
      * NEUE WELT starts the game at once with FreeCol's defaults, as before,
      * and one INFO line asks for {@code ant classic-assets}; INDIVIDUALISIEREN
-     * without CUSTOMIZ.PIK or its labels keeps its "follows later" notice.
+     * without CUSTOMIZ.PIK or its labels, or with new-game rules without the
+     * original's world ({@link #loadChainData}), keeps its "follows later"
+     * notice.
      *
      * @param world True for INDIVIDUALISIEREN.
      */

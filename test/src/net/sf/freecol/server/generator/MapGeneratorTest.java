@@ -731,19 +731,126 @@ public class MapGeneratorTest extends FreeColTestCase {
     }
 
     /**
+     * The classic rules on the easiest level, with the topology's map
+     * options: FreeCol's own placement of the natives, spaced by the
+     * level's settlement number (10), which needs the N5 fallback.
+     *
+     * @return The {@code Specification}.
+     */
+    private static Specification veryEasyClassic() {
+        return loadRules("classic", "model.difficulty.veryEasy");
+    }
+
+    /**
+     * Make the map of a new game and count the N5 fallback sites the
+     * generator logged for it ("Fallback settlement site ...").
+     *
+     * @param spec The rules.
+     * @param seed The seed of the map generator.
+     * @param fallbacks One entry per fallback site, filled here.
+     * @return The {@code Game} with its new map.
+     */
+    private static Game makeVeryEasyGame(Specification spec, long seed,
+                                         List<String> fallbacks) {
+        final java.util.logging.Logger log = java.util.logging.Logger
+            .getLogger(SimpleMapGenerator.class.getName());
+        final java.util.logging.Level level = log.getLevel();
+        final java.util.logging.Handler h = new java.util.logging.Handler() {
+                @Override public void publish(java.util.logging.LogRecord r) {
+                    final String m = r.getMessage();
+                    if (m != null && m.startsWith("Fallback settlement site")) {
+                        fallbacks.add(m);
+                    }
+                }
+                @Override public void flush() {}
+                @Override public void close() {}
+            };
+        h.setLevel(java.util.logging.Level.ALL);
+        log.setLevel(java.util.logging.Level.INFO);
+        log.addHandler(h);
+        try {
+            return makeVeryEasyLeviGame(spec, seed);
+        } finally {
+            log.removeHandler(h);
+            log.setLevel(level);
+        }
+    }
+
+    /**
+     * Every tribe of the game has a settlement and exactly one capital.
+     */
+    private static void assertEveryTribeSettled(String what, Game game) {
+        assertEquals(what, 8, game.getLiveNativePlayerList().size());
+        for (Player p : game.getLiveNativePlayerList()) {
+            assertTrue(what + " " + p.getNationId(), p.hasSettlements());
+            int capitals = 0;
+            for (IndianSettlement is : p.getIndianSettlementList()) {
+                if (is.isCapital()) capitals++;
+            }
+            assertEquals(what + " " + p.getNationId(), 1, capitals);
+        }
+    }
+
+    /**
      * Every tribe of a new game gets a settlement (part N5; Roger,
      * 2026-10-09: "Zu Beginn kommt sehr schnell die Meldung, dass der
      * eine oder andere Stamm ausgerottet sei. DAs gibts im Original
      * natürlich nicht."; his game: "Die Arawak wurden vernichtet" in
-     * turn 2).  On the easiest level the levi rules space the
-     * settlements 10 tiles apart, and before these seeds left a tribe
-     * without one: square 4 the Inca, Arawak and Apache, 5 the Sioux, 9
-     * the Apache and Cherokee, 21 the Aztec and Apache; isometric 1 the
-     * Apache, 2 the Arawak, 4 the Aztec, 15 the Cherokee and Apache, 37
-     * the Inca and Cherokee.
+     * turn 2).  FreeCol's own placement (the classic and freecol rules;
+     * the levi rules until part P2) spaces the settlements 10 tiles apart
+     * on the easiest level, so a tribe's regions can get no site; on these
+     * seeds the classic rules leave a tribe without one, and N5's
+     * fallback gives it a site (each seed is checked to use the fallback,
+     * so the test keeps guarding it; the final fixer of part P: since P2
+     * the levi rules place the natives as the original and never reach
+     * the fallback, see {@link #testEveryTribeGetsASettlementInTheOriginal}).
      * Each tribe has one capital.
      */
     public void testEveryTribeGetsASettlement() {
+        final Topology saved = Topology.current();
+        try {
+            for (Topology top : new Topology[] { Topology.SQUARE,
+                                                 Topology.ISOMETRIC }) {
+                Topology.setCurrent(top);
+                final Specification spec = veryEasyClassic();
+                final long[] seeds = (top == Topology.SQUARE)
+                    ? CLASSIC_FALLBACK_SEEDS_SQUARE
+                    : CLASSIC_FALLBACK_SEEDS_ISOMETRIC;
+                for (long seed : seeds) {
+                    final List<String> fallbacks = new ArrayList<>();
+                    final Game game = makeVeryEasyGame(spec, seed, fallbacks);
+                    final String what = "classic " + top + " seed " + seed;
+                    assertFalse(what + ": no tribe needed the fallback",
+                                fallbacks.isEmpty());
+                    assertEveryTribeSettled(what + " " + fallbacks, game);
+                }
+            }
+        } finally {
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
+     * Seeds of {@link #testEveryTribeGetsASettlement} on which the classic
+     * rules' placement leaves a tribe without a site (the final fixer of
+     * part P, seeds 1-40 of each topology: the fallback was needed on 31
+     * square and 24 isometric maps): square 4 the Inca, Arawak and Apache,
+     * 6 the Sioux and Apache, 8 the Inca and Apache, 1 the Apache;
+     * isometric 7 the Aztec and Apache, 26 the Cherokee and Apache, 40 the
+     * Arawak and Apache, 1 the Apache.
+     */
+    private static final long[] CLASSIC_FALLBACK_SEEDS_SQUARE = { 4, 6, 8, 1 };
+    private static final long[] CLASSIC_FALLBACK_SEEDS_ISOMETRIC = { 7, 26, 40, 1 };
+
+    /**
+     * The levi rules (part P2, the original's natives): every tribe gets
+     * its settlements without the N5 fallback, on the seeds that left a
+     * tribe without one before P2 (square 4 the Inca, Arawak and Apache,
+     * 5 the Sioux, 9 the Apache and Cherokee, 21 the Aztec and Apache;
+     * isometric 1 the Apache, 2 the Arawak, 4 the Aztec, 15 the Cherokee
+     * and Apache, 37 the Inca and Cherokee).  Each tribe has one capital.
+     */
+    public void testEveryTribeGetsASettlementInTheOriginal() {
         final Topology saved = Topology.current();
         try {
             for (Topology top : new Topology[] { Topology.SQUARE,
@@ -754,18 +861,11 @@ public class MapGeneratorTest extends FreeColTestCase {
                     ? new long[] { 4, 5, 9, 21 }
                     : new long[] { 1, 2, 4, 15, 37 };
                 for (long seed : seeds) {
-                    final Game game = makeVeryEasyLeviGame(spec, seed);
-                    final String what = top + " seed " + seed;
-                    assertEquals(what, 8, game.getLiveNativePlayerList().size());
-                    for (Player p : game.getLiveNativePlayerList()) {
-                        assertTrue(what + " " + p.getNationId(),
-                                   p.hasSettlements());
-                        int capitals = 0;
-                        for (IndianSettlement is : p.getIndianSettlementList()) {
-                            if (is.isCapital()) capitals++;
-                        }
-                        assertEquals(what + " " + p.getNationId(), 1, capitals);
-                    }
+                    final List<String> fallbacks = new ArrayList<>();
+                    final Game game = makeVeryEasyGame(spec, seed, fallbacks);
+                    final String what = "levi " + top + " seed " + seed;
+                    assertEquals(what + " " + fallbacks, 0, fallbacks.size());
+                    assertEveryTribeSettled(what, game);
                 }
             }
         } finally {
@@ -801,8 +901,17 @@ public class MapGeneratorTest extends FreeColTestCase {
                 assertTrue(p.getNationId(), p.getHistory().isEmpty());
             }
 
-            // A new map: every tribe has its settlements, none is retired.
+            // A new map: every tribe has its settlements, none is retired
+            // -- also on FreeCol's placement when a tribe got its site only
+            // from the fallback (the classic rules, the final fixer of
+            // part P: the levi rules no longer reach the fallback).
             game = makeVeryEasyLeviGame(spec, 4);
+            assertTrue(SimpleMapGenerator.retireEmptyNatives(game).isEmpty());
+            assertEquals(8, game.getLiveNativePlayerList().size());
+            final List<String> fallbacks = new ArrayList<>();
+            game = makeVeryEasyGame(veryEasyClassic(),
+                CLASSIC_FALLBACK_SEEDS_SQUARE[0], fallbacks);
+            assertFalse("classic needs the fallback", fallbacks.isEmpty());
             assertTrue(SimpleMapGenerator.retireEmptyNatives(game).isEmpty());
             assertEquals(8, game.getLiveNativePlayerList().size());
         } finally {

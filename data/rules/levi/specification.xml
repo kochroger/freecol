@@ -81,11 +81,18 @@
   <!-- The original's native land and sizes (part P2).  The original
        (manual, the colony chapter): "Camps and villages have a home
        radius of one square; cities have a home radius of two
-       squares"; nothing gives a capital more, and nothing grows: the
-       original's saves have exactly these populations at the start
-       (camp 3, its capital 4; village 5 / 7; Aztec 7 / 10; Inca 9 / 13)
-       and, in Roger's playthrough game 80 turns on, every tribe's sum is
-       still its start value.  FreeCol (classic): capitals one more
+       squares"; nothing gives a capital more land.  The populations:
+       the original's freshly made games (Roger's «Neue Welt» #13 and
+       Inselgruppe #10, 1493; Amerika, 1492) have every settlement, its
+       capital too, at the tribe's size: camp 3, village 5, Aztec 7, Inca
+       9; its saves from 1505 on have the capitals at 4 / 7 / 10 / 13 and
+       the others still at 3 / 5 / 7 / 9 (in Roger's playthrough game 80
+       turns on too), so a capital grows once early in the game (when is
+       not recorded) and nothing else grows.  Here a capital starts at
+       its later size, 4 / 7 / 10 / 13 (FreeCol != original in the first
+       years, a question to Roger together with the brave on top; the
+       final fixer of part P corrected this comment, which said the
+       original starts them so).  FreeCol (classic): capitals one more
        radius (cities 3), 1 to 14 more tiles grown at the start, a brave
        may claim up to 2 tiles beyond the radius, random sizes 4 to 12.
        Here: claimable-radius camp/village 1, Inca/Aztec 2, capitals the

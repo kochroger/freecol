@@ -481,9 +481,10 @@ public class OriginalNativesTest extends FreeColTestCase {
      * and villages, 2 for the Inca and Aztec cities, capitals the same,
      * no land beyond it (FreeCol: capitals one more, 1 to 14 tiles grown
      * at the start); every settlement starts with the original's
-     * population (camp 3 / 4, village 5 / 7, Aztec 7 / 10, Inca 9 / 13;
-     * FreeCol: random 4 to 12); the natives own about half the land
-     * (the original 42 to 63 %).
+     * population (camp 3, village 5, Aztec 7, Inca 9; FreeCol: random 4
+     * to 12), a capital 4 / 7 / 10 / 13 (the original's capitals from 1505
+     * on; at its start they have the tribe's size); the natives own about
+     * half the land (the original 42 to 63 %).
      */
     public void testNativeLandAsTheOriginal() {
         final Topology saved = Topology.current();

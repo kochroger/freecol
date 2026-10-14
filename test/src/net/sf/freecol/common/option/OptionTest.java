@@ -106,5 +106,83 @@ public class OptionTest extends FreeColTestCase {
 
     }
 
+    /**
+     * Read a select option from XML into an existing option, catching
+     * the warnings of {@code SelectOption}.
+     *
+     * @param o The option.
+     * @param xml Its new declaration.
+     * @return The warnings logged while reading.
+     */
+    private static List<String> readSelect(SelectOption o, String xml)
+        throws Exception {
+        final List<String> warnings = new java.util.ArrayList<>();
+        final java.util.logging.Logger log
+            = java.util.logging.Logger.getLogger(SelectOption.class.getName());
+        final java.util.logging.Handler h = new java.util.logging.Handler() {
+                @Override public void publish(java.util.logging.LogRecord r) {
+                    if (r.getLevel().intValue()
+                        >= java.util.logging.Level.WARNING.intValue()) {
+                        warnings.add(r.getMessage());
+                    }
+                }
+                @Override public void flush() {}
+                @Override public void close() {}
+            };
+        log.addHandler(h);
+        try (net.sf.freecol.common.io.FreeColXMLReader xr
+             = new net.sf.freecol.common.io.FreeColXMLReader(
+                 new java.io.StringReader(xml))) {
+            xr.nextTag();
+            o.readFromXML(xr);
+        } finally {
+            log.removeHandler(h);
+        }
+        return warnings;
+    }
 
+    private static String selectXml(String attributes, int values) {
+        StringBuilder sb = new StringBuilder("<selectOption id=\"model.option.test\" "
+            + attributes + " localizedLabels=\"false\">");
+        for (int i = 0; i < values; i++) {
+            sb.append("<selectValue value=\"").append(i)
+                .append("\" label=\"v").append(i).append("\"/>");
+        }
+        return sb.append("</selectOption>").toString();
+    }
+
+    /**
+     * A select option declared again with more values (the levi rules'
+     * landGeneratorType, part P1: classic's four generators and the
+     * original's fifth, default 4) takes its new default without a
+     * warning: the value is checked against the values that follow the
+     * attributes, not against the earlier declaration's.  A value that
+     * is not among the new values still warns and falls back to the
+     * first, as before.
+     */
+    public void testSelectOptionDeclaredAgain() throws Exception {
+        final SelectOption o = new SelectOption("model.option.test", spec());
+        assertTrue(readSelect(o, selectXml("defaultValue=\"1\"", 4)).isEmpty());
+        assertEquals(4, o.getItemValues().size());
+        assertEquals(1, (int)o.getValue());
+
+        // Declared again with a fifth value as its default: 4, quietly.
+        List<String> w = readSelect(o, selectXml("defaultValue=\"4\"", 5));
+        assertEquals(w.toString(), 0, w.size());
+        assertEquals(5, o.getItemValues().size());
+        assertEquals(4, (int)o.getValue());
+
+        // Declared again with a value it does not have: one warning, the
+        // first value.
+        w = readSelect(o, selectXml("defaultValue=\"7\"", 3));
+        assertEquals(w.toString(), 1, w.size());
+        assertTrue(w.get(0), w.get(0).contains("invalid value: 7"));
+        assertEquals(3, o.getItemValues().size());
+        assertEquals(0, (int)o.getValue());
+
+        // A saved value is kept the same way.
+        w = readSelect(o, selectXml("value=\"2\" defaultValue=\"0\"", 3));
+        assertEquals(w.toString(), 0, w.size());
+        assertEquals(2, (int)o.getValue());
+    }
 }

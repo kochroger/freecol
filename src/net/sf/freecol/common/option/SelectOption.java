@@ -60,6 +60,12 @@ public class SelectOption extends IntegerOption {
     private final Map<Integer, String> itemValues
         = new LinkedHashMap<>();
 
+    /**
+     * True while the attributes are read ({@link #readAttributes}): the
+     * values then still are those of an earlier declaration, if any.
+     */
+    private boolean readingAttributes = false;
+
 
     /**
      * Creates a new {@code SelectOption}.
@@ -172,6 +178,16 @@ public class SelectOption extends IntegerOption {
     public void setValue(Integer value) {
         Set<Integer> keys = getItemValues().keySet();
         if (keys.isEmpty()) return; // May not have been read yet
+        if (this.readingAttributes) {
+            // An option a specification declares again (the levi rules'
+            // landGeneratorType with its fifth value, 4): its new values
+            // follow the attributes, so the value is checked against them
+            // in readChildren, not against the old ones here (that check
+            // logged "invalid value: 4, using fallback: 0" on every load,
+            // and readChildren set 4 again anyway).
+            super.setValue(value);
+            return;
+        }
 
         Integer fallback = null;
         for (Integer i : keys) {
@@ -226,7 +242,12 @@ public class SelectOption extends IntegerOption {
      */
     @Override
     protected void readAttributes(FreeColXMLReader xr) throws XMLStreamException {
-        super.readAttributes(xr);
+        this.readingAttributes = true;
+        try {
+            super.readAttributes(xr);
+        } finally {
+            this.readingAttributes = false;
+        }
 
         localizedLabels = xr.getAttribute(LOCALIZED_LABELS_TAG, true);
     }

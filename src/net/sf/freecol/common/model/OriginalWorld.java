@@ -123,8 +123,10 @@ public final class OriginalWorld {
      * 1 chilly = Kühl, 2 temperate = Gemäßigt, 3 warm = Warm, 4 hot), for
      * FreeCol's climate bands ({@code TerrainGenerator}: the latitude
      * gives the temperature between the two, varied by 7 degrees).
-     * Gemäßigt gives the original's mean shares of tundra (6.6 % of the
-     * land) and savannah (11.9 %) over its seven random maps read (FreeCol's
+     * Gemäßigt gives tundra 8.0 % and savannah 10.0 % of the flat land on
+     * everything Normal, which fits the two known Gemäßigt games in the
+     * original (#2 7.7 / 10.5, #10 8.6 / 5.9); the mean of its seven random
+     * maps read, 6.6 / 11.9 %, mixes unknown settings (FreeCol's
      * temperate, -10 / 35, gives 15 % tundra); Warm gives Roger's game
      * «Groß, Kontinente, Warm, Feucht» (tundra 7.7 to 3.9 %, savannah 10.5
      * to 15.6 %, plains 23.4 to 18.9 % against his game with everything

@@ -1275,7 +1275,16 @@ public class ClassicGUI extends GUI {
         MapGeneratorOptions.applyTopologyDefaults(spec.getMapGeneratorOptions());
         final OriginalWorldSettings world = (setup == null)
             ? OriginalWorldSettings.CLASSIC_UI_NEW_WORLD : setup.world;
-        world.apply(spec.getMapGeneratorOptions());
+        if (!world.apply(spec.getMapGeneratorOptions())
+            && FreeCol.CLASSIC_RULES.equals(spec.getId())) {
+            // The Classic UI's own rules without the original's world:
+            // the program runs on older data (part P's three data files
+            // not copied), and the new game gets FreeCol's map.
+            logger.warning("ClassicGUI: the " + spec.getId() + " rules have"
+                + " no original world (data older than the program? copy"
+                + " data/rules/levi/specification.xml): FreeCol's map, not "
+                + world);
+        }
     }
 
     /**

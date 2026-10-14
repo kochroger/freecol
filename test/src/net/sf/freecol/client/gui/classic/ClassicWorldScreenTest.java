@@ -348,6 +348,85 @@ public class ClassicWorldScreenTest extends FreeColTestCase {
     }
 
     /**
+     * A program on older data (the final fixer of part P: a promotion
+     * that copies {@code FreeCol.jar} but not the levi rules of part P,
+     * whose new-game rules then have no original world): INDIVIDUALISIEREN
+     * keeps the notice it had before P3, with one WARNING, instead of a
+     * world screen whose answers every game would ignore; NEUE WELT still
+     * opens the chain.  Played here with the classic rules as the new
+     * game's rules ({@code --rules classic}), which have no original world
+     * either.
+     */
+    public void testOlderDataKeepsTheNotice() throws Exception {
+        if (ClassicPackFiles.runtime() == null
+            || ClassicText.load(ClassicPackFiles.runtime()) == null) {
+            System.err.println(getClass().getSimpleName()
+                + ": older-data check skipped, no pack (ant classic-assets)");
+            return;
+        }
+        final List<String> warnings = new ArrayList<>();
+        final java.util.logging.Logger log = java.util.logging.Logger
+            .getLogger(ClassicMainMenuPanel.class.getName());
+        final java.util.logging.Handler h = new java.util.logging.Handler() {
+                @Override public void publish(java.util.logging.LogRecord r) {
+                    if (r.getLevel().intValue()
+                        >= java.util.logging.Level.WARNING.intValue()) {
+                        warnings.add(r.getMessage());
+                    }
+                }
+                @Override public void flush() {}
+                @Override public void close() {}
+            };
+        log.addHandler(h);
+        net.sf.freecol.FreeCol.setRules("classic");
+        try {
+            final ClassicMainMenuPanel panel = new ClassicMainMenuPanel(
+                new ClassicMainMenuPanel.Actions() {
+                    @Override public void newWorld(ClassicGUI.NewWorldSetup s) {}
+                    @Override public void loadGame(File f) {}
+                    @Override public void hallOfFame() {}
+                    @Override public void quit() {}
+                });
+            panel.setSize(320, 200);
+            panel.showTitle(null);
+            click(panel, titleRow(ClassicMainMenuPanel.ITEM_CUSTOMIZE));
+            assertEquals(ClassicMainMenuPanel.Mode.NOTICE, panel.mode());
+            assertNull(panel.chainView());
+            assertEquals(warnings.toString(), 1, warnings.size());
+            assertTrue(warnings.get(0),
+                warnings.get(0).contains("classic have no original world"));
+            // Escape (the title's key binding) closes the notice.
+            panel.getActionMap().get("classic_menuEscape").actionPerformed(null);
+            assertEquals(ClassicMainMenuPanel.Mode.TITLE, panel.mode());
+            click(panel, titleRow(ClassicMainMenuPanel.ITEM_NEW_WORLD));
+            assertEquals(ClassicMainMenuPanel.Mode.NEW_WORLD, panel.mode());
+            assertEquals(Step.DIFFICULTY, panel.chainView().step);
+        } finally {
+            net.sf.freecol.FreeCol.setRules(null);
+            log.removeHandler(h);
+        }
+        // The levi rules: the world screen, no warning.
+        warnings.clear();
+        log.addHandler(h);
+        try {
+            final ClassicMainMenuPanel panel = new ClassicMainMenuPanel(
+                new ClassicMainMenuPanel.Actions() {
+                    @Override public void newWorld(ClassicGUI.NewWorldSetup s) {}
+                    @Override public void loadGame(File f) {}
+                    @Override public void hallOfFame() {}
+                    @Override public void quit() {}
+                });
+            panel.setSize(320, 200);
+            panel.showTitle(null);
+            click(panel, titleRow(ClassicMainMenuPanel.ITEM_CUSTOMIZE));
+            assertEquals(Step.WORLD, panel.chainView().step);
+            assertTrue(warnings.toString(), warnings.isEmpty());
+        } finally {
+            log.removeHandler(h);
+        }
+    }
+
+    /**
      * Through the real panel to the game's start: INDIVIDUALISIEREN, the
      * clicks of {@code 024} (everything at the bottom), the footer, then
      * the chain by keys (the first difficulty, Holland, the default name,

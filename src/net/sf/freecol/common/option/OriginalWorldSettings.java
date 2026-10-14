@@ -19,8 +19,16 @@
 
 package net.sf.freecol.common.option;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+import net.sf.freecol.common.io.FreeColModFile;
+import net.sf.freecol.common.io.FreeColRules;
 import net.sf.freecol.common.model.OriginalWorld;
 
 
@@ -67,7 +75,10 @@ public final class OriginalWorldSettings {
      * WELT starten»: Roger's three such games had 427, 469 and 650
      * land tiles, mean 515, the amount of LANDMASSE Klein with LANDFORM
      * Inselgruppe (OriginalWorld: 514); the original's manual and texts
-     * do not say what it is (I).
+     * do not say what it is (I).  Presumably, not certainly: 427 and 650
+     * lie outside what Klein + Inselgruppe makes here (514 ± 12 %,
+     * 452-576), so the original may draw more for it (P3's D-P3-1;
+     * Roger's two more «Neue Welt» games will tell).
      */
     public static final OriginalWorldSettings ORIGINAL_NEW_WORLD
         = new OriginalWorldSettings(TOP, TOP, MIDDLE, MIDDLE);
@@ -152,6 +163,45 @@ public final class OriginalWorldSettings {
         logger.info("Original world: " + this);
         return true;
     }
+
+    /**
+     * Whether rules declare the original's world (the "levi" rules from
+     * part P1 on): their specification file, or one it extends, declares
+     * {@link MapGeneratorOptions#ORIGINAL_LAND_MASS} and
+     * {@link MapGeneratorOptions#ORIGINAL_LAND_FORM}.  Read as text,
+     * without loading the rules, so the title menu can ask it on its
+     * prefetch thread.  The title menu's guard against a program run on
+     * older data (a new {@code FreeCol.jar} with Part O's
+     * {@code data\rules\levi\specification.xml}): there «Neue Welt
+     * INDIVIDUALISIEREN» would open its screen, and every answer would
+     * make the same FreeCol map ({@link #apply} returns false).
+     *
+     * @param rules The rules' file, or null.
+     * @return True if the rules have the original's world.
+     */
+    public static boolean inRules(FreeColModFile rules) {
+        boolean mass = false, form = false;
+        FreeColModFile f = rules;
+        for (int depth = 0; f != null && depth < 8 && !(mass && form); depth++) {
+            final String xml;
+            try (InputStream is = f.getSpecificationInputStream()) {
+                if (is == null) break;
+                xml = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                logger.log(Level.WARNING, "Rules unreadable: " + f.getId(), e);
+                break;
+            }
+            mass |= xml.contains("id=\"" + MapGeneratorOptions.ORIGINAL_LAND_MASS + "\"");
+            form |= xml.contains("id=\"" + MapGeneratorOptions.ORIGINAL_LAND_FORM + "\"");
+            final Matcher m = EXTENDS.matcher(xml);
+            f = (m.find()) ? FreeColRules.getFreeColRulesFile(m.group(1)) : null;
+        }
+        return mass && form;
+    }
+
+    /** The rules a specification file extends. */
+    private static final Pattern EXTENDS
+        = Pattern.compile("<freecol-specification\\b[^>]*\\bextends=\"([^\"]+)\"");
 
     /**
      * The answers a game's map generator options stand for.

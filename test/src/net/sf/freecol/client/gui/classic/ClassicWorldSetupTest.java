@@ -77,6 +77,56 @@ public class ClassicWorldSetupTest extends FreeColTestCase {
     }
 
     /**
+     * The levi rules without the original's world (a program on older
+     * data, the final fixer of part P): the new game gets FreeCol's map,
+     * and a WARNING says so, not only an INFO line; other rules than the
+     * Classic UI's own stay quiet.
+     */
+    public void testOlderDataSaysSo() {
+        final java.util.List<String> warnings = new java.util.ArrayList<>();
+        final java.util.logging.Logger log = java.util.logging.Logger
+            .getLogger(ClassicGUI.class.getName());
+        final java.util.logging.Handler h = new java.util.logging.Handler() {
+                @Override public void publish(java.util.logging.LogRecord r) {
+                    if (r.getLevel().intValue()
+                        >= java.util.logging.Level.WARNING.intValue()) {
+                        warnings.add(r.getMessage());
+                    }
+                }
+                @Override public void flush() {}
+                @Override public void close() {}
+            };
+        final Topology saved = Topology.current();
+        log.addHandler(h);
+        try {
+            Specification spec = levi();
+            ClassicGUI.prepareNewWorldMap(spec, ClassicGUI.NewWorldSetup.defaults());
+            assertTrue(warnings.toString(), warnings.isEmpty());
+
+            spec = levi();
+            final OptionGroup mgo = spec.getMapGeneratorOptions();
+            assertNotNull(mgo.remove(MapGeneratorOptions.ORIGINAL_LAND_MASS));
+            assertNotNull(mgo.remove(MapGeneratorOptions.ORIGINAL_LAND_FORM));
+            ClassicGUI.prepareNewWorldMap(spec, new ClassicGUI.NewWorldSetup(
+                "model.difficulty.veryEasy", "model.nation.dutch", "Levi",
+                OriginalWorldSettings.ofCode("GCwf")));
+            assertEquals(warnings.toString(), 1, warnings.size());
+            assertTrue(warnings.get(0), warnings.get(0).contains(
+                "levi rules have no original world"));
+            assertTrue(warnings.get(0), warnings.get(0).contains("(GCwf)"));
+
+            warnings.clear();
+            spec = FreeCol.loadSpecification(FreeColRules.getFreeColRulesFile("classic"),
+                null, "model.difficulty.veryEasy");
+            ClassicGUI.prepareNewWorldMap(spec, ClassicGUI.NewWorldSetup.defaults());
+            assertTrue(warnings.toString(), warnings.isEmpty());
+        } finally {
+            log.removeHandler(h);
+            Topology.setCurrent(saved);
+        }
+    }
+
+    /**
      * Other answers (as «Individualisieren» gives them) reach the
      * new game's options unchanged.
      */

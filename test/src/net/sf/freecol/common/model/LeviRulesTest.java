@@ -424,9 +424,11 @@ public class LeviRulesTest extends FreeColTestCase {
      * The original's native land and sizes (part P2): levi's settlement
      * types have the original's home radius (camps and villages 1, the
      * Inca and Aztec cities 2, capitals the same; manual, the colony
-     * chapter), the original's populations (camp 3 / 4, village 5 / 7,
-     * Aztec 7 / 10, Inca 9 / 13; its saves), no grown land, and a brave
-     * claims only inside the home radius (extra radius 1); everything
+     * chapter), the original's populations (camp 3, village 5, Aztec 7,
+     * Inca 9; capitals 4 / 7 / 10 / 13, the size the original's capitals
+     * have from 1505 on; at its start they too have the tribe's size), no
+     * grown land, and a brave claims only inside the home radius (extra
+     * radius 1); everything
      * else of each tribe is classic's.  Classic keeps FreeCol's types.
      * The levi rules load without a warning.
      */
@@ -452,11 +454,15 @@ public class LeviRulesTest extends FreeColTestCase {
         } finally {
             root.removeHandler(h);
         }
-        // The known warning of the levi land generator's fifth value
-        // (part P1, the classic group's select option is read first).
-        warnings.removeIf(w -> w != null
-            && w.startsWith("selectOption.setValue invalid value: 4"));
+        // Not even the land generator's fifth value warns (part P1 logged
+        // "selectOption.setValue invalid value: 4, using fallback: 0"
+        // here: the classic group's four values were still there when the
+        // levi option's attributes were read; the final fixer of part P).
         assertEquals(warnings.toString(), 0, warnings.size());
+        assertEquals(net.sf.freecol.common.option.MapGeneratorOptions
+            .LAND_GENERATOR_ORIGINAL, levi.getMapGeneratorOptions()
+            .getInteger(net.sf.freecol.common.option.MapGeneratorOptions
+                .LAND_GENERATOR_TYPE));
 
         final Specification classic = spec("classic");
         final Map<String, int[]> original = new HashMap<>();

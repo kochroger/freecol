@@ -20,6 +20,7 @@
 package net.sf.freecol.common.option;
 
 import net.sf.freecol.FreeCol;
+import net.sf.freecol.common.io.FreeColModFile;
 import net.sf.freecol.common.io.FreeColRules;
 import net.sf.freecol.common.model.OriginalWorld;
 import net.sf.freecol.common.model.Specification;
@@ -108,6 +109,66 @@ public class OriginalWorldSettingsTest extends FreeColTestCase {
             assertEquals(rules, humidity,
                          mgo.getRange(MapGeneratorOptions.HUMIDITY));
             assertNull(rules, OriginalWorldSettings.of(mgo));
+        }
+    }
+
+    /**
+     * A rules folder for {@link #testTheRulesHaveTheWorld}.
+     */
+    private static FreeColModFile rulesDir(java.io.File root, String id,
+                                           String specification)
+        throws java.io.IOException {
+        final java.io.File dir = new java.io.File(root, id);
+        assertTrue(dir.mkdirs());
+        java.nio.file.Files.write(new java.io.File(dir, "mod.xml").toPath(),
+            ("<mod id=\"" + id + "\" parent=\"classic\" />\n")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        java.nio.file.Files.write(new java.io.File(dir, "specification.xml").toPath(),
+            specification.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return new FreeColModFile(dir);
+    }
+
+    /**
+     * Which rules have the original's world (the title menu's guard
+     * against a program on older data, the final fixer of part P): the
+     * levi rules and rules that extend them; not classic or freecol, not
+     * levi rules from before part P (Part O's specification declares
+     * neither option), not rules with only one of the two.
+     */
+    public void testTheRulesHaveTheWorld() throws Exception {
+        assertTrue(OriginalWorldSettings.inRules(FreeColRules.getFreeColRulesFile("levi")));
+        assertFalse(OriginalWorldSettings.inRules(FreeColRules.getFreeColRulesFile("classic")));
+        assertFalse(OriginalWorldSettings.inRules(FreeColRules.getFreeColRulesFile("freecol")));
+        assertFalse(OriginalWorldSettings.inRules(null));
+
+        final java.io.File root = java.nio.file.Files
+            .createTempDirectory("p-rules").toFile();
+        try {
+            final String head = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                + "<freecol-specification id=\"%s\" version=\"0.120\" extends=\"%s\">\n";
+            final String mass = "<selectOption id=\"model.option.originalLandMass\""
+                + " defaultValue=\"1\"/>\n";
+            final String form = "<selectOption id=\"model.option.originalLandForm\""
+                + " defaultValue=\"1\"/>\n";
+            final String end = "</freecol-specification>\n";
+            assertFalse("Part O's levi", OriginalWorldSettings.inRules(
+                rulesDir(root, "oldlevi", String.format(head, "levi", "classic")
+                    + "<!-- landGeneratorType 0, no original world -->\n" + end)));
+            assertFalse("one of the two", OriginalWorldSettings.inRules(
+                rulesDir(root, "half", String.format(head, "half", "classic")
+                    + mass + end)));
+            assertTrue("both", OriginalWorldSettings.inRules(
+                rulesDir(root, "both", String.format(head, "both", "classic")
+                    + mass + form + end)));
+            assertTrue("extends levi", OriginalWorldSettings.inRules(
+                rulesDir(root, "child", String.format(head, "child", "levi")
+                    + end)));
+        } finally {
+            for (java.io.File d : root.listFiles()) {
+                for (java.io.File f : d.listFiles()) f.delete();
+                d.delete();
+            }
+            root.delete();
         }
     }
 

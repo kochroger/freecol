@@ -1499,6 +1499,18 @@ public final class FreeCol {
     }
 
     /**
+     * Gets the FreeColModFile of the rules a new game of the Classic UI
+     * is played on (those given with {@code --rules}, else
+     * {@link #CLASSIC_RULES}), whether or not the Classic UI's flag is
+     * set: for the Classic UI's own panels, which exist only there.
+     *
+     * @return The {@code FreeColModFile}, or null if not present.
+     */
+    public static FreeColModFile getClassicNewGameRulesFile() {
+        return FreeColRules.getFreeColRulesFile(newGameRules(true, rules));
+    }
+
+    /**
      * Gets the timeout.
      * Use the command line specified one if any, otherwise default
      * to `infinite' in single player and the TIMEOUT_DEFAULT for

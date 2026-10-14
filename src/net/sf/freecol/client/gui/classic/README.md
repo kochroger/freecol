@@ -153,7 +153,12 @@ save plays on as it was (R1b re-applies the rules on load, later).
   `testATribeWithNothingIsRetiredSilently`, `testFallbackSiteSteps`).
   Since part P2 the levi rules place the villages as the original does
   (below, "The original's natives"); the fallback and the retirement stay
-  as the safety net (not used in 1600 census maps).
+  as the safety net (not used in 1600 census maps). The classic and
+  freecol rules still need the fallback on «Sehr einfach» (31 of 40 square
+  and 24 of 40 isometric maps, seeds 1-40), so the two end-to-end tests
+  run on the classic rules with seeds that use it (each checked to log a
+  fallback site), and `testEveryTribeGetsASettlementInTheOriginal` keeps
+  the levi rules' placement as P2's own guard (final fixer of part P).
 - **The original's New World** (part P1; Roger 2026-10-13: "Indianerland
   wie im Original", "funktionieren müssen natürlich alle Parameter"; his 13
   games in the original, `prep2/W-landtests.md`). The levi rules' land
@@ -165,7 +170,13 @@ save plays on as it was (R1b re-applies the rules on load, later).
   `model.option.originalLandMass` and LANDFORM `model.option.originalLandForm`
   (both new, levi only), TEMPERATUR `model.option.temperature` chilly /
   temperate / warm, KLIMA `model.option.humidity` dry / normal / wet;
-  `model.option.landMass` is not used.
+  `model.option.landMass` is not used. The levi rules declare
+  `landGeneratorType` again, with the fifth value as default;
+  `SelectOption` checks a value read from the attributes only against the
+  values that follow them (before, every load of the levi rules logged
+  "selectOption.setValue invalid value: 4, using fallback: 0" and then
+  set 4 anyway; final fixer of part P,
+  `OptionTest.testSelectOptionDeclaredAgain`).
   - *Land*: each setting has the original's mean (58x72, rows 1-70, no
     arctic): everything Normal 886 (his games 872, 901), Klein 702 (673,
     732), Groß 1131 (1079, 1184), Inselgruppe 698, Große Kontinente 1191,
@@ -174,7 +185,8 @@ save plays on as it was (R1b re-applies the rules on load, later).
     Kontinente 1007, Groß + Inselgruppe 943). Each map draws its amount
     around the mean (5 %, at most 12 %), the isometric map in proportion to
     its 4000 tiles. The land grows from random walks of three-tile stamps,
-    as Civilization's generator (the original's base), until the amount is
+    as Civilization's generator (inferred, I: the original's base is not
+    documented), until the amount is
     reached: walks of 1-64 steps for Inselgruppe, 1-128 Normal, 64-256
     Kontinente give the original's shapes (Inselgruppe 10 masses of 10+
     tiles, coast 0.74 per land tile; the original 9 and 0.78). The land
@@ -182,7 +194,10 @@ save plays on as it was (R1b re-applies the rules on load, later).
     high seas on both sides; one water row separates it from the poles.
   - *Climate*: the land is typed by FreeCol's climate bands with the
     original's temperatures (`OriginalWorld.getPoleTemperature`: Gemäßigt
-    -5 to 35 degrees gives the original's 6.6 % tundra and 11.9 % savannah;
+    -5 to 35 degrees gives tundra 8.0 % and savannah 10.0 % on everything
+    Normal, which fits the two known Gemäßigt games, #2 7.7 / 10.5 and #10
+    8.6 / 5.9; the 6.6 / 11.9 % of seven original maps mixes unknown
+    settings;
     Warm 0 to 37 his warm game; Kühl the mirror) and a mild KLIMA (humidity
     38 / 40 / 42: FreeCol's 35 / 55 would turn 14 % into desert or a
     quarter into swamp). No land outside the polar rows is arctic, and the
@@ -195,8 +210,10 @@ save plays on as it was (R1b re-applies the rules on load, later).
     `ClassicGUI.prepareNewWorldMap`; everything Normal, the world Roger and
     Levi play, is INDIVIDUALISIEREN and the footer, as in the original.
     «Ein Spiel in der NEUEN WELT starten» plays the original's «Neue Welt»
-    (427, 469, 650 land tiles in Roger's three games, the amount of Klein +
-    Inselgruppe): `OriginalWorldSettings.CLASSIC_UI_NEW_WORLD` =
+    (427, 469, 650 land tiles in Roger's three games: their mean is the
+    amount of Klein + Inselgruppe, presumably its setting; 427 and 650 lie
+    outside what Klein + Inselgruppe makes here, 452-576, so the original
+    may draw more, D-P3-1): `OriginalWorldSettings.CLASSIC_UI_NEW_WORLD` =
     `ORIGINAL_NEW_WORLD` (from P1 until P3 it was everything Normal).
   - Measured with `net.sf.freecol.tools.WorldSettingsCensus` (60 seeds per
     setting and topology: land, masses, coasts, rivers, terrain, Pacific,
@@ -245,9 +262,23 @@ save plays on as it was (R1b re-applies the rules on load, later).
     grown at the start (FreeCol 1 to 14 tiles), a brave claims a free tile
     only inside its home radius (`extra-claimable-radius` 1;
     `ServerUnit.csMove`), and every settlement starts with the original's
-    population (camp 3, its capital 4, village 5 / 7, Aztec 7 / 10, Inca
-    9 / 13; FreeCol random 4 to 12). FreeCol's one birth above that and its
-    braves' moves between villages stay.
+    population: camp 3, village 5, Aztec 7, Inca 9 (FreeCol random 4 to
+    12). A capital starts at 4 / 7 / 10 / 13, the size the original's
+    capitals have in its saves from 1505 on; in its freshly made games
+    (1492-1493) they still have the tribe's size, so they grow once early
+    (when is not recorded; FreeCol != original in the first years, a
+    question to Roger). The radius also sets FreeCol's warehouse of a
+    settlement (100 per radius: a camp or village capital stores 100 of a
+    good, not classic's 200; an Inca or Aztec capital 200, not 300), so
+    capitals pay less for some goods (a village capital about half for
+    coats and a quarter less for trade goods, a little more for tools; the
+    Inca and Aztec capitals about 6 % less for coats) and their alarm zone
+    is one tile smaller; how the original's capitals trade is not known.
+    FreeCol's one birth above the size and its braves' moves between
+    villages stay. A settlement's roaming brave is one of its people (in
+    the original one brave more lives outside), so a camp of 3 keeps 2 at
+    home and FreeCol's missions convert there only after a birth (a
+    question to Roger, D-P2-1).
   - Measured with `net.sf.freecol.tools.NativeLandCensus` (all world
     settings, both topologies, «Sehr einfach» and «Mittel», 40 seeds:
     villages, per tribe, capitals, native land, people, sizes, nearest
@@ -4692,7 +4723,17 @@ differing pixels.
     and logs one INFO line asking for `ant classic-assets`.
   - INDIVIDUALISIEREN → the original's world screen, then the same chain
     (part P3, see "New-game chain"); a pack without CUSTOMIZ.PIK or its
-    labels keeps the notice below.
+    labels keeps the notice below, and so do new-game rules without the
+    original's world (`OriginalWorldSettings.inRules`, read from the rules'
+    specification file on the prefetch thread; the final fixer of part P):
+    a new `FreeCol.jar` on older data (Part O's
+    `data/rules/levi/specification.xml`) would open the screen and make
+    the same FreeCol map for every answer, so there it shows the notice and
+    logs one WARNING ("... have no original world ..."); a new game on the
+    levi rules without the world logs a WARNING in
+    `ClassicGUI.prepareNewWorldMap` too. A promotion of part P copies the
+    jar and its three data files (`data/rules/levi/specification.xml`,
+    `data/strings/FreeColMessages.properties`, `FreeColMessages_de.properties`).
   - AMERIKA shows the notice "Diese Funktion folgt in einer späteren
     Version." FreeCol's America maps would look about 3.6× too tall in the
     rectangular view; the faithful route is converting AMER2.MP.
@@ -4836,8 +4877,8 @@ game opens on the original's first scene with the admiral (083/049, see
     here both are cuts, as between the chain's other screens.
   - The answers become `NewWorldSetup.world` (`ClassicNewWorldChain.
     worldSettings`); NEUE WELT has no world screen and plays
-    `OriginalWorldSettings.CLASSIC_UI_NEW_WORLD`, the original's small
-    world (Klein + Inselgruppe).
+    `OriginalWorldSettings.CLASSIC_UI_NEW_WORLD`, presumably the original's
+    small world (Klein + Inselgruppe, D-P3-1).
 - **Where it runs.** On the title canvas itself (`ClassicMainMenuPanel` mode
   `NEW_WORLD`): one panel, one letterbox, one arrow, no panel swap. The chain
   holds no engine state, so Escape at any point needs no teardown. Its art
