@@ -119,6 +119,9 @@ final class ClassicTestHarness {
                 ClassicFrameRecorder.event("harness", "sub-window kept minimized: "
                     + w.getClass().getSimpleName());
             };
+            // And Alt+Enter's re-frame of the minimized main window keeps it
+            // minimized (M4.0 live check L3).
+            ClassicFrame.keepMinimized = () -> true;
             ClassicScriptDriver.start(new File(script), h.new Host());
         }
     }

@@ -642,7 +642,8 @@ public class ClassicGUI extends GUI {
         reframeChild(this.reportFrame, this.frame);
         final Window target = (active != null && active.isShowing())
             ? active : this.frame;
-        target.toFront();
+        // Not a minimized run's window (the harness, ClassicFrame.keepMinimized).
+        if (target != this.frame || !this.frameState.keptMinimized()) target.toFront();
         final Component want = (focus != null && focus.isShowing()
                 && SwingUtilities.getWindowAncestor(focus) == target)
             ? focus : defaultFocus(target);

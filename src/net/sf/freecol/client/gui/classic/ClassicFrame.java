@@ -124,6 +124,24 @@ final class ClassicFrame {
     }
 
     /**
+     * The scripted harness ({@code ClassicTestHarness}): true while a
+     * re-frame of a minimized main window must leave it minimized and out of
+     * the front (a minimized run's Alt+Enter, M4.0 live check L3); null in a
+     * game, where Alt+Enter only ever reaches a window that has the focus.
+     */
+    static volatile java.util.function.BooleanSupplier keepMinimized = null;
+
+    /**
+     * @return Whether the harness keeps the window minimized now
+     *     ({@link #keepMinimized}): asked, and minimized.
+     */
+    boolean keptMinimized() {
+        final java.util.function.BooleanSupplier keep = keepMinimized;
+        return keep != null && keep.getAsBoolean()
+            && (this.frame.getExtendedState() & Frame.ICONIFIED) != 0;
+    }
+
+    /**
      * Show the window for the first time: borderless full screen, or with
      * an explicit {@code --windowsize} the decorated window of that size it
      * always was.
@@ -158,8 +176,9 @@ final class ClassicFrame {
      * covers the taskbar too; Windows hides the taskbar behind a focused
      * window that covers its monitor), not
      * {@code GraphicsDevice.setFullScreenWindow}.  Exclusive mode is the
-     * wrong tool for this UI: the classic screens are separate top-level
-     * windows (colony, Europe, reports) and modal dialogs, and on Windows an
+     * wrong tool for this UI: the report screens are separate top-level
+     * windows, and so are the modal dialogs (the colony and Europe screens
+     * are in this window since M4.0), and on Windows an
      * exclusive full-screen window minimises or flickers out of its mode as
      * soon as another top-level window takes focus, Alt+Tab behaves badly,
      * and a modal dialog can end up hidden behind it.  A borderless window is
@@ -196,8 +215,10 @@ final class ClassicFrame {
         // The monitor the frame is on now (the default screen before the
         // first show), so the switch stays on the same monitor.
         final GraphicsConfiguration gc = f.getGraphicsConfiguration();
+        // A minimized run of the harness stays minimized (keepMinimized).
+        final boolean stayMinimized = keptMinimized();
         if (f.isDisplayable()) {
-            if (!this.fullScreen) {
+            if (!this.fullScreen && !stayMinimized) {
                 // Remember the window to come back to.  While maximised,
                 // getBounds() is the maximised size: keep the earlier normal
                 // bounds and just remember the state.
@@ -222,8 +243,16 @@ final class ClassicFrame {
             f.setBounds((this.windowedBounds != null) ? this.windowedBounds
                 : defaultWindowedBounds(gc, f.getInsets()));
         }
+        if (stayMinimized) {
+            // Shown minimized and without activation (SW_SHOWMINNOACTIVE),
+            // as the harness's launcher minimized it.
+            f.setAutoRequestFocus(false);
+            f.setExtendedState(Frame.ICONIFIED);
+        }
         f.setVisible(true);
-        if (!full && this.windowedState != Frame.NORMAL) {
+        if (stayMinimized) {
+            f.setAutoRequestFocus(true);
+        } else if (!full && this.windowedState != Frame.NORMAL) {
             f.setExtendedState(this.windowedState);
         }
     }

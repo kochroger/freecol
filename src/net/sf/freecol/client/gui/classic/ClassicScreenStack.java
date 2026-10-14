@@ -57,7 +57,11 @@ import javax.swing.SwingUtilities;
  * another one (the older screen when a newer one replaced it, decision H5)
  * goes without any visible change; when the top goes, the next one down,
  * or the game parts, show in the same paint (V #11159: 1-2 frames, one torn
- * frame).  Swing only, no game: tested headless
+ * frame), and a push paints its screen at once too ({@code paintImmediately}:
+ * also in a minimized window, whose {@code repaint()}s Swing holds back, so
+ * the recorder of a minimized run films the swap).  Later repaints of a
+ * screen are ordinary {@code repaint()}s: filmed in a window that is shown,
+ * held back in a minimized one.  Swing only, no game: tested headless
  * ({@code ClassicScreenStackTest}).  EDT only.
  */
 final class ClassicScreenStack {
@@ -268,7 +272,11 @@ final class ClassicScreenStack {
         updateProbe();
         ClassicFrameRecorder.event("screen-push", kind.id + " " + name);
         this.pane.revalidate();
-        this.pane.repaint();
+        // The swap in one paint (V: Europe in 2 PNGs, #24106 -> #24111; the
+        // colony 328 ms after the woodcut's map, clip008 #4009 -> #4032),
+        // also in a minimized window, whose repaint()s Swing holds back:
+        // the recorder of a minimized run films the screen from its push.
+        this.pane.paintImmediately(0, 0, w, h);
         giveKeys();
         SwingUtilities.invokeLater(() -> {
                 if (topScreen() == screen) giveKeys();

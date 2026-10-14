@@ -214,7 +214,15 @@ public class ClassicScreenStackTest extends FreeColTestCase {
      */
     private static final class Rig {
 
-        final JLayeredPane pane = new JLayeredPane();
+        /** The full paints at once (the swap in one paint, also minimized). */
+        int paintsNow = 0;
+        final JLayeredPane pane = new JLayeredPane() {
+                @Override
+                public void paintImmediately(int x, int y, int w, int h) {
+                    if (w >= getWidth() && h >= getHeight()) paintsNow++;
+                    super.paintImmediately(x, y, w, h);
+                }
+            };
         final JPanel map = new JPanel(), panel = new JPanel(), strip = new JPanel(),
             drop = new JPanel(), pointer = new JPanel();
         final JComponent mapBoxes;
@@ -346,6 +354,7 @@ public class ClassicScreenStackTest extends FreeColTestCase {
                 assertTrue(r.stack.isHosting());
                 assertTrue(r.partsHidden());
                 assertEquals(1, r.menuCloses);
+                assertEquals("the push in one paint", 1, r.paintsNow);
                 assertTrue(colony.isVisible());
                 assertEquals(new java.awt.Rectangle(0, 0, 1280, 800), colony.getBounds());
                 assertEquals(new java.awt.Rectangle(0, 0, 1280, 800), colonyBoxes.getBounds());
@@ -364,6 +373,7 @@ public class ClassicScreenStackTest extends FreeColTestCase {
                 r.stack.push(ClassicScreenStack.Kind.BUILD_LIST, list, null, "Jamestown",
                              colony);
                 assertEquals(2, r.menuCloses);
+                assertEquals(2, r.paintsNow);
                 assertFalse(colony.isVisible());
                 assertTrue(list.isVisible());
                 assertTrue(r.pane.getIndexOf(list) < r.pane.getIndexOf(colony));
@@ -376,6 +386,7 @@ public class ClassicScreenStackTest extends FreeColTestCase {
                 // Its pop: the colony again.
                 assertTrue(r.stack.pop(list, "test"));
                 assertNull(list.getParent());
+                assertEquals("the pop in one paint", 3, r.paintsNow);
                 assertTrue(colony.isVisible());
                 assertTrue(r.partsHidden());
                 assertSame(colony, r.stack.topScreen());
@@ -400,7 +411,9 @@ public class ClassicScreenStackTest extends FreeColTestCase {
                 r.stack.push(ClassicScreenStack.Kind.COLONY, colony, null, "Jamestown", null);
                 r.stack.push(ClassicScreenStack.Kind.EUROPE, europe, null, "Amsterdam", null);
                 assertFalse(colony.isVisible());
+                final int paints = r.paintsNow;
                 assertTrue(r.stack.pop(colony, "replaced"));
+                assertEquals("no paint for a pop from under another one", paints, r.paintsNow);
                 assertTrue(europe.isVisible());
                 assertTrue(r.partsHidden());
                 assertSame(europe, r.stack.topScreen());
@@ -592,10 +605,26 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         assertEquals(1, edt(() -> gui.screens().slots().size()).intValue());
         assertTrue(edt(gui::europeHosted));
         assertEquals(1, r.shown);
+        // Decision H2: a box asked while a screen is up (a FreeCol notice, a
+        // tip: the GUI's own prompter, putBox) is a wood box on that
+        // screen's own layer, not the stopgap popup and not the map's.
+        Answer h2 = null;
+        if (boxes) {
+            final ClassicAdvisorLayer el = edt(gui::europeBoxLayer);
+            h2 = new Answer();
+            final Answer hh = h2;
+            SwingUtilities.invokeLater(() -> {
+                    hh.value.set(gui.prompter.ask(ClassicGUI.notice("h2", "Eine Nachricht.",
+                        "h2", null)));
+                    hh.done.countDown();
+                });
+            awaitBusy(el);
+        }
         edt(() -> {
                 gui.screens().popAll("test");
                 return null;
             });
+        if (h2 != null) assertEquals(ClassicAdvisorBox.Bar.DISMISSED, h2.get());
     }
 
     /**
