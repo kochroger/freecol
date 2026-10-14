@@ -653,6 +653,48 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         if (h2 != null) assertEquals(ClassicAdvisorBox.Bar.DISMISSED, h2.get());
     }
 
+    /**
+     * M4.0 target 2 in the GUI: the arrow's suppression asks the hosted
+     * screen on top whether one of its drags runs (Europe's; the colony
+     * screen drags nothing yet), and nothing without a screen; the screens
+     * the GUI builds tell the arrow ({@link ClassicPointer#DRAGGING}
+     * listeners).
+     */
+    public void testTheArrowIsHiddenDuringAScreensDrag() throws Exception {
+        final Game game = getStandardGame();
+        final Map map = getTestMap(true);
+        game.changeMap(map);
+        final Colony colony = createStandardColony();
+        final HostGUI gui = new HostGUI(game, colony.getOwner(), null);
+        assertFalse(edt(gui::screenDragging));
+        gui.host();
+        gui.showEuropePanel();
+        flush();
+        final ClassicEuropePanel ep = edt(() -> (ClassicEuropePanel) gui.hostedScreen());
+        assertFalse(edt(gui::screenDragging));
+        assertTrue("the GUI listens to its drags",
+                   ep.getPropertyChangeListeners(ClassicPointer.DRAGGING).length > 0);
+        // A market slot pressed and dragged out of it: a drag.
+        edt(() -> {
+                ep.pressAt(5, 190, false);
+                ep.dragTo(100, 100);
+                return null;
+            });
+        assertTrue(ep.dragging());
+        assertTrue(edt(gui::screenDragging));
+        // The colony over it: its screen drags nothing.
+        gui.showColonyPanel(colony, null);
+        flush();
+        final ClassicColonyPanel cp = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
+        assertTrue(cp.getPropertyChangeListeners(ClassicPointer.DRAGGING).length > 0);
+        assertFalse(edt(gui::screenDragging));
+        edt(() -> {
+                gui.screens().popAll("test");
+                return null;
+            });
+        assertFalse(edt(gui::screenDragging));
+    }
+
     /** The arrival chain's calls with what was on top at each (T3b). */
     private static ClassicVoyages.Chain.Host logged(HostGUI gui,
             ClassicVoyages.Chain.Host real, List<String> log) {

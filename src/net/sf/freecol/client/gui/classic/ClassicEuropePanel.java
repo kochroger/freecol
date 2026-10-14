@@ -879,7 +879,7 @@ final class ClassicEuropePanel extends JPanel {
         if (this.acting) return;
         this.pressed = hitAt(vx, vy);
         this.pressShift = shift;
-        this.dragging = false;
+        setDragging(false);
         this.pointerX = vx;
         this.pointerY = vy;
         if (this.pressed.kind == Kind.MARKET) this.marketCursor = this.pressed.index;
@@ -899,8 +899,21 @@ final class ClassicEuropePanel extends JPanel {
         if (p == null) return;
         this.pointerX = vx;
         this.pointerY = vy;
-        if (!this.dragging && !p.contains(vx, vy) && draggable(p)) this.dragging = true;
+        if (!this.dragging && !p.contains(vx, vy) && draggable(p)) setDragging(true);
         repaint();
+    }
+
+    /**
+     * A drag starts or ends: the arrow is hidden from its start to the
+     * drop (V clip 020; the M5 spec §1: "the arrow hidden during a drag";
+     * M4.0's pointer, {@link ClassicPointer#DRAGGING}).
+     *
+     * @param on Whether a drag runs now.
+     */
+    private void setDragging(boolean on) {
+        if (on == this.dragging) return;
+        this.dragging = on;
+        firePropertyChange(ClassicPointer.DRAGGING, !on, on);
     }
 
     /** @return Whether a pressed thing can be dragged. */
@@ -932,7 +945,7 @@ final class ClassicEuropePanel extends JPanel {
         final boolean dragged = this.dragging;
         final boolean sh = shift || this.pressShift;
         this.pressed = null;
-        this.dragging = false;
+        setDragging(false);
         repaint();
         if (p == null || this.acting) return;
         if (!dragged) {

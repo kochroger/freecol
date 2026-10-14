@@ -2061,11 +2061,13 @@ public class ClassicGUI extends GUI {
                 final ClassicMapViewer mv = mapViewer;
                 return mv != null && mv.holdsPreload();
             });
-        // The arrow: hidden under the first scene (its overlay draws one)
-        // and during a woodcut's dissolve (W9).
+        // The arrow: hidden under the first scene (its overlay draws one),
+        // during a woodcut's dissolve (W9) and during a drag on a hosted
+        // screen (M4.0).
         this.hudPane = new ClassicHudPane(this.menuStrip, this.mapViewer,
             this.infoPanel, arrowSprite(pack), () -> sceneShowing
-                || (boxLayer != null && boxLayer.hidesArrow()));
+                || (boxLayer != null && boxLayer.hidesArrow())
+                || screenDragging());
         // The keys fire the Classic UI's own actions as the strip does
         // (V: the view toggle, classicAction).
         ClassicKeyMap.install(this.hudPane, this.mapViewer,
@@ -2597,6 +2599,26 @@ public class ClassicGUI extends GUI {
     JComponent hostedScreen() {
         final ClassicScreenStack s = this.screens;
         return (s == null) ? null : s.topScreen();
+    }
+
+    /**
+     * Whether a drag runs on the hosted screen on top: the original hides
+     * its arrow from the drag's start to the drop (V: clip 020, 32 drags;
+     * dago {@code 01-interact.md} §1), so ours does too (M4.0 target 2).
+     * EDT only.
+     *
+     * @return True during a drag on the colony or the Europe screen.
+     */
+    boolean screenDragging() {
+        final JComponent t = hostedScreen();
+        if (t instanceof ClassicEuropePanel) return ((ClassicEuropePanel) t).dragging();
+        if (t instanceof ClassicColonyPanel) return ((ClassicColonyPanel) t).dragging();
+        return false;
+    }
+
+    /** The arrow looks again whether it is drawn (a drag started or ended). */
+    private void arrowRefresh() {
+        if (this.hudPane != null) this.hudPane.pointer().refresh();
     }
 
     /** @return Whether the Europe screen is hosted.  EDT only. */
@@ -4340,8 +4362,11 @@ public class ClassicGUI extends GUI {
                     getFreeColClient(), this.imageLibrary, colony,
                     () -> {
                         if (this.colonyPanel == self[0]) closeColonyPanel("player");
-                    }, new ColonyUnits());
+                    }, new ColonyUnits(), waitClock(), true);
                 self[0] = panel;
+                // The arrow is hidden during the screen's drags (M4.0).
+                panel.addPropertyChangeListener(ClassicPointer.DRAGGING,
+                                                e -> arrowRefresh());
                 // The wood boxes over the screen (a unit's @COLONYUNIT,
                 // clip 019, and every box asked while it is up), on their
                 // own layer: the same 320x200 canvas, scale and letterbox.
@@ -4407,6 +4432,8 @@ public class ClassicGUI extends GUI {
         this.colonyBoxes = null;
         if (boxes != null) boxes.dispose();
         if (p != null && this.screens != null) this.screens.pop(p, why);
+        // Gone for good: its blink's thread ends (M4.0 kit).
+        if (p != null) p.dispose();
     }
 
     /**
@@ -4525,6 +4552,10 @@ public class ClassicGUI extends GUI {
                         if (this.europePanel == self[0]) europeClosed("player");
                     }, this::europeShipSailed, new EuropeBoxes());
                 self[0] = panel;
+                // The arrow is hidden during the screen's drags (M4.0 kit;
+                // V: Europe's too, the M5 spec §1).
+                panel.addPropertyChangeListener(ClassicPointer.DRAGGING,
+                                                e -> arrowRefresh());
                 // The wood boxes over the screen (B1), on their own layer:
                 // the same 320x200 canvas, scale and letterbox as the panel.
                 final ClassicPackFiles pack = ClassicPackFiles.runtime();

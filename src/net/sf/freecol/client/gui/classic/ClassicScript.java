@@ -55,6 +55,11 @@ import javax.swing.KeyStroke;
  *       the colony screen: a unit of its row, clip 019; also in a
  *       minimized run, whose screen never painted); {@code sclick <x>
  *       <y> shift} with Shift held.</li>
+ *   <li>{@code sdrag <ax> <ay> <bx> <by>}: a left drag on the open
+ *       classic screen's canvas (build spec M4.0's test hook): the press
+ *       at a, a motion on the way, the release at b (Europe: a trade, a
+ *       sailing; the colony: its drags from M4.8 on, a press and a release
+ *       before); {@code ... shift} with Shift held (a partial amount).</li>
  *   <li>{@code tclick <x> <y>}: a left click on map tile (x, y) as the
  *       map shows it now: the canvas point at its cell's centre in the
  *       15x12 view (a unit in the Spielzugende mode, J2); an error if the
@@ -95,7 +100,7 @@ final class ClassicScript {
 
     /** The commands. */
     enum Op { WAIT, KEY, CLICK, MOVE, WAIT_GAME, WAIT_IDLE, WAIT_TURN, PREF, LOG,
-        QUIT, GOTO, WAIT_BOX, SCREEN_CLICK, TILE_CLICK, MARK_TURN }
+        QUIT, GOTO, WAIT_BOX, SCREEN_CLICK, TILE_CLICK, MARK_TURN, SCREEN_DRAG }
 
     /** Default timeouts (ms) of the waits. */
     static final long WAIT_GAME_TIMEOUT = 180_000L;
@@ -127,11 +132,19 @@ final class ClassicScript {
         /** PREF: the name; LOG: the text; WAIT_BOX: the prefix. */
         final String name;
 
-        /** PREF: the value. */
+        /** PREF: the value; SCREEN_CLICK, SCREEN_DRAG: Shift held. */
         final boolean value;
+
+        /** SCREEN_DRAG: the release's x and y (the press is number, y). */
+        final int x2, y2;
 
         Command(Op op, int line, String text, long number, int y,
                 KeyStroke key, String name, boolean value) {
+            this(op, line, text, number, y, key, name, value, 0, 0);
+        }
+
+        Command(Op op, int line, String text, long number, int y,
+                KeyStroke key, String name, boolean value, int x2, int y2) {
             this.op = op;
             this.line = line;
             this.text = text;
@@ -140,6 +153,8 @@ final class ClassicScript {
             this.key = key;
             this.name = name;
             this.value = value;
+            this.x2 = x2;
+            this.y2 = y2;
         }
 
         @Override
@@ -212,6 +227,21 @@ final class ClassicScript {
             final int x = integer(xy[0], ClassicFrameRecorder.W);
             final int y = integer(xy[1], ClassicFrameRecorder.H);
             return new Command(Op.SCREEN_CLICK, n, s, x, y, null, null, xy.length == 3);
+        }
+        case "sdrag": {
+            final String[] p = rest.split("\\s+");
+            if (p.length < 4 || p.length > 5) {
+                throw new IllegalArgumentException(cmd + " needs ax ay bx by");
+            }
+            if (p.length == 5 && !"shift".equalsIgnoreCase(p[4])) {
+                throw new IllegalArgumentException(cmd + ": only shift after ax ay bx by");
+            }
+            final int ax = integer(p[0], ClassicFrameRecorder.W);
+            final int ay = integer(p[1], ClassicFrameRecorder.H);
+            final int bx = integer(p[2], ClassicFrameRecorder.W);
+            final int by = integer(p[3], ClassicFrameRecorder.H);
+            return new Command(Op.SCREEN_DRAG, n, s, ax, ay, null, null, p.length == 5,
+                               bx, by);
         }
         case "tclick": {
             final String[] xy = rest.split("\\s+");

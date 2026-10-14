@@ -521,6 +521,38 @@ public class ClassicEuropePanelTest extends FreeColTestCase {
      * market row sells it; with Shift {@code @HOWMUCH5} opens with "100"
      * over "(0-50)" (V clip 020 #24920) and Enter on it sells all 50.
      */
+    /**
+     * M4.0 target 2 on Europe (V: the arrow hidden during a drag, the M5
+     * spec §1): the screen tells the arrow when a drag starts (the pointer
+     * left the pressed slot) and when it ends (the drop); a click is no
+     * drag.  The trade itself as before.
+     */
+    public void testTheArrowGoesDuringADrag() throws Exception {
+        final Scene s = rogers1496();
+        final List<Object> events = new ArrayList<>();
+        s.panel.addPropertyChangeListener(ClassicPointer.DRAGGING,
+                                          e -> events.add(e.getNewValue()));
+        final Rectangle toolsSlot = slot(tools);
+        // A click: no drag, the arrow stays.
+        click(s.panel, cx(toolsSlot), cy(toolsSlot));
+        assertTrue(events.toString(), events.isEmpty());
+        // A press and a motion inside the slot: no drag yet (the pointer
+        // has to leave the pressed thing, Europe's own rule).
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, cx(toolsSlot), cy(toolsSlot), false);
+        mouse(s.panel, MouseEvent.MOUSE_DRAGGED, cx(toolsSlot) + 1, cy(toolsSlot), false);
+        assertFalse(s.panel.dragging());
+        assertTrue(events.toString(), events.isEmpty());
+        // Out of the slot: the drag, the arrow goes (M4.0's pointer).
+        mouse(s.panel, MouseEvent.MOUSE_DRAGGED, 196, 170, false);
+        assertTrue(s.panel.dragging());
+        assertEquals(List.of(Boolean.TRUE), events);
+        // The drop: the arrow comes back, the hold is bought as before.
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, 196, 170, false);
+        assertFalse(s.panel.dragging());
+        assertEquals(List.of(Boolean.TRUE, Boolean.FALSE), events);
+        assertEquals(100, s.ship.getGoodsCount(tools));
+    }
+
     public void testBuyAndSellByDragging() throws Exception {
         final Scene s = rogers1496();
         final int ask = s.dutch.getMarket().getCostToBuy(tools);

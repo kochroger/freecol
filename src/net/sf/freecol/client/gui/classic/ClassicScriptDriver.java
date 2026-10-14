@@ -161,6 +161,23 @@ final class ClassicScriptDriver {
         }
 
         /**
+         * A left drag on the open classic screen's own canvas: the press
+         * at a, a motion on the way, the release at b (build spec M4.0's
+         * {@code sdrag}).
+         *
+         * @param ax The press x.
+         * @param ay The press y.
+         * @param bx The release x.
+         * @param by The release y.
+         * @param shift Whether Shift is held.
+         * @exception ScriptException if no such screen is open.
+         */
+        default void screenDrag(int ax, int ay, int bx, int by, boolean shift)
+            throws ScriptException {
+            throw new ScriptException("no classic screen to drag on");
+        }
+
+        /**
          * Click the left button on a map tile as the map shows it now
          * ({@link ClassicScriptDriver#tileCanvasPoint}).
          *
@@ -312,6 +329,10 @@ final class ClassicScriptDriver {
             break;
         case SCREEN_CLICK:
             this.host.screenClick((int)c.number, c.y, c.value);
+            Thread.sleep(KEY_HOLD_MS);
+            break;
+        case SCREEN_DRAG:
+            this.host.screenDrag((int)c.number, c.y, c.x2, c.y2, c.value);
             Thread.sleep(KEY_HOLD_MS);
             break;
         case TILE_CLICK:

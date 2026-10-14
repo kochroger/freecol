@@ -476,6 +476,50 @@ final class ClassicTestHarness {
         }
 
         @Override
+        public void screenDrag(int ax, int ay, int bx, int by, boolean shift)
+            throws ClassicScriptDriver.ScriptException {
+            final String what = ax + "," + ay + " -> " + bx + "," + by
+                + (shift ? " shift" : "");
+            final boolean[] found = { false };
+            try {
+                SwingUtilities.invokeAndWait(() -> {
+                        // The hosted screen on top (M4.0), its targets
+                        // painted (a minimized run's screen never painted).
+                        final java.awt.Container cp = gui.hostedScreen();
+                        if (cp instanceof ClassicColonyPanel) {
+                            found[0] = true;
+                            ((ClassicColonyPanel)cp).paintTargets();
+                            ClassicFrameRecorder.event("sdrag", what + " -> colony");
+                        } else if (cp instanceof ClassicEuropePanel) {
+                            found[0] = true;
+                            ((ClassicEuropePanel)cp).paintTargets();
+                            ClassicFrameRecorder.event("sdrag", what + " -> Europe");
+                        }
+                    });
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                throw new ClassicScriptDriver.ScriptException("sdrag: " + e.getCause());
+            }
+            if (!found[0]) {
+                throw new ClassicScriptDriver.ScriptException("no Europe or colony screen to drag on");
+            }
+            // Queued as a real drag: its drop may ask a box (a modal loop)
+            // that the script answers.
+            SwingUtilities.invokeLater(() -> {
+                    final java.awt.Container cp = gui.hostedScreen();
+                    if (cp instanceof ClassicColonyPanel) {
+                        ((ClassicColonyPanel)cp).dragAt(ax, ay, bx, by, shift);
+                    } else if (cp instanceof ClassicEuropePanel) {
+                        ((ClassicEuropePanel)cp).dragAt(ax, ay, bx, by, shift);
+                    } else {
+                        ClassicFrameRecorder.event("sdrag", what + " lost");
+                    }
+                });
+        }
+
+        @Override
         public void tileClick(int x, int y)
             throws ClassicScriptDriver.ScriptException, InterruptedException {
             final int[][] p = new int[1][];

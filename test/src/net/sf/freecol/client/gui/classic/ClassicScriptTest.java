@@ -198,6 +198,46 @@ public class ClassicScriptTest extends TestCase {
     }
 
     /**
+     * M4.0: {@code sdrag ax ay bx by [shift]} is a drag on the open
+     * classic screen's canvas, handed to the host with both points; bad
+     * arguments are refused; a host without a classic screen fails the
+     * script there.
+     */
+    public void testScreenDrag() throws IOException {
+        final ClassicScript s = parse("sdrag 10 190 196 170", "SDRAG 1 2 3 4 shift");
+        final ClassicScript.Command c = s.commands.get(0);
+        assertEquals(ClassicScript.Op.SCREEN_DRAG, c.op);
+        assertEquals(10L, c.number);
+        assertEquals(190, c.y);
+        assertEquals(196, c.x2);
+        assertEquals(170, c.y2);
+        assertFalse(c.value);
+        assertTrue(s.commands.get(1).value);
+        assertBad("sdrag 1 2 3", "sdrag needs ax ay bx by");
+        assertBad("sdrag 1 2 3 4 ctrl", "only shift after ax ay bx by");
+        assertBad("sdrag 1 2 320 4", "outside 0..319");
+        assertBad("sdrag 1 2 3 200", "outside 0..199");
+        final FakeHost h = new FakeHost() {
+                @Override
+                public void screenDrag(int ax, int ay, int bx, int by, boolean shift) {
+                    this.calls.add("sdrag " + ax + "," + ay + "->" + bx + "," + by
+                                   + (shift ? " shift" : ""));
+                }
+            };
+        File r = resultFile();
+        new ClassicScriptDriver(parse("sdrag 10 190 196 170", "sdrag 1 2 3 4 shift", "quit"),
+                                h, r).run();
+        assertEquals(Arrays.asList("sdrag 10,190->196,170", "sdrag 1,2->3,4 shift", "quit"),
+                     h.calls);
+        assertEquals("ok", result(r));
+        final FakeHost none = new FakeHost();
+        r = resultFile();
+        new ClassicScriptDriver(parse("sdrag 1 2 3 4", "log never"), none, r).run();
+        assertTrue(result(r), result(r).startsWith("error line 1"));
+        assertTrue(result(r), result(r).contains("no classic screen to drag on"));
+    }
+
+    /**
      * J2: {@code tclick x y} clicks a map tile as the map shows it now
      * (a unit in the Spielzugende mode): the cell's centre on the canvas,
      * under the 8-px menu strip; a tile out of the 15x12 view, or no map,

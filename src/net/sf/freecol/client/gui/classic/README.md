@@ -2013,8 +2013,8 @@ the owner of popups, re-framing on Alt+Enter, the focus); most bugs with Europe 
   `europe-close` and `europe-raise` (now "the keys back to Europe") stay; the harness's state line
   names the hosted screen (`screen=europe:Amsterdam`) and counts other frames (`subframes=`).
 - **The original arrow** is drawn over colony and Europe too (it was the Windows pointer in their
-  windows). Not yet as the original: the original hides it from the press to the drop of a drag (M4.0
-  target 2 / M5.0 item 4, later).
+  windows), and since S1 (M4.0 target 2) hidden from a drag's start to its drop, as the original
+  ("The mouse arrow" below; Europe's drags today, the colony's from M4.8).
 - Tests: `ClassicScreenStackTest` (T1-T8: the stack, the disabled keys, the replacement with a box
   dismissed, the map's box over a screen, the keys' home, J1 on a fake clock, the index hint, a source
   census), `ClassicTurnFlowTest.testAHostedScreenHoldsTheTurn`, `ClassicGUISeamTest
@@ -3281,6 +3281,13 @@ canvas" above), clipped to the canvas, hot spot = sprite origin.
   083/049) until the mouse first moves; only real motion moves it.  The real
   pointer is not moved (no `Robot`), so after the scene the HUD arrow is
   wherever the mouse really is.
+- Hosted screens (M4.0): drawn over the colony and Europe screens too, and
+  hidden from a drag's start to its drop as the original (clip 020, 32 drags;
+  dago: "hidden only during a drag"): the screen fires `ClassicPointer.DRAGGING`
+  when its drag starts and ends, the GUI refreshes the arrow, and the arrow's
+  suppression asks `ClassicGUI.screenDragging()`.  Europe's drags start when
+  the pointer leaves the pressed thing (its own rule); the colony screen has
+  no drag yet (M4.8).
 - Limits: the drawn arrow moves on the EDT, so it pauses while the EDT is
   blocked (the short synchronous server calls).  Each move repaints two
   arrow-sized rectangles; the map viewer repaints its tiles under them.
@@ -3480,9 +3487,19 @@ colony on the map (`ClassicMapViewer.onClick → gui.showColonyPanel`) or foundi
 one with **B**; hosted in the main window in place of the map (M4.0; until part P its own
 `JFrame`). Layout, top to bottom:
 
-- **Title bar** — colony name, turn and gold, gold-on-black.
-- **Buildings pane** (left) — the colony's buildings on the sandy ground
-  (`TERRAIN.SS.001`, tiled), each drawn from the original **`BUILDING.SS`** sprite
+- **Top line** (M4.1, `ClassicColonyChrome`) — the original's: «Name.   Jahreszeit,
+  Jahr.  Gold: n¤» in FONTTINY ink 68 at x = floor((322 − w)/2), glyph top 1, on the
+  wood rows 0–6 (WOODTILE.SS.000 tiled from (0,0), the map strip's chrome) with the
+  black row 7; the season from NAMES.TXT `@SEASONS` (spring before 1600, as the HUD),
+  «Gold:» from LABELS `@CTITLE`, the coin as FONTTINY's '$'. A **notice** (M4.0
+  target 6, `ClassicColonyNotice`: gold ink 149 at floor((320 − w)/2), held during a
+  goods drag, 138 frames after a result) takes its place; its texts come with M4.9.
+- **Chrome** (M4.1): the building area's ground PARCH.SS.000 tiled from (0,0)
+  (x 0–198, y 8–127), the black column x 199, the wood panel x 200–319 with the 3×3
+  map's black frame x 223–296 × y 31–104, `COLONY.PIK` at (0,128) unscaled with its
+  first row black. All drawn from the pack in the original's colours.
+- **Buildings pane** (left) — the colony's buildings on that ground, each drawn
+  from the original **`BUILDING.SS`** sprite
   set with the colonists working inside it and a black production tag
   (`amount` + goods icon). Names show **on hover** only (as in the original),
   which also keeps them from overlapping; the hover targets are the building
@@ -3495,14 +3512,37 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   (`cellForDirection`), **not** its raw `(x,y)` offset — FreeCol's map is
   isometric, so the eight neighbours' raw offsets do not fill a −1..+1 square
   (the same isometric-vs-rectangular gotcha as the map viewer; placing by raw
-  offset left cells empty). Each cell draws the same terrain art as the map, plus
-  the colonist working it (green-boxed) and its production tag.
-- **Bottom band** — the original **`COLONY.PIK`** chrome (320×72) blitted as-is,
-  with the live figures over it: the SoL/tory split and the units standing in the
-  colony (left), the ships in port or the empty-dock caption (middle), the net
-  production (right), and the 16-slot **warehouse** row of goods icons + amounts
-  along the very bottom. The red **"E"** at the bottom-right (part of the
-  `COLONY.PIK` art) and **Escape** both close the screen.
+  offset left cells empty). The cells are the original's 24×24 at (224 + 24c,
+  32 + 24r) (M4.1); each draws the same terrain art as the map scaled to 24 (the
+  original's finer art is M4.4's open point), plus the colonist working it
+  (green-boxed) and its production tag, clipped to its cell.
+- **Bottom band** — the original **`COLONY.PIK`** chrome (320×72), with the live
+  figures over it: the SoL/tory split and the units standing in the colony (left),
+  the ships in port or the empty-dock caption (middle), the net production (right)
+  — the first slice's until M4.5–M4.7 — and the original's 16-box **warehouse**
+  row (M4.1): ICONS.SS.(22 + i) at (19i + 10 − floor(w/2), 181), the amount at
+  glyph top 194 and x = 19i + 1 + floor((20 − 4d)/2), its last two digits in ink 61
+  and higher ones in ink 148, no capacity mark, the selected good's box framed
+  green (ink 10). The selection is global (it carries to the next colony and
+  visit) and stays on food until goods are dragged (M4.9). «Abb» white over the red
+  **"E"** at (306,179). The E and **Escape** close the screen.
+- **The kit** (M4.0): one blink for the cursors (`ClassicBlink`, 23 frames, armed
+  while the screen is shown, stopped during a drag; a toggle repaints only if a
+  painter asked `blinkOff()`), the press / drag / release machine
+  (`ClassicDragGesture`; nothing can be dragged yet, so the presses act as before),
+  the hover label (white FONTTINY on its black (w + 1) × 7 box, x = sx + sw/2 −
+  (w + 1)/2 clamped to 0…198 − w), the completion dissolve
+  (`ClassicColonyDissolve`: the changed rectangles' pixels, 19 frames after the
+  complete screen, in 55 frames, the woodcuts' fixed order) and the harness's
+  `sdrag ax ay bx by [shift]`. Every formula is in `ClassicColonyLayout`.
+- **Golden tests** (`ClassicColonyChromeTest`, `ClassicColonyKitTest`, with the pack
+  and `-Dclassic.clips`): the state of clip 020 #2260, #14817, #123003, #134173 and
+  #118448 rebuilt in a test game, the screen's canvas against the frames: top
+  line, separators, wood panel, band row, warehouse and exit 0 px; the parchment
+  and the band picture 0 px where the original draws nothing over them (the
+  analysis' overlay models name what it draws there); the notice (#10058,
+  #10116) and the hover label (#2398, #96680) 0 px; the dissolve against the
+  clip's three completions (start, length, the end inside its rectangles 0 px).
 - **The numbers** follow SPIEL "Koloniebericht-Optionen" (W14, read at each
   paint): "Beschriftung an Gebäuden" the production tags on the buildings,
   "Beschriftung an Waren und Terrain" those on the work tiles and the

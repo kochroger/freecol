@@ -40,6 +40,7 @@ import javax.swing.ActionMap;
 import javax.swing.InputMap;
 import javax.swing.JPanel;
 import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.control.InGameController;
@@ -67,20 +68,35 @@ import net.sf.freecol.common.model.Unit;
  * screenshots.  Top to bottom:
  *
  * <ul>
- *   <li><b>Title bar</b> — colony name, turn and treasury in gold on black.</li>
- *   <li><b>Buildings pane</b> (left) — the colony's buildings on the sandy
- *   ground, each with the colonists working in it and a black production tag
- *   ({@code amount} + goods icon), drawn from the original {@code BUILDING.SS}
- *   sprite set.</li>
+ *   <li><b>Top line</b> — the original's (M4.1, {@link ClassicColonyChrome}):
+ *   «Name.   Jahreszeit, Jahr.  Gold: n¤» in FONTTINY on the wood rows, or a
+ *   gold notice in its place ({@link ClassicColonyNotice}).</li>
+ *   <li><b>Buildings pane</b> (left) — the colony's buildings on the
+ *   original's parchment ground (PARCH.SS, M4.1), each with the colonists
+ *   working in it and a black production tag ({@code amount} + goods icon),
+ *   drawn from the original {@code BUILDING.SS} sprite set (the first
+ *   slice's flow layout until the 15 slots, M4.2).</li>
  *   <li><b>Tile pane</b> (right) — the 3&times;3 grid of the colony's work
- *   tiles on the wood panel ({@code WOODTILE.SS}), each worked tile carrying its
- *   colonist and a production tag.  The centre cell is the colony itself.</li>
- *   <li><b>Bottom band</b> — the original {@code COLONY.PIK} chrome (320&times;72)
- *   blitted as-is, with the Sons-of-Liberty / population figures and the units
- *   outside the colony on the left, the ships in port in the middle, the net
- *   production on the right, and the 16-slot <b>warehouse</b> row of goods icons
- *   and amounts along the bottom.</li>
+ *   tiles, 24-px cells in the original's black frame on the wood panel
+ *   ({@code WOODTILE.SS}, M4.1), each worked tile carrying its colonist and
+ *   a production tag (the first slice's until M4.4).  The centre cell is the
+ *   colony itself.</li>
+ *   <li><b>Bottom band</b> — the original {@code COLONY.PIK} chrome
+ *   (320&times;72) with its black first row, with the Sons-of-Liberty /
+ *   population figures and the units outside the colony on the left, the
+ *   ships in port in the middle, the net production on the right (the first
+ *   slice's until M4.5-M4.7), and the original's 16-box <b>warehouse</b> row
+ *   along the bottom (M4.1: icons, numbers in their inks, the selected
+ *   good's green frame) with «Abb» over the exit.</li>
  * </ul>
+ *
+ * <p>The screen kit (M4.0): the original arrow is hidden during a drag
+ * ({@link #dragging}, {@link ClassicPointer#DRAGGING}); one blink for the
+ * cursors ({@link #blinkOff}); the press / drag / release machine
+ * ({@link ClassicDragGesture}); the top line's notice slot
+ * ({@link #holdNotice}, {@link #showNotice}); the completion dissolve
+ * ({@link ClassicColonyDissolve}).  Nothing on the screen can be dragged
+ * yet, so its presses act as before (M4.8-M4.10).
  *
  * <p><b>Building frame map.</b> {@code BUILDING.SS} holds 48 frames.  The
  * seven buildings a new colony starts with are matched against the
@@ -105,15 +121,17 @@ import net.sf.freecol.common.model.Unit;
 final class ClassicColonyPanel extends JPanel {
 
     /** The original VGA canvas this screen is laid out in. */
-    private static final int VW = 320;
-    private static final int VH = 200;
+    private static final int VW = ClassicColonyLayout.W;
+    private static final int VH = ClassicColonyLayout.H;
 
-    /** Title bar: full width, gold on black. */
-    private static final int TITLE_H = 9;
+    /**
+     * The colony area (buildings + work tiles) sits between the top line
+     * (y 0-6, its black row 7) and the band (spec §1.1, M4.1).
+     */
+    private static final int AREA_Y = ClassicColonyLayout.BUILDING_AREA.y;
 
-    /** The colony area (buildings + work tiles) sits between title and band. */
-    private static final int AREA_Y = TITLE_H;
-    private static final int BUILD_W = 204;
+    /** The building area's width: x 0-198, the black column at 199. */
+    private static final int BUILD_W = ClassicColonyLayout.BUILDING_AREA.width;
 
     /**
      * The construction indicator — current build + progress, clickable to open
@@ -124,16 +142,19 @@ final class ClassicColonyPanel extends JPanel {
     private static final int CONSTR_H = 11;
 
     /** The {@code COLONY.PIK} chrome occupies the bottom 72 rows. */
-    private static final int BAND_Y = 128;
+    private static final int BAND_Y = ClassicColonyLayout.BAND_Y;
 
-    /** Work-tile cell size: the native 16px tiles at a crisp integer 2x. */
-    private static final int GRID_CELL = 32;
-    private static final int GRID_X = 213;
-    private static final int GRID_Y = 19;
+    /**
+     * Work-tile cells: the original's 24x24 at (224 + 24c, 32 + 24r) in
+     * their black frame (spec §1.1, V 0 px); what a cell shows is still
+     * the first slice's until M4.4 (our map art scaled to 24, the plates).
+     */
+    private static final int GRID_CELL = ClassicColonyLayout.TILE;
+    private static final int GRID_X = ClassicColonyLayout.TILES_X;
+    private static final int GRID_Y = ClassicColonyLayout.TILES_Y;
 
-    /** Warehouse row (inside the COLONY.PIK chrome). */
+    /** The exit's hit area: from the warehouse row's last box on (M4.11 makes it the E). */
     private static final int WARE_Y = 178;
-    private static final int WARE_H = 22;
     private static final int WARE_W = 306;
 
     /** The three sub-panels of the band, and their shared top. */
@@ -142,13 +163,10 @@ final class ClassicColonyPanel extends JPanel {
     private static final int PANEL2_X = 122;
     private static final int PANEL3_X = 207;
 
-    private static final Color TITLE_BG = new Color(0x00, 0x00, 0x00);
     private static final Color GOLD = new Color(0xC8, 0xB0, 0x40);
     private static final Color TAG_BG = new Color(0x00, 0x00, 0x00, 0xC0);
     private static final Color TAG_FG = new Color(0xFF, 0xFF, 0xFF);
-    private static final Color SAND = new Color(0xEB, 0xDB, 0xA2);
     private static final Color WOOD = new Color(0x49, 0x28, 0x1C);
-    private static final Color FRAME = new Color(0x00, 0x00, 0x00);
     private static final Color SELECT = new Color(0x40, 0xE0, 0x40);
     private static final Color PICKED = new Color(0xFF, 0xFF, 0x00);
     private static final Color WORK_HINT = new Color(0xE8, 0xC8, 0x40);
@@ -286,6 +304,49 @@ final class ClassicColonyPanel extends JPanel {
     /** The flag letters' font (FONTTINY), or null without the pack. */
     private final ClassicFont tiny;
 
+    /** The original's chrome and warehouse pieces (M4.1), from the pack. */
+    private final ClassicColonyChrome.Assets chrome;
+
+    /**
+     * The warehouse's selected good (its green frame): global, it carries
+     * over to the next colony and the next visit (V clip 020: Prov. opened
+     * with Rum framed, the good last dragged in Base).  Food until a goods
+     * drag moves it (M4.9).  EDT only.
+     */
+    private static int warehouseSelection = 0;
+
+    /** The time (nanoseconds) of the blink and the notice slot. */
+    private final ClassicSlide.Clock clock;
+
+    /** The top line's notice slot (M4.0 target 6; its texts come with M4.9). */
+    private final ClassicColonyNotice notice = new ClassicColonyNotice();
+
+    /** Brings the colony's words back when a result's notice ends, or null. */
+    private javax.swing.Timer noticeTimer = null;
+
+    /**
+     * The screen's blink (M4.0 target 4: the tile, figure, button and
+     * carrier cursors, all in one phase, 23 frames): armed while the
+     * screen is shown, stopped during a drag.
+     */
+    private final ClassicBlink blink;
+
+    /** Whether the blink is in its off half now. */
+    private boolean blinkOff = false;
+
+    /**
+     * Whether the last paint drew a blinking thing ({@link #blinkOff} read
+     * by a painter, M4.4-M4.7): only then does a toggle repaint.
+     */
+    private boolean blinkUsed = false;
+
+    /**
+     * The press / drag / release machine (M4.0 target 3).  Nothing on the
+     * screen can be dragged yet ({@link #canDragAt}): the colony's drags
+     * come with M4.8/M4.9, and until then its presses act as before.
+     */
+    private final ClassicDragGesture gesture = new ClassicDragGesture();
+
     /** Cache of {@code BUILDING.SS} frames, loaded on demand. */
     private final Map<Integer, BufferedImage> buildingCache = new HashMap<>();
 
@@ -318,6 +379,9 @@ final class ClassicColonyPanel extends JPanel {
 
     /** Index into {@link #buildingBounds} of the hovered building, or -1. */
     private int hovered = -1;
+
+    /** The warehouse box under the pointer (its good's hover label), or -1. */
+    private int hoveredBox = -1;
 
     /**
      * Whether the production numbers are drawn, read at each paint: on the
@@ -371,13 +435,34 @@ final class ClassicColonyPanel extends JPanel {
      */
     ClassicColonyPanel(FreeColClient freeColClient, ImageLibrary lib,
                        Colony colony, Runnable onClose, Units units) {
+        this(freeColClient, lib, colony, onClose, units, ClassicSlide.SYSTEM, true);
+    }
+
+    /**
+     * @param freeColClient The client.
+     * @param lib The images.
+     * @param colony The colony shown.
+     * @param onClose Run when the screen is dismissed.
+     * @param units What a click on a unit standing in the colony does, or
+     *     null.
+     * @param clock The blink's and the notice's time.
+     * @param threadedBlink Whether the blink waits on a thread of its own
+     *     (the game); false leaves its toggles to the caller (tests).
+     */
+    ClassicColonyPanel(FreeColClient freeColClient, ImageLibrary lib,
+                       Colony colony, Runnable onClose, Units units,
+                       ClassicSlide.Clock clock, boolean threadedBlink) {
         this.freeColClient = freeColClient;
         this.lib = lib;
         this.colony = colony;
         this.onClose = onClose;
         this.units = units;
+        this.clock = clock;
         final ClassicPackFiles pack = ClassicPackFiles.runtime();
         this.tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
+        this.chrome = ClassicColonyChrome.Assets.load(pack);
+        this.blink = new ClassicBlink(clock, SwingUtilities::invokeLater,
+                                      this::blinkToggled, threadedBlink);
         setOpaque(true);
         setBackground(Color.BLACK);
         setPreferredSize(new Dimension(VW * 3, VH * 3));
@@ -386,11 +471,19 @@ final class ClassicColonyPanel extends JPanel {
         addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent e) {
+                    if (SwingUtilities.isLeftMouseButton(e)) {
+                        final int vx = canvasX(e.getX()), vy = canvasY(e.getY());
+                        gesture.press(vx, vy, e.getX(), e.getY(), canDragAt(vx, vy));
+                    }
                     onClick(e);
                 }
 
                 @Override
                 public void mouseReleased(MouseEvent e) {
+                    if (SwingUtilities.isLeftMouseButton(e)
+                        && gesture.release() == ClassicDragGesture.Result.DROP) {
+                        dragEnded();
+                    }
                     onRelease(e);
                 }
             });
@@ -398,6 +491,11 @@ final class ClassicColonyPanel extends JPanel {
                 @Override
                 public void mouseMoved(MouseEvent e) {
                     onHover(e);
+                }
+
+                @Override
+                public void mouseDragged(MouseEvent e) {
+                    if (gesture.motion(e.getX(), e.getY())) dragStarted();
                 }
             });
     }
@@ -505,6 +603,16 @@ final class ClassicColonyPanel extends JPanel {
         if (!ClassicFrameRecorder.on()) return;
         final String name = "colony-" + (++stills);
         ClassicFrameRecorder.event("colony-still", name + " " + why);
+        ClassicFrameRecorder.still(name, canvas());
+    }
+
+    /**
+     * The 320x200 canvas as the screen paints it now, in its own picture
+     * (the recorder's stills, the golden tests).
+     *
+     * @return The picture (RGB).
+     */
+    BufferedImage canvas() {
         final BufferedImage still
             = new BufferedImage(VW, VH, BufferedImage.TYPE_INT_RGB);
         final Graphics2D g = still.createGraphics();
@@ -513,7 +621,7 @@ final class ClassicColonyPanel extends JPanel {
         } finally {
             g.dispose();
         }
-        ClassicFrameRecorder.still(name, still);
+        return still;
     }
 
     private void pressAt(int vx, int vy) {
@@ -577,8 +685,19 @@ final class ClassicColonyPanel extends JPanel {
     /** Track which building the pointer is over, and repaint if it changed. */
     private void onHover(MouseEvent e) {
         if (this.scale <= 0) return;
-        final int vx = (e.getX() - this.originX) / this.scale;
-        final int vy = (e.getY() - this.originY) / this.scale;
+        hoverAt((e.getX() - this.originX) / this.scale,
+                (e.getY() - this.originY) / this.scale);
+    }
+
+    /**
+     * The pointer is over a canvas point (the mouse, tests): the building
+     * there shows its name, a warehouse good its «Ware (n Tonnen)» label
+     * (V clip008 §2.6, clip 020 #21747).
+     *
+     * @param vx The x, or -1 for none.
+     * @param vy The y.
+     */
+    void hoverAt(int vx, int vy) {
         int found = -1;
         for (int i = 0; i < this.buildingBounds.size(); i++) {
             if (this.buildingBounds.get(i).contains(vx, vy)) {
@@ -586,8 +705,10 @@ final class ClassicColonyPanel extends JPanel {
                 break;
             }
         }
-        if (found != this.hovered) {
+        final int box = (vx < 0) ? -1 : ClassicColonyLayout.warehouseBoxAt(vx, vy);
+        if (found != this.hovered || box != this.hoveredBox) {
             this.hovered = found;
+            this.hoveredBox = box;
             repaint();
         }
     }
@@ -603,6 +724,184 @@ final class ClassicColonyPanel extends JPanel {
     /** Repaint after a model change (a build-queue pick, production, gold). */
     void refresh() {
         repaint();
+    }
+
+
+    // The screen kit (M4.0: blink, drag, notice, warehouse selection)
+
+    /** @return The canvas x of a device x (the last paint's scale and origin). */
+    private int canvasX(int x) {
+        return (x - this.originX) / Math.max(1, this.scale);
+    }
+
+    /** @return The canvas y of a device y. */
+    private int canvasY(int y) {
+        return (y - this.originY) / Math.max(1, this.scale);
+    }
+
+    /**
+     * Whether a press at a canvas point picks something that can be
+     * dragged: a colonist (M4.8) or a good (M4.9).  Nothing yet: the
+     * colony's presses still act as the first slice's.
+     *
+     * @param vx The x.
+     * @param vy The y.
+     * @return False.
+     */
+    private boolean canDragAt(int vx, int vy) {
+        return false;
+    }
+
+    /**
+     * @return Whether a drag runs on this screen: the arrow is hidden
+     *     meanwhile ({@link ClassicPointer#DRAGGING}).
+     */
+    boolean dragging() {
+        return this.gesture.dragging();
+    }
+
+    /** A drag started: no blink during it (dago §4.1), the arrow goes. */
+    private void dragStarted() {
+        this.blink.stop();
+        firePropertyChange(ClassicPointer.DRAGGING, false, true);
+        repaint();
+    }
+
+    /** A drag ended: the blink starts again (I: a new phase), the arrow comes back. */
+    private void dragEnded() {
+        if (isDisplayable()) this.blink.arm();
+        this.blinkOff = false;
+        firePropertyChange(ClassicPointer.DRAGGING, true, false);
+        repaint();
+    }
+
+    /** A toggle of the blink: repainted only if something blinks. */
+    private void blinkToggled(int n) {
+        this.blinkOff = ClassicBlink.isOff(n);
+        if (this.blinkUsed) repaint();
+    }
+
+    /**
+     * Whether a blinking thing is in its off half now; a painter that
+     * asks makes the next toggles repaint the screen.
+     *
+     * @return True in the off half.
+     */
+    boolean blinkOff() {
+        this.blinkUsed = true;
+        return this.blinkOff;
+    }
+
+    /** @return The blink (tests). */
+    ClassicBlink blink() {
+        return this.blink;
+    }
+
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        // The blink's phase starts with the shown screen (V: the cursor is
+        // on in the first frame, I).
+        this.blinkOff = false;
+        this.blink.arm();
+    }
+
+    @Override
+    public void removeNotify() {
+        // Not displayable any more (the pop; also a full-screen switch,
+        // which makes the window displayable again): no blink meanwhile.
+        this.gesture.cancel();
+        this.blink.stop();
+        if (this.noticeTimer != null) this.noticeTimer.stop();
+        super.removeNotify();
+    }
+
+    /** The screen is gone for good (its close or replacement): the blink's thread ends. */
+    void dispose() {
+        this.gesture.cancel();
+        this.blink.close();
+        if (this.noticeTimer != null) this.noticeTimer.stop();
+    }
+
+    /**
+     * A notice in the top line while something runs (a goods drag's
+     * «Einladen …», M4.9): it stays until {@link #showNotice} or
+     * {@link #clearNotice}.
+     *
+     * @param text The notice.
+     */
+    void holdNotice(String text) {
+        this.notice.hold(text);
+        repaint(0, 0, getWidth(), getHeight());
+    }
+
+    /**
+     * A result's notice in the top line (M4.9: «24 Erz bewegt nach …»):
+     * the colony's words come back 138 frames later.
+     *
+     * @param text The notice.
+     */
+    void showNotice(String text) {
+        this.notice.show(text, this.clock.now());
+        if (this.noticeTimer == null) {
+            this.noticeTimer = new javax.swing.Timer(0, e -> repaint());
+            this.noticeTimer.setRepeats(false);
+        }
+        this.noticeTimer.setInitialDelay((int) Math.ceil(ClassicColonyNotice.RESULT_MS));
+        this.noticeTimer.restart();
+        repaint();
+    }
+
+    /** The colony's words again in the top line. */
+    void clearNotice() {
+        this.notice.clear();
+        repaint();
+    }
+
+    /** @return The notice the top line shows now, or null (tests). */
+    String noticeShown() {
+        return this.notice.at(this.clock.now());
+    }
+
+    /** @return The warehouse's selected good's box (global). */
+    static int warehouseSelection() {
+        return warehouseSelection;
+    }
+
+    /**
+     * Select a good of the warehouse (the goods step, M4.9; tests): its
+     * box gets the green frame, in every colony, until another is selected.
+     *
+     * @param box The box, 0-15.
+     */
+    static void selectWarehouseGood(int box) {
+        if (box >= 0 && box < ClassicColonyLayout.WAREHOUSE_BOXES) {
+            warehouseSelection = box;
+        }
+    }
+
+    /**
+     * A drag from one canvas point to another, as the mouse would do it
+     * (the harness's {@code sdrag}, tests): the press, a motion on the
+     * way, the release.  Until M4.8 nothing on this screen can be dragged,
+     * so this is a press at a and a release at b.
+     *
+     * @param ax Press x.
+     * @param ay Press y.
+     * @param bx Release x.
+     * @param by Release y.
+     * @param shift Whether Shift is held (the goods step's partial amount).
+     */
+    void dragAt(int ax, int ay, int bx, int by, boolean shift) {
+        final int s = Math.max(1, this.scale);
+        this.gesture.press(ax, ay, this.originX + ax * s, this.originY + ay * s,
+                           canDragAt(ax, ay));
+        pressAt(ax, ay);
+        if (this.gesture.motion(this.originX + bx * s, this.originY + by * s)) {
+            dragStarted();
+        }
+        if (this.gesture.release() == ClassicDragGesture.Result.DROP) dragEnded();
+        releaseAt(bx, by);
     }
 
 
@@ -644,12 +943,38 @@ final class ClassicColonyPanel extends JPanel {
         this.buildingNumbers = prefs.is(ClassicPrefs.BUILDING_LABELS);
         this.goodsTerrainNumbers = prefs.is(ClassicPrefs.GOODS_TERRAIN_LABELS);
 
-        paintTitle(g);
+        // Whether this paint draws a blinking thing (blinkOff() asked).
+        this.blinkUsed = false;
+        // The original's chrome (M4.1): the top line or its notice, the
+        // parchment and its black column, the wood panel and the 3x3
+        // map's frame; then what stands on them.
+        final String shown = this.notice.at(this.clock.now());
+        if (shown != null) {
+            ClassicColonyChrome.paintNotice(g, this.chrome, shown);
+        } else {
+            ClassicColonyChrome.paintTopLine(g, this.chrome, topLine());
+        }
+        ClassicColonyChrome.paintGround(g, this.chrome);
+        ClassicColonyChrome.paintWoodPanel(g, this.chrome);
         paintBuildings(g);
         paintConstruction(g);
         paintWorkTiles(g);
         paintBand(g);
         paintHover(g);
+    }
+
+    /** @return The top line's words now ({@link ClassicColonyChrome#model}). */
+    private String topLine() {
+        return chromeModel().topLine;
+    }
+
+    /** @return What the chrome shows of the colony now. */
+    ClassicColonyChrome.Model chromeModel() {
+        final Game game = (this.freeColClient == null) ? null : this.freeColClient.getGame();
+        final Player player = (this.freeColClient == null) ? null
+            : this.freeColClient.getMyPlayer();
+        return ClassicColonyChrome.model(this.colony, game, player,
+            ClassicText.load(ClassicPackFiles.runtime()), warehouseSelection);
     }
 
     /**
@@ -666,15 +991,7 @@ final class ClassicColonyPanel extends JPanel {
         final String name = "colony-" + (++stills);
         ClassicFrameRecorder.event("colony-buildings",
             name + " " + this.colony.getId() + drawn);
-        final BufferedImage still
-            = new BufferedImage(VW, VH, BufferedImage.TYPE_INT_RGB);
-        final Graphics2D g = still.createGraphics();
-        try {
-            paintCanvas(g);
-        } finally {
-            g.dispose();
-        }
-        ClassicFrameRecorder.still(name, still);
+        ClassicFrameRecorder.still(name, canvas());
     }
 
     /**
@@ -709,38 +1026,27 @@ final class ClassicColonyPanel extends JPanel {
                      AREA_Y + CONSTR_H - 3);
     }
 
-    /** The gold-on-black header: colony name, turn, treasury. */
-    private void paintTitle(Graphics2D g) {
-        g.setColor(TITLE_BG);
-        g.fillRect(0, 0, VW, TITLE_H);
-        final Game game = this.freeColClient.getGame();
-        final Player player = this.freeColClient.getMyPlayer();
-        final StringBuilder sb = new StringBuilder(this.colony.getName());
-        if (game != null && game.getTurn() != null) {
-            sb.append(", ").append(msg(game.getTurn().getLabel()));
+    /**
+     * The buildings pane: every building in the colony on the parchment
+     * ({@link ClassicColonyChrome#paintGround}) -- its sprite, the
+     * colonists working inside it, its production tag and its name.  The
+     * original places each building at a fixed spot on the ground; this
+     * first slice flows them left-to-right in rows instead (a documented
+     * deviation until M4.2, the 15 slots), inside the building area.
+     */
+    private void paintBuildings(Graphics2D g0) {
+        final Graphics2D g = (Graphics2D) g0.create();
+        final Rectangle area = ClassicColonyLayout.BUILDING_AREA;
+        g.clipRect(area.x, area.y, area.width, area.height);
+        try {
+            paintBuildingsIn(g);
+        } finally {
+            g.dispose();
         }
-        if (player != null) {
-            sb.append(", ").append(Messages.message("gold")).append(": ")
-                .append(player.getGold());
-        }
-        g.setColor(GOLD);
-        g.setFont(font(7f, Font.BOLD));
-        final String s = sb.toString();
-        g.drawString(s, (VW - g.getFontMetrics().stringWidth(s)) / 2, 7);
     }
 
-    /**
-     * The buildings pane: the sandy ground, then every building in the colony —
-     * its sprite, the colonists working inside it, its production tag and its
-     * name.  The original places each building at a fixed spot on the ground;
-     * this first slice flows them left-to-right in rows instead (a documented
-     * deviation — the fixed original layout wants the expert's slot map).
-     */
-    private void paintBuildings(Graphics2D g) {
-        // Ground: the original tan colony ground (TERRAIN.SS.001), tiled.
-        final BufferedImage ground = ImageLibrary.getUnscaledImage(ssKey("TERRAIN.SS", 1));
-        fillTiled(g, ground, SAND, 0, AREA_Y, BUILD_W, BAND_Y - AREA_Y);
-
+    /** {@link #paintBuildings}, clipped to the building area. */
+    private void paintBuildingsIn(Graphics2D g) {
         this.buildingBounds.clear();
         this.buildingNames.clear();
         this.buildingTargets.clear();
@@ -794,27 +1100,31 @@ final class ClassicColonyPanel extends JPanel {
         }
     }
 
-    /** Draw the hovered building's name plate over everything, as a tooltip. */
+    /**
+     * The hovered building's name over everything, the original's hover
+     * label (spec §1.2, M4.0 target 5): white FONTTINY on its black box,
+     * centred over the sprite and clamped to the building area, at the
+     * sprite's top (the class rule and NAMES.TXT's names come with the 15
+     * slots, M4.2; until then FreeCol's names).
+     */
     private void paintHover(Graphics2D g) {
         if (this.hovered < 0 || this.hovered >= this.buildingBounds.size()) return;
         final java.awt.Rectangle r = this.buildingBounds.get(this.hovered);
-        paintName(g, this.buildingNames.get(this.hovered),
-                  r.x - 8, r.y - 2, r.width + 16);
+        final String name = this.buildingNames.get(this.hovered);
+        if (name == null || name.isEmpty()) return;
+        ClassicColonyChrome.paintHoverLabel(g, this.chrome, name, r.x, r.width, r.y);
     }
 
     /**
-     * The work-tile pane: the wood panel and, inset in it, the 3&times;3 grid of
-     * the colony's {@link ColonyTile}s — the colony itself in the centre cell and
-     * its eight neighbours around it, each drawn with the same terrain art as the
-     * map, plus the colonist working it and what that tile yields.
+     * The work-tile pane: inset in the wood panel and its black frame
+     * ({@link ClassicColonyChrome#paintWoodPanel}), the 3&times;3 grid of
+     * the colony's {@link ColonyTile}s — the colony itself in the centre
+     * cell and its eight neighbours around it, each drawn with the same
+     * terrain art as the map, plus the colonist working it and what that
+     * tile yields, each inside its 24-px cell (M4.4 brings the original's
+     * rows, figures and frames).
      */
-    private void paintWorkTiles(Graphics2D g) {
-        final BufferedImage wood = ImageLibrary.getUnscaledImage(ssKey("WOODTILE.SS", 0));
-        fillTiled(g, wood, WOOD, BUILD_W, AREA_Y, VW - BUILD_W, BAND_Y - AREA_Y);
-
-        g.setColor(FRAME);
-        g.drawRect(GRID_X - 1, GRID_Y - 1, GRID_CELL * 3 + 1, GRID_CELL * 3 + 1);
-
+    private void paintWorkTiles(Graphics2D g0) {
         this.tileBounds.clear();
         this.tileTargets.clear();
         final Tile centre = this.colony.getTile();
@@ -830,43 +1140,56 @@ final class ClassicColonyPanel extends JPanel {
             if (cell == null) continue;
             final int sx = GRID_X + cell[0] * GRID_CELL;
             final int sy = GRID_Y + cell[1] * GRID_CELL;
-
-            final BufferedImage terrain = this.lib.getTerrainImage(
-                t.getType(), t.getX(), t.getY(), new Dimension(16, 16));
-            if (terrain != null) {
-                g.drawImage(terrain, sx, sy, GRID_CELL, GRID_CELL, null);
+            final Graphics2D g = (Graphics2D) g0.create();
+            g.clipRect(sx, sy, GRID_CELL, GRID_CELL);
+            try {
+                paintCell(g, ct, t, t == centre, sx, sy);
+            } finally {
+                g.dispose();
             }
-            if (t == centre) {
-                final BufferedImage settlement
-                    = this.lib.getScaledSettlementImage(this.colony);
-                if (settlement != null) {
-                    drawFitted(g, settlement, sx, sy, GRID_CELL);
-                }
-                continue;         // the centre tile works itself; not a target.
-            }
-            this.tileBounds.add(new Rectangle(sx, sy, GRID_CELL, GRID_CELL));
-            this.tileTargets.add(ct);
-            // A colonist is selected: hint every work tile it could move into.
-            if (this.selectedUnit != null) {
-                g.setColor(WORK_HINT);
-                g.drawRect(sx, sy, GRID_CELL - 1, GRID_CELL - 1);
-            }
-            final List<Unit> workers = ct.getUnitList();
-            if (!workers.isEmpty()) {
-                g.setColor(SELECT);
-                g.drawRect(sx, sy, GRID_CELL - 1, GRID_CELL - 1);
-                paintWorkers(g, workers, sx + GRID_CELL / 2 - 6,
-                             sy + GRID_CELL - 4);
-                if (this.goodsTerrainNumbers) {
-                    paintProductionTag(g, ct.getProductionInfo(), sx + 1, sy + 1);
-                }
-            }
-            // An enemy on the tile at war: his icon at cell + (4,4) with
-            // his flag (clip opening_018 #13962; the original's cells are
-            // 24 px, these 32).
-            final Unit enemy = occupier(t, this.colony.getOwner());
-            if (enemy != null) paintStanding(g, enemy, sx + 4, sy + 4);
         }
+    }
+
+    /** One cell of the 3x3 map, clipped to it. */
+    private void paintCell(Graphics2D g, ColonyTile ct, Tile t, boolean isCentre,
+                           int sx, int sy) {
+        // Our map art scaled to 24 px (the original's finer 24-px art comes
+        // from an unknown scaler, spec §M4.4: an Unsichtbarkeit).
+        final BufferedImage terrain = this.lib.getTerrainImage(
+            t.getType(), t.getX(), t.getY(), new Dimension(16, 16));
+        if (terrain != null) {
+            g.drawImage(terrain, sx, sy, GRID_CELL, GRID_CELL, null);
+        }
+        if (isCentre) {
+            final BufferedImage settlement
+                = this.lib.getScaledSettlementImage(this.colony);
+            if (settlement != null) {
+                drawFitted(g, settlement, sx, sy, GRID_CELL);
+            }
+            return;           // the centre tile works itself; not a target.
+        }
+        this.tileBounds.add(new Rectangle(sx, sy, GRID_CELL, GRID_CELL));
+        this.tileTargets.add(ct);
+        // A colonist is selected: hint every work tile it could move into.
+        if (this.selectedUnit != null) {
+            g.setColor(WORK_HINT);
+            g.drawRect(sx, sy, GRID_CELL - 1, GRID_CELL - 1);
+        }
+        final List<Unit> workers = ct.getUnitList();
+        if (!workers.isEmpty()) {
+            g.setColor(SELECT);
+            g.drawRect(sx, sy, GRID_CELL - 1, GRID_CELL - 1);
+            paintWorkers(g, workers, sx + GRID_CELL / 2 - 6,
+                         sy + GRID_CELL - 4);
+            if (this.goodsTerrainNumbers) {
+                // The plate inside the cell (its top at sy + 1).
+                paintProductionTag(g, ct.getProductionInfo(), sx + 1, sy + 9);
+            }
+        }
+        // An enemy on the tile at war: his icon at cell + (4,4) with
+        // his flag (clip opening_018 #13962).
+        final Unit enemy = occupier(t, this.colony.getOwner());
+        if (enemy != null) paintStanding(g, enemy, sx + 4, sy + 4);
     }
 
     /** The 3&times;3 grid cell {@code {col,row}} for a compass direction, or null. */
@@ -886,21 +1209,34 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * The bottom band: the original {@code COLONY.PIK} chrome, then the live
-     * numbers over it — Sons of Liberty and the units outside the colony (left),
-     * the ships in port (middle), the colony's net production (right), and the
-     * warehouse row of goods along the bottom.
+     * The bottom band: the original {@code COLONY.PIK} chrome with its
+     * black first row ({@link ClassicColonyChrome#paintBand}), then the live
+     * numbers over it — Sons of Liberty and the units outside the colony
+     * (left), the ships in port (middle), the colony's net production
+     * (right), the first slice's until M4.5-M4.7 — and the original's
+     * warehouse row along the bottom with «Abb» over the exit (M4.1).
      */
     private void paintBand(Graphics2D g) {
-        final BufferedImage band
-            = ImageLibrary.getUnscaledImage("image.background.ColonyPanel");
-        if (band != null) {
-            g.drawImage(band, 0, BAND_Y, VW, VH - BAND_Y, null);
-        }
+        ClassicColonyChrome.paintBand(g, this.chrome);
         paintPopulation(g);
         paintPort(g);
         paintNetProduction(g);
-        paintWarehouse(g);
+        final int[] amounts = ClassicColonyChrome.amounts(this.colony);
+        ClassicColonyChrome.paintWarehouse(g, this.chrome, amounts,
+            ClassicColonyChrome.exported(this.colony), warehouseSelection);
+        ClassicColonyChrome.paintExitLabel(g, this.chrome);
+        if (this.hoveredBox >= 0) {
+            final net.sf.freecol.common.model.Specification spec
+                = this.colony.getSpecification();
+            final GoodsType gt = (spec == null) ? null
+                : spec.getGoodsType(ClassicColonyLayout.WAREHOUSE_GOODS[this.hoveredBox]);
+            if (gt != null) {
+                ClassicColonyChrome.paintWarehouseLabel(g, this.chrome,
+                    ClassicColonyChrome.warehouseLabel(
+                        ClassicText.load(ClassicPackFiles.runtime()), gt,
+                        amounts[this.hoveredBox]), this.hoveredBox);
+            }
+        }
     }
 
     /** Left panel: the SoL / tory split and the units standing in the colony. */
@@ -1063,28 +1399,6 @@ final class ClassicColonyPanel extends JPanel {
         }
     }
 
-    /** The warehouse row: every storable good, with what is in store. */
-    private void paintWarehouse(Graphics2D g) {
-        final List<GoodsType> goods
-            = this.colony.getSpecification().getStorableGoodsTypeList();
-        if (goods.isEmpty()) return;
-        final int cw = WARE_W / goods.size();
-        g.setFont(font(7f, Font.PLAIN));
-        for (int i = 0; i < goods.size(); i++) {
-            final GoodsType gt = goods.get(i);
-            final int x = i * cw;
-            final BufferedImage img = this.lib.getScaledGoodsTypeImage(gt);
-            if (img != null) {
-                drawFitted(g, img, x + (cw - 12) / 2, WARE_Y + 2, 12);
-            }
-            final String s = String.valueOf(this.colony.getGoodsCount(gt));
-            g.setColor(TAG_FG);
-            g.drawString(s, x + (cw - g.getFontMetrics().stringWidth(s)) / 2,
-                         WARE_Y + WARE_H - 3);
-        }
-    }
-
-
     // Shared drawing helpers
 
     /** Draw the colonists of a work location in a row, ending at {@code (x, y)}. */
@@ -1126,18 +1440,6 @@ final class ClassicColonyPanel extends JPanel {
         }
     }
 
-    /** A small caption plate, used for the building names. */
-    private void paintName(Graphics2D g, String name, int x, int y, int w) {
-        if (name == null || name.isEmpty()) return;
-        g.setFont(font(6f, Font.PLAIN));
-        final int tw = g.getFontMetrics().stringWidth(name);
-        final int tx = x + (w - tw) / 2;
-        g.setColor(TAG_BG);
-        g.fillRect(tx - 1, y - 6, tw + 2, 7);
-        g.setColor(TAG_FG);
-        g.drawString(name, tx, y);
-    }
-
     /** A tiny black-plated number, as used under the net-production icons. */
     private void tag(Graphics2D g, String s, int x, int y) {
         g.setFont(font(6f, Font.BOLD));
@@ -1160,37 +1462,10 @@ final class ClassicColonyPanel extends JPanel {
         g.drawImage(img, x + (size - w) / 2, y + (size - h) / 2, w, h, null);
     }
 
-    /** Tile {@code texture} over a rectangle, falling back to a flat colour. */
-    private void fillTiled(Graphics2D g, BufferedImage texture, Color fallback,
-                           int x, int y, int w, int h) {
-        if (texture == null) {
-            g.setColor(fallback);
-            g.fillRect(x, y, w, h);
-            return;
-        }
-        final Graphics2D gg = (Graphics2D) g.create();
-        gg.clipRect(x, y, w, h);
-        for (int ty = y; ty < y + h; ty += texture.getHeight()) {
-            for (int tx = x; tx < x + w; tx += texture.getWidth()) {
-                gg.drawImage(texture, tx, ty, null);
-            }
-        }
-        gg.dispose();
-    }
-
     /** The last segment of a FreeCol id ({@code model.building.townHall} → {@code townHall}). */
     private static String shortId(String id) {
         final int i = id.lastIndexOf('.');
         return (i < 0) ? id : id.substring(i + 1);
-    }
-
-    /** Render a StringTemplate, guarding against nulls / missing keys. */
-    private static String msg(net.sf.freecol.common.model.StringTemplate t) {
-        try {
-            return (t == null) ? "" : Messages.message(t);
-        } catch (RuntimeException e) {
-            return "";
-        }
     }
 
     /** A font in <em>virtual</em> pixels — the paint transform scales it up. */

@@ -69,7 +69,10 @@ import javax.swing.SwingUtilities;
  * gives the system arrow back, so there is never no pointer and never two.
  * The colony, build-list and Europe screens are in the main window since
  * M4.0 ({@link ClassicScreenStack}), under this layer: the original arrow
- * is drawn over them too, as in the original (V clip 020, 32 drags).
+ * is drawn over them too, as in the original, and hidden from a drag's
+ * start to its drop (V clip 020, 32 drags; dago {@code 01-interact.md}
+ * §1: "hidden only during a drag"): the screen fires {@link #DRAGGING}
+ * when a drag starts and ends, the game's suppression asks it.
  *
  * <p>{@link #place} puts the arrow somewhere until the mouse first moves:
  * the first scene uses it for the original's (160,100), where the game
@@ -89,6 +92,12 @@ final class ClassicPointer extends JComponent {
 
     /** Where the original parks the mouse when the first scene appears (083/049). */
     static final int SCENE_X = 160, SCENE_Y = 100;
+
+    /**
+     * The property a hosted screen fires when one of its drags starts
+     * (true) or ends (false): the arrow is hidden meanwhile (M4.0 target 2).
+     */
+    static final String DRAGGING = "classic.dragging";
 
     /** The shared invisible system cursor, or null if the platform has none. */
     private static Cursor blank = null;
