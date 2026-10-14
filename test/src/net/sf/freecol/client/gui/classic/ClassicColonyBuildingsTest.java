@@ -965,8 +965,9 @@ public class ClassicColonyBuildingsTest extends FreeColTestCase {
     /**
      * The presses on the building area (the first slice's select-then-
      * target, unchanged): a worker's figure selects him, a figure on the
-     * fence does nothing yet (M4.8), the right panel opens the build list
-     * until ÄNDERN (M4.7: the construction plate is gone).
+     * fence does nothing yet (M4.8), the build list opens from ÄNDERN in the
+     * hammer panel (M4.7: the construction plate is gone, the first slice's
+     * press anywhere on the right panel too).
      */
     public void testThePresses() throws Exception {
         final State s = base1539();
@@ -999,10 +1000,17 @@ public class ClassicColonyBuildingsTest extends FreeColTestCase {
         p.clickAt(20, 20);                     // trees (M1): no target, nothing
         assertSame(vet, p.selected());
         p.select(null);
-        p.clickAt(250, 150);                   // the right panel
+        p.setMode(ClassicColonyRight.Mode.HOUSE);
+        p.canvas();
+        p.clickAt(250, 150);                   // the right panel's house rows: nothing
+        assertEquals(0, lists[0]);
+        p.setMode(ClassicColonyRight.Mode.HAMMER);
+        p.canvas();
+        p.clickAt(280, 142);                   // ÄNDERN (M4.7; the list's look, M4.10)
         assertEquals(1, lists[0]);
         p.clickAt(100, 12);                    // where the plate was: the Rathaus now
         assertEquals(1, lists[0]);
+        ClassicColonyPanel.setLastMode(ClassicColonyRight.Mode.HOUSE);
     }
 
 

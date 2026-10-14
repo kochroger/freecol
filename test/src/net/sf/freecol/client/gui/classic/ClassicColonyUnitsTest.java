@@ -375,11 +375,13 @@ public class ClassicColonyUnitsTest extends FreeColTestCase {
         // A fronted unit that has gone is skipped.
         assertEquals(List.of(u2, u1), ClassicColonyUnits.order(List.of(u1, u2), fronted));
         assertTrue(ClassicColonyUnits.order(null, fronted).isEmpty());
-        for (int n = 0; n <= 6; n++) assertEquals(18, ClassicColonyPanel.bandPitch(n));
-        assertTrue(ClassicColonyPanel.bandPitch(7) < 18);
-        for (int n = 7; n <= 40; n++) {
-            final int p = ClassicColonyPanel.bandPitch(n);
-            assertTrue(n + ": " + p, p >= 1 && 3 + 3 + p * (n - 1) + 16 <= 122);
+        // The cells of «Vorhandene Einheiten» (M4.7: the musket panel's, 18
+        // px while five fit before x 302, closer beyond).
+        for (int n = 0; n <= 5; n++) assertEquals(18, ClassicColonyLayout.unitListPitch(n));
+        assertTrue(ClassicColonyLayout.unitListPitch(6) < 18);
+        for (int n = 6; n <= 40; n++) {
+            final int p = ClassicColonyLayout.unitListPitch(n);
+            assertTrue(n + ": " + p, p >= 1 && 213 + p * (n - 1) + 16 <= 303);
         }
     }
 

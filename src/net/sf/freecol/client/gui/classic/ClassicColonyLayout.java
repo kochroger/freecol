@@ -1244,6 +1244,363 @@ final class ClassicColonyLayout {
     }
 
 
+    // The right panel (spec M4.7; L §7, dago §6, clip008 §2, clip 019 §4)
+
+    /**
+     * The three mode buttons' sprites: ICONS.SS.067 (house), 068 (musket),
+     * 069 (hammer), 14x13 each, their bevel and picture in one (found in the
+     * pack: every opaque pixel equal at clip 020 #2260 and #9921).
+     */
+    static final int ICON_MODE_HOUSE = 67;
+
+    /**
+     * A mode button's shadow: ink 63 (#08086D), one pixel beside the
+     * sprite (V #2260, #9921: a raised button's sprite at (303, y) with
+     * the shadow on its right column x 317, y + 1 ... y + 13 and its bottom
+     * row y + 13, x 304-317; the pressed one's sprite one lower and one to
+     * the right, (304, y + 1), the shadow on its top row y, x 303-316 and
+     * its left column x 303, y ... y + 12).
+     */
+    static final int INK_BUTTON_SHADOW = 63;
+
+    /** The raised bevel's light ink (a raised button reads 54 at (304, y + 1): its inside). */
+    static final int INK_BUTTON_FACE = 54;
+
+    /**
+     * A mode button's sprite place.
+     *
+     * @param mode The button, 0 house, 1 musket, 2 hammer.
+     * @param pressed Whether it is the pressed one.
+     * @return The sprite's top-left corner.
+     */
+    static java.awt.Point modeSprite(int mode, boolean pressed) {
+        return new java.awt.Point(MODE_X + ((pressed) ? 1 : 0),
+                                  MODE_Y[mode] + ((pressed) ? 1 : 0));
+    }
+
+    /**
+     * A mode button's 15x14 cell (its press area): x 303-317, y 132-145 /
+     * 147-160 / 162-175.
+     *
+     * @param mode The button.
+     * @return The cell.
+     */
+    static Rectangle modeCell(int mode) {
+        return new Rectangle(MODE_X, MODE_Y[mode], MODE_W, MODE_H);
+    }
+
+    /**
+     * The mode button under a point.
+     *
+     * @param x The x.
+     * @param y The y.
+     * @return The button, 0-2, or -1.
+     */
+    static int modeAt(int x, int y) {
+        for (int i = 0; i < MODE_Y.length; i++) if (modeCell(i).contains(x, y)) return i;
+        return -1;
+    }
+
+    /** The house panel's three rows: icon y 134 / 148 / 162 (V #2260, #14817, #123003; dago #1000). */
+    static final int[] HOUSE_ROW_Y = { 134, 148, 162 };
+
+    /** The house panel's rows start at x 213. */
+    static final int HOUSE_X = 213;
+
+    /** The gap between two groups: 2 px in rows 1-2, 4 px in row 3 (V #2260, #123003; dago). */
+    static final int[] HOUSE_GAP = { 2, 2, 4 };
+
+    /**
+     * The house panel's last pixel column: 302, before the mode buttons
+     * (V: #2260's row 3 ends at 290 at pitch 2 and would end at 311 at
+     * pitch 3; dago's row 3 would end at 309 at scale 1; I: 302).
+     */
+    static final int HOUSE_RIGHT = 302;
+
+    /** A part's count label: its box at (first + 2, icon y + 2), as the band's (dago #1000: «34» glyphs at y 137). */
+    static final int HOUSE_LABEL_DY = 2;
+
+    /** The red count label of a crossed part: its number in ink 12 on the black box (dago #1000 «14», «2»). */
+    static final int INK_RED = 12;
+
+    /**
+     * A house panel row laid out: per good its two parts, the icons it
+     * makes and, after them, the crossed ones (a shortfall).
+     */
+    static final class HouseRow {
+
+        /** Each icon stands for k units; the pitch the icons use at most. */
+        final int k, pitch;
+
+        /** The amounts per good and part (0 made, 1 crossed). */
+        final int[][] n;
+
+        /** The icons' x per good, part and icon. */
+        final int[][][] x;
+
+        /** Whether a part carries its count label, and the label's box x. */
+        final boolean[][] labelled;
+        final int[][] labelX;
+
+        /** The row's last pixel column (-1 for an empty row). */
+        final int end;
+
+        HouseRow(int k, int pitch, int[][] n, int[][][] x, boolean[][] labelled,
+                 int[][] labelX, int end) {
+            this.k = k;
+            this.pitch = pitch;
+            this.n = n;
+            this.x = x;
+            this.labelled = labelled;
+            this.labelX = labelX;
+            this.end = end;
+        }
+
+        @Override
+        public String toString() {
+            final StringBuilder sb = new StringBuilder("k" + this.k + " p" + this.pitch);
+            for (int g = 0; g < this.x.length; g++) {
+                if (this.x[g][0].length + this.x[g][1].length == 0) continue;
+                sb.append(" |");
+                for (int q = 0; q < 2; q++) {
+                    if (this.x[g][q].length == 0) continue;
+                    sb.append(' ').append((q == 1) ? "x" : "").append(this.x[g][q].length)
+                        .append('@').append(this.x[g][q][0]);
+                    if (this.labelled[g][q]) sb.append(" \"").append(this.n[g][q]).append('"');
+                }
+            }
+            return sb.toString();
+        }
+    }
+
+    /**
+     * A house panel row (L §7.2, dago §6.1; V clip 020 #2260, #14817,
+     * #123003 and dago #1000 at 0 px): from x 213, the goods in their
+     * order, each the icons it makes, then its shortfall's icons crossed
+     * (the red X 055 over each, V); in rows 1 and 2 a good's crossed icons
+     * go on at the good's pitch (V dago: 17 tobacco to x 229, the crossed
+     * from 230; #14817: the horse at 213, the crossed one at 227), in row 3
+     * they are a group of their own (V #2260: 8 lumber, 4 px, the 4
+     * crossed, 4 px, the hammers; dago: lumber, 2 crossed, hammers); a
+     * group after the previous one's last icon + its width + the row's gap
+     * (2 or 4); one pitch for the whole row, each step min(w + 1, p), p the
+     * largest that ends the row at x 302 at most (V #2260: 2, #14817 and
+     * #123003: w + 1); only when pitch 1 does not fit, one scale k = 2, 4
+     * ... at pitch 1, a part's icons its amount div k (V dago: k 2 in rows
+     * 1 and 3, k 4 in row 2; cotton 5 -&gt; 2 icons; I: a part keeps one
+     * icon at least).  A part carries its count label when k &gt; 1 or at
+     * pitch 1 with more than one icon (V dago: every part of the three
+     * rows; as the band's).
+     *
+     * @param made The amounts made, per good.
+     * @param crossed The shortfalls, per good.
+     * @param w The goods' icon widths.
+     * @param row The row, 0-2.
+     * @return The row.
+     */
+    static HouseRow houseRow(int[] made, int[] crossed, int[] w, int row) {
+        int widest = 1;
+        for (int g = 0; g < w.length; g++) {
+            if (made[g] > 0 || crossed[g] > 0) widest = Math.max(widest, w[g]);
+        }
+        for (int p = widest + 1; p >= 1; p--) {
+            final HouseRow r = houseRowAt(made, crossed, w, row, 1, p);
+            if (r.end <= HOUSE_RIGHT) return r;
+        }
+        for (int k = 2; ; k *= 2) {
+            final HouseRow r = houseRowAt(made, crossed, w, row, k, 1);
+            if (r.end <= HOUSE_RIGHT || k >= (1 << 20)) return r;
+        }
+    }
+
+    /**
+     * A house panel row at a given scale and pitch ({@link #houseRow}; tests).
+     *
+     * @param made The amounts made.
+     * @param crossed The shortfalls.
+     * @param w The icon widths.
+     * @param row The row, 0-2.
+     * @param k The scale.
+     * @param p The pitch.
+     * @return The row.
+     */
+    static HouseRow houseRowAt(int[] made, int[] crossed, int[] w, int row, int k, int p) {
+        final int goods = made.length;
+        final int gap = HOUSE_GAP[Math.max(0, Math.min(2, row))];
+        final boolean apart = row >= 2;
+        final int[][] n = new int[goods][2];
+        final int[][][] xs = new int[goods][2][];
+        final boolean[][] labelled = new boolean[goods][2];
+        final int[][] labelX = new int[goods][2];
+        int lastX = -1, lastW = 0;
+        for (int g = 0; g < goods; g++) {
+            n[g][0] = Math.max(0, made[g]);
+            n[g][1] = Math.max(0, crossed[g]);
+            boolean newGroup = true;
+            for (int q = 0; q < 2; q++) {
+                final int v = n[g][q];
+                int m = (k == 1) ? v : v / k;
+                if (v > 0 && m == 0) m = 1;                  // I: one icon at least
+                xs[g][q] = new int[m];
+                if (m == 0) continue;
+                if (q == 1 && apart) newGroup = true;
+                int x;
+                if (lastX < 0) {
+                    x = HOUSE_X;
+                } else if (newGroup) {
+                    x = lastX + lastW + gap;
+                } else {
+                    x = lastX + Math.min(lastW + 1, p);
+                }
+                for (int j = 0; j < m; j++) {
+                    if (j > 0) x += Math.min(w[g] + 1, p);
+                    xs[g][q][j] = x;
+                }
+                lastX = x;
+                lastW = w[g];
+                newGroup = false;
+                labelled[g][q] = k > 1 || (p <= 1 && m > 1);
+                labelX[g][q] = xs[g][q][0] + 2;
+            }
+        }
+        return new HouseRow(k, p, n, xs, labelled, labelX,
+                            (lastX < 0) ? -1 : lastX + lastW - 1);
+    }
+
+    /**
+     * The musket panel's «Vorhandene Einheiten»: unit i in a 16x16 cell at
+     * (213 + 18i, 158), drawn as the map draws it (V clip 019 #1290: the
+     * dragoon's cell 213, the artillery's 231, 249, 267; dago #6000: 213 ...
+     * 285).
+     */
+    static final int UNIT_LIST_X = 213, UNIT_LIST_Y = 158, UNIT_LIST_PITCH = 18;
+
+    /**
+     * The step between the list's cells: 18 while the cells fit before x
+     * 302 (five), closer beyond so that every unit can be pressed (I: never
+     * seen; the topmost wins where cells overlap).
+     *
+     * @param n The units.
+     * @return The step.
+     */
+    static int unitListPitch(int n) {
+        if (n <= 1) return UNIT_LIST_PITCH;
+        final int room = HOUSE_RIGHT - UNIT_LIST_X + 1 - 16;
+        return Math.max(1, Math.min(UNIT_LIST_PITCH, room / (n - 1)));
+    }
+
+    /**
+     * Unit i's cell in the list.
+     *
+     * @param i The unit.
+     * @param n The units.
+     * @return Its 16x16 cell.
+     */
+    static Rectangle unitListCell(int i, int n) {
+        return new Rectangle(UNIT_LIST_X + i * unitListPitch(n), UNIT_LIST_Y, 16, 16);
+    }
+
+    /**
+     * The selected unit's frame in the list: 18x18 around its cell, green;
+     * white while the white cursor stands on it in the blink's on half (V
+     * clip 019: x 212-229, y 157-174, white #366, green #388 ...; dago
+     * #6000 green x 212-229).
+     *
+     * @param cell The cell.
+     * @return The frame.
+     */
+    static Rectangle unitListFrame(Rectangle cell) {
+        return new Rectangle(cell.x - 1, cell.y - 1, cell.width + 2, cell.height + 2);
+    }
+
+    /** The hammer panel's KAUFEN and ÄNDERN boxes: x 216-244 and 270-298, y 138-146 (V). */
+    static final Rectangle BUY_BOX = new Rectangle(216, 138, 29, 9);
+    static final Rectangle CHANGE_BOX = new Rectangle(270, 138, 29, 9);
+
+    /** Their words: white at box + (3, 2) (V: (219,140), (273,140)). */
+    static final int BOX_TEXT_DX = 3, BOX_TEXT_DY = 2;
+
+    /** A box's light edge (its bottom row and right column; the cursor's top and left): ink 48. */
+    static final int INK_BOX_LIGHT = 48;
+
+    /**
+     * The hammer rows: the stored hammers in rows of q = cost / 4 icons
+     * (ICONS.SS.054), up to four, row r at icon y 147 + 6r, icon j at x 212 +
+     * {@link #hammerOffset} (V #9921, #134173, #130584, #93990; dago).
+     */
+    static final int HAMMER_X = 212, HAMMER_Y = 147, HAMMER_ROW_DY = 6, HAMMER_ROWS = 4;
+
+    /** The hammer icon. */
+    static final int ICON_HAMMERS = 54;
+
+    /**
+     * The offsets of the hammer rows seen (spec §0.1 decision 1, the L
+     * Checker's table): q 10 (Wagenzug, #130584), 13 (Verlag, #9921), 20
+     * (Lagerhaus, #93990), 30 (Druckerei #134173, dago's Fort), 48
+     * (Artillerie, dago Base #6400: measured in S5, not the spec's formula).
+     */
+    private static final int[][] HAMMER_TABLE = {
+        { 10, 0, 9, 18, 27, 36, 45, 54, 63, 72, 81 },
+        { 13, 0, 6, 13, 20, 26, 33, 40, 46, 53, 60, 66, 73, 80 },
+        { 20, 0, 4, 8, 12, 17, 21, 25, 29, 34, 38, 42, 46, 51, 55, 59, 63, 68, 72, 76, 80 },
+        { 30, 0, 2, 5, 8, 11, 13, 16, 19, 22, 24, 27, 30, 33, 35, 38, 41, 44, 47, 49, 52,
+          55, 58, 60, 63, 66, 69, 71, 74, 77, 80 },
+        // q 48 (Artillerie, dago Base #6400, measured anew in S5: dago's
+        // floor(j·82/48); the spec's floor(j·218/128) puts 6 of the 48 one
+        // pixel left, j 17, 24, 27, 34, 41, 44).
+        { 48, 0, 1, 3, 5, 6, 8, 10, 11, 13, 15, 17, 18, 20, 22, 23, 25, 27, 29, 30, 32, 34,
+          35, 37, 39, 41, 42, 44, 46, 47, 49, 51, 52, 54, 56, 58, 59, 61, 63, 64, 66, 68, 70,
+          71, 73, 75, 76, 78, 80 },
+    };
+
+    /**
+     * Icon j's offset in a hammer row of q icons: the table's for the five
+     * costs seen (40, 52, 80, 120, 192; V clip 020 and dago), else
+     * floor(j·S/128), S = floor(10240/(q - 1)) + 1 (L §7.3; I for every
+     * other q, at most 1 px off: spec §4 item 2).
+     *
+     * @param q The icons of a full row (cost / 4).
+     * @param j The icon, 0 ... q - 1.
+     * @return Its x offset from 212.
+     */
+    static int hammerOffset(int q, int j) {
+        for (int[] t : HAMMER_TABLE) {
+            if (t[0] == q && j >= 0 && j < q) return t[1 + j];
+        }
+        if (q <= 1) return 0;
+        final int s = 10240 / (q - 1) + 1;
+        return j * s / 128;
+    }
+
+    /**
+     * Whether a hammer row carries its count label at (214, y + 1): when its
+     * pitch is below 2 (dago: the Artillerie's 48 at 1.7 «48» «48»; none at
+     * 2.77 or more, #134173, dago's Fort), i.e. q &gt; 41.
+     *
+     * @param q The icons of a full row.
+     * @return True for a label.
+     */
+    static boolean hammerLabelled(int q) {
+        return q > 1 && hammerOffset(q, q - 1) < 2 * (q - 1);
+    }
+
+    /** A hammer row's count label's box: (214, icon y + 1). */
+    static final int HAMMER_LABEL_X = 214, HAMMER_LABEL_DY = 1;
+
+    /**
+     * The hammers a hammer row holds.
+     *
+     * @param stored The hammers stored.
+     * @param q The icons of a full row.
+     * @param r The row, 0-3.
+     * @return Its icons.
+     */
+    static int hammerRowCount(int stored, int q, int r) {
+        if (q <= 0) return 0;
+        return Math.max(0, Math.min(q, stored - r * q));
+    }
+
+
     // Timings (spec §1.4)
 
     /** One frame of the original: 70.0863 Hz. */

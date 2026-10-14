@@ -2771,8 +2771,9 @@ colony box, which follows the same rules (I).
   only from its own dialog.
 - **The colony rows.** "Beschriftung an Gebäuden" (`buildingLabels`) shows
   the colony screen's production numbers on the buildings, "... an Waren
-  und Terrain" (`goodsTerrainLabels`) those on the work tiles and under the
-  net production (Roger: the original switches its numbers with them; ours
+  und Terrain" (`goodsTerrainLabels`) those on the work tiles, the band's row
+  and the right panel's house rows (since M4.7; before, under the first slice's
+  net production; Roger: the original switches its numbers with them; ours
   are FreeCol's, which are right). The warehouse's amounts always show (I).
   The eight report rows hold back FreeCol's matching notices
   (`ClassicPrefs.REPORTS`, read off the server's messages and the
@@ -3541,8 +3542,8 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   large slots, the harbour and the trees. The pack's index 12 (#FF5555, 10 pixels
   of BUILDING.SS) is drawn in the game palette's #FF0000. The first slice's
   black construction plate is gone (the original shows the build only in its
-  hammer panel); until ÄNDERN (M4.7) a press on the right panel opens the build
-  list.
+  hammer panel); ÄNDERN in the hammer panel opens the build list (M4.7; the
+  list's look is M4.10).
 - **3×3 colony map** (right; M4.4, `ClassicColonyTiles`, every number in
   `ClassicColonyLayout`) — the colony's nine tiles in the original's 24×24 cells
   at (224 + 24c, 32 + 24r) inside the black frame on the wood panel (M4.1). Each
@@ -3629,7 +3630,42 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
     furs; goods already aboard when the carrier is first seen in the goods' order),
     an emptied hold closes up (V #134899); units aboard first, their figure fitted
     into the hold (I, as our Europe). The recorder logs `colony-port`.
-  - the net production (right; the first slice's until M4.7), and the original's
+  - on the right the original's **right panel** (M4.7, `ClassicColonyRight`, every number in
+    `ClassicColonyLayout`; L §7, dago §6, clip 019 §4): the three **mode buttons** house, musket,
+    hammer, ICONS.SS.067-069 (14×13, their bevel and picture in one; found in the pack: every opaque
+    pixel equal at #2260 and #9921), a raised one at (303, y) with its ink-63 shadow on the right
+    and below, the pressed one sunk to (304, y + 1) with the shadow on its top and left (V); a press
+    sinks the button at once, its release shows the panel (I: 15-19 frames later in the clips, as a
+    click lasts); the mode carries over to the next visit of any colony, a founding opens in house
+    mode (spec §0.1 decision 8; the turn boxes' zoom rows, M4.11, have their hooks). **House:**
+    three rows from x 213 at icon y 134 / 148 / 162 — the tiles' raw goods but food and lumber;
+    the horses and the made goods; the lumber and the hammers — each good what the colony makes
+    and its shortfall's icons each crossed by the red X 055 (what its buildings would use at full
+    production less what is made, or what they would make more: V #2260's 4 crossed lumber, clip008's
+    crossed hammers, #14817's second horse, dago's 14 tobacco), in rows 1-2 the crossed going on at
+    the good's pitch, in row 3 a group of their own; groups 2 px apart in rows 1-2, 4 px in row 3;
+    one pitch per row (each step min(w + 1, p), the row ending at x 302 at most), when pitch 1 does
+    not fit one scale k = 2, 4 … with each part's count label at (first + 2, y + 2), a crossed
+    part's number red (ink 12; V dago #1000: «34», red «14», «5», «32» …). **Musket:**
+    «Vorhandene Einheiten» (LABELS `@CMISC` 1, ink 57 at floor((514 − w)/2)), the tile's land
+    units that are not in the colony (the persons outside, the artillery, a treasure, a wagon train;
+    no ship) in 16×16 cells at (213 + 18i, 158), drawn as the map draws them (the shadow, the flag,
+    the letter dark for F and S as on the map: V clip 019, the artillery's F #AA4900, the fortifying
+    dragoon's black), the selected one (the first at the opening, V) in its 18×18 frame, green,
+    white under the white cursor in its on half (V #366 / #388); a press on a unit selects it,
+    brings the cursor (`CURSOR_LIST`) and opens its **@COLONYUNIT** box on the release (M2's box,
+    moved here from the figure row: the artillery and the rest stand only here now). **Hammer:**
+    the build's NAMES name (ink 57 at floor((514 − w)/2)), KAUFEN and ÄNDERN (LABELS `@CTITLE`
+    2, 3) in their boxes x 216-244 and 270-298, y 138-146 (top and left ink 57, bottom and right
+    48, the word white at box + (3, 2); under the cursor inverted: inside white, the word black,
+    top and left 48, bottom and right 57, V #105810 / #105830), the stored hammers in rows of
+    cost / 4 at y 147 + 6r, icon j at 212 + the offset table (q 10, 13, 20, 30, 48 measured; else
+    floor(j·S/128), S = floor(10240/(q − 1)) + 1, I), a row's count at (214, y + 1) below pitch 2,
+    «(Benötigt n Werkzeuge)» (LABELS «Benötigt», NAMES's tools) at glyph top 170 over the rows'
+    last pixel row, white while the stock is short, grey when it suffices. ÄNDERN opens the build
+    list (the first slice's until M4.10), KAUFEN brings only the cursor (M4.10: @BUYME0 /
+    @BUYME1). The recorder logs `colony-right` (the panel, the cursor's place) and `colony-mode`;
+    `colony-open` names the mode. And the original's
     16-box **warehouse** row (M4.1): ICONS.SS.(22 + i) at (19i + 10 − floor(w/2),
     181), the amount at glyph top 194 and x = 19i + 1 + floor((20 − 4d)/2), its last
     two digits in ink 61 and higher ones in ink 148, no capacity mark, the selected
@@ -3647,7 +3683,14 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   `sdrag ax ay bx by [shift]`. Every formula is in `ClassicColonyLayout`.
 - **Golden tests** (`ClassicColonyChromeTest`, `ClassicColonyKitTest`,
   `ClassicColonyBuildingsTest`, `ClassicColonyTilesTest`, `ClassicColonyBandTest`,
-  `ClassicColonyPortTest`, with the pack and `-Dclassic.clips`): the whole left
+  `ClassicColonyPortTest`, `ClassicColonyRightTest`, with the pack and
+  `-Dclassic.clips`): the right panel with the mode buttons (x 208–319, y 129–177)
+  of 9 frames of clip 020 (house #2260, #14817, #123003; hammer #9921, #93990,
+  #105810 and #105830 with ÄNDERN under the cursor, #130584, #134173), dago's 4
+  (the stacked house rows with red labels #1000, «Vorhandene Einheiten» #6000, the
+  Artillerie's rows with «48» #6400, Fur Town's Fort #11400) and clip 019's 2 (the
+  list with the white cursor #1290, without it #700) 0 px each, the clip's house
+  amounts drawn where FreeCol's differ (S5); the whole left
   panel (x 0–118, y 129–177) of 13 frames of clip 020 (#2260, #2620, #2747, #6560,
   #18955, #46039, #46350, #47291, #96680, #134173, #14817, #35057, #123003: the SoL
   line with the flag at the frame's phase, the figure row with the green frame or
@@ -3680,7 +3723,8 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   rows (since M4.3; I: the option's meaning in the original),
   "Beschriftung an Waren und Terrain" those of the tiles' stacked rows (since
   M4.4, I likewise), those of the band's production row (since M4.5, I likewise)
-  and the figures under the net production. The warehouse amounts always show.
+  and those of the right panel's house rows (since M4.7, I likewise; a hammer row's
+  count stays, I). The warehouse amounts always show.
   The figures are FreeCol's, a house improvement on the original's icon
   rows (Regeln-Auswahl).
 
@@ -3699,8 +3743,8 @@ Escape closes it. 0 SEVERE.
 ### The build queue (`ClassicBuildQueuePanel`) — the first hard blocker, closed
 
 *Since M4.2 the construction indicator described below is gone (the original
-shows the build only in its hammer panel): until the right panel's ÄNDERN (M4.7)
-a press on the right panel (x 208–302, y 129–177) opens the list.*
+shows the build only in its hammer panel); since M4.7 ÄNDERN in the right panel's
+hammer mode opens the list (its original look is M4.10).*
 
 Until this slice, `GUI.showBuildQueuePanel(Colony)` returned `null` unconditionally (an unoverridden
 no-op): a colony could accumulate hammers/tools but the player had no way to ever tell it what to
@@ -3811,10 +3855,12 @@ slice); loading cargo and per-nation tints are still open, tracked above.
 
 How Roger wakes a soldier fortified in his colony (clip 019,
 `wake-in-colony-analysis/10-spec.md`; playthrough-2 #45170 for a unit without
-orders): the units standing on the colony tile (the original's "Vorhandene
-Einheiten"; ours in the band's left panel until D5d builds that panel) are a
-row of icons with their order flags, the letter black also for F (V #1290),
-18 px apart (closer when more stand there than fit, so all stay clickable).
+orders): the units standing on the colony tile are the original's "Vorhandene
+Einheiten" in the right panel's musket mode (since M4.7; until then in the band's
+left panel), icons with their order flags as on the map (the letter dark for a
+fortified or sentried unit, black otherwise; V #1290: the fortifying dragoon's F
+black, the fortified artillery's dark), 18 px apart (closer when more stand there
+than five, so all stay clickable).
 A **press** on one selects it (its frame; V: the white frame at #916), the
 **release** on the same one opens its **@COLONYUNIT** box over the colony
 screen (V: 0.6 s after the press, I: on the release), in the screen's own wood
@@ -3862,9 +3908,8 @@ puts a colonist to work there (our click stand-in for the original's drag,
 - Tests: `ClassicColonyUnitsTest` (rows, names, box and place, the rows in
   the game with a fake controller, the row's order and step, the golden
   check), `ClassicWarTest.testTheFrenchSoldierAtOurColony`.
-- Not yet (D5d/D6): the "Vorhandene Einheiten" panel and its buttons, the
-  blinking white/green frame, the figures on the Festung picture, the
-  original's 24 px cells.
+- Since M4.7: the "Vorhandene Einheiten" panel and its buttons, the blinking
+  white/green frame (`CURSOR_LIST`); the figures on the Festung picture since M4.3.
 
 ## Europe screen (`ClassicEuropePanel`)
 

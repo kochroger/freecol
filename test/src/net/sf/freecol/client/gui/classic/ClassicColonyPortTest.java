@@ -206,7 +206,8 @@ public class ClassicColonyPortTest extends FreeColTestCase {
             assertNotSame("no wagon train in the figure row", wagon, f.unit);
             assertNotSame(ship, f.unit);
         }
-        assertEquals("the artillery still at the row's end (M4.7)", 2, p.rowFigures().size());
+        assertEquals("the artillery not in the row (M4.7: the musket panel's)", 1,
+                     p.rowFigures().size());
         wagon.setLocation(null);
         p.canvas();
         assertSame(ship, p.port().carrier);

@@ -4371,6 +4371,11 @@ public class ClassicGUI extends GUI {
                         if (this.colonyPanel == self[0]) closeColonyPanel("player");
                     }, new ColonyUnits(), waitClock(), true);
                 self[0] = panel;
+                // The right panel's mode at the opening: a founding's house,
+                // else the last visit's (M4.7; the turn boxes' zoom rows come
+                // with M4.11).
+                panel.opened((founding) ? ClassicColonyRight.Opening.FOUNDING
+                             : ClassicColonyRight.Opening.OTHER);
                 // Its 3x3 map's water at the map's cycling phase (M4.4).
                 panel.setWaterPhase(() -> {
                     final ClassicMapViewer mv = this.mapViewer;
@@ -4421,7 +4426,7 @@ public class ClassicGUI extends GUI {
                 this.colonyPanel = panel;
                 this.colonyBoxes = boxes;
                 ClassicFrameRecorder.event("colony-open", colony.getName()
-                    + ((founding) ? " founding" : ""));
+                    + ((founding) ? " founding" : "") + " " + panel.mode().word());
                 colonyScreenShown(colony, shownAt, founding);
             } catch (Exception e) {
                 logger.log(Level.WARNING, "ClassicGUI: could not show colony "

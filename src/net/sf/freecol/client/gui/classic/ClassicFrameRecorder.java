@@ -108,7 +108,11 @@ import javax.swing.JComponent;
  * panel: the SoL line, the food used, stored or short, the crosses and
  * bells and their row's scale and pitch; {@link ClassicColonyBand.Model}),
  * {@code colony-port} (the port's caption, carrier and six holds, and the
- * white cursor's place; {@link ClassicColonyPort.Model}),
+ * white cursor's place; {@link ClassicColonyPort.Model}), {@code colony-right}
+ * (the right panel: its mode and pressed button, the house rows, the
+ * listed units or the hammer panel, and the white cursor's place;
+ * {@link ClassicColonyRight.Model}), {@code colony-mode} (a mode button's
+ * release switched the panel),
  * {@code still}, {@code terrain} (W6e: whether the pack holds the index
  * pipeline, {@code index ...} or {@code fallback ...}; a {@link #note},
  * so it is also a line of {@code summary.txt}), {@code palette-step}
@@ -137,7 +141,8 @@ import javax.swing.JComponent;
  * M4.0: the hosted colony, build-list and Europe screens and their boxes
  * (children of the HUD pane, {@link ClassicScreenStack}; events
  * {@code screen-push <kind> <name>}, {@code screen-pop <kind> <why>},
- * {@code screen-replace <old> -> <new>}, {@code colony-open});
+ * {@code screen-replace <old> -> <new>}, {@code colony-open <name> [founding]
+ * <mode>});
  * the map's index hint is off meanwhile.  Not in the copy:
  * the first scene (the frame's glass pane) and the Swing popups
  * ({@link ClassicDialog} and the other JDialogs), whose opening and closing

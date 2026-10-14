@@ -159,14 +159,23 @@ final class ClassicColonyGolden {
         if (s == null) return m;
         final int[] f = pixels(frame);
         final List<int[]> opaque = new ArrayList<>();
+        // The opaque pixels' extent: the arrow is found wherever they fit,
+        // also where its 17x17 sprite's empty edge would leave the frame
+        // (S5: the arrow on the mode buttons at x 306-309, clip 020
+        // #130584, dago #6000, clip 019 #700).
+        int right = 0, bottom = 0;
         for (int y = 0; y < s.getHeight(); y++) {
             for (int x = 0; x < s.getWidth(); x++) {
                 final int c = s.getRGB(x, y);
-                if ((c >>> 24) > 128) opaque.add(new int[] { x, y, c & 0xFFFFFF });
+                if ((c >>> 24) > 128) {
+                    opaque.add(new int[] { x, y, c & 0xFFFFFF });
+                    right = Math.max(right, x);
+                    bottom = Math.max(bottom, y);
+                }
             }
         }
-        for (int y = 0; y + s.getHeight() <= 200; y++) {
-            next: for (int x = 0; x + s.getWidth() <= 320; x++) {
+        for (int y = 0; y + bottom < 200; y++) {
+            next: for (int x = 0; x + right < 320; x++) {
                 for (int[] o : opaque) {
                     if (f[(y + o[1]) * 320 + x + o[0]] != o[2]) continue next;
                 }
@@ -178,8 +187,8 @@ final class ClassicColonyGolden {
         // arrow's rows from 1 to 4 on missing, the rest whole (clip 020
         // #48712: rows 2-13 at (257,48)).  Only those rows are its.
         for (int top = 1; top <= 4 && m.count() == 0; top++) {
-            for (int y = -top; y + s.getHeight() <= 200; y++) {
-                next: for (int x = 0; x + s.getWidth() <= 320; x++) {
+            for (int y = -top; y + bottom < 200; y++) {
+                next: for (int x = 0; x + right < 320; x++) {
                     int n = 0;
                     for (int[] o : opaque) {
                         if (o[1] < top) continue;

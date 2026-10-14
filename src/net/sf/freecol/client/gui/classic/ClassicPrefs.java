@@ -70,7 +70,7 @@ import net.sf.freecol.common.io.FreeColDirectories;
  *   <caption>Colony report prefs</caption>
  *   <tr><th>Key</th><th>Original row</th><th>Here</th></tr>
  *   <tr><td>{@value #BUILDING_LABELS}</td><td>Beschriftung an Geb&auml;uden</td><td>the colony screen's numbers on the buildings</td></tr>
- *   <tr><td>{@value #GOODS_TERRAIN_LABELS}</td><td>Beschriftung an Waren und Terrain</td><td>its numbers on the work tiles and the net production</td></tr>
+ *   <tr><td>{@value #GOODS_TERRAIN_LABELS}</td><td>Beschriftung an Waren und Terrain</td><td>its count labels on the work tiles, the band's row and the house rows</td></tr>
  *   <tr><td>{@value #REPORT_TRAINED} ... {@value #REPORT_REBEL_MAJORITY}</td><td>Bericht, wenn / bei ...</td><td>the matching FreeCol notices ({@link #REPORTS})</td></tr>
  * </table>
  *
@@ -125,8 +125,9 @@ final class ClassicPrefs {
     static final String BUILDING_LABELS = "buildingLabels";
 
     /**
-     * Beschriftung an Waren und Terrain: the colony screen's numbers on the
-     * work tiles and under the net production.
+     * Beschriftung an Waren und Terrain: the colony screen's count labels on
+     * the work tiles, the band's production row and the right panel's house
+     * rows.
      */
     static final String GOODS_TERRAIN_LABELS = "goodsTerrainLabels";
 

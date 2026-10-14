@@ -21,7 +21,6 @@ package net.sf.freecol.client.gui.classic;
 
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
@@ -90,9 +89,11 @@ import net.sf.freecol.common.model.Unit;
  *   cursor), the production row (food used, stored or short, crosses,
  *   bells); in the middle the port (M4.6, {@link ClassicColonyPort}): «Keine
  *   Schiffe im Hafen» or «Einladen: Typ», the ship or wagon train in its
- *   frame, its six holds with the goods' icons and the crates; the net
- *   production on the right (the first slice's until M4.7; a click there
- *   opens the build list until M4.7's ÄNDERN), and the original's 16-box
+ *   frame, its six holds with the goods' icons and the crates; on the
+ *   right the original's right panel (M4.7, {@link ClassicColonyRight}):
+ *   the three mode buttons and the house rows, «Vorhandene Einheiten» or
+ *   the hammer panel with KAUFEN and ÄNDERN (which opens the build list,
+ *   the first slice's until M4.10), and the original's 16-box
  *   <b>warehouse</b> row along the bottom (M4.1: icons, numbers in their
  *   inks, the selected good's green frame) with «Abb» over the exit.</li>
  * </ul>
@@ -123,15 +124,6 @@ final class ClassicColonyPanel extends JPanel {
     /** The exit's hit area: from the warehouse row's last box on (M4.11 makes it the E). */
     private static final int WARE_Y = 178;
     private static final int WARE_W = 306;
-
-    /** The three sub-panels of the band, and their shared top. */
-    private static final int PANEL_Y = 130;
-    private static final int PANEL1_X = 3;
-    private static final int PANEL2_X = 122;
-    private static final int PANEL3_X = 207;
-
-    private static final Color TAG_BG = new Color(0x00, 0x00, 0x00, 0xC0);
-    private static final Color TAG_FG = new Color(0xFF, 0xFF, 0xFF);
 
     private final FreeColClient freeColClient;
     private final ImageLibrary lib;
@@ -305,6 +297,53 @@ final class ClassicColonyPanel extends JPanel {
      */
     static final int CURSOR_CARRIER = -2;
 
+    /**
+     * {@link #tileCursor} on a unit of the musket panel's «Vorhandene
+     * Einheiten» (M4.7: the selected one's frame white in the blink's on
+     * half, green in its off half; V clip 019 #366-#550, #1322-#1506; a
+     * press on a unit there brings it).
+     */
+    static final int CURSOR_LIST = -3;
+
+    /**
+     * {@link #tileCursor} on the hammer panel's KAUFEN or ÄNDERN (M4.7
+     * target 5: the button inverted in the blink's on half; V #105806 on,
+     * #105829 off: after a building's @BUILT zoom, M4.11; a press on the
+     * button brings it, I as dago §3's press).
+     */
+    static final int CURSOR_BUY = -4, CURSOR_CHANGE = -5;
+
+    /**
+     * The mode the last colony visit ended in, for all colonies (spec §0.1
+     * decision 8, L §7.1; the house at the session's first opening: clip008
+     * «House is pressed by default»).  EDT only.
+     */
+    private static ClassicColonyRight.Mode lastMode = ClassicColonyRight.Mode.HOUSE;
+
+    /**
+     * The right panel's pressed button and the panel it shows: a press on
+     * a button moves the first (V: the pressed look in the press's frame,
+     * clip 019 #542, #640), its release the second (I: the panel 15-19
+     * frames later, clip008 #10350 -&gt; #10365, clip 019 #640 -&gt; #659,
+     * as long as a click lasts).
+     */
+    private ClassicColonyRight.Mode buttonMode = lastMode, mode = lastMode;
+
+    /** Whether a press on a mode button waits for its release. */
+    private boolean modePressed = false;
+
+    /** The musket panel's selected unit (its frame), or null for the first. */
+    private Unit listSelected = null;
+
+    /** The right panel as the last paint drew it (M4.7, {@link ClassicColonyRight}). */
+    private ClassicColonyRight.Model right = null;
+
+    /** A test's change of the right panel's model before it is drawn, or null. */
+    private java.util.function.UnaryOperator<ClassicColonyRight.Model> rightAdjust = null;
+
+    /** The right panel as last logged by the recorder. */
+    private String rightLogged = null;
+
     /** The tiles as last logged by the recorder ({@link #recordBuildings}). */
     private String tilesLogged = null;
 
@@ -320,7 +359,7 @@ final class ClassicColonyPanel extends JPanel {
     /** The port panel as the last paint drew it (M4.6, {@link ClassicColonyPort}). */
     private ClassicColonyPort.Model port = null;
 
-    /** The left panel and the port as last logged by the recorder. */
+    /** The left panel and the port as last logged by the recorder (the right panel: {@link #rightLogged}). */
     private String bandLogged = null, portLogged = null;
 
     /** The figure row's colonists as this paint orders them ({@link #figureOrder}). */
@@ -337,14 +376,6 @@ final class ClassicColonyPanel extends JPanel {
     /** The stills taken so far, for their names (EDT only). */
     private static int stills = 0;
 
-    /**
-     * Until the right panel's ÄNDERN (M4.7, M4.10) opens the build list, a
-     * press on the right panel does (the first slice's black construction
-     * plate over the buildings is gone: the original shows the build only
-     * in its hammer panel, M4.2).
-     */
-    private static final Rectangle BUILD_LIST_AREA = ClassicColonyLayout.RIGHT_PANEL;
-
     /** The slot of {@link #area} under the pointer (its hover label), or -1. */
     private int hovered = -1;
 
@@ -354,8 +385,8 @@ final class ClassicColonyPanel extends JPanel {
     /**
      * Whether the production numbers are drawn, read at each paint: the
      * count labels of the buildings' stacked rows ("Beschriftung an
-     * Gebäuden", M4.3), and the numbers on the work tiles and
-     * under the net production ("Beschriftung an Waren und Terrain";
+     * Gebäuden", M4.3), and the count labels of the tiles', the band's and
+     * the right panel's house rows ("Beschriftung an Waren und Terrain";
      * {@link ClassicPrefs#BUILDING_LABELS},
      * {@link ClassicPrefs#GOODS_TERRAIN_LABELS}).  The warehouse's amounts
      * stay (I: they are the store itself, not a label).
@@ -540,14 +571,29 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     private void releaseAt(int vx, int vy) {
+        // A mode button's release shows its panel (M4.7; I: on the release).
+        if (this.modePressed) {
+            this.modePressed = false;
+            if (this.mode != this.buttonMode) {
+                this.mode = this.buttonMode;
+                lastMode = this.mode;
+                ClassicFrameRecorder.event("colony-mode", this.mode.word());
+            }
+            repaint();
+        }
         final Unit pressed = this.pressedBand;
         this.pressedBand = null;
         if (pressed == null || this.units == null) return;
         final int i = bandAt(vx, vy);
         if (i < 0 || this.bandUnits.get(i) != pressed) return;
+        // «Nach vorne bewegen.» is offered to all but the first of
+        // «Vorhandene Einheiten» (clip 019 #959; M4.7: the box is the
+        // list's, M2 had it on the figure row's units).
+        final int at = ClassicColonyRight.listed(this.colony, this.units::order)
+            .indexOf(pressed);
         ClassicFrameRecorder.event("colony-unit", "click " + pressed.getId()
-            + " cell=" + i + " state=" + pressed.getState());
-        this.units.options(pressed, i == 0);
+            + " cell=" + at + " state=" + pressed.getState());
+        this.units.options(pressed, at == 0);
         refresh();
         recordStill("unit " + pressed.getId());
     }
@@ -587,10 +633,16 @@ final class ClassicColonyPanel extends JPanel {
 
     private void pressAt(int vx, int vy) {
         this.pressedBand = null;
-        if (BUILD_LIST_AREA.contains(vx, vy)) {
-            this.freeColClient.getGUI().showBuildQueuePanel(this.colony);
+        // The right panel's mode buttons (M4.7): the pressed look at once,
+        // the panel at the release.
+        final int button = ClassicColonyLayout.modeAt(vx, vy);
+        if (button >= 0) {
+            this.buttonMode = ClassicColonyRight.Mode.values()[button];
+            this.modePressed = true;
+            repaint();
             return;
         }
+        if (pressRight(vx, vy)) return;
         if (vx >= WARE_W && vy >= WARE_Y) { close(); return; }
         // The white cursor goes to a pressed tile (its worker's or an
         // empty one: dago §3, playthrough-1 #75221), off the tiles to
@@ -612,16 +664,6 @@ final class ClassicColonyPanel extends JPanel {
             return;
         }
 
-        // A unit standing in the colony (the original's "Vorhandene
-        // Einheiten"): the press selects it, its release opens its box.
-        final int band = bandAt(vx, vy);
-        if (band >= 0 && this.units != null) {
-            this.pressedBand = this.bandUnits.get(band);
-            this.selectedUnit = this.pressedBand;
-            tileCursor = CURSOR_OFF_TILES;
-            repaint();
-            return;
-        }
         for (int i = 0; i < this.unitBounds.size(); i++) {
             if (this.unitBounds.get(i).contains(vx, vy)) {
                 final Unit u = this.unitTargets.get(i);
@@ -646,6 +688,53 @@ final class ClassicColonyPanel extends JPanel {
                 assignWork(this.tileTargets.get(i));
                 return;
             }
+        }
+    }
+
+    /**
+     * A press on the right panel's mode (M4.7): in the musket panel a unit
+     * of «Vorhandene Einheiten» is selected, the white cursor goes to it and
+     * its @COLONYUNIT box comes on the release (clip 019 #916: the frame
+     * white on the press, the box 43 frames later; I: on the release; M2
+     * had it on the band's units); in the hammer panel a press on KAUFEN or
+     * ÄNDERN brings the cursor (I, as dago §3's press), ÄNDERN opens the
+     * build list (the first slice's until M4.10), KAUFEN does nothing yet
+     * (M4.10: @BUYME0 / @BUYME1); the house panel takes no press.
+     *
+     * @param vx The x.
+     * @param vy The y.
+     * @return Whether the press was the right panel's.
+     */
+    private boolean pressRight(int vx, int vy) {
+        if (!ClassicColonyLayout.RIGHT_PANEL.contains(vx, vy) || this.right == null) {
+            return false;
+        }
+        switch (this.mode) {
+        case MUSKET: {
+            ClassicColonyRight.Listed hit = null;
+            for (ClassicColonyRight.Listed l : this.right.units) {
+                if (ClassicColonyLayout.unitListFrame(l.cell).contains(vx, vy)) hit = l;
+            }
+            if (hit != null) {
+                this.listSelected = hit.unit;
+                tileCursor = CURSOR_LIST;
+                if (this.units != null) this.pressedBand = hit.unit;
+                repaint();
+            }
+            return true;
+        }
+        case HAMMER:
+            if (ClassicColonyLayout.BUY_BOX.contains(vx, vy)) {
+                tileCursor = CURSOR_BUY;
+                repaint();
+            } else if (ClassicColonyLayout.CHANGE_BOX.contains(vx, vy)) {
+                tileCursor = CURSOR_CHANGE;
+                repaint();
+                this.freeColClient.getGUI().showBuildQueuePanel(this.colony);
+            }
+            return true;
+        default:
+            return true;
         }
     }
 
@@ -938,9 +1027,8 @@ final class ClassicColonyPanel extends JPanel {
         this.unitTargets.clear();
         // The numbers, as SPIEL "Koloniebericht-Optionen" switches them
         // (W14): the count labels of the buildings' stacked rows (M4.3) and
-        // of the tiles' (M4.4; I: the options' meaning in the original),
-        // and the first slice's figures under the net production (until
-        // M4.7).
+        // of the tiles', the band's and the right panel's house rows (M4.4,
+        // M4.5, M4.7; I: the options' meaning in the original).
         final ClassicPrefs prefs = ClassicPrefs.get();
         this.buildingNumbers = prefs.is(ClassicPrefs.BUILDING_LABELS);
         this.goodsTerrainNumbers = prefs.is(ClassicPrefs.GOODS_TERRAIN_LABELS);
@@ -998,7 +1086,11 @@ final class ClassicColonyPanel extends JPanel {
         final boolean map = !tilesDrawn.equals(this.tilesLogged);
         final boolean left = !bandDrawn.equals(this.bandLogged);
         final boolean dock = !portDrawn.equals(this.portLogged);
-        if (!area && !map && !left && !dock) return;
+        // The right panel (M4.7) with the white cursor's place.
+        final String rightDrawn = this.right + " cursor=" + cursorName();
+        final boolean side = !rightDrawn.equals(this.rightLogged);
+        if (!area && !map && !left && !dock && !side) return;
+        this.rightLogged = rightDrawn;
         this.buildingsLogged = drawn;
         this.tilesLogged = tilesDrawn;
         this.bandLogged = bandDrawn;
@@ -1023,13 +1115,23 @@ final class ClassicColonyPanel extends JPanel {
             ClassicFrameRecorder.event("colony-port",
                 name + " " + this.colony.getId() + " " + portDrawn);
         }
+        if (side) {
+            ClassicFrameRecorder.event("colony-right",
+                name + " " + this.colony.getId() + " " + rightDrawn);
+        }
         ClassicFrameRecorder.still(name, canvas());
     }
 
     /** @return Where the white cursor stands (the recorder): a tile's name, «figure», «carrier». */
     private static String cursorName() {
         if (tileCursor >= 0) return ClassicColonyLayout.TILE_NAMES[tileCursor];
-        return (tileCursor == CURSOR_CARRIER) ? "carrier" : "figure";
+        switch (tileCursor) {
+        case CURSOR_CARRIER: return "carrier";
+        case CURSOR_LIST: return "list";
+        case CURSOR_BUY: return "buy";
+        case CURSOR_CHANGE: return "change";
+        default: return "figure";
+        }
     }
 
     /**
@@ -1312,12 +1414,14 @@ final class ClassicColonyPanel extends JPanel {
      * tiles on the selected one's figure ({@link #CURSOR_OFF_TILES}), or
      * on the carrier in port ({@link #CURSOR_CARRIER}).
      *
-     * @param tile The tile, 0-8, {@link #CURSOR_OFF_TILES} or
-     *     {@link #CURSOR_CARRIER}.
+     * @param tile The tile, 0-8, {@link #CURSOR_OFF_TILES},
+     *     {@link #CURSOR_CARRIER}, {@link #CURSOR_LIST}, {@link #CURSOR_BUY} or
+     *     {@link #CURSOR_CHANGE}.
      */
     static void setTileCursor(int tile) {
         tileCursor = (tile >= 0 && tile < ClassicColonyLayout.TILE_COUNT) ? tile
-            : (tile == CURSOR_CARRIER) ? CURSOR_CARRIER : CURSOR_OFF_TILES;
+            : (tile == CURSOR_CARRIER || tile == CURSOR_LIST || tile == CURSOR_BUY
+               || tile == CURSOR_CHANGE) ? tile : CURSOR_OFF_TILES;
     }
 
     /** @return The white cursor's tile, {@link #CURSOR_OFF_TILES} or {@link #CURSOR_CARRIER}. */
@@ -1330,15 +1434,17 @@ final class ClassicColonyPanel extends JPanel {
      * black first row ({@link ClassicColonyChrome#paintBand}), then over
      * it the left panel (M4.5: the SoL line, the figure row, the production
      * row), the port (M4.6: the caption, the carrier, its holds), the
-     * colony's net production (right, the first slice's until M4.7), and
+     * right panel (M4.7: the mode buttons and the shown mode's panel), and
      * the original's warehouse row along the bottom with «Abb» over the
      * exit (M4.1).
      */
     private void paintBand(Graphics2D g) {
         ClassicColonyChrome.paintBand(g, this.chrome);
+        this.bandUnits.clear();
+        this.bandBounds.clear();
         paintPopulation(g);
         paintPort(g);
-        paintNetProduction(g);
+        paintRight(g);
         final int[] amounts = ClassicColonyChrome.amounts(this.colony);
         ClassicColonyChrome.paintWarehouse(g, this.chrome, amounts,
             ClassicColonyChrome.exported(this.colony), warehouseSelection);
@@ -1368,12 +1474,10 @@ final class ClassicColonyPanel extends JPanel {
      * Einheiten»), the selected one's green frame or, where the white
      * cursor stands on him, the cursor; and the production row at y 163
      * (the food used, stored or short, the crosses, the bells).  A press on
-     * a colonist selects him (as on his building or tile); a press on a
-     * unit standing in the colony opens its box (@COLONYUNIT, M2) on the
-     * release, as the first slice's row did.  Until the musket panel (M4.7)
-     * lists them, the colony tile's other units (artillery, a treasure)
-     * follow at the row's end so that their box stays at hand (not the
-     * original's); a wagon train stands in the port since M4.6.
+     * a figure selects it (as on a building or tile); the @COLONYUNIT box of
+     * a unit standing in the colony is the musket panel's since M4.7
+     * ({@link #pressRight}), the artillery, a treasure and the rest stand
+     * only there; a wagon train stands in the port since M4.6.
      */
     private void paintPopulation(Graphics2D g) {
         final ClassicColonyBand.Model m = ClassicColonyBand.model(this.colony,
@@ -1393,22 +1497,14 @@ final class ClassicColonyPanel extends JPanel {
             }
         }
 
-        this.bandUnits.clear();
-        this.bandBounds.clear();
         final Tile tile = this.colony.getTile();
         if (tile == null) return;
-        final List<Unit> standing = new ArrayList<>();
-        for (Unit u : tile.getUnitList()) {
-            // Ships and wagon trains go in the port (M4.6).
-            if (!u.isNaval() && !ClassicColonyPort.isCarrier(u)) standing.add(u);
-        }
-        final List<Unit> ordered = (this.units == null) ? standing
-            : this.units.order(standing);
-        final List<Unit> outside = outside();
-        final List<Unit> row = new ArrayList<>(outside);
-        for (Unit u : ordered) if (!row.contains(u)) row.add(u);
+        // The colonists, then the persons outside (M4.7: the artillery, a
+        // treasure and the rest only in the musket panel's «Vorhandene
+        // Einheiten», V clip 019 #1290; the ships and the wagon train in
+        // the port, M4.6).
         final List<ClassicColonyBuildings.Figure> figures
-            = ClassicColonyBuildings.figureRow(this.buildingArt, this.rowOrder, row);
+            = ClassicColonyBuildings.figureRow(this.buildingArt, this.rowOrder, outside());
         this.figures = figures;
         // The white cursor on the selected one's figure (it blinks: only
         // then is the blink asked).
@@ -1428,19 +1524,13 @@ final class ClassicColonyPanel extends JPanel {
         } finally {
             g2.dispose();
         }
+        // Every figure is selected by a press (the first slice's select,
+        // then a building or tile); the @COLONYUNIT box of a person outside
+        // is the musket panel's since M4.7 (spec §0.1 decision 7; the
+        // original's job menu on a fence figure comes with M4.8).
         for (ClassicColonyBuildings.Figure f : figures) {
-            final Rectangle r = f.bounds();
-            if (standing.contains(f.unit)) {
-                this.bandUnits.add(f.unit);
-                this.bandBounds.add(r);
-                if (this.units == null) {
-                    this.unitBounds.add(r);
-                    this.unitTargets.add(f.unit);
-                }
-            } else {
-                this.unitBounds.add(r);
-                this.unitTargets.add(f.unit);
-            }
+            this.unitBounds.add(f.bounds());
+            this.unitTargets.add(f.unit);
         }
     }
 
@@ -1480,27 +1570,6 @@ final class ClassicColonyPanel extends JPanel {
     static void forgetFigureOrders() {
         figureOrders.clear();
     }
-
-    /**
-     * The step between the cells of the musket panel's «Vorhandene
-     * Einheiten» (M4.7; the first slice drew them in the left panel, which
-     * shows the original's figure row since M4.3): the original's 18 px
-     * (clip 019 #1290: the dragoon from x 213, the artillery from 231,
-     * 249, 267), closer when more units stand there than 18 px cells fit,
-     * so that every one can be clicked (the topmost wins where cells
-     * overlap).
-     *
-     * @param n The number of units.
-     * @return The step, 18 at most, 1 at least.
-     */
-    static int bandPitch(int n) {
-        final int room = (PANEL2_X - 3) - (PANEL1_X + 3) - 16;
-        if (n <= 1) return BAND_PITCH;
-        return Math.max(1, Math.min(BAND_PITCH, room / (n - 1)));
-    }
-
-    /** The original's step between the units' cells (18 px). */
-    static final int BAND_PITCH = 18;
 
     /**
      * A unit standing in the colony: its map sprite with its order flag,
@@ -1593,55 +1662,124 @@ final class ClassicColonyPanel extends JPanel {
         repaint();
     }
 
-    /** Right panel: what the colony nets each turn, good by good. */
-    private void paintNetProduction(Graphics2D g) {
-        int x = PANEL3_X + 2;
-        int y = PANEL_Y + 2;
-        int n = 0;
-        for (GoodsType gt : this.colony.getSpecification().getStorableGoodsTypeList()) {
-            final int net = this.colony.getNetProductionOf(gt);
-            if (net == 0) continue;
-            if (n == 4) {                    // second row
-                x = PANEL3_X + 2;
-                y += 16;
-            }
-            if (n >= 8) break;
-            final BufferedImage img = this.lib.getScaledGoodsTypeImage(gt);
-            if (img != null) drawFitted(g, img, x, y, 12);
-            if (this.goodsTerrainNumbers) {
-                tag(g, (net > 0 ? "+" : "") + net, x, y + 12);
-            }
-            x += 22;
-            n++;
+    /**
+     * The right panel (M4.7, {@link ClassicColonyRight}): the three mode
+     * buttons, the pressed one sunk; the house rows (what the colony makes
+     * and its shortfalls crossed), «Vorhandene Einheiten» (the units on the
+     * tile as the map draws them, the selected one framed, white under the
+     * cursor in its on half), or the hammer panel (the build, KAUFEN and
+     * ÄNDERN, the hammers, «(Benötigt …)»; the cursor on a box inverts it in
+     * its on half).  The musket panel's units are press targets for their
+     * box ({@link #pressRight}).
+     */
+    private void paintRight(Graphics2D g) {
+        final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
+        final ClassicColonyRight.Model m = ClassicColonyRight.model(this.colony, text,
+            this.buildingArt, this.buttonMode, this.mode,
+            (this.units == null) ? null : this.units::order, this.listSelected);
+        this.right = (this.rightAdjust == null) ? m : this.rightAdjust.apply(m);
+        final ClassicColonyRight.Cursor cursor;
+        switch (tileCursor) {
+        case CURSOR_LIST:
+            cursor = (this.right.selected == null) ? ClassicColonyRight.Cursor.NONE
+                : ClassicColonyRight.Cursor.LIST;
+            break;
+        case CURSOR_BUY:
+            cursor = ClassicColonyRight.Cursor.BUY;
+            break;
+        case CURSOR_CHANGE:
+            cursor = ClassicColonyRight.Cursor.CHANGE;
+            break;
+        default:
+            cursor = ClassicColonyRight.Cursor.NONE;
+            break;
+        }
+        // The blink is asked only where the cursor stands on this panel's
+        // shown mode (else its toggles cost no repaint).
+        final boolean blinks = (cursor == ClassicColonyRight.Cursor.LIST
+                                && this.mode == ClassicColonyRight.Mode.MUSKET)
+            || (cursor != ClassicColonyRight.Cursor.NONE
+                && cursor != ClassicColonyRight.Cursor.LIST
+                && this.mode == ClassicColonyRight.Mode.HAMMER);
+        final boolean on = blinks && !blinkOff();
+        ClassicColonyRight.paint(g, this.chrome, this.buildingArt, this.tiny, this.right,
+                                 cursor, on, this.goodsTerrainNumbers);
+        for (ClassicColonyRight.Listed l : this.right.units) {
+            this.bandUnits.add(l.unit);
+            this.bandBounds.add(ClassicColonyLayout.unitListFrame(l.cell));
         }
     }
 
-    // Shared drawing helpers
-
-    /** A tiny black-plated number, as used under the net-production icons. */
-    private void tag(Graphics2D g, String s, int x, int y) {
-        g.setFont(font(6f, Font.BOLD));
-        g.setColor(TAG_BG);
-        g.fillRect(x, y - 5, g.getFontMetrics().stringWidth(s) + 2, 6);
-        g.setColor(TAG_FG);
-        g.drawString(s, x + 1, y);
+    /** @return The right panel as last painted (tests). */
+    ClassicColonyRight.Model right() {
+        return this.right;
     }
 
     /**
-     * Draw {@code img} scaled to fit a {@code size}-px box at {@code (x, y)},
-     * preserving aspect.  The original sprites are small (~16px), so this is
-     * usually an up-scale; the pack-absent FreeCol art is large and shrinks.
+     * Change the right panel's model before it is drawn (the golden tests:
+     * the clip's amounts where FreeCol's rules make others).
+     *
+     * @param f The change, or null.
      */
-    private void drawFitted(Graphics2D g, BufferedImage img, int x, int y, int size) {
-        final double s = Math.min((double) size / img.getWidth(),
-                                  (double) size / img.getHeight());
-        final int w = Math.max(1, (int) Math.round(img.getWidth() * s));
-        final int h = Math.max(1, (int) Math.round(img.getHeight() * s));
-        g.drawImage(img, x + (size - w) / 2, y + (size - h) / 2, w, h, null);
+    void setRightAdjust(java.util.function.UnaryOperator<ClassicColonyRight.Model> f) {
+        this.rightAdjust = f;
+        repaint();
     }
 
-    /** A font in <em>virtual</em> pixels — the paint transform scales it up. */
-    private Font font(float size, int style) {
-        return getFont().deriveFont(style, size);
+    /**
+     * How the screen was opened (M4.7 target 6, spec §0.1 decision 8): the
+     * right panel's mode from it and the last visit's
+     * ({@link ClassicColonyRight#modeAtOpening}); after a building's @BUILT
+     * zoom the white cursor on ÄNDERN (V ×3; the turn boxes' zoom rows come
+     * with M4.11).
+     *
+     * @param how How it was opened.
+     */
+    void opened(ClassicColonyRight.Opening how) {
+        this.mode = this.buttonMode = ClassicColonyRight.modeAtOpening(how, lastMode);
+        lastMode = this.mode;
+        if (how == ClassicColonyRight.Opening.BUILT_BUILDING) tileCursor = CURSOR_CHANGE;
+        repaint();
+    }
+
+    /** @return The right panel's mode shown (tests, the recorder). */
+    ClassicColonyRight.Mode mode() {
+        return this.mode;
+    }
+
+    /**
+     * Show a mode at once, its button pressed (tests: a clip's mode).
+     *
+     * @param m The mode.
+     */
+    void setMode(ClassicColonyRight.Mode m) {
+        this.mode = this.buttonMode = m;
+        lastMode = m;
+        repaint();
+    }
+
+    /** @return The mode the last colony visit ended in (global). */
+    static ClassicColonyRight.Mode lastMode() {
+        return lastMode;
+    }
+
+    /**
+     * Forget the last visit's mode (tests: each frame's state a fresh
+     * session).
+     *
+     * @param m The mode the next screen opens in.
+     */
+    static void setLastMode(ClassicColonyRight.Mode m) {
+        lastMode = (m == null) ? ClassicColonyRight.Mode.HOUSE : m;
+    }
+
+    /**
+     * Select a unit of «Vorhandene Einheiten» as a press on it does (tests).
+     *
+     * @param u The unit, or null for the first.
+     */
+    void selectListed(Unit u) {
+        this.listSelected = u;
+        repaint();
     }
 }
