@@ -3574,30 +3574,68 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   their order, then the frames. **The cursor** is global, as the warehouse's
   selection (V: openings with it on Mitte, NW, NO, N, SW or on a figure; I:
   across colonies), on the centre at first; a press on a tile or its worker
-  brings it there, a press on another colonist takes it off the tiles (its look
-  on a figure is M4.5's; the keys that move it come with M4.8). **Hover label:**
+  brings it there, a press on another colonist takes it off the tiles onto his
+  figure in the band (M4.5), a press on the carrier in port onto the carrier
+  (M4.6; the keys that move it come with M4.8). **Hover label:**
   the tile's terrain as the map's panel names it and its extras joined by '/'
   («Tropen- Wald», «Hügellandschaft/Straße», «Sumpfland/Straße/Gepflügt»), its box
   at tile x + 12 − (w + 1)/2, the tile's y, not clamped (dago §3.5). FreeCol's
   numbers are the rows' (where they differ from the original's, see the S3
   report). The recorder logs `colony-tiles` (each tile's rows, worker, sign,
   totem, enemy, the cursor's place).
-- **Bottom band** — the original **`COLONY.PIK`** chrome (320×72), with the live
-  figures over it: the SoL/tory split (the first slice's until M4.5) and the
-  original's **figure row** (M4.3; L §5.2: every colonist by his job now, NAMES
-  `@JOB`, then the units outside after 4 px more, at y 142 without shadow, pitch
-  w + 2 closing as the row fills; during a turn a colonist keeps his place when his
-  job changes and a newcomer goes to the colonists' end, V clip 020 ×4; a press on
-  a colonist selects him, on a unit standing in the colony opens its box as in M2;
-  until the musket panel lists them, artillery, wagon trains and treasures follow at
-  its end), the ships in port or the empty-dock caption (middle), the net
-  production (right) — the first slice's until M4.6–M4.7 — and the original's 16-box **warehouse**
-  row (M4.1): ICONS.SS.(22 + i) at (19i + 10 − floor(w/2), 181), the amount at
-  glyph top 194 and x = 19i + 1 + floor((20 − 4d)/2), its last two digits in ink 61
-  and higher ones in ink 148, no capacity mark, the selected good's box framed
-  green (ink 10). The selection is global (it carries to the next colony and
-  visit) and stays on food until goods are dragged (M4.9). «Abb» white over the red
-  **"E"** at (306,179). The E and **Escape** close the screen.
+- **Bottom band** — the original **`COLONY.PIK`** chrome (320×72), with over it:
+  - **Left panel** (M4.5, `ClassicColonyBand`): the **SoL line** — the flag
+    ICONS.SS.123 at (2,132) and «p% (n)» white at (15,133) when the colony has
+    members, the crown ICONS.SS.124 at (104,132) and its «p% (n)» ending at x 104
+    when it has Tories; «(n)» the members rounded, (p·pop + 50) div 100 (V clip 020
+    ×12, «1% (0)», «99% (1)»; FreeCol's own count floors); the percentage is
+    FreeCol's (its rules use it; the original rounds it up, see the S4 report). The
+    flag's three canton pixels are palette indices 122/123 of the water's cycle (the
+    only cycling pixels of ICONS.SS), so the flag is drawn from the pack's index
+    sheet through the game palette at the map's phase, and a palette step repaints
+    it. The original's **figure row** (M4.3; L §5.2: every colonist by his job now,
+    NAMES `@JOB`, then the units outside after 4 px more, at y 142 without shadow,
+    pitch w + 2 closing as the row fills; during a turn a colonist keeps his place
+    when his job changes and a newcomer goes to the colonists' end, V clip 020 ×4; a
+    press on a colonist selects him, on a unit standing in the colony opens its box
+    as in M2; until the musket panel lists them, artillery and treasures follow at its
+    end): the selected one's green frame x − 1…x + w, y 143–158, or, where the
+    white cursor stands on him, the cursor in its place: white in the blink's on
+    half, nothing in its off half (V #123003, #6560). The **production row** at
+    y 163 (L §5.3, dago §4.3): the food used (its fish part 057, then the corn part
+    022), the food stored, or the shortfall as corn each under the red X 055 (V
+    #18955), the crosses 056, the bells 062; each group after the previous one's
+    last icon + its width + 4; one pitch for the whole row, each step min(w + 1, p),
+    p the largest that ends the row at x 118 at most; only when pitch 1 does not fit,
+    one scale k = 2, 4 … (pitch 1) with a count label per group at (first + 2, 165),
+    at pitch 1 on groups of more than one icon (dago). FreeCol's numbers: the
+    tiles' food, what the colonists eat (2 each) and the horses take of the surplus,
+    the rest stored; less food than the colonists eat: all used, the rest short; the
+    crosses and bells the buildings make. The recorder logs `colony-band`.
+  - **Port** (M4.6, `ClassicColonyPort`): the caption in ink 57 at floor((328 −
+    w)/2), «Keine Schiffe im Hafen» or «Einladen: Handelsschiff» (LABELS `@MISC` 26 /
+    38 and the NAMES `@UNIT` name; it starts at x 121, over the panel's edge);
+    the tile's first carrier, a ship or a **wagon train** (V: it counts; it no longer
+    stands at the figure row's end), drawn as the map draws a unit (`ClassicHud`'s
+    box icon: its 2-px black shadow, its flag in the owner's colour with the order
+    letter) in its 16×16 cell at (130,146), a wagon train at (130,147) (V), in an
+    18×18 frame, green, white while the white cursor stands on it in the blink's
+    on half (V #120499, #120521, #10483, #134899; a press on the carrier brings the
+    cursor, on a wagon train also its box on the release); its six holds: the goods'
+    icons at x = 128 + 12k + floor((9 − w)/2), y 165, the full colours for a hold of
+    100, the grey set for a part, no number; the crate ICONS.SS.122 at (127 + 12k,
+    165) over the holds it lacks, six without a carrier. The holds are in the order
+    the goods came aboard as this client saw them (V clip 020 #120499: rum before
+    furs; goods already aboard when the carrier is first seen in the goods' order),
+    an emptied hold closes up (V #134899); units aboard first, their figure fitted
+    into the hold (I, as our Europe). The recorder logs `colony-port`.
+  - the net production (right; the first slice's until M4.7), and the original's
+    16-box **warehouse** row (M4.1): ICONS.SS.(22 + i) at (19i + 10 − floor(w/2),
+    181), the amount at glyph top 194 and x = 19i + 1 + floor((20 − 4d)/2), its last
+    two digits in ink 61 and higher ones in ink 148, no capacity mark, the selected
+    good's box framed green (ink 10). The selection is global (it carries to the
+    next colony and visit) and stays on food until goods are dragged (M4.9). «Abb»
+    white over the red **"E"** at (306,179). The E and **Escape** close the screen.
 - **The kit** (M4.0): one blink for the cursors (`ClassicBlink`, 23 frames, armed
   while the screen is shown, stopped during a drag; a toggle repaints only if a
   painter asked `blinkOff()`), the press / drag / release machine
@@ -3608,8 +3646,19 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   complete screen, in 55 frames, the woodcuts' fixed order) and the harness's
   `sdrag ax ay bx by [shift]`. Every formula is in `ClassicColonyLayout`.
 - **Golden tests** (`ClassicColonyChromeTest`, `ClassicColonyKitTest`,
-  `ClassicColonyBuildingsTest`, `ClassicColonyTilesTest`, with the pack and
-  `-Dclassic.clips`): the 3×3 map of 8 frames of clip 020 (#2260, #48712, #50260,
+  `ClassicColonyBuildingsTest`, `ClassicColonyTilesTest`, `ClassicColonyBandTest`,
+  `ClassicColonyPortTest`, with the pack and `-Dclassic.clips`): the whole left
+  panel (x 0–118, y 129–177) of 13 frames of clip 020 (#2260, #2620, #2747, #6560,
+  #18955, #46039, #46350, #47291, #96680, #134173, #14817, #35057, #123003: the SoL
+  line with the flag at the frame's phase, the figure row with the green frame or
+  the white cursor, the production row at pitch 8, 6, 4, 3, the fish part, the
+  shortfall) 0 px, the clip's amounts drawn where FreeCol's differ, and dago's
+  three colonies' SoL lines and k-scaled rows with their labels 0 px; the port
+  panel (x 119–207, y 129–177) of 9 frames (#2260, #10483, #14817, #118448,
+  #120499, #120521, #120637, #134173, #134899: the captions, the ship and the wagon train
+  with shadow, flag and «-», the frame green or white, open holds, crates, grey
+  ore, rum and furs in their loading order, the close-up) 0 px (S4); the 3×3 map
+  of 8 frames of clip 020 (#2260, #48712, #50260,
   #105689, #134173, #14817, #35057, #123003: rows, the stack «12», the workers,
   the sign, the totems, the frames, the cursor, «Tropen- Wald») 0 px over
   everything the original or ours draws on the terrain, the terrain counted, and
@@ -3630,8 +3679,8 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   paint): "Beschriftung an Gebäuden" the count labels of the buildings' stacked
   rows (since M4.3; I: the option's meaning in the original),
   "Beschriftung an Waren und Terrain" those of the tiles' stacked rows (since
-  M4.4, I likewise) and the figures under the net production. The warehouse
-  amounts always show.
+  M4.4, I likewise), those of the band's production row (since M4.5, I likewise)
+  and the figures under the net production. The warehouse amounts always show.
   The figures are FreeCol's, a house improvement on the original's icon
   rows (Regeln-Auswahl).
 

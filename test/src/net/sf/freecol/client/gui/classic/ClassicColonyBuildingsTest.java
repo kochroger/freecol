@@ -576,7 +576,7 @@ public class ClassicColonyBuildingsTest extends FreeColTestCase {
     }
 
     /** A colony of the classic rules being rebuilt in a clip's state. */
-    private static final class State {
+    static final class State {
 
         final Game game;
         final Colony colony;
@@ -705,21 +705,21 @@ public class ClassicColonyBuildingsTest extends FreeColTestCase {
     }
 
     /** Base's founding layout in clip 020 (L §3.2). */
-    private static final Founding BASE = Founding.of("L1", "M4", "H5", "H6", "H4", "H7", "H3");
+    static final Founding BASE = Founding.of("L1", "M4", "H5", "H6", "H4", "H7", "H3");
 
     /** Provisorische Kolonie's (#14817). */
-    private static final Founding PROV = Founding.of("L1", "M2", "H6", "H4", "H7", "H1", "H5");
+    static final Founding PROV = Founding.of("L1", "M2", "H6", "H4", "H7", "H1", "H5");
 
     /** Silver City's (#123003). */
-    private static final Founding SILVER = Founding.of("L1", "M1", "H6", "H4", "H2", "H5", "H1");
+    static final Founding SILVER = Founding.of("L1", "M1", "H6", "H4", "H2", "H5", "H1");
 
     /** Base in 1539 (#2260): the Sägewerk and the Hafenanlagen built. */
-    private static State base1539() {
+    static State base1539() {
         return base(1539);
     }
 
     /** Base in a year with the Sägewerk and the Hafenanlagen. */
-    private static State base(int year) {
+    static State base(int year) {
         return new State("Base", year).build("lumberMill").build("docks");
     }
 
@@ -1032,7 +1032,7 @@ public class ClassicColonyBuildingsTest extends FreeColTestCase {
         }
     }
 
-    private static ClassicColonyPanel panel(State s, Founding f) throws Exception {
+    static ClassicColonyPanel panel(State s, Founding f) throws Exception {
         ClassicColonyPanel.forgetFigureOrders();
         final ClassicColonyPanel p = new ClassicColonyPanel(client(s.game, s.owner),
             library(), s.colony, null, null, ClassicSlide.SYSTEM, false);

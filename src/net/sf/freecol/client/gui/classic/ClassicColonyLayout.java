@@ -888,6 +888,305 @@ final class ClassicColonyLayout {
     }
 
     /**
+     * The white cursor on a figure of the band's figure row (V clip 020
+     * #123003-#123095 Silver City, #6540-#6600, #2620, #35057): the green
+     * frame's place, x - 1 ... x + w, y 143-158, white (ink 15) in the
+     * blink's on half and nothing in its off half (the figure's green frame
+     * is not drawn under it: #6570, #46350, #47291, #123003).
+     *
+     * @param x The figure's x.
+     * @param w Its width.
+     * @return The frame.
+     */
+    static Rectangle figureCursor(int x, int w) {
+        return figureFrame(x, w);
+    }
+
+
+    // The band's left panel: the SoL line and the production row (spec
+    // M4.5; L §5.1, §5.3, dago §4.1, §4.3; V clip 020 and dago at 0 px)
+
+    /** The SoL flag ICONS.SS.123 (its 3 canton pixels cycle with the water) and the Tory crown 124. */
+    static final int ICON_SOL = 123, ICON_TORY = 124;
+
+    /**
+     * The count «(n)» of an SoL or Tory percentage: the members rounded,
+     * (percent * population + 50) div 100 (V: 11 % of 5 -&gt; 1, 14 % of 4
+     * -&gt; 1, 24 % of 8 -&gt; 2, 89 % of 5 -&gt; 4, 86 % of 4 -&gt; 3, 76 % of 8
+     * -&gt; 6; dago 34 % of 14 -&gt; 5, 66 % -&gt; 9; I: a half rounds up, never
+     * seen).  FreeCol's own count rounds down (11 % of 5 -&gt; 0).
+     *
+     * @param percent The percentage, 0-100.
+     * @param population The colonists.
+     * @return The count.
+     */
+    static int memberCount(int percent, int population) {
+        return Math.max(0, (percent * population + 50) / 100);
+    }
+
+    /**
+     * The SoL or Tory line's words: {@code "<p>% (<n>)"} («11% (1)», «100%
+     * (1)», V).
+     *
+     * @param percent The percentage.
+     * @param count Its count ({@link #memberCount}).
+     * @return The words.
+     */
+    static String memberText(int percent, int count) {
+        return percent + "% (" + count + ")";
+    }
+
+    /** The production row's icon y, its first x and the gap between its groups. */
+    static final int BAND_ROW_Y = 163, BAND_ROW_X = 2, BAND_GROUP_GAP = 4;
+
+    /**
+     * The production row's last pixel column (V: #2260 ends at 117 with
+     * pitch 6, dago Base at k = 1 would end at 120 and is halved; I: 118,
+     * the left panel's last column).
+     */
+    static final int BAND_ROW_RIGHT = 118;
+
+    /**
+     * A group's count label in the production row: its black box at
+     * (first + 2, 165), the icon y + 2 (one lower than on the buildings and
+     * tiles), the number white one pixel in (V dago #1000 «38» box x 4-12,
+     * y 165-171; Fur City «29», «20»; Fur Town «41», «10», «2», «96»).
+     */
+    static final int BAND_LABEL_DY = 2;
+
+    /** The icons of the production row (dago §4.3): fish 057, corn 022, crosses 056, bells 062; a shortfall's red X 055. */
+    static final int ICON_FISH = 57, ICON_CORN = 22, ICON_CROSSES = 56, ICON_BELLS = 62,
+        ICON_SHORTFALL = 55;
+
+    /**
+     * The band's production row laid out (L §5.3, dago §4.3): its groups,
+     * each of one or two parts (food used: the fish part, then the corn
+     * part), each part a run of one good's icons.
+     */
+    static final class BandRow {
+
+        /** Each icon stands for k units; the pitch the icons use at most. */
+        final int k, pitch;
+
+        /** The amounts, per group and part, as given. */
+        final int[][] n;
+
+        /** The icons' x, per group, part and icon (empty for a group of 0). */
+        final int[][][] x;
+
+        /** Whether a group carries its count label, and the label's box x. */
+        final boolean[] labelled;
+        final int[] labelX;
+
+        /** The row's last pixel column (-1 for an empty row). */
+        final int end;
+
+        BandRow(int k, int pitch, int[][] n, int[][][] x, boolean[] labelled, int[] labelX,
+                int end) {
+            this.k = k;
+            this.pitch = pitch;
+            this.n = n;
+            this.x = x;
+            this.labelled = labelled;
+            this.labelX = labelX;
+            this.end = end;
+        }
+
+        /**
+         * @param g A group.
+         * @return Its amount, the parts' sum (the label's number).
+         */
+        int total(int g) {
+            int s = 0;
+            for (int v : this.n[g]) s += Math.max(0, v);
+            return s;
+        }
+
+        /**
+         * @param g A group.
+         * @return Its first icon's x, or -1 for an empty group.
+         */
+        int first(int g) {
+            for (int[] part : this.x[g]) if (part.length > 0) return part[0];
+            return -1;
+        }
+
+        @Override
+        public String toString() {
+            final StringBuilder sb = new StringBuilder("k" + this.k + " p" + this.pitch);
+            for (int g = 0; g < this.x.length; g++) {
+                sb.append(" |");
+                for (int[] part : this.x[g]) {
+                    sb.append(' ').append(part.length).append('@')
+                        .append((part.length == 0) ? "-" : String.valueOf(part[0]));
+                }
+                if (this.labelled[g]) sb.append(" \"").append(total(g)).append('"');
+            }
+            return sb.toString();
+        }
+    }
+
+    /**
+     * The band's production row (L §5.3, dago §4.3; V clip 020 #2260,
+     * #134173, #14817, #18955 and dago's three colonies at 0 px): from x 2,
+     * each group after the previous one's last icon + its width + 4; one
+     * pitch p for the whole row: each step min(w + 1, p), w the icon's
+     * width (the fish part's last icon to the corn part's first alike), p
+     * the largest for which the row ends at x {@link #BAND_ROW_RIGHT} at
+     * most (V: 6 at #2260, 3 at #134173, w + 1 at #14817); only when p = 1
+     * does not fit, one scale k = 2, 4 ... for the whole row, each icon k
+     * units (a part's icons n div k; I: a group keeps one icon at least),
+     * pitch 1 (V dago Base and Fur Town).  A group carries its count label
+     * when k &gt; 1 (dago: Fur Town's single cross «2») or when the pitch is
+     * 1 and it has more than one icon (Fur City «29», «20», not its 1
+     * cross); none otherwise (V: no label at pitch 3 or 6).
+     *
+     * @param n The amounts per group and part (a group of 0 is left out).
+     * @param w The icons' widths per group and part.
+     * @return The row.
+     */
+    static BandRow bandRow(int[][] n, int[][] w) {
+        int widest = 1;
+        for (int[] g : w) for (int v : g) widest = Math.max(widest, v);
+        for (int p = widest + 1; p >= 1; p--) {
+            final BandRow r = bandRowAt(n, w, 1, p);
+            if (r.end <= BAND_ROW_RIGHT) return r;
+        }
+        for (int k = 2; ; k *= 2) {
+            final BandRow r = bandRowAt(n, w, k, 1);
+            if (r.end <= BAND_ROW_RIGHT || k >= (1 << 20)) return r;
+        }
+    }
+
+    /**
+     * The row at a given scale and pitch ({@link #bandRow}; tests).
+     *
+     * @param n The amounts per group and part.
+     * @param w The icons' widths.
+     * @param k The scale.
+     * @param p The pitch.
+     * @return The row.
+     */
+    static BandRow bandRowAt(int[][] n, int[][] w, int k, int p) {
+        final int groups = n.length;
+        final int[][][] xs = new int[groups][][];
+        final boolean[] labelled = new boolean[groups];
+        final int[] labelX = new int[groups];
+        int lastX = -1, lastW = 0;
+        for (int g = 0; g < groups; g++) {
+            final int parts = n[g].length;
+            xs[g] = new int[parts][];
+            final int[] m = new int[parts];
+            int total = 0, icons = 0, lastPart = -1;
+            for (int q = 0; q < parts; q++) {
+                final int v = Math.max(0, n[g][q]);
+                total += v;
+                m[q] = (k == 1) ? v : v / k;
+                icons += m[q];
+                if (v > 0) lastPart = q;
+            }
+            if (total > 0 && icons == 0) {
+                m[lastPart] = 1;                     // I: one icon at least
+                icons = 1;
+            }
+            int x = (lastX < 0) ? BAND_ROW_X : lastX + lastW + BAND_GROUP_GAP;
+            boolean firstInGroup = true;
+            int prevW = 0;
+            for (int q = 0; q < parts; q++) {
+                xs[g][q] = new int[m[q]];
+                for (int j = 0; j < m[q]; j++) {
+                    if (!firstInGroup) x += Math.min(prevW + 1, p);
+                    xs[g][q][j] = x;
+                    prevW = w[g][q];
+                    firstInGroup = false;
+                    lastX = x;
+                    lastW = w[g][q];
+                }
+            }
+            if (icons > 0) {
+                labelled[g] = k > 1 || (p <= 1 && icons > 1);
+                int first = -1;
+                for (int[] part : xs[g]) {
+                    if (part.length > 0) {
+                        first = part[0];
+                        break;
+                    }
+                }
+                labelX[g] = first + 2;
+            }
+        }
+        return new BandRow(k, p, n, xs, labelled, labelX,
+                           (lastX < 0) ? -1 : lastX + lastW - 1);
+    }
+
+
+    // The port panel (spec M4.6; L §6, clip008 §2, dago §5)
+
+    /**
+     * The carrier in port: its 16x16 cell at (130,146) for a ship and
+     * (130,147) for a wagon train, the sprite in it as the map's
+     * ({@link ClassicHud#spriteOffset}: ICONS.SS.006 at (133,146), 008 at
+     * (132,147); V #2260, #9921, #45944, #118448, #134173; I: why the
+     * wagon train sits one lower).
+     */
+    static final int CARRIER_X = 130, SHIP_Y = 146, WAGON_Y = 147;
+
+    /**
+     * @param naval Whether the carrier is a ship.
+     * @return Its 16x16 cell.
+     */
+    static Rectangle carrierCell(boolean naval) {
+        return new Rectangle(CARRIER_X, (naval) ? SHIP_Y : WAGON_Y, 16, 16);
+    }
+
+    /**
+     * The carrier's 18x18 frame around its cell: green (ink 10), white
+     * (ink 15) while the white cursor stands on it in the blink's on half
+     * (V: ship (129,145)-(146,162), wagon train (129,146)-(146,163);
+     * #120499 white, #120521 green, #2260 green throughout with the cursor
+     * on a tile).
+     *
+     * @param naval Whether the carrier is a ship.
+     * @return The frame.
+     */
+    static Rectangle carrierFrame(boolean naval) {
+        final Rectangle c = carrierCell(naval);
+        return new Rectangle(c.x - 1, c.y - 1, c.width + 2, c.height + 2);
+    }
+
+    /** The six holds: the icons' y 165, pitch 12. */
+    static final int HOLDS = 6, HOLD_Y = 165, HOLD_PITCH = 12;
+
+    /**
+     * Hold k's goods icon: x = 128 + 12k + floor((9 - w)/2), y 165 (V: ore
+     * w 10 at 127, rum w 7 at 129 and 141, furs w 9 at 128 and 140; clip008
+     * §2.5).
+     *
+     * @param k The hold, 0-5.
+     * @param w The icon's width.
+     * @return Its x.
+     */
+    static int holdIconX(int k, int w) {
+        return 128 + HOLD_PITCH * k + Math.floorDiv(9 - w, 2);
+    }
+
+    /**
+     * A hold the carrier lacks: the crate ICONS.SS.122 at (127 + 12k, 165)
+     * (V: the Handelsschiff's 4 and 5 at 175/187, the wagon train's 2-5,
+     * all six without a carrier).
+     *
+     * @param k The hold.
+     * @return Its x.
+     */
+    static int crateX(int k) {
+        return 127 + HOLD_PITCH * k;
+    }
+
+    /** The crate over a hold the carrier lacks. */
+    static final int ICON_CRATE = 122;
+
+
+    /**
      * NAMES.TXT {@code @JOB}'s index of a work (the order of the figure
      * row, L §5.2: Farmer 0, Zuckerpflanzer 1 ... Fischer 8, Schnapsbrenner
      * 9 ... Staatsmann 17, Lehrer 18, Siedler 19, Pionier 20, Soldat 21,

@@ -104,7 +104,11 @@ import javax.swing.JComponent;
  * and figures, {@link ClassicColonyBuildings.Model}), {@code colony-tiles}
  * (each tile of its 3x3 map: its rows, the worker, the prohibition sign,
  * the totem, an enemy, and the white cursor's place;
- * {@link ClassicColonyTiles.Model}),
+ * {@link ClassicColonyTiles.Model}), {@code colony-band} (the band's left
+ * panel: the SoL line, the food used, stored or short, the crosses and
+ * bells and their row's scale and pitch; {@link ClassicColonyBand.Model}),
+ * {@code colony-port} (the port's caption, carrier and six holds, and the
+ * white cursor's place; {@link ClassicColonyPort.Model}),
  * {@code still}, {@code terrain} (W6e: whether the pack holds the index
  * pipeline, {@code index ...} or {@code fallback ...}; a {@link #note},
  * so it is also a line of {@code summary.txt}), {@code palette-step}

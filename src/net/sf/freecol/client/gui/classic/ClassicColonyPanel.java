@@ -43,8 +43,6 @@ import javax.swing.SwingUtilities;
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.control.InGameController;
 import net.sf.freecol.client.gui.ImageLibrary;
-import net.sf.freecol.common.i18n.Messages;
-import net.sf.freecol.common.model.AbstractGoods;
 import net.sf.freecol.common.model.Building;
 import net.sf.freecol.common.model.Colony;
 import net.sf.freecol.common.model.ColonyTile;
@@ -85,14 +83,18 @@ import net.sf.freecol.common.model.Unit;
  *   an enemy at war on his tile; the selected colonist's green frame, the
  *   blinking white cursor, the tile's hover label.</li>
  *   <li><b>Bottom band</b> — the original {@code COLONY.PIK} chrome
- *   (320&times;72) with its black first row, with the Sons-of-Liberty /
- *   population figures (the first slice's until M4.5) and the original's
- *   figure row (the colonists by their job, then the units outside) on
- *   the left, the ships in port in the middle, the net production on the
- *   right (the first slice's until M4.6-M4.7; a click there opens the build
- *   list until M4.7's ÄNDERN), and the original's 16-box <b>warehouse</b> row
- *   along the bottom (M4.1: icons, numbers in their inks, the selected
- *   good's green frame) with «Abb» over the exit.</li>
+ *   (320&times;72) with its black first row; on the left the original's
+ *   left panel (M4.5, {@link ClassicColonyBand}): the SoL flag and Tory
+ *   crown with their «p% (n)», the figure row (the colonists by their job,
+ *   then the units outside; the selected one's green frame or the white
+ *   cursor), the production row (food used, stored or short, crosses,
+ *   bells); in the middle the port (M4.6, {@link ClassicColonyPort}): «Keine
+ *   Schiffe im Hafen» or «Einladen: Typ», the ship or wagon train in its
+ *   frame, its six holds with the goods' icons and the crates; the net
+ *   production on the right (the first slice's until M4.7; a click there
+ *   opens the build list until M4.7's ÄNDERN), and the original's 16-box
+ *   <b>warehouse</b> row along the bottom (M4.1: icons, numbers in their
+ *   inks, the selected good's green frame) with «Abb» over the exit.</li>
  * </ul>
  *
  * <p>The screen kit (M4.0): the original arrow is hidden during a drag
@@ -288,11 +290,38 @@ final class ClassicColonyPanel extends JPanel {
      */
     private static int tileCursor = ClassicColonyLayout.CENTRE_TILE;
 
-    /** {@link #tileCursor} on a figure, not on a tile. */
+    /**
+     * {@link #tileCursor} off the tiles, on the selected colonist's figure
+     * in the band's figure row (M4.5: white in the blink's on half, nothing
+     * in its off half; V clip 020 #123003, #6560).
+     */
     static final int CURSOR_OFF_TILES = -1;
+
+    /**
+     * {@link #tileCursor} on the carrier in port (M4.6: its frame white in
+     * the blink's on half, green in its off half; V clip 020 #120499,
+     * #120521, #134899, clip008 #30022: the colony opened with it there; a
+     * press on the carrier brings it, I: the goods' drags too, M4.9).
+     */
+    static final int CURSOR_CARRIER = -2;
 
     /** The tiles as last logged by the recorder ({@link #recordBuildings}). */
     private String tilesLogged = null;
+
+    /** The band's left panel as the last paint drew it (M4.5, {@link ClassicColonyBand}). */
+    private ClassicColonyBand.Model band = null;
+
+    /** A test's change of the left panel's model before it is drawn, or null. */
+    private java.util.function.UnaryOperator<ClassicColonyBand.Model> bandAdjust = null;
+
+    /** Whether the last paint drew the SoL flag (its canton cycles with the water). */
+    private boolean flagDrawn = false;
+
+    /** The port panel as the last paint drew it (M4.6, {@link ClassicColonyPort}). */
+    private ClassicColonyPort.Model port = null;
+
+    /** The left panel and the port as last logged by the recorder. */
+    private String bandLogged = null, portLogged = null;
 
     /** The figure row's colonists as this paint orders them ({@link #figureOrder}). */
     private List<Unit> rowOrder = new ArrayList<>();
@@ -569,6 +598,19 @@ final class ClassicColonyPanel extends JPanel {
         // M4.8).
         final int tile = ClassicColonyLayout.tileAt(vx, vy);
         if (tile >= 0 && this.tiles.cell(tile) != null) tileCursor = tile;
+
+        // The carrier in port (M4.6): the press brings the cursor (dago §3:
+        // the press moves it); a wagon train's box on the release, as from
+        // the figure row's end where it stood until the port showed it.
+        final Rectangle carrier = (this.port == null) ? null : this.port.frame();
+        if (carrier != null && carrier.contains(vx, vy)) {
+            tileCursor = CURSOR_CARRIER;
+            if (!this.port.carrier.isNaval() && this.units != null) {
+                this.pressedBand = this.port.carrier;
+            }
+            repaint();
+            return;
+        }
 
         // A unit standing in the colony (the original's "Vorhandene
         // Einheiten"): the press selects it, its release opens its box.
@@ -949,11 +991,18 @@ final class ClassicColonyPanel extends JPanel {
         if (!ClassicFrameRecorder.on()) return;
         final String drawn = this.buildingsDrawn;
         final String tilesDrawn = this.tiles.toString();
+        final String bandDrawn = String.valueOf(this.band);
+        // The port with the white cursor's place (a press on the carrier brings it).
+        final String portDrawn = this.port + " cursor=" + cursorName();
         final boolean area = !drawn.equals(this.buildingsLogged);
         final boolean map = !tilesDrawn.equals(this.tilesLogged);
-        if (!area && !map) return;
+        final boolean left = !bandDrawn.equals(this.bandLogged);
+        final boolean dock = !portDrawn.equals(this.portLogged);
+        if (!area && !map && !left && !dock) return;
         this.buildingsLogged = drawn;
         this.tilesLogged = tilesDrawn;
+        this.bandLogged = bandDrawn;
+        this.portLogged = portDrawn;
         final String name = "colony-" + (++stills);
         if (area) {
             ClassicFrameRecorder.event("colony-buildings",
@@ -963,9 +1012,24 @@ final class ClassicColonyPanel extends JPanel {
         if (map) {
             ClassicFrameRecorder.event("colony-tiles",
                 name + " " + this.colony.getId() + " " + tilesDrawn + " cursor="
-                + ((tileCursor >= 0) ? ClassicColonyLayout.TILE_NAMES[tileCursor] : "figure"));
+                + cursorName());
+        }
+        // The band's left panel (M4.5) and the port (M4.6).
+        if (left) {
+            ClassicFrameRecorder.event("colony-band",
+                name + " " + this.colony.getId() + " " + bandDrawn);
+        }
+        if (dock) {
+            ClassicFrameRecorder.event("colony-port",
+                name + " " + this.colony.getId() + " " + portDrawn);
         }
         ClassicFrameRecorder.still(name, canvas());
+    }
+
+    /** @return Where the white cursor stands (the recorder): a tile's name, «figure», «carrier». */
+    private static String cursorName() {
+        if (tileCursor >= 0) return ClassicColonyLayout.TILE_NAMES[tileCursor];
+        return (tileCursor == CURSOR_CARRIER) ? "carrier" : "figure";
     }
 
     /**
@@ -1173,13 +1237,28 @@ final class ClassicColonyPanel extends JPanel {
      * A step of the water's cycling (the game's {@code ClassicWaterCycle},
      * its palette for the map and this screen as the original's one VGA
      * palette): the 3x3 map is painted again when one of its tiles holds a
-     * cycling index (V clip 020: 144 px of its water every 40-41 frames).
+     * cycling index (V clip 020: 144 px of its water every 40-41 frames),
+     * and the SoL flag when it is drawn (M4.5: its canton's 3 pixels cycle
+     * too, V #2260 phase 3, #123003 phase 0).
      */
     void paletteStep() {
-        if (!this.tilesCycle || !isShowing() || this.scale <= 0) return;
-        final Rectangle f = ClassicColonyLayout.MAP_FRAME;
+        if (!isShowing() || this.scale <= 0) return;
+        if (this.tilesCycle) repaintCanvas(ClassicColonyLayout.MAP_FRAME);
+        if (this.flagDrawn) {
+            repaintCanvas(new Rectangle(ClassicColonyLayout.SOL_ICON_X,
+                ClassicColonyLayout.SOL_ICON_Y, 13, 11));
+        }
+    }
+
+    /** Repaint a rectangle of the canvas. */
+    private void repaintCanvas(Rectangle f) {
         repaint(this.originX + f.x * this.scale, this.originY + f.y * this.scale,
                 f.width * this.scale, f.height * this.scale);
+    }
+
+    /** @return Whether the last paint drew the SoL flag (its canton cycles; tests). */
+    boolean flagCycles() {
+        return this.flagDrawn;
     }
 
     /**
@@ -1229,28 +1308,31 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * Put the white cursor on a tile (tests: a clip's place), or off the
-     * tiles ({@link #CURSOR_OFF_TILES}).
+     * Put the white cursor on a tile (tests: a clip's place), off the
+     * tiles on the selected one's figure ({@link #CURSOR_OFF_TILES}), or
+     * on the carrier in port ({@link #CURSOR_CARRIER}).
      *
-     * @param tile The tile, 0-8, or {@link #CURSOR_OFF_TILES}.
+     * @param tile The tile, 0-8, {@link #CURSOR_OFF_TILES} or
+     *     {@link #CURSOR_CARRIER}.
      */
     static void setTileCursor(int tile) {
         tileCursor = (tile >= 0 && tile < ClassicColonyLayout.TILE_COUNT) ? tile
-            : CURSOR_OFF_TILES;
+            : (tile == CURSOR_CARRIER) ? CURSOR_CARRIER : CURSOR_OFF_TILES;
     }
 
-    /** @return The white cursor's tile, or {@link #CURSOR_OFF_TILES}. */
+    /** @return The white cursor's tile, {@link #CURSOR_OFF_TILES} or {@link #CURSOR_CARRIER}. */
     static int tileCursor() {
         return tileCursor;
     }
 
     /**
      * The bottom band: the original {@code COLONY.PIK} chrome with its
-     * black first row ({@link ClassicColonyChrome#paintBand}), then the live
-     * numbers over it — Sons of Liberty and the units outside the colony
-     * (left), the ships in port (middle), the colony's net production
-     * (right), the first slice's until M4.5-M4.7 — and the original's
-     * warehouse row along the bottom with «Abb» over the exit (M4.1).
+     * black first row ({@link ClassicColonyChrome#paintBand}), then over
+     * it the left panel (M4.5: the SoL line, the figure row, the production
+     * row), the port (M4.6: the caption, the carrier, its holds), the
+     * colony's net production (right, the first slice's until M4.7), and
+     * the original's warehouse row along the bottom with «Abb» over the
+     * exit (M4.1).
      */
     private void paintBand(Graphics2D g) {
         ClassicColonyChrome.paintBand(g, this.chrome);
@@ -1276,28 +1358,40 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * Left panel: the SoL / Tory split (the first slice's until M4.5) and
-     * the original's figure row (L §5.2; {@link
-     * ClassicColonyBuildings#figureRow}): every colonist by his job now,
-     * then the units outside after 4 px more, at y 142 without shadow
-     * (V clip 020 #2260, #6560, #134173; clip 019 #1290: no artillery
-     * there, it stands only in the musket panel's «Vorhandene Einheiten»).
-     * A press on a colonist selects him (as on his building or tile); a
-     * press on a unit standing in the colony opens its box (@COLONYUNIT,
-     * M2) on the release, as the first slice's row did.  Until the musket
-     * panel (M4.7) lists them, the colony tile's other units (artillery, a
-     * wagon train, a treasure) follow at the row's end so that their box
-     * stays at hand (not the original's).
+     * Left panel (M4.5, {@link ClassicColonyBand}): the SoL line (the flag
+     * and «p% (n)» when the colony has members, the crown and its words
+     * ending at x 104 when it has Tories), the original's figure row (L
+     * §5.2; {@link ClassicColonyBuildings#figureRow}): every colonist by
+     * his job now, then the units outside after 4 px more, at y 142
+     * without shadow (V clip 020 #2260, #6560, #134173; clip 019 #1290: no
+     * artillery there, it stands only in the musket panel's «Vorhandene
+     * Einheiten»), the selected one's green frame or, where the white
+     * cursor stands on him, the cursor; and the production row at y 163
+     * (the food used, stored or short, the crosses, the bells).  A press on
+     * a colonist selects him (as on his building or tile); a press on a
+     * unit standing in the colony opens its box (@COLONYUNIT, M2) on the
+     * release, as the first slice's row did.  Until the musket panel (M4.7)
+     * lists them, the colony tile's other units (artillery, a treasure)
+     * follow at the row's end so that their box stays at hand (not the
+     * original's); a wagon train stands in the port since M4.6.
      */
     private void paintPopulation(Graphics2D g) {
-        final int sol = this.colony.getSonsOfLiberty();
-        final int count = this.colony.getUnitCount();
-        final int rebels = count * sol / 100;
-        g.setFont(font(7f, Font.BOLD));
-        g.setColor(TAG_FG);
-        g.drawString(sol + "% (" + rebels + ")", PANEL1_X + 12, PANEL_Y + 7);
-        g.drawString((100 - sol) + "% (" + (count - rebels) + ")",
-                     PANEL1_X + 62, PANEL_Y + 7);
+        final ClassicColonyBand.Model m = ClassicColonyBand.model(this.colony,
+                                                                  this.buildingArt);
+        this.band = (this.bandAdjust == null) ? m : this.bandAdjust.apply(m);
+        final Rectangle left = ClassicColonyLayout.LEFT_PANEL;
+        {
+            final Graphics2D g2 = (Graphics2D) g.create();
+            g2.clipRect(left.x, left.y, left.width, left.height);
+            try {
+                this.flagDrawn = ClassicColonyBand.paint(g2, this.chrome, this.buildingArt,
+                    ClassicColonyBand.flag(ClassicPackFiles.runtime(), this.buildingArt,
+                                           this.waterPhase.getAsInt()),
+                    this.band, this.goodsTerrainNumbers);
+            } finally {
+                g2.dispose();
+            }
+        }
 
         this.bandUnits.clear();
         this.bandBounds.clear();
@@ -1305,7 +1399,8 @@ final class ClassicColonyPanel extends JPanel {
         if (tile == null) return;
         final List<Unit> standing = new ArrayList<>();
         for (Unit u : tile.getUnitList()) {
-            if (!u.isNaval()) standing.add(u);         // ships go in the port
+            // Ships and wagon trains go in the port (M4.6).
+            if (!u.isNaval() && !ClassicColonyPort.isCarrier(u)) standing.add(u);
         }
         final List<Unit> ordered = (this.units == null) ? standing
             : this.units.order(standing);
@@ -1315,12 +1410,21 @@ final class ClassicColonyPanel extends JPanel {
         final List<ClassicColonyBuildings.Figure> figures
             = ClassicColonyBuildings.figureRow(this.buildingArt, this.rowOrder, row);
         this.figures = figures;
+        // The white cursor on the selected one's figure (it blinks: only
+        // then is the blink asked).
+        boolean onFigure = false;
+        if (tileCursor == CURSOR_OFF_TILES && this.selectedUnit != null) {
+            for (ClassicColonyBuildings.Figure f : figures) {
+                if (f.unit == this.selectedUnit) onFigure = true;
+            }
+        }
+        final boolean cursorShown = onFigure && !blinkOff();
         final Graphics2D g2 = (Graphics2D) g.create();
-        final Rectangle left = ClassicColonyLayout.LEFT_PANEL;
         g2.clipRect(left.x, left.y, left.width, left.height);
         try {
             ClassicColonyBuildings.paintFigureRow(g2, this.chrome, this.buildingArt,
-                                                  figures, this.selectedUnit);
+                                                  figures, this.selectedUnit, onFigure,
+                                                  cursorShown);
         } finally {
             g2.dispose();
         }
@@ -1445,29 +1549,48 @@ final class ClassicColonyPanel extends JPanel {
         }
     }
 
-    /** Middle panel: the ships tied up at the dock, or the empty-harbour notice. */
+    /**
+     * The port panel (M4.6, {@link ClassicColonyPort}): the caption, the
+     * carrier in port (the tile's first ship or wagon train) as the map
+     * draws a unit, in its frame (green; white while the cursor stands on
+     * it in the blink's on half), its six holds.  A wagon train there is a
+     * press target for its box ({@link #pressAt}), as it was at the figure
+     * row's end.
+     */
     private void paintPort(Graphics2D g) {
-        final Tile tile = this.colony.getTile();
-        int x = PANEL2_X + 3;
-        boolean any = false;
-        if (tile != null) {
-            for (Unit u : tile.getUnitList()) {
-                if (!u.isNaval()) continue;
-                if (x > PANEL3_X - 20) break;
-                final BufferedImage img = this.lib.getScaledUnitImage(u);
-                if (img != null) drawFitted(g, img, x, PANEL_Y + 10, 20);
-                x += 20;
-                any = true;
-            }
+        final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
+        this.port = ClassicColonyPort.model(this.colony, text);
+        final Unit carrier = this.port.carrier;
+        final boolean white = carrier != null && tileCursor == CURSOR_CARRIER && !blinkOff();
+        final String letter = (carrier == null) ? null
+            : ClassicHud.orderLetter(text, ClassicUnitCycle.ordersRowShown(carrier));
+        ClassicColonyPort.paint(g, this.chrome, this.buildingArt, this.tiny, letter,
+                                this.port, white);
+        if (carrier != null && !carrier.isNaval()) {
+            this.bandUnits.add(carrier);
+            this.bandBounds.add(this.port.frame());
         }
-        if (!any) {
-            // The original captions the empty dock ("Keine Schiffe im Hafen").
-            // FreeCol has no such message, so reuse its own "In Port" caption.
-            g.setFont(font(7f, Font.BOLD));
-            g.setColor(new Color(0x60, 0x70, 0xA0));
-            g.drawString(Messages.message("colonyPanel.inPort"),
-                         PANEL2_X + 4, PANEL_Y + 7);
-        }
+    }
+
+    /** @return The port panel as last painted (tests). */
+    ClassicColonyPort.Model port() {
+        return this.port;
+    }
+
+    /** @return The left panel as last painted (tests). */
+    ClassicColonyBand.Model band() {
+        return this.band;
+    }
+
+    /**
+     * Change the left panel's model before it is drawn (the golden tests:
+     * the clip's amounts where FreeCol's rules make others).
+     *
+     * @param f The change, or null.
+     */
+    void setBandAdjust(java.util.function.UnaryOperator<ClassicColonyBand.Model> f) {
+        this.bandAdjust = f;
+        repaint();
     }
 
     /** Right panel: what the colony nets each turn, good by good. */

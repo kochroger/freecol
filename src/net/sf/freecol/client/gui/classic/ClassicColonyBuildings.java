@@ -1101,10 +1101,35 @@ final class ClassicColonyBuildings {
      */
     static void paintFigureRow(Graphics2D g, ClassicColonyChrome.Assets c, Assets a,
                                List<Figure> row, Unit selected) {
+        paintFigureRow(g, c, a, row, selected, false, false);
+    }
+
+    /**
+     * The band's figure row with the white cursor (M4.5 target 2): where
+     * the cursor stands on the selected one's figure, its frame is the
+     * cursor's, white (ink 15) in the blink's on half and nothing in its off
+     * half, no green under it (V clip 020 #123003-#123095, #6540-#6600,
+     * #2620, #35057, #46350, #47291); elsewhere the green frame.
+     *
+     * @param g The canvas.
+     * @param c The chrome's assets.
+     * @param a The sprites.
+     * @param row The figures.
+     * @param selected The selected unit, or null.
+     * @param cursorOnSelected Whether the cursor stands on the selected one's figure.
+     * @param cursorShown Whether the cursor is in its on half.
+     */
+    static void paintFigureRow(Graphics2D g, ClassicColonyChrome.Assets c, Assets a,
+                               List<Figure> row, Unit selected, boolean cursorOnSelected,
+                               boolean cursorShown) {
         for (Figure f : row) {
             figure(g, a, f, -1);
-            if (selected != null && f.unit == selected) {
+            if (selected == null || f.unit != selected) continue;
+            if (!cursorOnSelected) {
                 frame(g, c, ClassicColonyLayout.figureFrame(f.x, f.w));
+            } else if (cursorShown) {
+                frame(g, c, ClassicColonyLayout.figureCursor(f.x, f.w),
+                      ClassicColonyLayout.INK_WHITE);
             }
         }
     }
@@ -1122,7 +1147,12 @@ final class ClassicColonyBuildings {
 
     /** A 1-px green frame (ink 10). */
     private static void frame(Graphics2D g, ClassicColonyChrome.Assets c, Rectangle r) {
-        g.setColor(new Color(c.rgb(ClassicColonyLayout.INK_GREEN)));
+        frame(g, c, r, ClassicColonyLayout.INK_GREEN);
+    }
+
+    /** A 1-px frame in an ink. */
+    private static void frame(Graphics2D g, ClassicColonyChrome.Assets c, Rectangle r, int ink) {
+        g.setColor(new Color(c.rgb(ink)));
         g.fillRect(r.x, r.y, r.width, 1);
         g.fillRect(r.x, r.y + r.height - 1, r.width, 1);
         g.fillRect(r.x, r.y, 1, r.height);
