@@ -335,11 +335,12 @@ save plays on as it was (R1b re-applies the rules on load, later).
   regardless of the active view and several look up order-button icons from
   their constructors. One unscaled `ImageLibrary` serves both today.
 - **`showColonyPanel` — the classic colony screen.** A click on an owned colony
-  (and the automatic open when one is founded) shows the `ClassicColonyPanel` in a
-  window of its own (the classic UI has no `Canvas` to host panels in). Only one
-  colony screen is open at a time — opening another disposes the previous — and
-  the whole thing is guarded so a failure degrades to a log line. See "Colony
-  screen" below.
+  (and the automatic open when one is founded) shows the `ClassicColonyPanel` in
+  the main window, in place of the map (M4.0, part Q: `ClassicScreenStack`; until
+  part P it was a window of its own). Only one colony screen is up at a time —
+  opening another replaces the previous, as does Europe — and the whole thing is
+  guarded so a failure degrades to a log line. See "Colony screen" below and "The
+  screens in the main window".
 - **Dialog seams (`modalConfirmDialog` / `modalChoiceDialog` / `getNewColonyName`).**
   The classic dialogs are Phase 3, but three controller flows can't proceed
   without an answer, so these are wired now with plain (unstyled) Swing dialogs:
@@ -1192,11 +1193,13 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   When it fires it ends the turn (`endTurn(false)`) only if it is still our
   turn, no box, menu, first scene or classic screen is up, and no unit can
   move; a box keeps it from firing and its close arms it again (a screen
-  without a close hook: the 50-ms poll). A classic screen counts only while
-  the player can be looking at it (`ClassicGUI.classicScreenUp`): not
+  without a close hook: the 50-ms poll). A colony, build-list or Europe screen
+  is hosted in the main window since M4.0 and always holds (also while the
+  window is minimized: decision H4); a report window counts only while the
+  player can be looking at it (`ClassicGUI.classicScreenUp`, `screenUp`): not
   minimized, and not behind the map -- windowed, a click on the map puts it in
-  front of an open screen, and with the main frame active the screens behind
-  it hold nothing (the blink, the hand-over, the turn start). A high-score
+  front of an open report, and with the main frame active a report behind it
+  holds nothing (the blink, the hand-over, the turn start). A high-score
   window an ended game left over the title closes with the next game view
   (`installInGameHud`). FreeCol's `autoEndTurn` is forced off
   for the session (`SESSION_OPTIONS`, restored at teardown): it ends at once.
@@ -1212,8 +1215,8 @@ recorder's sleep plus spin, posted to the EDT with generations -- not a
   "Ort" from before that move, through the pause, the hand-over and the AI
   phase. Another unit's block replaces it; the turn-start wipe forgets it. The
   season line is frozen from our end to the wipe, so the year changes in the
-  wipe's paint. The minimap stays live. Our boxes are separate windows and
-  never cover the panel, so a close leaves it exactly as before the box.
+  wipe's paint. The minimap stays live. A box's close repaints the panel
+  under it as it was before the box.
 - **Turn indicator (W5c).** `ClassicHud.INDICATOR` (315..319, 197..199) is
   filled with the current player's colour while it is not our turn
   (`ClassicHud.indicatorRgb`: the eight tribes, England, France, Spain from
@@ -1862,27 +1865,28 @@ and units at sea or in Europe never count as movable. Now as the original:
   the last turn-start box; our colour lights at the hold, the chain's first
   step 2 frames later, L5): one band per ship in Europe, 542 ms
   apart; Europe opens 542 ms after the last (38 frames, landfall #27878 ->
-  #27916); a box up then (an emigration question): Europe after its close; open
-  already (windowed, behind the map or minimized): refreshed, restored and
-  brought to the front; the band goes when Europe is open; Europe not open
-  after 1 s: counts as closed (logged). While the hold waits for Europe's close
-  every game key is dead, so a Europe that goes behind the map or is minimized
-  while the map's window is active comes up again at the next 50-ms step (not
-  over a box or an open menu, not while the game's window itself is minimized;
-  `ClassicGUI.raisesEurope`), and E brings it up too (`ClassicKeyMap
-  .WHILE_EUROPE_HOLDS`; E raises an open Europe instead of opening a second
-  one) (H REVIEW2 M1). A host call that throws ends the chain and the turn
+  #27916); a box up then (an emigration question): Europe after its close; up
+  already: refreshed and given the keys; the band goes when Europe is up;
+  Europe not up after 1 s: counts as closed (logged). While the hold waits for
+  Europe's close every game key is dead; Europe is hosted in the main window
+  since M4.0 and cannot be behind the map or minimized, so the hold only gives
+  the keys back to it when they went astray while the player is in the window
+  (not over a box, the first scene or a popup of the map;
+  `ClassicGUI.keepsEuropeKeys`, before M4.0 `raisesEurope` brought the window
+  up), and E opens a Europe that was asked for and is not up yet
+  (`ClassicKeyMap.WHILE_EUROPE_HOLDS`; once Europe is up the map's keys are
+  disabled and Europe's own E closes it) (H REVIEW2 M1). A host call that throws ends the chain and the turn
   start goes on (L1). When
   Europe closes: per ship back in the New World the view jumps to it, its band
   (137 frames) one frame later, the hold ends 128 ms after the band (the wipe,
   clip008 #26208/#26209/#26218); the turn start's jump is decided at the wipe,
   so the ship's block comes 300 ms after it with no second jump. Then the wipe.
 - **Europe holds the end** (`ClassicTurnFlow.Host.europeOpen` =
-  `ClassicGUI.europeHoldsTheEnd`): while the Europe window exists (in front,
-  behind the map or minimized) or was asked for less than 1 s ago, the automatic
-  end waits; the player's close is a box's close (`europeClosed`: its "Abb" or
-  Escape, the window's X and Alt+F4 through `WINDOW_CLOSING`; Alt+Enter's
-  re-framing is no close): the end comes 485 ms after it.
+  `ClassicGUI.europeHoldsTheEnd`): while the Europe screen is hosted (also with
+  the window minimized) or was asked for less than 1 s ago, the automatic end
+  waits; the player's close is a box's close (`europeClosed`: its "Abb",
+  Escape or E; Alt+F4 is the main window's quit question since M4.0, decision
+  H3; Alt+Enter is no close): the end comes 485 ms after it.
 - **Europe closes by itself** 357 ms after the last ship in its port sailed
   (`ClassicEuropePanel` Set Sail -> `ClassicGUI.europeShipSailed`,
   `ClassicVoyages.closesAfterSailing`, `EUROPE_CLOSE_MS`; opening_013 #3958 ->
@@ -1922,15 +1926,72 @@ and units at sea or in Europe never count as movable. Now as the original:
   `testEuropeHoldsTheEnd`, `testNoEuropeInsteadOfTheEnd`,
   `testArrivalHoldsTheWipe`, `testOwnColourDuringTheArrivalHold`,
   `ClassicGUISeamTest.testVoyageSeams`,
-  `testEuropeOpensOnlyAtAnArrival`, `testRaisesEurope`,
+  `testEuropeOpensOnlyAtAnArrival`, `testEuropeKeepsItsKeys` (was
+  `testRaisesEurope` until M4.0),
   `testWoodcutsOfTheEventsAndNotices`, `ClassicHudTest.testKeysWhileWaiting`,
   `ClassicScriptTest.testScreenClick`, `PlayerTest.testClassicTips`,
   `LeviRulesTest.testSailingTime`.
 - Scripted runs (`ClassicTestHarness` only; `ClassicGUI.childWindowHook` is
-  null in a game): a sub-window opened while the game's window is minimized
-  opens minimized and without focus, and the script's keys go to an open
-  classic screen when no window has the focus, so a minimized run can open
-  and close Europe without a window on the desktop.
+  null in a game): a sub-window (a report, a stopgap popup) opened while the
+  game's window is minimized opens minimized and without focus, and the
+  script's keys go to the hosted screen (colony, build list, Europe: in the main
+  window since M4.0) or a report window when no window has the focus, so a
+  minimized run can open and close Europe without a window on the desktop.
+
+### The screens in the main window (`ClassicScreenStack`; master plan M4.0, part Q)
+
+As in the original, the colony screen, its build list and the Europe screen replace the map in the one
+320x200 picture (V clip 020 #2260, #24106 -> #24111, #28207 -> #28238; the manual l.83). Until part P
+each was a `JFrame` of its own, and about 15 places kept those windows in order (raising, minimizing,
+the owner of popups, re-framing on Alt+Enter, the focus); most bugs with Europe "behind the map" or
+"every key dead" (H REVIEW2 M1, the fixer of part L, N1 R7) came from that machinery, which is gone
+(spec `prep2/M40-mainwindow.md`, W1-W27).
+
+- **Layers** of `ClassicHudPane`: map and right panel (DEFAULT), strip (PALETTE), its dropdowns (POPUP),
+  the screens `SCREEN_LAYER` = POPUP+4, each screen's own wood boxes `SCREEN_BOX_LAYER` = POPUP+6, the
+  map's boxes `BOX_LAYER` = POPUP+10 (above the screens: no box can hide under a screen), the arrow
+  (DRAG). While a screen is up the map, the panel, the strip and its dropdowns are hidden (not
+  removed: they keep their state; the blink holds as "hidden"), and only the top screen of the stack
+  shows. Every screen covers the pane and letterboxes itself with the HUD's formula, so its pixels lie
+  on the HUD's grid and the recorder's.
+- **Stack rules.** One colony or one Europe at a time: the newer replaces the older (decision H5; the
+  new one goes on first, the older goes from under it, so the map never shows in between; a box still
+  up on the older answers "dismissed"). The build list only over its colony; a colony's pop takes its
+  build list with it; the build list's pop shows the colony again. A pop of the top shows the next one
+  down or the map in the same paint (`paintImmediately`, E1: 1-2 frames). The game view's teardown pops
+  everything.
+- **Keys.** The map's and the strip's window-wide keys are skipped while they are hidden. The HUD key
+  table (`ClassicKeyMap`) is **disabled**, not merely inert, while a screen is hosted: Swing gives a
+  window-wide key to the newest binding first and stops at the first enabled action, and after
+  Alt+Enter the HUD pane binds after the screen, so an early-returning HUD action would swallow
+  Europe's A, U, E and R (and the colony's L and U to come). The screens keep their own
+  `WHEN_IN_FOCUSED_WINDOW` bindings, so they work also without the focus. Tab is the screens' own
+  (no focus traversal).
+- **Focus** comes back through one method, `ClassicGUI.focusHome`: a box of the map that is up, else a
+  box over the hosted screen, else that screen, else the map (or the title). Used by every box's close,
+  the first scene's, each push and pop, the game view's build, Europe's arrival and hold.
+- **Boxes over a screen** are wood boxes on the screen's own layer: `putBox` over a hosted screen goes
+  there (decision H2: V clip008 #4032 -> #4068, @TUTORIAL4 on the colony picture; FreeCol's notices
+  while a colony or Europe is up), the grey stopgap only without the pack. Woodcuts and the congress
+  hall still refuse over a screen ("no game canvas").
+- **Turn.** A hosted screen holds the turn flow and the blink, also while the window is minimized
+  (decision H4). Europe's close after its last ship sailed (J1, 357 ms) is identified by its panel; the
+  pop shows the map before `europeGone`.
+- **Alt+F4** is always the main window's quit question (decision H3; Escape leaves a screen). Popups
+  over a screen are owned by the main frame; only the report screens are still windows (decision H7).
+- **Recorder.** The screens are children of the recorded HUD pane, so colony and Europe are filmed
+  frame by frame; the map's index hint is off while one is up (`ClassicMapViewer.indexHint`). Events
+  `screen-push <kind> <name>`, `screen-pop <kind> <why>` (`why`: player, auto, replaced, close,
+  teardown), `screen-replace <old> -> <new>`, `screen-refused`, `colony-open`; `europe-open`,
+  `europe-close` and `europe-raise` (now "the keys back to Europe") stay; the harness's state line
+  names the hosted screen (`screen=europe:Amsterdam`) and counts other frames (`subframes=`).
+- **The original arrow** is drawn over colony and Europe too (it was the Windows pointer in their
+  windows). Not yet as the original: the original hides it from the press to the drop of a drag (M4.0
+  target 2 / M5.0 item 4, later).
+- Tests: `ClassicScreenStackTest` (T1-T8: the stack, the disabled keys, the replacement with a box
+  dismissed, the map's box over a screen, the keys' home, J1 on a fake clock, the index hint, a source
+  census), `ClassicTurnFlowTest.testAHostedScreenHoldsTheTurn`, `ClassicGUISeamTest
+  .testEuropeKeepsItsKeys`.
 
 ### Advisor boxes (`ClassicAdvisorBox`, `ClassicAdvisorLayer`; build spec W7)
 
@@ -3389,7 +3450,8 @@ original's VGA size) then up-scaled by the largest integer factor that fits the
 window, nearest-neighbour — so the layout constants read straight off the
 screenshots and the classic pixels stay crisp. Reached by clicking an owned
 colony on the map (`ClassicMapViewer.onClick → gui.showColonyPanel`) or founding
-one with **B**; hosted in its own `JFrame` (no `Canvas`). Layout, top to bottom:
+one with **B**; hosted in the main window in place of the map (M4.0; until part P its own
+`JFrame`). Layout, top to bottom:
 
 - **Title bar** — colony name, turn and gold, gold-on-black.
 - **Buildings pane** (left) — the colony's buildings on the sandy ground
@@ -3445,9 +3507,10 @@ Until this slice, `GUI.showBuildQueuePanel(Colony)` returned `null` unconditiona
 no-op): a colony could accumulate hammers/tools but the player had no way to ever tell it what to
 build — not "rough," a genuine dead end for actually playing a game to a finish.
 
-**The seam.** `ClassicGUI.showBuildQueuePanel` opens `ClassicBuildQueuePanel` in a window of its own
-(the same one-window-at-a-time, guarded-`SwingUtilities.invokeLater` convention as every other classic
-screen), positioned relative to the colony screen when one is open. **Reached by clicking the
+**The seam.** `ClassicGUI.showBuildQueuePanel` hosts `ClassicBuildQueuePanel` over its colony screen in the
+main window (M4.0: only over a hosted colony; the colony is hidden under it and shows again with the
+keys at its close; guarded `SwingUtilities.invokeLater` as every other classic screen; until part P a
+window of its own placed over the colony window). **Reached by clicking the
 construction indicator** — a new dark, gold-bordered band at the top of the buildings pane (above the
 first building row, which shifted down `CONSTR_H` to make room) showing the colony's current build
 target's icon, name and the goods still needed, or a "nothing being built" caption — mirroring
@@ -3609,7 +3672,7 @@ puts a colonist to work there (our click stand-in for the original's drag,
 The original's home-port dock (design ref: the expert's `opening_009`–`013`).
 Built exactly like the colony screen — painted into a virtual **320×200** canvas
 and up-scaled by the largest integer factor that fits, nearest-neighbour, hosted
-in its own `JFrame` (no `Canvas`). The original **`EUROPE.PIK`** harbour picture
+in the main window in place of the map (M4.0; until part P its own `JFrame`). The original **`EUROPE.PIK`** harbour picture
 (sky, sea, the wooden piers, the row of European town houses) is blitted as the
 backdrop (loaded straight by its pack key `image.classic_original.pik.EUROPE.PIK`,
 with a plain sea/sky fallback when the pack is absent); the live figures are drawn

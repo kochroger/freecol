@@ -74,8 +74,11 @@ import javax.swing.JComponent;
  *       line per event, {@code System.nanoTime} stamps, ms and frame on the
  *       timeline's clock (the detail is the rest of the line);</li>
  *   <li>{@code summary.txt}, written when the recorder closes.</li>
- *   <li>{@code colony-N.png} and the like: stills of windows outside the
- *       HUD copy ({@link #still}), true colour.</li>
+ *   <li>{@code colony-N.png}: stills of the colony screen ({@link #still}),
+ *       true colour, from the time it was a window of its own; since M4.0
+ *       the colony and the Europe screen are in the HUD copy (below), so
+ *       the stills only repeat frames (kept until the M4 overlay tests no
+ *       longer read them).</li>
  * </ul>
  *
  * <p><b>Events</b> ({@link #event}; a hook costs one volatile read while
@@ -122,7 +125,12 @@ import javax.swing.JComponent;
  * ({@code ClassicMapViewer.animateMove}, which pushes its frames with
  * {@code paintImmediately}) is recorded frame by frame.  The sampler thread
  * reads the copy at the centre of each s x s block (s = the HUD's integer
- * scale) on its own absolute clock ({@link #waitUntil}).  Not in the copy:
+ * scale) on its own absolute clock ({@link #waitUntil}).  In the copy since
+ * M4.0: the hosted colony, build-list and Europe screens and their boxes
+ * (children of the HUD pane, {@link ClassicScreenStack}; events
+ * {@code screen-push <kind> <name>}, {@code screen-pop <kind> <why>},
+ * {@code screen-replace <old> -> <new>}, {@code colony-open});
+ * the map's index hint is off meanwhile.  Not in the copy:
  * the first scene (the frame's glass pane) and the Swing popups
  * ({@link ClassicDialog} and the other JDialogs), whose opening and closing
  * are events instead.  {@code summary.txt} gives the paint cost (the
@@ -593,10 +601,11 @@ public final class ClassicFrameRecorder {
     }
 
     /**
-     * Save a picture of a window the HUD copy does not hold (the colony
-     * screen has a window of its own) as {@code <name>.png} in the record
-     * directory, written off the calling thread, and log a {@code still}
-     * event.  A no-op while recording is off.
+     * Save a picture of a screen as a still (the colony screen, from the
+     * time it had a window of its own; since M4.0 it is in the HUD copy
+     * too) as {@code <name>.png} in the record directory, written off the
+     * calling thread, and log a {@code still} event.  A no-op while
+     * recording is off.
      *
      * @param name The file name, without {@code .png}.
      * @param img The picture; it must not change afterwards.

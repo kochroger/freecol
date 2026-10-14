@@ -3247,13 +3247,19 @@ final class ClassicMapViewer extends JPanel {
      * The recorder's index hint of the view (design 10 §9.2.4).
      *
      * @param out 240x192 bytes.
-     * @return False without a layer (out untouched).
+     * @return False without a layer (out untouched), under a woodcut and
+     *     while a classic screen is hosted.
      */
     boolean indexHint(byte[] out) {
         final ClassicTerrainLayer l = this.layer;
         if (l == null) return false;
         // A woodcut covers the map: no pixel of it is the terrain (W9).
-        if (this.gui != null && this.gui.woodcutCovers()) return false;
+        // So does a hosted colony or Europe screen (M4.0): the hidden map's
+        // last hint would give a screen pixel the colour of a cycling
+        // duplicate (56/121, 59/120) the water's index.
+        if (this.gui != null && (this.gui.woodcutCovers() || this.gui.screenHosted())) {
+            return false;
+        }
         l.indexHint(out);
         return true;
     }

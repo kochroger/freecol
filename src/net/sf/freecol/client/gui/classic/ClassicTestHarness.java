@@ -56,9 +56,11 @@ import net.sf.freecol.common.model.Unit;
  * {@value ClassicScriptDriver#SCRIPT_PROPERTY} is set.
  *
  * <p><b>Keys</b> are dispatched on the EDT to the component a real key
- * would reach -- the focus owner, else (window not focused, which an
- * unattended run cannot rule out) the open modal dialog's or the frame's
- * most recent focus owner, else the map -- with
+ * would reach -- a box that is up, the focus owner, else (window not
+ * focused, which an unattended run cannot rule out) the open modal
+ * dialog's focus owner, the hosted colony, build-list or Europe screen
+ * (M4.0), a report window's or the frame's most recent focus owner, else
+ * the map -- with
  * {@code Component.dispatchEvent}, so they pass the same
  * {@code KeyboardFocusManager} path as a real press: the frame's
  * dispatchers (Alt+Enter, the menu strip) first, then the focused
@@ -102,8 +104,10 @@ final class ClassicTestHarness {
         if (rec != null) rec.setProbe(h::probe);
         final String script = System.getProperty(ClassicScriptDriver.SCRIPT_PROPERTY);
         if (script != null && !script.isBlank()) {
-            // A run minimized without activation keeps its sub-windows (the
-            // Europe screen, a stopgap popup) off the desktop too.
+            // A run minimized without activation keeps its sub-windows (a
+            // report screen, a stopgap popup) off the desktop too; the
+            // colony, build-list and Europe screens are in the main window
+            // since M4.0.
             ClassicGUI.childWindowHook = w -> {
                 final JFrame main = gui.currentFrame();
                 if (main == null || w == main
@@ -161,11 +165,21 @@ final class ClassicTestHarness {
         final ClassicAdvisorLayer boxes = this.gui.boxLayer();
         final String box = (boxes == null) ? null : boxes.probe();
         if (box != null) sb.append(" box=").append(box);
+        // The hosted screen on top (M4.0), and the frames besides the main
+        // window (a report screen): no colony, build-list or Europe window.
+        final ClassicScreenStack screens = this.gui.screens();
+        final String screen = (screens == null) ? null : screens.probe();
+        if (screen != null) sb.append(" screen=").append(screen.replace(' ', '_'));
+        final JFrame main = this.gui.currentFrame();
+        int frames = 0;
         for (Window w : Window.getWindows()) {
             if (w instanceof Dialog && w.isShowing()) {
                 sb.append(" [").append(((Dialog)w).getTitle()).append(']');
+            } else if (w instanceof java.awt.Frame && w != main && w.isShowing()) {
+                frames++;
             }
         }
+        if (frames > 0) sb.append(" subframes=").append(frames);
         return sb.toString();
     }
 
@@ -222,7 +236,7 @@ final class ClassicTestHarness {
         // So do the wood boxes over the Europe screen (B1).
         final ClassicAdvisorLayer europe = this.gui.europeBoxLayer();
         if (europe != null && europe.isBusy() && europe.isShowing()) return europe;
-        // And the unit boxes over the colony screen (clip 019).
+        // And the boxes over the colony screen (clip 019).
         final ClassicAdvisorLayer colony = this.gui.colonyBoxLayer();
         if (colony != null && colony.isBusy() && colony.isShowing()) return colony;
         // So does the first scene: it holds the focus in a real game, but
@@ -238,7 +252,12 @@ final class ClassicTestHarness {
             final Component c = d.getMostRecentFocusOwner();
             return (c != null) ? c : d;
         }
-        // A classic screen (the Europe screen, W13) of a minimized run.
+        // The hosted screen on top (the colony, its build list, Europe;
+        // M4.0) of a minimized run: a press dispatched to it passes its own
+        // window-wide keys (the map's are hidden, the HUD's disabled).
+        final Component hosted = this.gui.hostedScreen();
+        if (hosted != null && hosted.isShowing()) return hosted;
+        // A report screen window of a minimized run.
         final Window s = this.gui.openScreen();
         if (s != null) {
             final Component c = s.getMostRecentFocusOwner();
@@ -302,9 +321,12 @@ final class ClassicTestHarness {
             return onEdt(() -> {
                     final ClassicAdvisorLayer l = gui.boxLayer();
                     if (l != null && l.isShowingBox()) return l.probe();
-                    // A unit's box over the colony screen (clip 019).
+                    // A box over the colony screen (clip 019) or over
+                    // Europe (B1), on the hosted screen's layer (M4.0).
                     final ClassicAdvisorLayer c = gui.colonyBoxLayer();
-                    return (c == null || !c.isShowingBox()) ? null : c.probe();
+                    if (c != null && c.isShowingBox()) return c.probe();
+                    final ClassicAdvisorLayer e = gui.europeBoxLayer();
+                    return (e == null || !e.isShowingBox()) ? null : e.probe();
                 }, null);
         }
 
@@ -412,9 +434,8 @@ final class ClassicTestHarness {
             final boolean[] found = { false };
             try {
                 SwingUtilities.invokeAndWait(() -> {
-                        final Window s = gui.openScreen();
-                        final java.awt.Container cp = (s instanceof JFrame)
-                            ? ((JFrame) s).getContentPane() : null;
+                        // The hosted screen on top (M4.0).
+                        final java.awt.Container cp = gui.hostedScreen();
                         if (cp instanceof ClassicColonyPanel) {
                             // The colony screen (clip 019: a unit of its row).
                             found[0] = true;
@@ -440,9 +461,7 @@ final class ClassicTestHarness {
             // The click itself is queued, as a real one: it may ask a box
             // (a modal loop) that the script answers.
             SwingUtilities.invokeLater(() -> {
-                    final Window s = gui.openScreen();
-                    final java.awt.Container cp = (s instanceof JFrame)
-                        ? ((JFrame) s).getContentPane() : null;
+                    final java.awt.Container cp = gui.hostedScreen();
                     if (cp instanceof ClassicColonyPanel) {
                         ((ClassicColonyPanel)cp).clickAt(x, y);
                     } else if (cp instanceof ClassicEuropePanel) {

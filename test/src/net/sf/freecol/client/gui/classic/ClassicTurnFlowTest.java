@@ -3145,9 +3145,11 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
     }
 
     /**
-     * A classic screen counts only while the player can be looking at it
-     * ({@link ClassicGUI#screenUp}): behind the active map or minimized it
-     * holds nothing.  A hand-over held by a screen in front comes up as
+     * A report window counts only while the player can be looking at it
+     * ({@link ClassicGUI#screenUp}; since M4.0 the colony and Europe screens
+     * are hosted in the main window and always hold, see
+     * {@link #testAHostedScreenHoldsTheTurn}): behind the active map or
+     * minimized it holds nothing.  A hand-over held by a screen in front comes up as
      * soon as the player clicks the map, with no close.
      */
     public void testScreenBehindTheMap() {
@@ -3179,6 +3181,43 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(1, r.count("wipe"));
         r.advanceMs(300);
         assertEquals(2, r.count("activate " + b.getId()));
+    }
+
+    /**
+     * Decision H4 (M4.0): a classic screen hosted in the main window (the
+     * colony, its build list, Europe) holds the turn and the blink whatever
+     * the window does, minimized included: it is what the window shows
+     * instead of the map.  The rule above ({@link ClassicGUI#screenUp})
+     * stays the report windows' (decision H7); the GUI has no main window
+     * here at all, as a minimized one is not asked either.
+     */
+    public void testAHostedScreenHoldsTheTurn() throws Exception {
+        final ClassicGUI gui = new ClassicGUI(null);
+        final javax.swing.JLayeredPane pane = new javax.swing.JLayeredPane();
+        final javax.swing.JPanel map = new javax.swing.JPanel();
+        pane.add(map);
+        final javax.swing.JPanel colony = new javax.swing.JPanel();
+        final ClassicScreenStack stack = new ClassicScreenStack(pane, List.of(map),
+                                                                null, null);
+        final String[] seen = new String[4];
+        final boolean[] blocked = new boolean[3];
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+                gui.installScreens(stack);
+                blocked[0] = gui.turnBlocked();
+                seen[0] = gui.blinkHoldReason();
+                stack.push(ClassicScreenStack.Kind.COLONY, colony, null, "Jamestown", null);
+                blocked[1] = gui.turnBlocked();
+                seen[1] = gui.blinkHoldReason();
+                stack.pop(colony, "test");
+                blocked[2] = gui.turnBlocked();
+                seen[2] = gui.blinkHoldReason();
+            });
+        assertFalse(blocked[0]);
+        assertEquals("ai", seen[0]);            // no client: not our turn
+        assertTrue("held by the hosted screen", blocked[1]);
+        assertEquals("screen", seen[1]);
+        assertFalse(blocked[2]);
+        assertEquals("ai", seen[2]);
     }
 
     /**

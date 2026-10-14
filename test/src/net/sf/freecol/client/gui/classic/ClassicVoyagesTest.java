@@ -401,8 +401,9 @@ public class ClassicVoyagesTest extends FreeColTestCase {
         boolean opens = true;
         long now = 0L;
         /**
-         * The Europe screen is open but behind the map or minimized while
-         * the player is at the map (the GUI's {@code raisesEurope}).
+         * The Europe screen is open but has lost the keys while the player
+         * is in the main window (the GUI's {@code keepsEuropeKeys}; before
+         * M4.0 a Europe window behind the map or minimized).
          */
         boolean hidden = false;
         /** The host calls that throw (H REVIEW2 L1): their prefixes. */

@@ -65,9 +65,11 @@ import javax.swing.SwingUtilities;
  * gives {@link #cursorOwner} (the HUD pane, whose children inherit its
  * cursor; or the overlay itself) a blank cursor; in the letterbox, outside
  * the window, while another window has the mouse (a modal classic dialog,
- * the colony or report windows) or after the window lost activation it draws
- * nothing and gives the system arrow back, so there is never no pointer and
- * never two.
+ * a report window) or after the window lost activation it draws nothing and
+ * gives the system arrow back, so there is never no pointer and never two.
+ * The colony, build-list and Europe screens are in the main window since
+ * M4.0 ({@link ClassicScreenStack}), under this layer: the original arrow
+ * is drawn over them too, as in the original (V clip 020, 32 drags).
  *
  * <p>{@link #place} puts the arrow somewhere until the mouse first moves:
  * the first scene uses it for the original's (160,100), where the game

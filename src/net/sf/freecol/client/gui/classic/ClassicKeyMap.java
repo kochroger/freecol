@@ -63,7 +63,10 @@ import net.sf.freecol.client.gui.GUI;
  * ({@link ClassicMapViewer#BOUND_KEYS}): with two such bindings for one key
  * Swing's {@code KeyboardManager} would pick by registration order, while
  * the map's own keys (moves, end of turn, wait, build colony) must keep
- * winning as they did over the old menu bar's accelerators.
+ * winning as they did over the old menu bar's accelerators.  While a classic
+ * screen is hosted in the same window (the colony, its build list, Europe;
+ * M4.0) every action of the table is disabled, so the screen's own keys of
+ * the same letters get them (see the last {@code install}).
  *
  * <p>A binding with several actions fires the first one that is enabled
  * (P: clear the forest, else plough).  Actions whose classic screen does not
@@ -202,10 +205,11 @@ final class ClassicKeyMap {
 
     /**
      * The actions whose key also fires while the arrival chain holds our
-     * turn start for the Europe screen (H REVIEW2 M1): E brings a Europe
-     * screen behind the map or minimized up again
-     * ({@code ClassicGUI.showEuropePanel}); every other game key stays
-     * inert until Europe is closed.
+     * turn start for the Europe screen (H REVIEW2 M1): E opens a Europe
+     * screen that was asked for and is not up yet
+     * ({@code ClassicGUI.showEuropePanel}; once it is hosted, M4.0, the
+     * whole table is disabled and Europe's own E closes it); every other
+     * game key stays inert until Europe is closed.
      */
     static final Set<String> WHILE_EUROPE_HOLDS = Set.of("europeAction");
 
@@ -354,6 +358,39 @@ final class ClassicKeyMap {
                                    BooleanSupplier waiting,
                                    Consumer<Binding> refused,
                                    BooleanSupplier europeHolds) {
+        return install(host, mapViewer, lookup, mode, context, blocked, waiting,
+                       refused, europeHolds, () -> false);
+    }
+
+    /**
+     * {@link #install(JComponent, JComponent, Function, Supplier, Supplier,
+     * BooleanSupplier, BooleanSupplier, Consumer, BooleanSupplier)}, and
+     * while {@code screenUp} every key of the table is <b>disabled</b>, not
+     * just inert: a hosted classic screen (the colony, its build list,
+     * Europe; master plan M4.0, {@link ClassicScreenStack}) lies in the same
+     * window as the map and binds some of the same keys window-wide
+     * (Europe's A, U, E and R; the colony's L and U to come, manual l.25).
+     * Swing gives a window-wide key to the newest binding first and stops
+     * at the first action that takes it, and an action takes every key
+     * while it is enabled, even when its body returns at once
+     * ({@code SwingUtilities.notifyAction}); Alt+Enter shows the window
+     * again, and the HUD pane then binds its keys after the screen's.  So a
+     * map key that only returned early would swallow the screen's after the
+     * first Alt+Enter.  A disabled one is passed on to the screen (spec
+     * §4.3, the prep's probe).
+     *
+     * @param screenUp Whether a classic screen is hosted now.
+     * @return The keystrokes bound.
+     */
+    static List<KeyStroke> install(JComponent host, JComponent mapViewer,
+                                   Function<String, Action> lookup,
+                                   Supplier<GUI.ViewMode> mode,
+                                   Supplier<ClassicMenuModel.Context> context,
+                                   BooleanSupplier blocked,
+                                   BooleanSupplier waiting,
+                                   Consumer<Binding> refused,
+                                   BooleanSupplier europeHolds,
+                                   BooleanSupplier screenUp) {
         final Set<KeyStroke> skip = mapViewerKeys();
         if (mapViewer != null) {
             final KeyStroke[] ks = mapViewer.getInputMap(
@@ -368,8 +405,18 @@ final class ClassicKeyMap {
             final String name = "classicKey." + b.key;
             im.put(b.key, name);
             am.put(name, new AbstractAction() {
+                    /**
+                     * Disabled while a classic screen is hosted, so the
+                     * key goes on to the screen (M4.0, see above).
+                     */
+                    @Override
+                    public boolean isEnabled() {
+                        return !screenUp.getAsBoolean() && super.isEnabled();
+                    }
+
                     @Override
                     public void actionPerformed(ActionEvent e) {
+                        if (screenUp.getAsBoolean()) return;
                         if (blocked.getAsBoolean()) return;
                         if (!waitAllows(b, waiting.getAsBoolean(),
                                         europeHolds.getAsBoolean())) {

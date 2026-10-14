@@ -494,9 +494,10 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * While the acceptance recorder runs: the canvas as a still now (this
-     * window is not in the HUD copy the recorder samples), after a unit's
-     * box: its flag as the answer left it.
+     * While the acceptance recorder runs: the canvas as a still now (from
+     * the time this screen was a window outside the HUD copy; since M4.0
+     * it is hosted in the HUD and filmed too), after a unit's box: its
+     * flag as the answer left it.
      *
      * @param why What it shows, for the event.
      */
@@ -654,8 +655,8 @@ final class ClassicColonyPanel extends JPanel {
     /**
      * While the acceptance recorder runs: log which sprite frame each
      * building got and where ({@code colony-buildings}), and save the
-     * canvas as a still, whenever that changes.  This window is not in the
-     * HUD copy the recorder samples.
+     * canvas as a still, whenever that changes (since M4.0 the screen is
+     * hosted in the HUD, so the recorder's frames hold it too).
      */
     private void recordBuildings() {
         if (!ClassicFrameRecorder.on()) return;

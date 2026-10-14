@@ -4348,48 +4348,46 @@ public class ClassicGUISeamTest extends FreeColTestCase {
     }
 
     /**
-     * H REVIEW2 M1: while the arrival chain waits for Europe's close, an
-     * open Europe comes up again whenever the player is at the map (the
-     * map's window active: Europe behind it or minimized); not when another
-     * window (Europe itself, another program) is active, not over a box or
-     * an open menu of the map, never without a Europe screen.
+     * H REVIEW2 M1 after M4.0: while the arrival chain waits for Europe's
+     * close, Europe cannot be behind the map or minimized any more (it is
+     * hosted in the main window), so the hold only gives the keys back to
+     * it when they went astray while the player is in the window; not over
+     * a box, the first scene or a popup of the map, never without Europe.
+     * The window machinery of parts H to N is gone: no raise rule, no
+     * activation hook (the fixer of part L's raise on activation), no
+     * window operation in the hold.
      */
-    public void testRaisesEurope() {
-        assertTrue(ClassicGUI.raisesEurope(true, true, false, false));
-        assertFalse("Europe or another program active",
-                    ClassicGUI.raisesEurope(true, false, false, false));
-        assertFalse("a box first", ClassicGUI.raisesEurope(true, true, true, false));
-        assertFalse("a menu first", ClassicGUI.raisesEurope(true, true, false, true));
-        assertFalse("no Europe", ClassicGUI.raisesEurope(false, true, false, false));
-        // The fixer of part L: a box over Europe itself (@HOWMUCH4/5,
-        // @TUTORIAL18) does not hold Europe behind the map; the map's
-        // window activated while it is up or due brings Europe and the box
-        // in front (else every map key and click was dead behind it).
-        assertTrue(ClassicGUI.raisesEuropeOnActivation(true, true));
-        assertFalse("no box over Europe",
-                    ClassicGUI.raisesEuropeOnActivation(true, false));
-        assertFalse("no Europe", ClassicGUI.raisesEuropeOnActivation(false, true));
-        final String src;
-        try {
-            src = new String(Files.readAllBytes(new File(
-                "src/net/sf/freecol/client/gui/classic/ClassicGUI.java").toPath()),
-                StandardCharsets.UTF_8).replaceAll("\\s+", " ");
-        } catch (java.io.IOException e) {
-            throw new RuntimeException(e);
+    public void testEuropeKeepsItsKeys() throws Exception {
+        assertTrue(ClassicGUI.keepsEuropeKeys(true, true, false, false));
+        assertFalse("another program active",
+                    ClassicGUI.keepsEuropeKeys(true, false, false, false));
+        assertFalse("a box of the map first",
+                    ClassicGUI.keepsEuropeKeys(true, true, true, false));
+        assertFalse("Europe has them", ClassicGUI.keepsEuropeKeys(true, true, false, true));
+        assertFalse("no Europe", ClassicGUI.keepsEuropeKeys(false, true, false, false));
+        for (java.lang.reflect.Method m : ClassicGUI.class.getDeclaredMethods()) {
+            for (String gone : new String[] { "raisesEurope", "raisesEuropeOnActivation",
+                                              "raiseEurope", "mapActivated" }) {
+                assertFalse(gone, m.getName().equals(gone));
+            }
         }
+        final String src = new String(Files.readAllBytes(new File(
+            "src/net/sf/freecol/client/gui/classic/ClassicGUI.java").toPath()),
+            StandardCharsets.UTF_8).replaceAll("\\s+", " ");
+        assertFalse(src.contains("windowActivated"));
         final int keep = src.indexOf("public void keepEuropeUp()");
         assertTrue(keep > 0);
-        final String body = src.substring(keep, src.indexOf("raiseEurope(\"hold\")", keep));
+        final String body = src.substring(keep, src.indexOf("focusEurope(\"hold\")", keep));
         assertTrue(body, body.contains("mapBoxBusy()"));
-        assertFalse(body, body.contains("boxUp()"));
-        // Both main-window listeners (the start-up window's and our own).
-        final String hook = "public void windowActivated(WindowEvent e) { mapActivated(); }";
-        final int first = src.indexOf(hook);
-        assertTrue(first > 0 && src.indexOf(hook, first + 1) > first);
-        // A raise keeps the keys on the box over Europe while one is up.
-        final int raise = src.indexOf("private boolean raiseEurope(String why)");
-        assertTrue(raise > 0);
-        final String rb = src.substring(raise, src.indexOf("return true; }", raise));
-        assertTrue(rb, rb.contains("(europeBoxBusy()) ? this.europeBoxes : this.europePanel"));
+        assertTrue(body, body.contains("europeHosted()"));
+        for (String windowOp : new String[] { "toFront", "setExtendedState", "setVisible" }) {
+            assertFalse(windowOp, body.contains(windowOp));
+        }
+        // The keys go home: a box of the map, a box over Europe, Europe.
+        final int focus = src.indexOf("private boolean focusEurope(String why)");
+        assertTrue(focus > 0);
+        final String fb = src.substring(focus, src.indexOf("return true; }", focus));
+        assertTrue(fb, fb.contains("focusHome();"));
+        assertFalse(fb, fb.contains("toFront"));
     }
 }

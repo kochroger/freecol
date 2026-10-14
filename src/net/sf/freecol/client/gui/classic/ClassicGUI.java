@@ -153,15 +153,26 @@ public class ClassicGUI extends GUI {
     /** Whether {@link #closeRequested} is asking "really quit?" right now. */
     private boolean closeAsked = false;
 
-    /** The colony screen's window, while one is open (see {@link #showColonyPanel}). */
-    private JFrame colonyFrame;
+    /**
+     * The classic screens hosted in the main window (master plan M4.0,
+     * {@link ClassicScreenStack}): the colony screen, its build list and
+     * Europe replace the map in the HUD pane, as in the original.  Created
+     * with the HUD ({@link #installInGameHud}), emptied and dropped with it
+     * ({@link #teardownInGame}); null without a game view (a test puts its
+     * own in, {@link #installScreens}).  EDT only.
+     */
+    private ClassicScreenStack screens;
 
-    /** The colony panel inside {@link #colonyFrame}, kept so it can be repainted. */
+    /**
+     * The colony screen (see {@link #showColonyPanel}) while one is hosted
+     * or about to be, kept so it can be repainted; null without one.
+     */
     private ClassicColonyPanel colonyPanel;
 
     /**
-     * The wood boxes over the colony screen ({@link #colonyFrame}'s glass
-     * pane: a unit's @COLONYUNIT, clip 019), or null.
+     * The wood boxes over the colony screen (its own layer on the screen
+     * stack: a unit's @COLONYUNIT, clip 019, and every box asked while the
+     * colony is up), or null.
      */
     private ClassicAdvisorLayer colonyBoxes;
 
@@ -202,8 +213,11 @@ public class ClassicGUI extends GUI {
             : this.imageLibrary.getScaledUnitImage(u);
     }
 
-    /** The build-queue screen's window, while one is open (see {@link #showBuildQueuePanel}). */
-    private JFrame buildQueueFrame;
+    /**
+     * The build-queue screen, hosted over its colony screen while one is
+     * open (see {@link #showBuildQueuePanel}), else null.
+     */
+    private ClassicBuildQueuePanel buildQueuePanel;
 
     /** The in-game canvas (strip, map, panel), while a game is shown. */
     private ClassicHudPane hudPane;
@@ -211,16 +225,17 @@ public class ClassicGUI extends GUI {
     /** The painted menu strip of {@link #hudPane}, while a game is shown. */
     private ClassicMenuStrip menuStrip;
 
-    /** The Europe screen's window, while one is open (see {@link #showEuropePanel}). */
-    private JFrame europeFrame;
-
-    /** The Europe panel inside {@link #europeFrame}, kept so it can be repainted. */
+    /**
+     * The Europe screen (see {@link #showEuropePanel}) while it is hosted,
+     * kept so it can be repainted; null without one.
+     */
     private ClassicEuropePanel europePanel;
 
     /**
-     * The wood boxes over the Europe screen ({@link #europeFrame}'s glass
-     * pane, gap list B1: {@code @HOWMUCH4}, {@code @HOWMUCH5},
-     * {@code @TUTORIAL18}), or null.
+     * The wood boxes over the Europe screen (its own layer on the screen
+     * stack, gap list B1: {@code @HOWMUCH4}, {@code @HOWMUCH5},
+     * {@code @TUTORIAL18}, and every box asked while Europe is up), or
+     * null.
      */
     private ClassicAdvisorLayer europeBoxes;
 
@@ -239,7 +254,7 @@ public class ClassicGUI extends GUI {
     /** Europe's close after its last ship sailed ({@link #europeShipSailed}). */
     private ClassicOneShot europeCloseTimer = null;
 
-    /** When Europe was last brought up ({@link #raiseEurope}), clock ns. */
+    /** When Europe last got the keys back ({@link #focusEurope}), clock ns. */
     private long europeRaisedAt = 0L;
 
     /**
@@ -481,15 +496,12 @@ public class ClassicGUI extends GUI {
         SwingUtilities.invokeLater(() -> {
             this.frameState = new ClassicFrame(desiredWindowSize);
             this.frame = this.frameState.frame;
+            // No activation hook: the colony and Europe screens are in this
+            // window (M4.0), nothing can be behind the map any more.
             this.frame.addWindowListener(new WindowAdapter() {
                 @Override
                 public void windowClosing(WindowEvent e) {
                     closeRequested();
-                }
-
-                @Override
-                public void windowActivated(WindowEvent e) {
-                    mapActivated();
                 }
             });
             // The original title picture (OPENMENU.PIK, 1:1 in a letterboxed
@@ -555,11 +567,6 @@ public class ClassicGUI extends GUI {
             public void windowClosing(WindowEvent e) {
                 closeRequested();
             }
-
-            @Override
-            public void windowActivated(WindowEvent e) {
-                mapActivated();
-            }
         });
         installFrameKeys();
         if (early.queued != null) {
@@ -599,16 +606,19 @@ public class ClassicGUI extends GUI {
      * Alt+Enter: switch between borderless full screen and a decorated
      * window, as in DOSBox.  EDT only.
      *
-     * <p>The main window switches first ({@link #applyFrameMode}); then every
-     * classic sub-window that is still open is re-framed for the new mode
-     * through the same {@link #prepareChildWindow} that framed it, in the
-     * order they stack (the build queue sits over its colony screen); finally
-     * the window that was active comes back to the front and keyboard focus
-     * returns to the component that had it (the map, the title menu, a
-     * colony screen ...), because a dispose drops the focus.  A sub-window
-     * that the player closed through its own close box is disposed but
-     * still referenced; {@code isDisplayable()} tells it apart, and it is
-     * left alone rather than brought back to life.
+     * <p>The main window switches first ({@link #applyFrameMode}), with the
+     * colony, build-list and Europe screens in it (M4.0, nothing to
+     * re-frame); then the report window, if one is open, is re-framed for
+     * the new mode through the same {@link #prepareChildWindow} that framed
+     * it; finally the window that was active comes back to the front and
+     * keyboard focus returns to the component that had it (the map, the
+     * title menu, a hosted screen or its box ...), because a dispose drops
+     * the focus.  A report window that the player closed through its own
+     * close box is disposed but still referenced; {@code isDisplayable()}
+     * tells it apart, and it is left alone rather than brought back to
+     * life.  The HUD's keys are bound again after the hosted screen's then
+     * ({@code JComponent.addNotify}), which is why they are disabled, not
+     * merely inert, while a screen is up ({@link ClassicKeyMap}).
      *
      * <p><b>Refused while a modal dialog is up.</b>  Disposing a window
      * disposes the windows it owns, and every {@link ClassicDialog} (and the
@@ -629,11 +639,7 @@ public class ClassicGUI extends GUI {
         final Component focus = (active == null) ? null
             : active.getMostRecentFocusOwner();
         applyFrameMode(!isFullScreen());
-        reframeChild(this.colonyFrame, this.frame);
-        reframeChild(this.europeFrame, this.frame);
         reframeChild(this.reportFrame, this.frame);
-        reframeChild(this.buildQueueFrame, isOpen(this.colonyFrame)
-            ? this.colonyFrame : this.frame);
         final Window target = (active != null && active.isShowing())
             ? active : this.frame;
         target.toFront();
@@ -652,12 +658,13 @@ public class ClassicGUI extends GUI {
             + " (" + this.frame.getBounds() + ").");
     }
 
-    /** The natural focus owner of {@code w}: its content, or the map/menu. */
+    /**
+     * The natural focus owner of {@code w}: its content, or for the main
+     * window {@link #homeComponent} (a box, a hosted screen, the map or the
+     * title menu).
+     */
     private Component defaultFocus(Window w) {
-        if (w == this.frame) {
-            return (this.mapViewer != null) ? this.mapViewer
-                : this.mainMenuPanel;
-        }
+        if (w == this.frame) return homeComponent();
         return (w instanceof JFrame) ? ((JFrame) w).getContentPane() : w;
     }
 
@@ -706,7 +713,10 @@ public class ClassicGUI extends GUI {
      * build-queue, Europe and report screens ({@code fullScreenSized}), and
      * every {@link ClassicDialog} popup and the choice list
      * ({@code !fullScreenSized}) -- so "no OS window chrome anywhere while
-     * full screen" is decided once, not per screen.
+     * full screen" is decided once, not per screen.  (Since M4.0 the
+     * colony, build-list and Europe screens are no windows: they are
+     * hosted in the main window, {@link ClassicScreenStack}; only the
+     * report screens still come here.)
      *
      * <ul>
      *   <li><b>Full screen</b> ({@code ref} borderless, see
@@ -758,70 +768,58 @@ public class ClassicGUI extends GUI {
     static volatile java.util.function.Consumer<Window> childWindowHook = null;
 
     /**
-     * The classic screen in front, for the scripted harness's keys when no
-     * window has the focus (a minimized run): the build queue, the colony,
-     * Europe or the report screen, whichever is open first in that
-     * stacking order, else null.  EDT only.
+     * The classic screen window in front, for the scripted harness's keys
+     * when no window has the focus (a minimized run): the report screen if
+     * one is open, else null.  The colony, build-list and Europe screens are
+     * no windows since M4.0 ({@link #hostedScreen}).  EDT only.
      *
      * @return The screen's window, or null.
      */
     Window openScreen() {
-        for (Window w : new Window[] { this.buildQueueFrame, this.colonyFrame,
-                                       this.europeFrame, this.reportFrame }) {
-            if (isOpen(w)) return w;
-        }
-        return null;
+        return (isOpen(this.reportFrame)) ? this.reportFrame : null;
     }
 
     /**
-     * The owner (and centring reference) for a popup: the classic screen the
-     * player is looking at -- the colony, build-queue, Europe or report
-     * window in front -- else the main frame.  EDT only.
+     * The owner (and centring reference) for a popup: the report window if
+     * the player is looking at one, else the main frame.  EDT only.
+     *
+     * <p>The colony, build-list and Europe screens are in the main window
+     * since M4.0 ({@link ClassicScreenStack}), so the main frame owns every
+     * popup over them, and a popup can no longer pull the map above them:
+     * the map is hidden while they are up.  Only a report screen is still a
+     * window of its own (decision H7).
      *
      * <p>Why not always the main frame: on Windows, bringing an owned window
      * to the top raises its owner directly beneath it.  With the main frame
-     * as owner, a notice popping up over a full-screen colony screen would
-     * pull the map above the colony screen, and when the notice closed the
-     * player would be looking at the map with the colony screen buried
-     * behind it.  Owned by the screen in front, the popup leaves the
-     * stacking alone.  (A switch to/from full screen is refused while a
-     * popup is up, so its owner is never disposed under it by
-     * {@link #toggleFullScreen}.)
+     * as owner, a notice popping up over a full-screen report window would
+     * pull the map above it, and when the notice closed the player would be
+     * looking at the map with the report buried behind it.  Owned by the
+     * report, the popup leaves the stacking alone.  (A switch to/from full
+     * screen is refused while a popup is up, so its owner is never disposed
+     * under it by {@link #toggleFullScreen}.)
      *
      * <p><b>Why not simply the active window.</b>  Activation changes
      * asynchronously.  Right after one modal popup is disposed, the active
      * window is still that dead popup (or null) until the OS re-activates
-     * the colony screen beneath it, and it is null whenever another
-     * application is in front.  Two popups in a row from one server message
-     * (end-of-turn notices, then a question) would then hand the second one
-     * to the main frame and bury the colony screen after all.  So the active
-     * window is only a hint: it and its owner chain are searched first (a
-     * dead popup's owner is still the screen it belonged to), and failing
-     * that the GUI's own state decides -- the open classic screens in their
-     * fixed stacking order (the build queue sits over its colony screen; the
-     * others are full-screen and opened from the map).  The main frame wins
-     * the owner-chain search only while windowed, where the player can put
-     * the map in front of an open screen by clicking it; in full screen an
-     * open screen always covers the map.
+     * the report beneath it, and it is null whenever another application is
+     * in front.  So the active window is only a hint: it and its owner
+     * chain are searched first (a dead popup's owner is still the window it
+     * belonged to), and failing that a report that is showing wins.  The
+     * main frame wins the owner-chain search only while windowed, where the
+     * player can put the map in front of an open report by clicking it; in
+     * full screen an open report always covers the map.
      */
     private Window dialogOwner() {
-        final Window[] screens = {
-            this.buildQueueFrame, this.colonyFrame,
-            this.europeFrame, this.reportFrame
-        };
+        final Window report = this.reportFrame;
         for (Window w = KeyboardFocusManager.getCurrentKeyboardFocusManager()
                  .getActiveWindow(); w != null; w = w.getOwner()) {
-            for (Window s : screens) {
-                if (w == s && s.isShowing()) return s;
-            }
+            if (w == report && report.isShowing()) return report;
             if (w == this.frame) {
                 if (!isFullScreen()) return this.frame;
                 break;
             }
         }
-        for (Window s : screens) {
-            if (s != null && s.isShowing()) return s;
-        }
+        if (report != null && report.isShowing()) return report;
         return this.frame;
     }
 
@@ -862,8 +860,11 @@ public class ClassicGUI extends GUI {
      *
      * <p><b>Alt+F4</b> posts {@code WINDOW_CLOSING} to the window that has
      * focus: on the main frame that is {@link #closeRequested} (it asks
-     * before anything ends), a sub-window or popup closes as through its
-     * close box.  Windows normally sends that close itself, also to an
+     * before anything ends) -- also over the colony, build-list and Europe
+     * screens, which are in the main window since M4.0 (decision H3: the
+     * original has no Alt+F4; Escape leaves a screen) -- a report window
+     * or popup closes as through its close box.  Windows normally sends
+     * that close itself, also to an
      * undecorated window, but AWT hands system keys to Java first, so whether
      * the native close still happens is up to the JDK; doing it here makes
      * the one exit path that every borderless window has a certainty.  If the
@@ -1347,19 +1348,23 @@ public class ClassicGUI extends GUI {
     /**
      * Take the in-game view down so the title can replace it, and so the next
      * {@link #reconnectGUI} builds a fresh one (it only does while
-     * {@code mapViewer} is null).  Closes the colony, build-queue, Europe and
-     * report windows -- except an open high-score window, which an ended game
-     * leaves for the player to read over the title -- stops the map's timer and
-     * removes the menu bar.  EDT only; a no-op when no game was shown.
+     * {@code mapViewer} is null).  Takes every hosted screen away (the
+     * colony, its build list, Europe: their boxes answer "dismissed") and
+     * closes the report window -- except an open high-score window, which an
+     * ended game leaves for the player to read over the title -- stops the
+     * map's timer and removes the menu bar.  EDT only; a no-op when no game
+     * was shown.
      */
     private void teardownInGame() {
         // A box still up or due answers "dismissed" (no, cancel), first,
         // while the blink and the turn flow it tells are still there.
         if (this.boxLayer != null) this.boxLayer.dispose();
         this.boxLayer = null;
-        closeColonyPanel();
-        closeBuildQueuePanel();
-        closeEuropePanel();
+        closeColonyPanel("teardown");
+        closeBuildQueuePanel("teardown");
+        closeEuropePanel("teardown");
+        if (this.screens != null) this.screens.popAll("teardown");
+        this.screens = null;
         if (this.reportFrame != null && !(this.reportFrame.getContentPane()
                 instanceof ClassicReportHighScoresPanel)) {
             closeReportPanel();
@@ -1891,7 +1896,8 @@ public class ClassicGUI extends GUI {
             if (focusTile != null) {
                 this.mapViewer.setFocus(focusTile);
             }
-            this.mapViewer.requestFocusInWindow();
+            // The keys to the map, or to a hosted screen or a box up (M4.0).
+            focusHome();
             this.mapViewer.repaint();
             // Nothing up at the load: the turn flow takes over, with the
             // view's focus set (a due unit's jump is decided from it).
@@ -2073,11 +2079,20 @@ public class ClassicGUI extends GUI {
                                               mapViewer.getViewMode()),
             () -> sceneShowing || boxBusy()
                 || (menuStrip != null && menuStrip.isMenuOpen()),
-            this::turnInputBlocked, this::orderRefused, this::chainWaitsForEurope);
+            this::turnInputBlocked, this::orderRefused, this::chainWaitsForEurope,
+            // Disabled while a classic screen is hosted: its own keys of the
+            // same letters get them (M4.0, the key-table trap).
+            this::screenHosted);
         // The advisor boxes on the same canvas (build spec W7).
         this.boxLayer = new ClassicAdvisorLayer(new BoxHost(pack, tiny, wood),
             waitClock(), SwingUtilities::invokeLater, true);
         this.hudPane.installBoxes(this.boxLayer);
+        // The colony, build-list and Europe screens in this window (M4.0):
+        // over the strip's dropdowns, under the map's boxes and the arrow.
+        this.screens = new ClassicScreenStack(this.hudPane, this.hudPane.gameParts(),
+            () -> {
+                if (menuStrip != null && menuStrip.isMenuOpen()) menuStrip.closeMenu();
+            }, this::focusHome);
         this.frame.setJMenuBar(null);
         this.frame.setContentPane(this.hudPane);
         this.frame.revalidate();
@@ -2133,9 +2148,11 @@ public class ClassicGUI extends GUI {
         @Override
         public void idle() {
             // The actions a box disabled (isDialogShowing) come back, and
-            // the keys go to the map again.
+            // the keys go back home: a box still up on a hosted screen, the
+            // screen, else the map (M4.0: never the hidden map under a
+            // screen).
             updateActions();
-            if (mapViewer != null) mapViewer.requestFocusInWindow();
+            focusHome();
         }
 
         @Override
@@ -2191,21 +2208,22 @@ public class ClassicGUI extends GUI {
      * ({@link #europeBoxes}, gap list B1) and the colony screen's
      * ({@link #colonyBoxes}, clip 019): the font, the wood and the
      * portraits (Europe's @SAILAWAY has the admiral, N1; the @HOWMUCH
-     * boxes, @TUTORIAL18 and @COLONYUNIT have none); the keys back to the
-     * screen when they are gone.
+     * boxes, @TUTORIAL18 and @COLONYUNIT have none); the keys back home
+     * when they are gone ({@link #focusHome}: the screen, or a box of the
+     * map still up over it).  The layer lies on the HUD pane over its screen
+     * ({@link ClassicHudPane#SCREEN_BOX_LAYER}, M4.0), so its paints are
+     * the pane's ({@code ClassicAdvisorLayer.paintNow}).
      */
     private final class ScreenBoxHost implements ClassicAdvisorLayer.Host {
 
         private final ClassicPackFiles pack;
         private final ClassicFont tiny;
         private final BufferedImage wood;
-        private final JComponent panel;
 
-        ScreenBoxHost(ClassicPackFiles pack, JComponent panel) {
+        ScreenBoxHost(ClassicPackFiles pack) {
             this.pack = pack;
             this.tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
             this.wood = (pack == null) ? null : pack.image(ClassicMenuBar.WOOD_KEY);
-            this.panel = panel;
         }
 
         @Override
@@ -2244,7 +2262,7 @@ public class ClassicGUI extends GUI {
 
         @Override
         public void idle() {
-            this.panel.requestFocusInWindow();
+            focusHome();
         }
 
         @Override
@@ -2268,7 +2286,7 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * A box over the Europe screen: the wood box on its glass pane
+     * A box over the Europe screen: the wood box on its own layer
      * ({@link #europeBoxes}), else (no font, no screen) the stopgap, which
      * answers an amount box with nothing ({@link #stopgapBox}).  EDT only.
      *
@@ -2277,7 +2295,7 @@ public class ClassicGUI extends GUI {
      */
     int europeBox(ClassicAdvisorBox.Request r) {
         final ClassicAdvisorLayer layer = this.europeBoxes;
-        if (layer != null && isOpen(this.europeFrame)) {
+        if (layer != null && europeHosted()) {
             final int got = layer.show(r);
             if (got != ClassicAdvisorLayer.UNAVAILABLE) return got;
         }
@@ -2352,7 +2370,7 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * A box over the colony screen: the wood box on its glass pane
+     * A box over the colony screen: the wood box on its own layer
      * ({@link #colonyBoxes}), else (no font, no screen) the stopgap.  EDT
      * only.
      *
@@ -2361,7 +2379,7 @@ public class ClassicGUI extends GUI {
      */
     int colonyBox(ClassicAdvisorBox.Request r) {
         final ClassicAdvisorLayer layer = this.colonyBoxes;
-        if (layer != null && isOpen(this.colonyFrame)) {
+        if (layer != null && colonyHosted()) {
             final int got = layer.show(r);
             if (got != ClassicAdvisorLayer.UNAVAILABLE) return got;
         }
@@ -2558,41 +2576,107 @@ public class ClassicGUI extends GUI {
         return this.europeBoxes != null && this.europeBoxes.isBusy();
     }
 
+    // The screens in the main window (master plan M4.0, ClassicScreenStack)
+
     /**
-     * The map's window became the active window (a click on it beside a
-     * windowed Europe, Alt+Tab, the taskbar).  While a box over the open
-     * Europe screen is up or due, Europe and its box come in front again,
-     * as a modal box's owner would bring it: the box keeps every map key
-     * and click inert ({@link #isDialogShowing}, E included), so behind the
-     * map it was a dead game until the "Amsterdam" window was found in the
-     * taskbar (the fixer of part L, review LATER play 1).  EDT only.
+     * Whether a classic screen (the colony, its build list, Europe) is
+     * hosted in the main window now: the map, the panel and the strip are
+     * hidden, the HUD's keys are disabled ({@link ClassicKeyMap}), the turn
+     * flow and the blink hold ({@link #classicScreenUp}), the map's index
+     * hint is off ({@link ClassicMapViewer#indexHint}).  EDT only.
+     *
+     * @return True if one is.
      */
-    void mapActivated() {
-        if (raisesEuropeOnActivation(isOpen(this.europeFrame), europeBoxBusy())) {
-            raiseEurope("box");
-        } else if (raisesEuropeOnActivation(isOpen(this.colonyFrame),
-                                            colonyBoxBusy())) {
-            // The same for a unit's box over the colony screen.
-            final JFrame f = this.colonyFrame;
-            if (this.frame == null
-                || (this.frame.getExtendedState() & Frame.ICONIFIED) == 0) {
-                f.toFront();
-                this.colonyBoxes.requestFocusInWindow();
-                ClassicFrameRecorder.event("colony-raise", "box");
-            }
-        }
+    boolean screenHosted() {
+        final ClassicScreenStack s = this.screens;
+        return s != null && s.isHosting();
+    }
+
+    /** @return The hosted screen on top (the harness, tests), or null.  EDT only. */
+    JComponent hostedScreen() {
+        final ClassicScreenStack s = this.screens;
+        return (s == null) ? null : s.topScreen();
+    }
+
+    /** @return Whether the Europe screen is hosted.  EDT only. */
+    boolean europeHosted() {
+        final ClassicScreenStack s = this.screens;
+        return this.europePanel != null && s != null && s.hosts(this.europePanel);
+    }
+
+    /** @return Whether the colony screen is hosted.  EDT only. */
+    boolean colonyHosted() {
+        final ClassicScreenStack s = this.screens;
+        return this.colonyPanel != null && s != null && s.hosts(this.colonyPanel);
+    }
+
+    /** @return The screen stack, or null (the harness, tests).  EDT only. */
+    ClassicScreenStack screens() {
+        return this.screens;
     }
 
     /**
-     * The rule of {@link #mapActivated}.
+     * Tests: host the screens on a pane of the test's own (no game view);
+     * Europe's close after the last ship gets its timer on
+     * {@link #waitClock}, run by the test ({@link ClassicOneShot#runIfDue}).
+     * EDT only.
      *
-     * @param europeOpen The Europe screen is open.
-     * @param boxOnEurope A box over Europe is up or due.
-     * @return True to bring Europe up.
+     * @param stack The stack.
      */
-    static boolean raisesEuropeOnActivation(boolean europeOpen,
-                                            boolean boxOnEurope) {
-        return europeOpen && boxOnEurope;
+    void installScreens(ClassicScreenStack stack) {
+        this.screens = stack;
+        if (this.europeCloseTimer == null) {
+            this.europeCloseTimer = new ClassicOneShot(waitClock(),
+                SwingUtilities::invokeLater, false, "ClassicEuropeClose");
+        }
+    }
+
+    /** @return Europe's close timer (tests), or null. */
+    ClassicOneShot europeCloseTimer() {
+        return this.europeCloseTimer;
+    }
+
+    /**
+     * What should have the keys now ({@link #home}): a box of the map that
+     * is up or due, else a box over the hosted screen, else that screen,
+     * else the map (or the title menu without a game view).  EDT only.
+     *
+     * @return The component, or null.
+     */
+    Component homeComponent() {
+        final ClassicScreenStack s = this.screens;
+        return home(this.boxLayer, (s == null) ? null : s.topBoxes(),
+                    hostedScreen(),
+                    (this.mapViewer != null) ? this.mapViewer : this.mainMenuPanel);
+    }
+
+    /**
+     * The rule of {@link #homeComponent}: the topmost thing that takes keys.
+     *
+     * @param mapBoxes The map's box layer, or null.
+     * @param screenBoxes The box layer over the hosted screen, or null.
+     * @param screen The hosted screen on top, or null.
+     * @param map The map (or the title menu), or null.
+     * @return The component, or null.
+     */
+    static Component home(ClassicAdvisorLayer mapBoxes, ClassicAdvisorLayer screenBoxes,
+                          Component screen, Component map) {
+        if (mapBoxes != null && mapBoxes.isBusy()) return mapBoxes;
+        if (screen != null) {
+            return (screenBoxes != null && screenBoxes.isBusy()) ? screenBoxes : screen;
+        }
+        return map;
+    }
+
+    /**
+     * Give the keys back home ({@link #homeComponent}) wherever they come
+     * back: a box's close, the first scene's, a hosted screen's push and
+     * pop, the game view's build, Europe's arrival and hold.  Never the
+     * hidden map under a screen.  EDT only.
+     */
+    void focusHome() {
+        final Component c = homeComponent();
+        if (c != null) c.requestFocusInWindow();
     }
 
     /** @return The advisor boxes' layer, or null (the harness, tests). */
@@ -3498,8 +3582,10 @@ public class ClassicGUI extends GUI {
     /**
      * Whether the arrival chain holds our turn start for the Europe screen
      * (asked for, or open until its close): every game key is dead then,
-     * but E brings Europe up again (H REVIEW2 M1, {@link #showEuropePanel}).
-     * EDT only.
+     * but E opens Europe when it is not up yet (H REVIEW2 M1,
+     * {@link #showEuropePanel}); once it is hosted in the main window
+     * (M4.0) the map's keys are disabled and Europe's own take the
+     * letters, its E included (its close).  EDT only.
      *
      * @return True while it waits.
      */
@@ -3627,28 +3713,28 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * Whether a classic screen (colony, Europe, report, build queue) is up
-     * where the player can be looking at it ({@link #screenUp}).  While
-     * windowed the player can bring the map in front of an open screen by
-     * clicking it (see {@link #dialogOwner}), and the map's keys work then;
-     * a screen behind the active map, or a minimized one, must not hold the
-     * hand-overs, the turn start, the map's input and the blink.  EDT only.
+     * Whether a classic screen is up where the player can be looking at
+     * it.  A hosted screen (the colony, its build list, Europe; M4.0) always
+     * is: it is what the main window shows instead of the map, also while
+     * the window is minimized (decision H4).  A report screen is still a
+     * window of its own ({@link #screenUp}): while windowed the player can
+     * bring the map in front of it by clicking the map (see
+     * {@link #dialogOwner}), and the map's keys work then; a report behind
+     * the active map, or a minimized one, must not hold the hand-overs, the
+     * turn start, the map's input and the blink.  EDT only.
      *
      * @return True if one is up.
      */
     private boolean classicScreenUp() {
+        if (screenHosted()) return true;
+        final Window w = this.reportFrame;
         final boolean mapActive = this.frame != null && this.frame.isActive();
-        for (Window w : new Window[] { this.colonyFrame, this.europeFrame,
-                                        this.reportFrame, this.buildQueueFrame }) {
-            if (w != null && screenUp(w.isShowing(), w instanceof Frame
-                    && (((Frame) w).getExtendedState() & Frame.ICONIFIED) != 0,
-                    mapActive)) return true;
-        }
-        return false;
+        return w != null && screenUp(w.isShowing(), w instanceof Frame
+            && (((Frame) w).getExtendedState() & Frame.ICONIFIED) != 0, mapActive);
     }
 
     /**
-     * The rule of {@link #classicScreenUp} for one screen.
+     * The rule of {@link #classicScreenUp} for a report window.
      *
      * @param showing The screen's window is showing.
      * @param minimized It is minimized.
@@ -4198,15 +4284,21 @@ public class ClassicGUI extends GUI {
      * {@inheritDoc}
      *
      * Phase 2: show the classic colony screen — {@link ClassicColonyPanel}, a
-     * 320&times;200 repaint of the original's signature screen — in a window of
-     * its own (the classic UI has no {@code Canvas} to host panels in).  Reached
-     * by clicking an owned colony on the map, and automatically by
+     * 320&times;200 repaint of the original's signature screen — in the main
+     * window, in place of the map, as in the original (master plan M4.0,
+     * {@link ClassicScreenStack}; V clip 020 #2260; the manual l.83: "you
+     * are immediately shown the colony display").  Reached by clicking an
+     * owned colony on the map, and automatically by
      * {@code InGameController.buildColony} the moment a colony is founded.
      *
-     * <p>Only one colony screen is open at a time; opening another replaces it.
+     * <p>Only one colony screen is up at a time; opening another replaces it,
+     * and a Europe screen that is up gives way to it (decision H5; the
+     * original has one picture only): the new screen comes on first, the
+     * older one goes from under it, so the map does not show in between.
      * The whole thing is guarded, so a failure degrades to a log line rather
-     * than breaking the map.  Returns null (as the base {@code GUI} does): no
-     * caller uses the returned panel, and the classic screen is not a
+     * than breaking the map; without a game view (a test) there is no
+     * screen.  Returns null (as the base {@code GUI} does): no caller uses
+     * the returned panel, and the classic screen is not a
      * {@code FreeColPanel}.
      */
     @Override
@@ -4227,24 +4319,25 @@ public class ClassicGUI extends GUI {
                 // The first colony's woodcut, before its screen (W9, D4).
                 final long due = foundingWoodcut(colony);
                 if (due == VIEW_GONE) return;
-                closeColonyPanel();
+                if (this.screens == null) {
+                    // No game canvas (a test without a view): no screen.
+                    logger.info("ClassicGUI: no game canvas for the colony screen of "
+                        + colony.getId() + ".");
+                    return;
+                }
+                final ClassicColonyPanel[] self = { null };
                 final ClassicColonyPanel panel = new ClassicColonyPanel(
                     getFreeColClient(), this.imageLibrary, colony,
-                    this::closeColonyPanel, new ColonyUnits());
-                final JFrame f = new JFrame(colony.getName());
-                this.colonyFrame = f;
-                this.colonyPanel = panel;
+                    () -> {
+                        if (this.colonyPanel == self[0]) closeColonyPanel("player");
+                    }, new ColonyUnits());
+                self[0] = panel;
                 // The wood boxes over the screen (a unit's @COLONYUNIT,
-                // clip 019), on its glass pane: the same 320x200 canvas,
-                // scale and letterbox as the panel.
-                this.colonyBoxes = new ClassicAdvisorLayer(
-                    new ScreenBoxHost(ClassicPackFiles.runtime(), panel),
+                // clip 019, and every box asked while it is up), on their
+                // own layer: the same 320x200 canvas, scale and letterbox.
+                final ClassicAdvisorLayer boxes = new ClassicAdvisorLayer(
+                    new ScreenBoxHost(ClassicPackFiles.runtime()),
                     waitClock(), SwingUtilities::invokeLater, true);
-                f.setGlassPane(this.colonyBoxes);
-                f.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-                f.setBackground(Color.BLACK);
-                f.setContentPane(panel);
-                prepareChildWindow(f, this.frame, true);
                 // Built while the map shows after the woodcut, shown at
                 // its time (V: 328 ms, clip008 #4009 -> #4032).
                 if (due != 0L) {
@@ -4253,14 +4346,27 @@ public class ClassicGUI extends GUI {
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                     }
-                    if (this.mapViewer == null || this.colonyFrame != f) {
-                        if (this.colonyFrame == f) closeColonyPanel();
-                        else f.dispose();
+                    if (this.mapViewer == null || this.screens == null) {
+                        boxes.dispose();
                         return;
                     }
                 }
-                f.setVisible(true);
-                f.getContentPane().requestFocusInWindow();
+                // The new screen on first, then the older one (a colony,
+                // Europe) goes from under it: no map in between (H5).
+                this.screens.push(ClassicScreenStack.Kind.COLONY, panel, boxes,
+                                  colony.getName(), null);
+                if (this.colonyPanel != null) {
+                    ClassicFrameRecorder.event("screen-replace", "colony -> colony");
+                    closeColonyPanel("replaced");
+                }
+                if (this.europePanel != null) {
+                    ClassicFrameRecorder.event("screen-replace", "europe -> colony");
+                    closeEuropePanel("replaced");
+                }
+                this.colonyPanel = panel;
+                this.colonyBoxes = boxes;
+                ClassicFrameRecorder.event("colony-open", colony.getName()
+                    + ((founding) ? " founding" : ""));
                 colonyScreenShown(colony, waitClock().now(), founding);
             } catch (Exception e) {
                 logger.log(Level.WARNING, "ClassicGUI: could not show colony "
@@ -4270,16 +4376,20 @@ public class ClassicGUI extends GUI {
         return null;
     }
 
-    /** Dismiss the colony screen if one is open. */
-    private void closeColonyPanel() {
-        final JFrame f = this.colonyFrame;
+    /**
+     * Take the colony screen away if one is up, the build list over it
+     * first; a box still up on it answers "dismissed" (no change).
+     *
+     * @param why Why (for the recorder).
+     */
+    private void closeColonyPanel(String why) {
+        closeBuildQueuePanel(why);
+        final ClassicColonyPanel p = this.colonyPanel;
         final ClassicAdvisorLayer boxes = this.colonyBoxes;
-        this.colonyFrame = null;
         this.colonyPanel = null;
         this.colonyBoxes = null;
-        // A box still up answers "dismissed": no change.
         if (boxes != null) boxes.dispose();
-        if (f != null) f.dispose();
+        if (p != null && this.screens != null) this.screens.pop(p, why);
     }
 
     /**
@@ -4292,34 +4402,42 @@ public class ClassicGUI extends GUI {
      * screen's construction indicator ({@link ClassicColonyPanel}, top-left of
      * the buildings pane).
      *
-     * <p>Only one build-queue screen is open at a time; guarded so a failure
-     * degrades to a log line rather than breaking the colony screen behind it.
+     * <p>Hosted over its colony screen in the main window (M4.0; decision
+     * H6: the original's wood list box over the colony comes in M4.11), the
+     * colony hidden under it; never without the colony screen.  Its close
+     * shows the colony again with the keys.  Only one build-queue screen is
+     * up at a time; guarded so a failure degrades to a log line rather than
+     * breaking the colony screen under it.
      */
     @Override
     public FreeColPanel showBuildQueuePanel(Colony colony) {
         if (colony == null) return null;
         SwingUtilities.invokeLater(() -> {
             try {
-                closeBuildQueuePanel();
-                final JFrame f = new JFrame(Messages.message(
-                    "classic.buildQueue.header"));
-                this.buildQueueFrame = f;
-                f.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+                closeBuildQueuePanel("replaced");
+                if (this.screens == null || !colonyHosted()) {
+                    // The build list belongs over its colony screen only.
+                    ClassicFrameRecorder.event("screen-refused", "buildlist "
+                        + colony.getName() + ": no colony screen");
+                    logger.info("ClassicGUI: no colony screen for the build list of "
+                        + colony.getId() + ".");
+                    return;
+                }
+                final ClassicBuildQueuePanel[] self = { null };
                 // InGameController.setBuildQueue does not itself call
                 // GUI.refresh() (its updateGUI only refreshes the map controls
-                // and menu bar), so the colony screen behind this one would
+                // and menu bar), so the colony screen under this one would
                 // otherwise keep showing the old construction indicator after
                 // a pick; repaint it whenever this screen closes.
-                f.setContentPane(new ClassicBuildQueuePanel(getFreeColClient(),
-                        this.imageLibrary, colony, () -> {
-                            closeBuildQueuePanel();
-                            repaintInfo();
-                        }));
-                f.setBackground(Color.BLACK);
-                prepareChildWindow(f, isOpen(this.colonyFrame)
-                    ? this.colonyFrame : this.frame, true);
-                f.setVisible(true);
-                f.getContentPane().requestFocusInWindow();
+                final ClassicBuildQueuePanel p = new ClassicBuildQueuePanel(
+                    getFreeColClient(), this.imageLibrary, colony, () -> {
+                        if (this.buildQueuePanel == self[0]) closeBuildQueuePanel("player");
+                        repaintInfo();
+                    });
+                self[0] = p;
+                this.buildQueuePanel = p;
+                this.screens.push(ClassicScreenStack.Kind.BUILD_LIST, p, null,
+                                  colony.getName(), this.colonyPanel);
             } catch (Exception e) {
                 logger.log(Level.WARNING, "ClassicGUI: could not show build "
                     + "queue for " + colony.getId(), e);
@@ -4328,29 +4446,37 @@ public class ClassicGUI extends GUI {
         return null;
     }
 
-    /** Dismiss the build-queue screen if one is open. */
-    private void closeBuildQueuePanel() {
-        final JFrame f = this.buildQueueFrame;
-        this.buildQueueFrame = null;
-        if (f != null) f.dispose();
+    /**
+     * Take the build-queue screen away if one is up: its colony shows
+     * again, with the keys.
+     *
+     * @param why Why (for the recorder).
+     */
+    private void closeBuildQueuePanel(String why) {
+        final ClassicBuildQueuePanel p = this.buildQueuePanel;
+        this.buildQueuePanel = null;
+        if (p != null && this.screens != null) this.screens.pop(p, why);
     }
 
     /**
      * {@inheritDoc}
      *
      * Phase 2: show the classic Europe screen — {@link ClassicEuropePanel}, a
-     * 320&times;200 repaint of the original's harbour — in a window of its own
-     * (the classic UI has no {@code Canvas} to host panels in).  Reached by the
-     * {@code Europe} menu action (accelerator {@code E}), and by the Classic
-     * UI itself when a ship of ours arrives in Europe (W13, the arrival
-     * chain; FreeCol's controller never opens it).  Never as a reminder of
-     * ships left in port (Roger, 2026-10-08: Part H's guard is gone).
+     * 320&times;200 repaint of the original's harbour — in the main window,
+     * in place of the map, as in the original (master plan M4.0 / M5.0,
+     * {@link ClassicScreenStack}; V clip 020 #24106 -&gt; #24111).  Reached
+     * by the {@code Europe} menu action (accelerator {@code E}), and by the
+     * Classic UI itself when a ship of ours arrives in Europe (W13, the
+     * arrival chain; FreeCol's controller never opens it).  Never as a
+     * reminder of ships left in port (Roger, 2026-10-08: Part H's guard is
+     * gone).
      *
-     * <p>Only one Europe screen is open at a time: one that is open already
-     * (behind the map or minimized) is brought up to date and up
-     * ({@link #raiseEurope}), not opened again (H REVIEW2 M1: E brings it
-     * back with its state).  The player's close, by the screen's own exit
-     * or by the window's close box / Alt+F4, is {@link #europeClosed}; so is
+     * <p>Only one Europe screen is up at a time: one that is up already is
+     * brought up to date and gets the keys ({@link #focusEurope}), not
+     * opened again (H REVIEW2 M1: E brings it back with its state).  A
+     * colony screen that is up gives way to it (decision H5).  The player's
+     * close, by the screen's own exit or Escape, is {@link #europeClosed}
+     * (Alt+F4 is the main window's quit question now, decision H3); so is
      * its close by itself after the last ship in port sailed
      * ({@link #europeShipSailed}).  The game's first Europe screen brings
      * {@code @TUTORIAL17} ({@link #europeTip}).  Guarded so a failure
@@ -4364,40 +4490,44 @@ public class ClassicGUI extends GUI {
         this.europeAskedAt = waitClock().now();
         SwingUtilities.invokeLater(() -> {
             try {
-                if (isOpen(this.europeFrame) && this.europePanel != null
-                    && this.europePanel.europe() == player.getEurope()) {
+                if (europeHosted() && this.europePanel.europe() == player.getEurope()) {
                     this.europeAskedAt = 0L;
                     this.europePanel.refresh();
-                    raiseEurope("asked again");
+                    focusEurope("asked again");
                     return;
                 }
-                closeEuropePanel();
+                if (this.screens == null) {
+                    // No game canvas (a test without a view): no screen.
+                    logger.info("ClassicGUI: no game canvas for the Europe screen.");
+                    return;
+                }
+                final ClassicEuropePanel[] self = { null };
                 final ClassicEuropePanel panel = new ClassicEuropePanel(
                     getFreeColClient(), this.imageLibrary, player.getEurope(),
-                    this::europeClosed, this::europeShipSailed, new EuropeBoxes());
-                final JFrame f = new JFrame(Messages.message(player.getEurope()
-                        .getNameKey()));
-                this.europeFrame = f;
-                this.europePanel = panel;
-                // The wood boxes over the screen (B1), on its glass pane:
+                    () -> {
+                        if (this.europePanel == self[0]) europeClosed("player");
+                    }, this::europeShipSailed, new EuropeBoxes());
+                self[0] = panel;
+                // The wood boxes over the screen (B1), on their own layer:
                 // the same 320x200 canvas, scale and letterbox as the panel.
                 final ClassicPackFiles pack = ClassicPackFiles.runtime();
-                this.europeBoxes = new ClassicAdvisorLayer(
-                    new ScreenBoxHost(pack, panel), waitClock(),
+                final ClassicAdvisorLayer boxes = new ClassicAdvisorLayer(
+                    new ScreenBoxHost(pack), waitClock(),
                     SwingUtilities::invokeLater, true);
-                f.setGlassPane(this.europeBoxes);
-                f.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-                f.addWindowListener(new WindowAdapter() {
-                        @Override
-                        public void windowClosing(WindowEvent e) {
-                            if (europeFrame == f) europeClosed();
-                        }
-                    });
-                f.setBackground(Color.BLACK);
-                f.setContentPane(panel);
-                prepareChildWindow(f, this.frame, true);
-                f.setVisible(true);
-                panel.requestFocusInWindow();
+                // The new screen on first, then the older one goes from
+                // under it: no map in between (H5).
+                this.screens.push(ClassicScreenStack.Kind.EUROPE, panel, boxes,
+                    Messages.message(player.getEurope().getNameKey()), null);
+                if (this.europePanel != null) {
+                    ClassicFrameRecorder.event("screen-replace", "europe -> europe");
+                    closeEuropePanel("replaced");
+                }
+                if (this.colonyPanel != null) {
+                    ClassicFrameRecorder.event("screen-replace", "colony -> europe");
+                    closeColonyPanel("replaced");
+                }
+                this.europePanel = panel;
+                this.europeBoxes = boxes;
                 this.europeAskedAt = 0L;
                 ClassicFrameRecorder.event("europe-open", "turn=" + turnNumber());
                 if (this.tipTimer != null && !tipShown(player,
@@ -4414,37 +4544,25 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * Bring the open Europe screen up: restored if minimized, in front of
-     * the map, the keys to it (H REVIEW2 M1: at an arrival a Europe behind
-     * the map or minimized held the turn start with every game key dead).
-     * Not while the game's own window is minimized: Europe then comes up
-     * when the map's window is active again
-     * ({@link VoyageHost#keepEuropeUp}), and a minimized scripted run keeps
-     * its windows off the desktop.  EDT only.
+     * Give the keys to the hosted Europe screen, or to a box over it (its
+     * Enter, Esc and Backspace), or to a box of the map still up over it
+     * ({@link #focusHome}).  Europe cannot be behind the map or minimized
+     * any more (M4.0): this replaces the raise of the separate window (H
+     * REVIEW2 M1, the fixer of part L), and keeps its recorder line
+     * {@code europe-raise}, once per {@link ClassicVoyages#EUROPE_TIMEOUT_MS}.
+     * EDT only.
      *
-     * @param why What brings it up (for the recorder).
-     * @return True if it was brought up.
+     * @param why What asks (for the recorder).
+     * @return True if Europe is hosted.
      */
-    private boolean raiseEurope(String why) {
-        final JFrame f = this.europeFrame;
-        if (!isOpen(f)) return false;
-        if (this.frame != null
-            && (this.frame.getExtendedState() & Frame.ICONIFIED) != 0) return false;
-        final int state = f.getExtendedState();
-        final boolean minimized = (state & Frame.ICONIFIED) != 0;
-        if (minimized) f.setExtendedState(state & ~Frame.ICONIFIED);
-        if (!f.isVisible()) f.setVisible(true);
-        f.toFront();
-        // The keys to the box over Europe while one is up (its Enter, Esc
-        // and Backspace), else to the screen (the fixer of part L).
-        final Component keys = (europeBoxBusy()) ? this.europeBoxes : this.europePanel;
-        if (keys != null) keys.requestFocusInWindow();
-        // One line per raise, not one per poll while Windows refuses it.
+    private boolean focusEurope(String why) {
+        if (!europeHosted()) return false;
+        focusHome();
+        // One line per raise, not one per poll.
         final long now = waitClock().now();
-        if (minimized || now - this.europeRaisedAt
+        if (now - this.europeRaisedAt
             >= ClassicVoyages.nanos(ClassicVoyages.EUROPE_TIMEOUT_MS)) {
-            ClassicFrameRecorder.event("europe-raise", why
-                + ((minimized) ? " (restored)" : ""));
+            ClassicFrameRecorder.event("europe-raise", why);
         }
         this.europeRaisedAt = now;
         return true;
@@ -4452,57 +4570,65 @@ public class ClassicGUI extends GUI {
 
     /**
      * The rule of {@link VoyageHost#keepEuropeUp}: while the arrival chain
-     * waits for Europe's close, a Europe screen that is open while the
-     * player is at the map (the map's window active: Europe behind it or
-     * minimized) comes up again; not over a box or an open menu of the map
-     * (the box or the menu first).  A box over Europe itself does not hold
-     * it: it comes up with Europe (the fixer of part L; before, such a box
-     * kept Europe behind the map, {@link #mapActivated}).
+     * waits for Europe's close and the player is in the main window, the
+     * keys come back to the hosted Europe screen when they are elsewhere;
+     * not over a box of the map, the first scene or a popup (they have the
+     * keys first), never without Europe.  (Before M4.0 this brought a
+     * Europe window behind the map or minimized up again.)
      *
-     * @param europeOpen The Europe screen is open.
-     * @param mapActive The map's window is the active window.
-     * @param boxUp A box of the map's window ({@link #mapBoxBusy}), the
-     *     first scene or a modal dialog is up.
-     * @param menuOpen A menu of the map's strip is open.
-     * @return True to bring Europe up.
+     * @param europeHosted The Europe screen is hosted.
+     * @param windowActive The main window is the active window.
+     * @param boxUp A box of the map, the first scene or a modal dialog is up.
+     * @param keysOnEurope Europe or its box has the keys already.
+     * @return True to give Europe the keys.
      */
-    static boolean raisesEurope(boolean europeOpen, boolean mapActive,
-                                boolean boxUp, boolean menuOpen) {
-        return europeOpen && mapActive && !boxUp && !menuOpen;
+    static boolean keepsEuropeKeys(boolean europeHosted, boolean windowActive,
+                                   boolean boxUp, boolean keysOnEurope) {
+        return europeHosted && windowActive && !boxUp && !keysOnEurope;
+    }
+
+    /** @return Whether the Europe screen or its box has the keys.  EDT only. */
+    private boolean keysOnEurope() {
+        final Component fo = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+            .getFocusOwner();
+        return fo != null && (fo == this.europePanel || fo == this.europeBoxes);
     }
 
     /**
-     * Dismiss the Europe screen if one is open, without telling anyone (a
+     * Take the Europe screen away if one is up, without telling anyone (a
      * replacement, the game view's end); the player's close is
-     * {@link #europeClosed}.
+     * {@link #europeClosed}.  A box still up on it answers "dismissed": no
+     * trade (B1).
+     *
+     * @param why Why (for the recorder).
      */
-    private void closeEuropePanel() {
-        final JFrame f = this.europeFrame;
+    private void closeEuropePanel(String why) {
+        final ClassicEuropePanel p = this.europePanel;
         final ClassicAdvisorLayer boxes = this.europeBoxes;
-        this.europeFrame = null;
         this.europePanel = null;
         this.europeBoxes = null;
         if (this.europeCloseTimer != null) this.europeCloseTimer.cancel();
-        // A box still up answers "dismissed": no trade (B1).
         if (boxes != null) boxes.dispose();
-        if (f != null) f.dispose();
+        if (p != null && this.screens != null) this.screens.pop(p, why);
     }
 
     /**
-     * The player closed the Europe screen: its own "Abb" or Escape, the
-     * window's close box or Alt+F4 ({@code WINDOW_CLOSING}; Alt+Enter's
-     * re-framing disposes it too, but fires only {@code windowClosed}), or
-     * it closed by itself after the last ship in port sailed
-     * ({@link #europeAutoClose}).  A box's close for the turn flow (W13):
-     * the end it held comes {@link ClassicTurnFlow#END_TURN_MS} after it,
-     * the turn start it held goes on at once (the arrival chain's next
-     * step), and the unit whose turn it is comes through the unit cycle.
-     * The turn flow hears the close also when the chain's step fails
+     * The player closed the Europe screen: its own "Abb" or Escape (or E),
+     * or it closed by itself after the last ship in port sailed
+     * ({@link #europeAutoClose}).  The map is back first (the pop shows the
+     * game parts in the same paint), then {@link #europeGone}, whose view
+     * rule and arrival chain need the map shown.  A box's close for the turn
+     * flow (W13): the end it held comes {@link ClassicTurnFlow#END_TURN_MS}
+     * after it, the turn start it held goes on at once (the arrival chain's
+     * next step), and the unit whose turn it is comes through the unit
+     * cycle.  The turn flow hears the close also when the chain's step fails
      * (H REVIEW2 L1).  EDT only.
+     *
+     * @param why "player" or "auto" (for the recorder's {@code screen-pop}).
      */
-    private void europeClosed() {
-        if (this.europeFrame == null) return;
-        closeEuropePanel();
+    private void europeClosed(String why) {
+        if (this.europePanel == null) return;
+        closeEuropePanel(why);
         this.europeAskedAt = 0L;
         ClassicFrameRecorder.event("europe-close", "");
         europeGone();
@@ -4545,23 +4671,24 @@ public class ClassicGUI extends GUI {
         final boolean last = ClassicVoyages.closesAfterSailing(me.getEurope());
         ClassicFrameRecorder.event("europe-sail", "unit=" + ship.getId()
             + ((last) ? " the last ship: Europe closes" : ""));
-        final JFrame f = this.europeFrame;
-        if (!last || !isOpen(f) || this.europeCloseTimer == null) return;
+        final ClassicEuropePanel p = this.europePanel;
+        if (!last || !europeHosted() || this.europeCloseTimer == null) return;
         this.europeCloseTimer.schedule(waitClock().now()
             + ClassicVoyages.nanos(ClassicVoyages.EUROPE_CLOSE_MS),
-            () -> europeAutoClose(f));
+            () -> europeAutoClose(p));
     }
 
     /**
      * Europe's close by itself ({@link #europeShipSailed}), unless it was
-     * closed or replaced meanwhile or a ship is in port again (one bought
-     * within the 357 ms); a modal list or a box up then: the close after
-     * it.  EDT only.
+     * closed or replaced meanwhile (another panel, or none hosted) or a
+     * ship is in port again (one bought within the 357 ms); a modal list or
+     * a box up then: the close after it ({@link ClassicVoyages#POLL_MS}
+     * later, again).  Package-private for the tests.  EDT only.
      *
-     * @param f The Europe window the last ship sailed from.
+     * @param p The Europe screen the last ship sailed from.
      */
-    private void europeAutoClose(JFrame f) {
-        if (this.europeFrame != f || !isOpen(f)) return;
+    void europeAutoClose(ClassicEuropePanel p) {
+        if (p == null || this.europePanel != p || !europeHosted()) return;
         final Player me = myPlayer();
         if (me == null || !ClassicVoyages.closesAfterSailing(me.getEurope())) {
             ClassicFrameRecorder.event("europe-close", "auto: dropped, a ship is in port");
@@ -4571,23 +4698,23 @@ public class ClassicGUI extends GUI {
             if (this.europeCloseTimer != null) {
                 this.europeCloseTimer.schedule(waitClock().now()
                     + ClassicVoyages.nanos(ClassicVoyages.POLL_MS),
-                    () -> europeAutoClose(f));
+                    () -> europeAutoClose(p));
             }
             return;
         }
         ClassicFrameRecorder.event("europe-close", "auto: the last ship sailed");
-        europeClosed();
+        europeClosed("auto");
     }
 
     /**
-     * Whether the Europe screen holds the automatic end (W13): it exists,
-     * showing, behind the map or minimized, or it was asked for less than
+     * Whether the Europe screen holds the automatic end (W13): it is
+     * hosted, or it was asked for less than
      * {@link ClassicVoyages#EUROPE_TIMEOUT_MS} ago and has not come yet.
      *
      * @return True if so.
      */
     boolean europeHoldsTheEnd() {
-        if (isOpen(this.europeFrame)) return true;
+        if (europeHosted()) return true;
         return this.europeAskedAt != 0L && waitClock().now() - this.europeAskedAt
             < ClassicVoyages.nanos(ClassicVoyages.EUROPE_TIMEOUT_MS);
     }
@@ -4867,11 +4994,11 @@ public class ClassicGUI extends GUI {
         public boolean openEurope() {
             final Player me = myPlayer();
             if (me == null || me.getEurope() == null) return false;
-            if (isOpen(europeFrame)) {
-                // Open already (windowed, behind the map or minimized; U5):
-                // brought up to date and up, not opened again (M1).
-                if (europePanel != null) europePanel.refresh();
-                raiseEurope("arrival");
+            if (europeHosted()) {
+                // Up already (U5): brought up to date, the keys to it, not
+                // opened again (M1).
+                europePanel.refresh();
+                focusEurope("arrival");
                 return true;
             }
             showEuropePanel();
@@ -4880,16 +5007,19 @@ public class ClassicGUI extends GUI {
 
         @Override
         public boolean europeOpen() {
-            return isOpen(europeFrame);
+            return europeHosted();
         }
 
         @Override
         public void keepEuropeUp() {
-            // A box of the map holds it, not one over Europe itself.
-            if (raisesEurope(isOpen(europeFrame), frame != null && frame.isActive(),
+            // Europe cannot be behind the map any more (M4.0): while the
+            // player is in this window, only the keys come back to it when
+            // they went astray; not over a box, a popup or a menu of the
+            // map (those first).
+            if (keepsEuropeKeys(europeHosted(), frame != null && frame.isActive(),
                     sceneShowing || modalDialogShowing() || mapBoxBusy(),
-                    menuStrip != null && menuStrip.isMenuOpen())) {
-                raiseEurope("hold");
+                    keysOnEurope())) {
+                focusEurope("hold");
             }
         }
 
@@ -4920,7 +5050,7 @@ public class ClassicGUI extends GUI {
      * ({@code Player.classicTips}).  EDT only.
      */
     private void europeTip() {
-        if (!isOpen(this.europeFrame)) return;
+        if (!europeHosted()) return;
         final Player me = myPlayer();
         final FreeColClient fcc = getFreeColClient();
         // Tutortips is FreeCol's option (ClassicPrefs.CLIENT_OPTIONS).
@@ -5831,7 +5961,8 @@ public class ClassicGUI extends GUI {
     long putCongress(FoundingFather ff, List<Integer> before) {
         final ClassicAdvisorLayer layer = this.boxLayer;
         if (layer == null || this.sceneShowing || this.hudPane == null
-            || !this.hudPane.isShowing() || dialogOwner() != this.frame) {
+            || !this.hudPane.isShowing() || screenHosted()
+            || dialogOwner() != this.frame) {
             ClassicFrameRecorder.event("hall-skipped", ff.getId() + " no game canvas");
             return ClassicAdvisorLayer.NOT_SHOWN;
         }
@@ -6188,8 +6319,8 @@ public class ClassicGUI extends GUI {
         ClassicFrameRecorder.event("dialog-close", "first scene");
         if (this.hudOverlay != null) this.hudOverlay.hideScene();
         updateActions();
+        focusHome();
         if (this.mapViewer != null) {
-            this.mapViewer.requestFocusInWindow();
             this.mapViewer.repaint();
             // The blink restarts ON at the scene's close (build spec W3).
             this.mapViewer.resumeBlink("scene");
@@ -7582,8 +7713,8 @@ public class ClassicGUI extends GUI {
      * @return The answer ({@link Prompter#ask}).
      */
     int screenBox(ClassicAdvisorBox.Request r) {
-        if (this.europeBoxes != null && isOpen(this.europeFrame)) return europeBox(r);
-        if (isOpen(this.colonyFrame)) return this.colonyPrompter.ask(r);
+        if (this.europeBoxes != null && europeHosted()) return europeBox(r);
+        if (colonyHosted()) return this.colonyPrompter.ask(r);
         return this.prompter.ask(r);
     }
 
@@ -7873,14 +8004,25 @@ public class ClassicGUI extends GUI {
 
     /**
      * Put a box: in the game's canvas when the map is what the player is
-     * looking at ({@link ClassicAdvisorLayer}, build spec W7), else -- on
-     * the title screens, over a colony, Europe or report screen, or without
-     * the pack -- in the stopgap window ({@link #stopgapBox}).  EDT only.
+     * looking at ({@link ClassicAdvisorLayer}, build spec W7); over a hosted
+     * colony or Europe screen as a wood box on that screen's own layer
+     * (decision H2: V clip008 #4032 -&gt; #4068, @TUTORIAL4 on the colony
+     * picture; before M4.0 the grey stopgap over the screen's window); else
+     * -- on the title screens, over a report screen, or without the pack --
+     * in the stopgap window ({@link #stopgapBox}).  EDT only.
      *
      * @param r The box.
      * @return The answer ({@link Prompter#ask}).
      */
     int putBox(ClassicAdvisorBox.Request r) {
+        if (screenHosted() && !this.sceneShowing) {
+            final ClassicAdvisorLayer over = this.screens.topBoxes();
+            if (over != null) {
+                final int got = over.show(r);
+                if (got != ClassicAdvisorLayer.UNAVAILABLE) return got;
+            }
+            return stopgapBox(r);
+        }
         final ClassicAdvisorLayer layer = this.boxLayer;
         if (layer != null && !this.sceneShowing && this.hudPane != null
             && this.hudPane.isShowing() && dialogOwner() == this.frame) {
@@ -9139,7 +9281,8 @@ public class ClassicGUI extends GUI {
     long putWoodcut(int k, long notBefore, double followMs) {
         final ClassicAdvisorLayer layer = this.boxLayer;
         if (layer == null || this.sceneShowing || this.hudPane == null
-            || !this.hudPane.isShowing() || dialogOwner() != this.frame) {
+            || !this.hudPane.isShowing() || screenHosted()
+            || dialogOwner() != this.frame) {
             ClassicFrameRecorder.event("woodcut-skipped", k + " no game canvas");
             return ClassicAdvisorLayer.NOT_SHOWN;
         }
@@ -9293,19 +9436,22 @@ public class ClassicGUI extends GUI {
         return fcc != null && fcc.tutorialMode();
     }
 
-    /** @return Whether the player looks at the map (a tip over it goes in the canvas). */
+    /**
+     * @return Whether the player looks at the map (a tip over it goes in
+     *     the canvas): not over the first scene, a hosted screen (M4.0: the
+     *     main window owns every popup then too) or a report window.
+     */
     boolean mapShowing() {
         return this.boxLayer != null && !this.sceneShowing && this.hudPane != null
-            && this.hudPane.isShowing() && dialogOwner() == this.frame;
+            && this.hudPane.isShowing() && !screenHosted() && dialogOwner() == this.frame;
     }
 
     /**
      * @param colony A colony.
-     * @return Whether its screen is open.
+     * @return Whether its screen is up (hosted).
      */
     boolean colonyScreenOpen(Colony colony) {
-        return isOpen(this.colonyFrame) && this.colonyPanel != null
-            && this.colonyShown == colony;
+        return colonyHosted() && this.colonyShown == colony;
     }
 
     /** @return When the box layer's last box closed, or {@code Long.MIN_VALUE}. */

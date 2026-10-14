@@ -443,10 +443,9 @@ final class ClassicTurnFlow {
         }
 
         /**
-         * Whether the Europe screen exists (showing, behind the map or
-         * minimized) or was just asked for: the automatic end waits for
-         * its close, also while windowed with the map in front (W13: a
-         * click on the map must not let the turns run on behind Europe).
+         * Whether the Europe screen is up (hosted in the main window since
+         * M4.0, also while the window is minimized) or was just asked for:
+         * the automatic end waits for its close (W13).
          *
          * @return True while it holds the end.
          */

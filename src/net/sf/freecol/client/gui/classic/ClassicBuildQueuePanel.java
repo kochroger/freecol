@@ -66,8 +66,9 @@ import net.sf.freecol.common.model.UnitType;
  * exactly as choosing from the original's build menu does.
  *
  * <p>Painted into a virtual <b>320&times;200</b> canvas, up-scaled by the
- * largest integer factor that fits the window, nearest-neighbour, hosted in its
- * own {@code JFrame} — the same convention as every other classic screen. No
+ * largest integer factor that fits the window, nearest-neighbour, hosted in the
+ * main window over its colony screen (M4.0, {@link ClassicScreenStack}; the
+ * original's wood list box over the colony comes in M4.11). No
  * reference screenshot of the original's build-selection screen has surfaced
  * (see {@code CLASSIC_UI_PLAN.md}), so the look here — a plain list over a dark
  * plate, in the same gold/green palette as the other screens — is a considered

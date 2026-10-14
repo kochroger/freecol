@@ -20,9 +20,12 @@
 package net.sf.freecol.client.gui.classic;
 
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Graphics;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
+import java.util.Arrays;
+import java.util.List;
 import java.util.function.BooleanSupplier;
 
 import javax.swing.JLayeredPane;
@@ -40,8 +43,15 @@ import javax.swing.JLayeredPane;
  *   <li>the right panel (240,8,80,192), {@link ClassicInfoPanel};</li>
  *   <li>over all of it, on the popup layer, the strip's dropdown layer
  *       (visible only while a menu is open);</li>
+ *   <li>over them, while one is up, the hosted classic screens (master
+ *       plan M4.0, {@link ClassicScreenStack}): the colony screen, its build
+ *       list and the Europe screen replace the map in this one picture, as
+ *       in the original, on {@link #SCREEN_LAYER}, each with its own wood
+ *       boxes on {@link #SCREEN_BOX_LAYER}; the map, the panel and the strip
+ *       are hidden meanwhile, and only the top screen shows;</li>
  *   <li>over them, the advisor boxes ({@link ClassicAdvisorLayer}, build
- *       spec W7; visible only while a box is up or due);</li>
+ *       spec W7; visible only while a box is up or due), so no box of the
+ *       map can be hidden under a screen;</li>
  *   <li>on top, on the drag layer, the original mouse arrow
  *       ({@link ClassicPointer}): it never takes a mouse event, blanks this
  *       pane's cursor (which every child inherits) over the canvas and gives
@@ -61,7 +71,10 @@ import javax.swing.JLayeredPane;
  * this pane is the painting origin of all its children and paints through
  * the recorder's copy of the screen, and the recorder reads the map's
  * terrain layer with each paint (its phase and index hint, M1c design 10
- * §9.2); otherwise it paints as any pane.
+ * §9.2); otherwise it paints as any pane.  The hosted screens are its
+ * children, so the recorder films the colony and the Europe screen too
+ * (M4.0); the map's index hint is off while one is up
+ * ({@link ClassicMapViewer#indexHint}).
  */
 final class ClassicHudPane extends JLayeredPane {
 
@@ -73,8 +86,17 @@ final class ClassicHudPane extends JLayeredPane {
     /** The advisor boxes' layer, or null until {@link #installBoxes}. */
     private ClassicAdvisorLayer boxes = null;
 
-    /** The layer of the advisor boxes: over the dropdowns, under the arrow. */
+    /** The layer of the advisor boxes: over the dropdowns and the screens, under the arrow. */
     static final Integer BOX_LAYER = POPUP_LAYER + 10;
+
+    /**
+     * The layer of the hosted classic screens (M4.0, {@link ClassicScreenStack}):
+     * over the strip's dropdowns, under the screens' own boxes.
+     */
+    static final Integer SCREEN_LAYER = POPUP_LAYER + 4;
+
+    /** The layer of a hosted screen's own wood boxes: over it, under the map's boxes. */
+    static final Integer SCREEN_BOX_LAYER = POPUP_LAYER + 6;
 
     /** The acceptance recorder of frames, or null: the usual case. */
     private final ClassicFrameRecorder recorder = ClassicFrameRecorder.forFrames();
@@ -143,6 +165,16 @@ final class ClassicHudPane extends JLayeredPane {
     }
 
     /**
+     * The game parts a hosted screen hides ({@link ClassicScreenStack}):
+     * the map, the right panel, the strip and its dropdowns.
+     *
+     * @return The parts.
+     */
+    List<Component> gameParts() {
+        return Arrays.asList(this.map, this.panel, this.strip, this.strip.dropLayer());
+    }
+
+    /**
      * Where the canvas parts go in a w x h pane.
      *
      * @return {canvas, strip, map, panel}.
@@ -172,6 +204,13 @@ final class ClassicHudPane extends JLayeredPane {
         // The whole pane: the boxes and the arrow map points with the
         // pane's canvas.
         if (this.boxes != null) this.boxes.setBounds(0, 0, getWidth(), getHeight());
+        // The hosted screens and their boxes cover the pane too; each
+        // letterboxes itself with the canvas formula (M4.0).
+        for (Integer layer : new Integer[] { SCREEN_LAYER, SCREEN_BOX_LAYER }) {
+            for (Component c : getComponentsInLayer(layer)) {
+                c.setBounds(0, 0, getWidth(), getHeight());
+            }
+        }
         this.pointer.setBounds(0, 0, getWidth(), getHeight());
     }
 

@@ -62,8 +62,9 @@ import net.sf.freecol.common.model.Unit;
  *   {@link #NEW_WORLD_RELEASE_MS} after the last band (the wipe #26218).
  *   Europe that does not open within {@link #EUROPE_TIMEOUT_MS} counts as
  *   closed (R4 verifier, hang 3).  While the hold waits for Europe's close
- *   the host keeps the screen up ({@link Chain.Host#keepEuropeUp}: one
- *   behind the map or minimized comes back, H REVIEW2 M1), and a host
+ *   the host keeps the screen up ({@link Chain.Host#keepEuropeUp}: since
+ *   M4.0 Europe is hosted in the main window and cannot be behind the
+ *   map, so only its keys come back, H REVIEW2 M1), and a host
  *   call that throws ends the chain, so the turn start goes on (L1).</li>
  *   <li><b>Europe closes by itself</b> {@link #EUROPE_CLOSE_MS} after the
  *   last ship in its port sailed ({@link #closesAfterSailing}; colonists
@@ -380,8 +381,8 @@ final class ClassicVoyages {
 
             /**
              * Open the Europe screen, or bring an open one up to date and
-             * up (restored if minimized, in front of the map; H REVIEW2
-             * M1).
+             * give it the keys (H REVIEW2 M1; hosted in the main window
+             * since M4.0).
              *
              * @return False if there is no Europe to open.
              */
@@ -392,9 +393,10 @@ final class ClassicVoyages {
 
             /**
              * The hold waits for Europe's close (polled while it is open):
-             * a Europe screen behind the map or minimized while the player
-             * is at the map comes up again, since every game key is dead
-             * until it closes (H REVIEW2 M1).
+             * the keys come back to the Europe screen when they went astray
+             * while the player is in the main window, since every game key
+             * is dead until it closes (H REVIEW2 M1; before M4.0 a Europe
+             * window behind the map or minimized came up again).
              */
             default void keepEuropeUp() {
             }
