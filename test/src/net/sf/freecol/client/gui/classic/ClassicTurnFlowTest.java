@@ -1313,6 +1313,58 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(1, r.count("activate " + b.getId()));
     }
 
+    /**
+     * Part W (build spec M4.12): a colony screen held the hand-over (the
+     * docked ship's); its close runs the pause from the close, 500 ms (V
+     * clip008 #32928 -&gt; #32963), not at once as a box's close does.
+     */
+    public void testAScreenClosedRunsTheHeldHandOverFromItsClose() {
+        final Unit a = ship(5, 5), b = ship(7, 5);
+        final Rig r = new Rig(this.game);
+        r.host.active = a;
+        a.setMovesLeft(0);
+        assertTrue(r.flow.unitChosen(b, a));
+        r.advanceMs(100);
+        r.host.blocked = true;              // the colony screen
+        r.advanceMs(2000);
+        assertTrue(r.flow.pending().held);
+        assertEquals(0, r.count("activate " + b.getId()));
+        r.host.blocked = false;
+        r.flow.screenClosed();
+        assertEquals("not at the close", 0, r.count("activate " + b.getId()));
+        assertFalse(r.flow.pending().held);
+        r.advanceMs(499.9);
+        assertEquals(0, r.count("activate " + b.getId()));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("activate " + b.getId()));
+        assertNull(r.flow.pending());
+        // Nothing held: as a box's close.
+        r.flow.screenClosed();
+        assertNull(r.flow.pending());
+        // With a jump done before the screen came: the rest of the pause
+        // from the close too (a started pause is not re-based by a box's
+        // close).
+        final Unit c = ship(9, 5);
+        r.host.jump = true;
+        b.setMovesLeft(0);
+        r.flow.screenChanged();
+        assertTrue(r.flow.unitChosen(c, b));
+        r.advanceMs(300);
+        assertEquals("the jump at 280 ms", 1, r.count("jump " + c.getId()));
+        r.host.blocked = true;
+        r.advanceMs(1500);
+        assertTrue(r.flow.pending().held);
+        assertEquals(0, r.count("activate " + c.getId()));
+        r.host.blocked = false;
+        r.flow.screenClosed();
+        r.advanceMs(1);
+        assertEquals("not at the close", 0, r.count("activate " + c.getId()));
+        r.advanceMs(498.8);
+        assertEquals(0, r.count("activate " + c.getId()));
+        r.advanceMs(0.4);
+        assertEquals(1, r.count("activate " + c.getId()));
+    }
+
     /** No unit left while a hand-over waits: it is dropped for the end. */
     public void testEndCancelsHandOver() {
         final Unit a = ship(5, 5), b = ship(7, 5);

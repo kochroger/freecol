@@ -700,6 +700,12 @@ final class ClassicAdvisorLayer extends JComponent {
         render();
         paintNow(scaled(p.layout.bounds()));
         requestFocusInWindow();
+        // A box that closes by itself (the colony's other reports after a
+        // zoom, part W): its close at its time, as a notice's answer.
+        if (p.request.closeAfterMs > 0.0) {
+            this.timer.schedule(this.clock.now() + nanos(p.request.closeAfterMs),
+                () -> { if (this.current == p) finish(p, 0); });
+        }
         if (ClassicFrameRecorder.on()) {
             final Rectangle b = p.layout.box;
             final String text = p.request.plainText();

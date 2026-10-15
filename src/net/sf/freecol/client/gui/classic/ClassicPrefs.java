@@ -234,11 +234,13 @@ final class ClassicPrefs {
      *       starves is a loss and always reported (@STARVE1/2);</li>
      *   <li>raw materials: a building that stopped or slowed for want of
      *       its input (@LUMBER, @TOOLS);</li>
-     *   <li>tools: a build that needs goods to finish (@NEEDTOOLS);</li>
+     *   <li>tools: a build that needs goods to finish (@NEEDTOOLS; the levi
+     *       rules' own report of it, part W);</li>
      *   <li>government: bad or very bad government, and its improvement
      *       while still bad (the tory penalty);</li>
      *   <li>new goods: a store past its high-water mark or full
-     *       (@CARGOREADY0-2); goods thrown away stay reported (@SPOIL);</li>
+     *       (@CARGOREADY0-2; the levi rules' new load of 100, part W); goods
+     *       thrown away stay reported (@SPOIL);</li>
      *   <li>Sons of Liberty: a colony's membership crossing a tenth
      *       (@SONSUP, @SONSDOWN);</li>
      *   <li>rebel majorities: the 50 % and 100 % marks won or lost
@@ -259,12 +261,17 @@ final class ClassicPrefs {
         m.put("model.building.noInput", REPORT_RAW_MATERIALS);
         m.put("model.building.notEnoughInput", REPORT_RAW_MATERIALS);
         m.put("model.colony.buildableNeedsGoods", REPORT_TOOLS);
+        // The levi rules' reports in the original's words (part W, M4.11).
+        m.put("model.colony.classicNeedTools", REPORT_TOOLS);
         m.put("model.colony.badGovernment", REPORT_GOVERNMENT);
         m.put("model.colony.veryBadGovernment", REPORT_GOVERNMENT);
         m.put("model.colony.governmentImproved1", REPORT_GOVERNMENT);
         m.put("model.colony.governmentImproved2", REPORT_GOVERNMENT);
         m.put("model.colony.warehouseFull", REPORT_NEW_GOODS);
         m.put("model.colony.warehouseOverfull", REPORT_NEW_GOODS);
+        m.put("model.colony.classicCargoReady0", REPORT_NEW_GOODS);
+        m.put("model.colony.classicCargoReady1", REPORT_NEW_GOODS);
+        m.put("model.colony.classicCargoReady2", REPORT_NEW_GOODS);
         m.put("model.colony.soLIncrease", REPORT_SONS_OF_LIBERTY);
         m.put("model.colony.soLDecrease", REPORT_SONS_OF_LIBERTY);
         m.put("model.colony.goodGovernment", REPORT_REBEL_MAJORITY);

@@ -27,11 +27,17 @@ import net.sf.freecol.common.model.Building;
 import net.sf.freecol.common.model.BuildingType;
 import net.sf.freecol.common.model.Colony;
 import net.sf.freecol.common.model.Game;
+import net.sf.freecol.common.model.GoodsContainer;
 import net.sf.freecol.common.model.GoodsType;
+import net.sf.freecol.common.model.ModelMessage;
+import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileType;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
+import net.sf.freecol.common.networking.ChangeSet;
+import net.sf.freecol.common.option.GameOptions;
+import net.sf.freecol.common.util.LogBuilder;
 import net.sf.freecol.server.ServerTestHelper;
 import net.sf.freecol.util.test.FreeColTestCase;
 import net.sf.freecol.util.test.FreeColTestUtils;
@@ -392,4 +398,133 @@ public class ServerColonyTest extends FreeColTestCase {
                      0, colony.getOwner().getModelMessages().size());
     }
     */
+
+    /**
+     * The original's report of a build that lacks only tools (part W,
+     * build spec M4.11, @NEEDTOOLS; V clip 020 #35, #69, #75, #85, #91: the
+     * Verlag's 52 hammers stored, the tools 10, 10, 13, 16, 19 of 20): with
+     * all its hammers and fewer tools than it needs, every turn; not while
+     * a hammer is missing, not with the tools there; FreeCol's rules warn
+     * only when nobody makes the missing goods.
+     */
+    public void testOriginalNeedTools() {
+        Game game = ServerTestHelper.startServerGame(getTestMap(plains));
+        final Specification spec = game.getSpecification();
+        final BuildingType press = spec.getBuildingType("model.building.printingPress");
+        final GoodsType tools = spec.getGoodsType("model.goods.tools");
+        final ServerColony colony = (ServerColony)createStandardColony(4);
+        colony.setBuildQueue(java.util.List.<net.sf.freecol.common.model.BuildableType>of(press));
+        final int hammers = AbstractGoods.getCount(hammerGoodsType, press.getRequiredGoodsList());
+        final int need = AbstractGoods.getCount(tools, press.getRequiredGoodsList());
+        assertTrue(hammers > 0 && need > 0);
+        colony.addGoods(hammerGoodsType, hammers);
+        colony.addGoods(tools, need / 2);
+        ModelMessage m = colony.originalNeedTools(press);
+        assertNotNull(m);
+        assertEquals("model.colony.classicNeedTools", m.getId());
+        assertEquals(String.valueOf(need), m.getReplacement("%amount%").getId());
+        assertEquals(String.valueOf(need / 2), m.getReplacement("%number%").getId());
+        assertEquals(colony.getName(), m.getReplacement("%colony%").getId());
+        assertEquals(press.getNameKey(), m.getReplacement("%buildable%").getId());
+        // No tools at all (@NEEDTOOLS0 on the screen): the stock 0.
+        colony.removeGoods(tools);
+        assertEquals("0", colony.originalNeedTools(press).getReplacement("%number%").getId());
+        // A hammer missing: nothing.
+        colony.removeGoods(hammerGoodsType, 1);
+        assertNull(colony.originalNeedTools(press));
+        colony.addGoods(hammerGoodsType, 1);
+        // The tools there: nothing.
+        colony.addGoods(tools, need);
+        assertNull(colony.originalNeedTools(press));
+        colony.removeGoods(tools);
+        // At the turn's warnings: the original's report instead of
+        // FreeCol's; without the option FreeCol's rule.
+        spec.setBoolean(GameOptions.ORIGINAL_COLONY_REPORTS, true);
+        try {
+            final ChangeSet cs = new ChangeSet();
+            colony.csNewTurnWarnings(new java.util.Random(1), new LogBuilder(0), cs);
+            assertTrue(cs.toString(), cs.toString().contains("model.colony.classicNeedTools"));
+            assertFalse(cs.toString(), cs.toString().contains("buildableNeedsGoods"));
+        } finally {
+            spec.setBoolean(GameOptions.ORIGINAL_COLONY_REPORTS, false);
+        }
+        final ChangeSet cs = new ChangeSet();
+        colony.csNewTurnWarnings(new java.util.Random(1), new LogBuilder(0), cs);
+        assertFalse(cs.toString(), cs.toString().contains("model.colony.classicNeedTools"));
+    }
+
+    /**
+     * The original's new load (part W, build spec M4.11, @CARGOREADY0-2;
+     * V clip 020 #236: rum 103 in a colony with a Lagerhaus; clip 040
+     * #84 666: horses at the capacity 300): a stock that passed a multiple
+     * of 100 this turn; at the capacity variant 1 while the warehouse can
+     * grow, 2 when it cannot; the turn's warnings give it instead of
+     * FreeCol's store warnings (with the option).
+     */
+    public void testOriginalCargoReady() {
+        Game game = ServerTestHelper.startServerGame(getTestMap(plains));
+        final Specification spec = game.getSpecification();
+        final GoodsType rum = spec.getGoodsType("model.goods.rum");
+        final ServerColony colony = (ServerColony)createStandardColony(4);
+        assertNull("no load passed", colony.originalCargoReady(rum, 103, 110, 200));
+        assertNull(colony.originalCargoReady(rum, 0, 99, 200));
+        ModelMessage m = colony.originalCargoReady(rum, 95, 103, 200);
+        assertEquals("model.colony.classicCargoReady0", m.getId());
+        assertEquals("103", m.getReplacement("%amount%").getId());
+        assertEquals("200", m.getReplacement("%level%").getId());
+        assertEquals(rum.getNameKey(), m.getReplacement("%goods%").getId());
+        assertEquals("model.colony.classicCargoReady0",
+                     colony.originalCargoReady(rum, 150, 260, 300).getId());
+        // At the capacity: the depot or warehouse can grow (1).
+        assertEquals("model.colony.classicCargoReady1",
+                     colony.originalCargoReady(rum, 90, 100, 100).getId());
+        // The expansion built: it cannot (2).
+        colony.getWarehouse().upgrade();
+        colony.getWarehouse().upgrade();
+        assertNull(colony.getWarehouse().getType().getUpgradesTo());
+        assertEquals("model.colony.classicCargoReady2",
+                     colony.originalCargoReady(rum, 280, 300, 300).getId());
+        // At the turn's warnings, with the option: a new load, no FreeCol
+        // warning of the store; without it FreeCol's.
+        // The cases: the stock before and now, the levi rules' report, FreeCol's.
+        final GoodsContainer gc = colony.getGoodsContainer();
+        final int limit = colony.getWarehouseCapacity();
+        final int high = colony.getExportData(rum).getHighLevel() * limit
+            / GoodsContainer.CARGO_SIZE;
+        assertTrue("the high-water mark between two loads", high > 105 && high < limit - 5);
+        final Object[][] cases = {
+            { 95, 103, "model.colony.classicCargoReady0", null },
+            { high - 5, high + 5, null, "model.colony.warehouseFull" },
+            // (the warehouse at its last level from above: 2)
+            { limit - 5, limit, "model.colony.classicCargoReady2",
+              "model.colony.warehouseOverfull" },
+        };
+        for (Object[] c : cases) {
+            final int before = (Integer) c[0], now = (Integer) c[1];
+            for (boolean original : new boolean[] { true, false }) {
+                colony.removeGoods(rum);
+                colony.addGoods(rum, before);
+                gc.saveState();
+                colony.addGoods(rum, now - before);
+                spec.setBoolean(GameOptions.ORIGINAL_COLONY_REPORTS, original);
+                final String all;
+                try {
+                    final ChangeSet cs = new ChangeSet();
+                    colony.csNewTurnWarnings(new java.util.Random(1), new LogBuilder(0), cs);
+                    all = cs.toString();
+                } finally {
+                    spec.setBoolean(GameOptions.ORIGINAL_COLONY_REPORTS, false);
+                }
+                final String what = before + " -> " + now + " original=" + original + ": " + all;
+                if (original) {
+                    if (c[2] != null) assertTrue(what, all.contains((String) c[2]));
+                    assertFalse(what, all.contains("warehouseFull"));
+                    assertFalse(what, all.contains("warehouseOverfull"));
+                } else {
+                    if (c[3] != null) assertTrue(what, all.contains((String) c[3]));
+                    assertFalse(what, all.contains("classicCargoReady"));
+                }
+            }
+        }
+    }
 }

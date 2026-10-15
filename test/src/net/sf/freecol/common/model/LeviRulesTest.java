@@ -69,6 +69,8 @@ public class LeviRulesTest extends FreeColTestCase {
         CHANGED.put(GameOptions.ORIGINAL_DROP_JOBS, Boolean.TRUE);         // the original's (U, R2/R3)
         CHANGED.put(GameOptions.ORIGINAL_BUILD_PRICE, Boolean.TRUE);       // the original's (V, R1)
         CHANGED.put(GameOptions.ORIGINAL_BUILD_COMPLETION, Boolean.TRUE);  // the original's (V, R4)
+        CHANGED.put(GameOptions.ORIGINAL_COLONY_REPORTS, Boolean.TRUE);    // the original's (W, M4.11)
+        CHANGED.put(GameOptions.DOCKING_ENDS_MOVES, Boolean.TRUE);         // the original's (W, R5)
         CHANGED.put(GameOptions.CANCEL_KEEPS_MOVE, Boolean.TRUE);          // house rules
         CHANGED.put(GameOptions.REVENGE_MODE, Boolean.FALSE);
         CHANGED.put(GameOptions.LAST_COLONY_DEFEAT, Boolean.TRUE);
@@ -396,11 +398,41 @@ public class LeviRulesTest extends FreeColTestCase {
     }
 
     /**
+     * The original's colony reports and docking (part W, M4.11 and M4.12
+     * rule R5): on in levi, off in classic and freecol (which get the
+     * options from Specification.fixGameOptions); in the colony group,
+     * with their names.  The rules' effects: {@code ServerColonyTest},
+     * {@code ServerUnitTest}, {@code ClassicColonyReportsTest}.
+     */
+    public void testOriginalFlowRules() {
+        for (String id : new String[] { GameOptions.ORIGINAL_COLONY_REPORTS,
+                                        GameOptions.DOCKING_ENDS_MOVES }) {
+            assertTrue(id, spec(LEVI).getBoolean(id));
+            assertFalse(id, spec("classic").getBoolean(id));
+            assertFalse(id, spec("freecol").getBoolean(id));
+            assertNotNull(id, spec(LEVI).getOptionGroup(GameOptions.GAMEOPTIONS_COLONY)
+                          .getOption(id));
+        }
+        assertEquals("Colony reports: the original ones",
+                     Messages.getName(GameOptions.ORIGINAL_COLONY_REPORTS));
+        assertEquals("Docking ends the ship's moves",
+                     Messages.getName(GameOptions.DOCKING_ENDS_MOVES));
+        assertTrue(Specification.originalFlowDefault(LEVI));
+        assertFalse(Specification.originalFlowDefault("classic"));
+        assertFalse(Specification.originalFlowDefault("freecol"));
+    }
+
+    /**
      * A save from before part V (its specification without the two
      * options) gets them through Specification.fixGameOptions: on for a
-     * levi game, off for classic (the review of part V, regression L2).
+     * levi game, off for classic (the review of part V, regression L2);
+     * the same for part W's two (the original's colony reports, docking).
      */
     public void testOriginalBuildRulesInAnOldSave() throws Exception {
+        final String[] ids = { GameOptions.ORIGINAL_BUILD_PRICE,
+                               GameOptions.ORIGINAL_BUILD_COMPLETION,
+                               GameOptions.ORIGINAL_COLONY_REPORTS,
+                               GameOptions.DOCKING_ENDS_MOVES };
         for (String rules : new String[] { LEVI, "classic" }) {
             final java.io.StringWriter sw = new java.io.StringWriter();
             try (net.sf.freecol.common.io.FreeColXMLWriter xw
@@ -409,8 +441,7 @@ public class LeviRulesTest extends FreeColTestCase {
                 spec(rules).toXML(xw);
             }
             String xml = sw.toString();
-            for (String id : new String[] { GameOptions.ORIGINAL_BUILD_PRICE,
-                                            GameOptions.ORIGINAL_BUILD_COMPLETION }) {
+            for (String id : ids) {
                 final String before = xml;
                 xml = xml.replaceAll("<[A-Za-z]+Option[^>]*id=\"" + java.util.regex.Pattern.quote(id)
                                      + "\"[^>]*/>", "");
@@ -423,8 +454,7 @@ public class LeviRulesTest extends FreeColTestCase {
             // Reading it runs the fixes (Specification.fixGameOptions).
             final Specification old = new Specification(
                 new java.io.ByteArrayInputStream(xml.getBytes("UTF-8")));
-            for (String id : new String[] { GameOptions.ORIGINAL_BUILD_PRICE,
-                                            GameOptions.ORIGINAL_BUILD_COMPLETION }) {
+            for (String id : ids) {
                 assertEquals(rules + " " + id, LEVI.equals(rules), old.getBoolean(id));
             }
         }

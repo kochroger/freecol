@@ -702,6 +702,22 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
             final ClassicAdvisorBox.Request r = this.asked.get(this.asked.size() - 1);
             return r.id + " " + Arrays.toString(r.plainRows()) + " bar=" + r.defaultRow;
         }
+
+        /** The colonies whose food a change made short (part W, @TUTORIAL16). */
+        final List<Colony> shortOf = new ArrayList<>();
+
+        /** The tiles whose Colonopedia page F1 asked (part W). */
+        final List<Tile> pages = new ArrayList<>();
+
+        @Override
+        public void foodRanShort(Colony colony) {
+            this.shortOf.add(colony);
+        }
+
+        @Override
+        public void terrainPage(Tile tile) {
+            this.pages.add(tile);
+        }
     }
 
     /** What a screen test works with. */
@@ -1803,5 +1819,159 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         }
         System.out.println(getName() + ":" + out);
         assertEquals("pixels off:" + out, 0, bad);
+    }
+    /** Run one of the screen's key actions (its binding's press or release). */
+    private static void action(ClassicColonyPanel p, String name) {
+        p.getActionMap().get(name).actionPerformed(
+            new java.awt.event.ActionEvent(p, java.awt.event.ActionEvent.ACTION_PERFORMED, name));
+    }
+
+    /**
+     * The exit on the release (part W, build spec M4.11 target 3; V clip
+     * 042: the press #17651 stops the blink, the release #17658, the map
+     * #17689): a press on «Abb» does nothing yet, a release elsewhere
+     * nothing at all; the release on it leaves the screen as it is, takes
+     * no input and closes it 30 frames (428 ms) later.
+     */
+    public void testTheExitOnTheRelease() throws Exception {
+        final Scene s = scene(2, true);
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, 312, 190);
+        assertFalse(s.panel.leaving());
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, 200, 190);
+        paint(s.panel);
+        assertFalse("released elsewhere", s.panel.leaving());
+        assertTrue(s.events.toString(), s.events.isEmpty());
+        final BufferedImage before = s.panel.canvas();
+        click(s.panel, 312, 190);
+        assertTrue(s.panel.leaving());
+        assertEquals("[later 428]", s.events.toString());
+        assertEquals(30, ClassicColonyMoves.EXIT_MAP_FRAMES);
+        // Meanwhile: the same picture, no input (Escape, a tile, the exit).
+        assertTrue(Arrays.equals(ClassicColonyPanel.pixelsOf(before),
+                                 ClassicColonyPanel.pixelsOf(s.panel.canvas())));
+        action(s.panel, "classic_escapeDown");
+        action(s.panel, "classic_closeColony");
+        final int[] t = tile(1);
+        click(s.panel, t[0], t[1]);
+        click(s.panel, 312, 190);
+        assertEquals("[later 428]", s.events.toString());
+        s.later.get(0).run();
+        assertEquals("[later 428, closed]", s.events.toString());
+        assertFalse(s.panel.leaving());
+    }
+
+    /**
+     * Escape acts on its release (part W, M4.11 target 3; the manual's key
+     * card: "Exit and return to the Map . . . [ESC]"): the press alone
+     * nothing, a release without the screen's press (an Escape that closed
+     * a box over it) nothing, the press and release the exit.
+     */
+    public void testTheExitByEscape() throws Exception {
+        final Scene s = scene(2, true);
+        action(s.panel, "classic_closeColony");
+        assertFalse("a release alone", s.panel.leaving());
+        action(s.panel, "classic_escapeDown");
+        assertFalse("the press alone", s.panel.leaving());
+        action(s.panel, "classic_closeColony");
+        assertTrue(s.panel.leaving());
+        assertEquals("[later 428]", s.events.toString());
+        s.later.get(0).run();
+        assertEquals("[later 428, closed]", s.events.toString());
+    }
+
+    /**
+     * The trigger of @TUTORIAL16 (part W, M4.11 target 2; V clip 020
+     * #18949: J2 moved the farmer into the smithy, the food ran short):
+     * the screen tells the GUI once a change made the colony's food short,
+     * not while it stays sufficient, not when it was short already.
+     */
+    public void testAChangeThatMakesTheFoodShort() throws Exception {
+        final Scene s = scene(4, true);
+        final List<Unit> all = s.colony.getUnitList();
+        final Unit farmer = all.get(0);
+        farmer.setLocation(tileOf(s.colony, Direction.S));
+        farmer.changeWorkType(ClassicColonyJobs.goodsOf(spec(), 0));
+        for (int i = 1; i < all.size(); i++) {
+            all.get(i).setLocation(building(s.colony, "carpenterHouse"));
+        }
+        s.colony.invalidateCache();
+        paint(s.panel);
+        final int made = s.colony.getFoodProduction(), eaten = s.colony.getFoodConsumption();
+        final int his = farmer.getWorkTile().getMaximumPotential(
+            ClassicColonyJobs.goodsOf(spec(), 0), farmer.getType());
+        if (made < eaten || made - his >= eaten) {
+            System.err.println(getName() + ": the test map's food does not suit ("
+                + made + " made, " + eaten + " eaten, " + his + " his), skipped");
+            return;
+        }
+        // A move that keeps the food sufficient: nothing.
+        final Unit other = all.get(1);
+        final int[] o = at(s.panel, other);
+        final int[] w = tile(7);
+        drag(s.panel, o[0], o[1], w[0], w[1]);
+        assertTrue(s.boxes.shortOf.toString(), s.boxes.shortOf.isEmpty());
+        // The farmer into a building: the food runs short, once.
+        final int[] f = at(s.panel, farmer);
+        final int[] b = slotOf(s.panel, building(s.colony, "blacksmithHouse"));
+        drag(s.panel, f[0], f[1], b[0], b[1]);
+        assertTrue(s.api.log.toString(), farmer.getLocation() instanceof Building);
+        assertTrue(s.colony.getFoodProduction() < s.colony.getFoodConsumption());
+        assertEquals(List.of(s.colony), s.boxes.shortOf);
+        // Short already: no second word.
+        final int[] o2 = at(s.panel, other);
+        final int[] w2 = tile(3);
+        drag(s.panel, o2[0], o2[1], w2[0], w2[1]);
+        assertEquals(1, s.boxes.shortOf.size());
+    }
+
+    /**
+     * F1 (part W, M4.11 target 4; V clip 020 #76921, #78325: the page of the
+     * white cursor's tile): the white cursor's tile, else the selected
+     * colonist's work tile, else none.
+     */
+    public void testF1AsksTheCursorsTile() throws Exception {
+        final Scene s = scene(2, true);
+        final List<Unit> all = s.colony.getUnitList();
+        all.get(0).setLocation(tileOf(s.colony, Direction.N));
+        all.get(1).setLocation(building(s.colony, "carpenterHouse"));
+        s.colony.invalidateCache();
+        paint(s.panel);
+        ClassicColonyPanel.setTileCursor(2);
+        paint(s.panel);
+        action(s.panel, "classic_colonyPedia");
+        assertEquals(List.of(s.colony.getTile().getNeighbourOrNull(Direction.NE)),
+                     s.boxes.pages);
+        ClassicColonyPanel.setTileCursor(ClassicColonyPanel.CURSOR_OFF_TILES);
+        s.panel.select(all.get(0));
+        action(s.panel, "classic_colonyPedia");
+        assertSame(all.get(0).getWorkTile(), s.boxes.pages.get(1));
+        s.panel.select(all.get(1));
+        action(s.panel, "classic_colonyPedia");
+        assertEquals("a building worker, the cursor off the tiles: none", 2,
+                     s.boxes.pages.size());
+        assertFalse(s.panel.leaving());
+        // F1 in the tile worker's job menu (J2, «(F1 für Hilfe)»): the menu
+        // goes, his tile's page comes, his work stays (I).
+        paint(s.panel);
+        final Unit worker = all.get(0);
+        final Object work = worker.getWorkType();
+        final int[] w = at(s.panel, worker);
+        click(s.panel, w[0], w[1]);     // select
+        final int boxes = s.boxes.asked.size();
+        s.boxes.answers.add(ClassicAdvisorBox.Bar.HELP);
+        click(s.panel, w[0], w[1]);     // J2
+        assertEquals(boxes + 1, s.boxes.asked.size());
+        final ClassicAdvisorBox.Request j2 = s.boxes.asked.get(boxes);
+        assertTrue(j2.id, j2.id.startsWith("jobs "));
+        assertNotNull("F1 answers", j2.help);
+        assertEquals(3, s.boxes.pages.size());
+        assertSame(worker.getWorkTile(), s.boxes.pages.get(2));
+        assertSame(work, worker.getWorkType());
+        assertFalse(s.panel.leaving());
+        // L and U stay unmapped on the screen (build spec M4.12).
+        final javax.swing.InputMap im
+            = s.panel.getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW);
+        assertNull(im.get(javax.swing.KeyStroke.getKeyStroke("L")));
+        assertNull(im.get(javax.swing.KeyStroke.getKeyStroke("U")));
     }
 }

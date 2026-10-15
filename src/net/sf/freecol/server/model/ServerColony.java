@@ -160,6 +160,90 @@ public class ServerColony extends Colony implements TurnTaker {
     }
 
     /**
+     * Whether the original's colony reports hold
+     * ({@code GameOptions.ORIGINAL_COLONY_REPORTS}, levi, part W).
+     *
+     * @return True if so; false for rules without the option.
+     */
+    private boolean originalColonyReports() {
+        try {
+            return getSpecification()
+                .getBoolean(GameOptions.ORIGINAL_COLONY_REPORTS);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** FreeCol's warnings of a store that the original's new loads replace. */
+    static final List<String> STORE_WARNINGS = List.of(
+        "model.colony.warehouseFull", "model.colony.warehouseOverfull");
+
+    /**
+     * The original's report of a build that lacks only tools (part W,
+     * build spec M4.11, @NEEDTOOLS): every turn while the build has all
+     * its other goods (the hammers) and fewer tools than it needs (V clip
+     * 020 #35, #69, #75, #85, #91: the Verlag's 52 hammers stored, the
+     * tools 10, 10, 13, 16, 19 of 20).  {@code %amount%} the tools the
+     * build needs, {@code %number%} the colony's.
+     *
+     * @param build The build.
+     * @return The report, or null when the build lacks something else
+     *     or nothing.
+     */
+    ModelMessage originalNeedTools(BuildableType build) {
+        final Specification spec = getSpecification();
+        final GoodsType tools = spec.getGoodsType("model.goods.tools");
+        if (build == null || tools == null) return null;
+        int need = 0;
+        for (AbstractGoods ag : build.getRequiredGoodsList()) {
+            if (ag.getType() == tools) {
+                need = ag.getAmount();
+            } else if (getGoodsCount(ag.getType()) < ag.getAmount()) {
+                return null;   // the hammers are not there yet
+            }
+        }
+        final int have = getGoodsCount(tools);
+        if (need <= 0 || have >= need) return null;
+        return new ModelMessage(MessageType.MISSING_GOODS,
+                                "model.colony.classicNeedTools", this, build)
+            .addName("%colony%", getName())
+            .addNamed("%buildable%", build)
+            .addAmount("%amount%", need)
+            .addAmount("%number%", have)
+            .addNamed("%goodsType%", tools);
+    }
+
+    /**
+     * The original's report of a new load (part W, build spec M4.11,
+     * @CARGOREADY0-2): a good whose stock passed a multiple of 100 this
+     * turn (V clip 020 #236: rum 103 in a colony with a Lagerhaus; clip
+     * 040 #84 666: horses at the capacity 300).  Its variant: 0, or at
+     * the store's capacity 1 when the warehouse can still grow, 2 when it
+     * cannot (@CARGOREADY2 «… seine Lagerkapazität für Pferde (300)
+     * erreicht.», V clip 040).
+     *
+     * @param type The goods type.
+     * @param before The stock before the turn's production.
+     * @param now The stock now (at most the capacity).
+     * @param limit The capacity.
+     * @return The report, or null when no multiple of 100 was passed.
+     */
+    ModelMessage originalCargoReady(GoodsType type, int before, int now, int limit) {
+        if (now / GoodsContainer.CARGO_SIZE <= Math.max(0, before) / GoodsContainer.CARGO_SIZE) {
+            return null;
+        }
+        final Building store = getWarehouse();
+        final int variant = (now < limit) ? 0
+            : (store != null && store.getType().getUpgradesTo() != null) ? 1 : 2;
+        return new ModelMessage(MessageType.WAREHOUSE_CAPACITY,
+                                "model.colony.classicCargoReady" + variant, this, type)
+            .addNamed("%goods%", type)
+            .addName("%colony%", getName())
+            .addAmount("%level%", limit)
+            .addAmount("%amount%", now);
+    }
+
+    /**
      * Build a unit from a build queue.
      *
      * @param buildQueue The {@code BuildQueue} to find the unit in.
@@ -556,9 +640,19 @@ public class ServerColony extends Colony implements TurnTaker {
             }
         }
 
+        // The original's reports (levi, part W): the build that lacks only
+        // tools, every turn, instead of FreeCol's warning of missing goods
+        // that nobody makes (the original has no such report).
+        final boolean original = originalColonyReports();
         for (BuildQueue<?> queue : queues) {
             ProductionInfo info = getProductionInfo(queue);
             if (info == null) continue;
+            if (original && queue == this.buildQueue) {
+                final ModelMessage m = (info.getConsumption().isEmpty())
+                    ? originalNeedTools(queue.getCurrentlyBuilding()) : null;
+                if (m != null) cs.addMessage(owner, m);
+                continue;
+            }
             if (info.getConsumption().isEmpty()) {
                 BuildableType build = queue.getCurrentlyBuilding();
                 if (build != null) {
@@ -619,6 +713,12 @@ public class ServerColony extends Colony implements TurnTaker {
                 // high-water-mark has been reached this turn
                 messageId = "model.colony.warehouseFull";
             }
+            // The original (levi, part W): a new load of 100 instead of
+            // FreeCol's high-water mark and capacity warnings; goods thrown
+            // away stay reported in FreeCol's words.
+            if (original && messageId != null && STORE_WARNINGS.contains(messageId)) {
+                messageId = null;
+            }
             if (messageId != null) {
                 cs.addMessage(owner,
                     new ModelMessage(MessageType.WAREHOUSE_CAPACITY,
@@ -627,6 +727,11 @@ public class ServerColony extends Colony implements TurnTaker {
                         .addAmount("%waste%", waste)
                         .addAmount("%level%", high)
                         .addName("%colony%", getName()));
+            }
+            if (original) {
+                final ModelMessage ready = originalCargoReady(type, oldAmount,
+                    Math.min(amount, limit), limit);
+                if (ready != null) cs.addMessage(owner, ready);
             }
 
             // No problem this turn, but what about the next?

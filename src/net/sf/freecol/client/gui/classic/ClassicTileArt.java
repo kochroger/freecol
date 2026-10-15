@@ -28,6 +28,7 @@ import net.sf.freecol.client.gui.ImageLibrary;
 import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Resource;
+import net.sf.freecol.common.model.ResourceType;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileImprovement;
 import net.sf.freecol.common.model.TileType;
@@ -412,6 +413,60 @@ final class ClassicTileArt {
             }
         }
         return false;
+    }
+
+    // The Colonopedia's terrain picture (part W)
+
+    /** The terrain page's picture: cells across and down. */
+    static final int PEDIA_CELLS = 3;
+
+    /**
+     * The overlays of a cell of the Colonopedia terrain page's picture
+     * (V clip 020 #78325 TROPENWALD, #76922 REGENWALD, #121397 LAUBWALD,
+     * every frame found whole): three by three cells of the type, its
+     * relief connected inside the block only (forest {@code 64 + mask}:
+     * 69, 71, 70 / 77, 79, 78 / 73, 75, 74); on land a river through the
+     * left column ({@code PHYS0.SS} 22 W+S at (0,1), 26 W+N at (0,2)) and
+     * a road's spokes through the right one (82 NE and 85 S at (2,0), 81 N
+     * and 84 SE at (2,1), no hub); the resource marker on the centre cell.
+     * The same river and road on all three pages, whatever the tiles: an
+     * illustration, not the tile's surroundings.  Water and the other land
+     * types are not seen (I: the same rule, no river or road on water).
+     *
+     * @param type The terrain type.
+     * @param resource The page's resource type, or null.
+     * @param x The cell's column, 0 to 2.
+     * @param y The cell's row, 0 to 2.
+     * @param frames Receives each {@code PHYS0.SS} frame, in drawing order.
+     */
+    static void pediaFrames(final TileType type, ResourceType resource, int x, int y,
+                            IntConsumer frames) {
+        if (type == null) return;
+        final TypeLookup block = (bx, by) -> (bx >= 0 && by >= 0
+            && bx < PEDIA_CELLS && by < PEDIA_CELLS) ? type : null;
+        if (type.isForested()) {
+            frames.accept(FOREST + areaMask(block, x, y, Feature.FOREST));
+        } else if (isType(type, "model.tile.mountains")) {
+            frames.accept(MOUNTAINS + areaMask(block, x, y, Feature.MOUNTAINS));
+        } else if (isType(type, "model.tile.hills")) {
+            frames.accept(HILLS + areaMask(block, x, y, Feature.HILLS));
+        }
+        if (!type.isWater()) {
+            if (x == 0 && y == 1) frames.accept(RIVER_MAJOR + W + S);
+            if (x == 0 && y == 2) frames.accept(RIVER_MAJOR + W + N);
+            if (x == 2 && y == 0) {
+                frames.accept(ROAD_SPOKES[1][2]);
+                frames.accept(ROAD_SPOKES[4][2]);
+            }
+            if (x == 2 && y == 1) {
+                frames.accept(ROAD_SPOKES[0][2]);
+                frames.accept(ROAD_SPOKES[3][2]);
+            }
+        }
+        if (x == 1 && y == 1 && resource != null) {
+            final int r = resourceFrame(resource.getId());
+            if (r >= 0) frames.accept(r);
+        }
     }
 
     /** {@code PHYS0.SS}: the resource markers, 89 + the NAMES.TXT row. */

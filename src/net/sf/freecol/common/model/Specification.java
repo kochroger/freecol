@@ -3120,6 +3120,15 @@ public final class Specification implements OptionContainer {
         ret |= checkOp(GameOptions.ORIGINAL_BUILD_COMPLETION,
                        GameOptions.GAMEOPTIONS_COLONY,
                        originalBuildDefault(getId()), BooleanOption.class);
+        // The original's colony reports and docking (levi, part W):
+        // without them FreeCol's warnings and move cost; a levi save from
+        // before the rules gets the levi rules' values.
+        ret |= checkOp(GameOptions.ORIGINAL_COLONY_REPORTS,
+                       GameOptions.GAMEOPTIONS_COLONY,
+                       originalFlowDefault(getId()), BooleanOption.class);
+        ret |= checkOp(GameOptions.DOCKING_ENDS_MOVES,
+                       GameOptions.GAMEOPTIONS_COLONY,
+                       originalFlowDefault(getId()), BooleanOption.class);
         ret |= checkOp(GameOptions.REVENGE_MODE,
                        GameOptions.GAMEOPTIONS_VICTORY_CONDITIONS,
                        Boolean.TRUE, BooleanOption.class);
@@ -3199,6 +3208,20 @@ public final class Specification implements OptionContainer {
      * @return The value.
      */
     static Boolean originalBuildDefault(String specId) {
+        return "levi".equals(specId);
+    }
+
+    /**
+     * The value {@code GameOptions.ORIGINAL_COLONY_REPORTS} and
+     * {@code GameOptions.DOCKING_ENDS_MOVES} get in rules or a save that
+     * lack them ({@link #fixGameOptions}): on for the "levi" rules (a game
+     * of Roger's begun before part W reports and docks as the original
+     * does), off for any other.
+     *
+     * @param specId The specification's id.
+     * @return The value.
+     */
+    static Boolean originalFlowDefault(String specId) {
         return "levi".equals(specId);
     }
 

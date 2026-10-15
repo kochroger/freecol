@@ -19,6 +19,7 @@
 
 package net.sf.freecol.client.gui.classic;
 
+import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -29,14 +30,27 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import net.sf.freecol.common.model.FreeColObject;
+import net.sf.freecol.common.model.GoodsType;
+import net.sf.freecol.common.model.Modifier;
+import net.sf.freecol.common.model.ResourceType;
+import net.sf.freecol.common.model.Specification;
+import net.sf.freecol.common.model.TileType;
+import net.sf.freecol.common.model.UnitType;
+import static net.sf.freecol.common.util.CollectionUtils.toList;
 
 
 /**
  * The original's Colonopedia text (PEDIA.TXT, copied into the pack's
- * {@code text/} folder by {@code ant classic-assets}) and its founding
- * father page (build spec D8b, the page alone: F1 in the father box).
+ * {@code text/} folder by {@code ant classic-assets}), its founding
+ * father page (build spec D8b, the page alone: F1 in the father box) and
+ * its terrain page (part W, build spec M4.11: F1 on the colony screen,
+ * {@link #terrainPage}).
  *
  * <p><b>The file.</b>  The same byte codes as GAME.TXT
  * ({@link ClassicText#decode}).  A section starts with a line
@@ -281,6 +295,376 @@ final class ClassicPedia {
         return img;
     }
 
+    // The terrain page (part W, build spec M4.11 target 4)
+
+    /** PEDIA.TXT {@code @PEDIA}: the terrain types' category («Art des Geländes»). */
+    static final int CATEGORY_TERRAIN = 2;
+
+    /**
+     * LABELS {@code @MISC}: "Experte", "Straße", "Pflügen", "Fluß",
+     * "Küste", "Bewegungskosten", "Verteidigungs- oder Geländebonus".
+     */
+    static final int MISC_EXPERT = 4, MISC_ROAD = 31, MISC_PLOW = 182, MISC_RIVER = 183,
+        MISC_COAST = 184, MISC_MOVES = 185, MISC_DEFENCE = 186;
+
+    /**
+     * The picture: 48x48 at (9,23) inside two frame lines, 3C2018 outside
+     * (x 7 and 58, y 21 and 72), 593424 inside (V #78325, #76922,
+     * #121397).
+     */
+    static final int PICTURE_X = 9, PICTURE_Y = 23, PICTURE_SIZE = 48;
+
+    /** The picture's frame lines. */
+    static final int FRAME_OUTER = 0x3C2018, FRAME_INNER = 0x593424;
+
+    /**
+     * The rows: the first glyph top and the pitch (27, 47, 67 ...), the
+     * work's figure {@code ICONS.SS.(81 + job)} at (63, top - 6), its
+     * yield at x 75.
+     */
+    static final int ROW_TOP = 27, ROW_PITCH = 20, ROW_ICON_X = 63, ROW_ICON_DY = -6,
+        ROW_X = 75;
+
+    /** The work's figure: {@code ICONS.SS.(81 + NAMES @JOB row)}. */
+    static final int ICON_JOB_BASE = 81;
+
+    /**
+     * The gaps of a row: 8 after the yield (and after the movement cost),
+     * 2 from the bonus to the resource marker, 18 from the marker to the
+     * resource's words, the expert's line 7 lower, under the bonus or 8
+     * right of the resource's words.
+     */
+    static final int ROW_GAP = 8, MARKER_GAP = 2, MARKER_TEXT_DX = 18,
+        RESOURCE_EXPERT_DX = 8, EXPERT_DY = 7;
+
+    /**
+     * The expert farmer as the original's page writes him: "+3" (V on all
+     * three pages).  The rule is +2 in FreeCol and, FreeCol's
+     * specification notes, in the original too: the page keeps the
+     * original's documentation.
+     */
+    static final int EXPERT_FARMER_SHOWN = 3;
+
+    /**
+     * One row of the terrain page: a tile work's yield, gold (NAMES
+     * {@code @JOB} and the type's production for a free colonist), the
+     * improvements' bonus and the expert's, green, and the type's resource,
+     * gold, after its marker, where it changes the work's goods.
+     */
+    static final class TerrainRow {
+
+        /** NAMES {@code @JOB} 0-8. */
+        final int job;
+
+        /** "Farmer: 3". */
+        final String yield;
+
+        /** "Pflügen/Fluß: +1", or null. */
+        final String bonus;
+
+        /** "Experte: x2", or null. */
+        final String expert;
+
+        /** "Bestes Holz: +4", or null. */
+        final String resource;
+
+        /** The resource's {@code PHYS0.SS} marker, or -1. */
+        final int marker;
+
+        TerrainRow(int job, String yield, String bonus, String expert,
+                   String resource, int marker) {
+            this.job = job;
+            this.yield = yield;
+            this.bonus = bonus;
+            this.expert = expert;
+            this.resource = resource;
+            this.marker = marker;
+        }
+
+        @Override
+        public String toString() {
+            return this.yield + " | " + this.bonus + " | " + this.expert
+                + ((this.resource == null) ? "" : " | " + this.resource + " @" + this.marker);
+        }
+    }
+
+    /**
+     * The Colonopedia's page of a terrain type (F1 on the colony screen,
+     * build spec M4.11 target 4; V clip 020 #76922 REGENWALD, #78325
+     * TROPENWALD from the colony, #121397 LAUBWALD from the map), over
+     * {@code WOODPANL.PIK}:
+     * <ul>
+     *   <li>the two header lines as the father page's, the second
+     *       "(<i>NAMES terrain name</i>: Art des Geländes)" (PEDIA
+     *       {@code @PEDIA} 2);</li>
+     *   <li>the picture ({@link #PICTURE_X}, framed): three by three cells
+     *       of the type with a river, a road and the resource
+     *       ({@link ClassicTileArt#pediaFrames});</li>
+     *   <li>one row per tile work the type yields to a free colonist, in
+     *       NAMES {@code @JOB} order ({@link #terrainRows}): the figure,
+     *       "Job: n" gold at x 75, 8 px later the improvements' bonus
+     *       green; the resource's marker 2 px after the bonus and its
+     *       words gold 18 px after the marker; "Experte: ..." green 7 px
+     *       lower, under the bonus, or 8 px right of the resource's
+     *       words;</li>
+     *   <li>20 px under the last row's top "Bewegungskosten: n" green at
+     *       x 63 and 8 px after it "Verteidigungs- oder Geländebonus:
+     *       +n%";</li>
+     *   <li>the entry PEDIA {@code @TERRAINk} as the father page's body,
+     *       its title 20 px under that line (127 after four rows, 147
+     *       after five).</li>
+     * </ul>
+     * Only forests are seen: the rows and the picture of the other types
+     * follow the same rules (I).
+     *
+     * @param pedia The Colonopedia.
+     * @param text The original's other texts.
+     * @param tiny FONTTINY.
+     * @param wood {@code WOODPANL.PIK}, or null (then black).
+     * @param type The terrain type.
+     * @param sprites A pack sprite by its name ("ICONS.SS.081"), or null.
+     * @param picture The picture of a type with a resource, or null.
+     * @return The 320x200 picture, or null without its texts.
+     */
+    static BufferedImage terrainPage(ClassicPedia pedia, ClassicText text, ClassicFont tiny,
+            BufferedImage wood, TileType type, Function<String, BufferedImage> sprites,
+            BiFunction<TileType, ResourceType, BufferedImage> picture) {
+        if (pedia == null || text == null || tiny == null || type == null) return null;
+        final int k = terrainEntry(type);
+        final Entry e = (k < 0) ? null : pedia.entry("TERRAIN" + k);
+        final String header = text.misc(MISC_HEADER);
+        final String category = pedia.category(CATEGORY_TERRAIN);
+        final String name = ClassicHud.terrainName(text, type.getId());
+        final String moves = movesText(text, type), defence = defenceText(text, type);
+        if (e == null || e.lines.isEmpty() || header == null || category == null
+            || name == null || moves == null || defence == null) return null;
+        final ResourceType resource = pageResource(type);
+        final List<TerrainRow> rows = terrainRows(text, type, resource);
+        final BufferedImage img = new BufferedImage(ClassicMenuBox.VW,
+            ClassicMenuBox.VH, BufferedImage.TYPE_INT_RGB);
+        final Graphics2D g = img.createGraphics();
+        try {
+            if (wood != null) g.drawImage(wood, 0, 0, null);
+            final int[] ink = ClassicFont.colours(INK), gold = ClassicFont.colours(GOLD);
+            final String h2 = "(" + name + ": " + category + ")";
+            tiny.draw(g, header, (322 - tiny.stringWidth(header)) / 2, HEADER1_TOP, gold);
+            tiny.draw(g, h2, (322 - tiny.stringWidth(h2)) / 2, HEADER2_TOP, gold);
+            g.setColor(new Color(FRAME_OUTER));
+            g.drawRect(PICTURE_X - 2, PICTURE_Y - 2, PICTURE_SIZE + 3, PICTURE_SIZE + 3);
+            g.setColor(new Color(FRAME_INNER));
+            g.drawRect(PICTURE_X - 1, PICTURE_Y - 1, PICTURE_SIZE + 1, PICTURE_SIZE + 1);
+            final BufferedImage pic = (picture == null) ? null : picture.apply(type, resource);
+            if (pic != null) g.drawImage(pic, PICTURE_X, PICTURE_Y, null);
+            int top = ROW_TOP;
+            for (TerrainRow r : rows) {
+                drawSprite(g, sprites, String.format("ICONS.SS.%03d", ICON_JOB_BASE + r.job),
+                           ROW_ICON_X, top + ROW_ICON_DY);
+                tiny.draw(g, r.yield, ROW_X, top, gold);
+                final int bx = ROW_X + tiny.stringWidth(r.yield) + ROW_GAP;
+                int ex = bx;
+                if (r.bonus != null) tiny.draw(g, r.bonus, bx, top, ink);
+                if (r.resource != null) {
+                    final int mx = bx + ((r.bonus == null) ? 0 : tiny.stringWidth(r.bonus))
+                        + MARKER_GAP;
+                    if (r.marker >= 0) {
+                        drawSprite(g, sprites, String.format("PHYS0.SS.%03d", r.marker),
+                                   mx, top + ROW_ICON_DY);
+                    }
+                    tiny.draw(g, r.resource, mx + MARKER_TEXT_DX, top, gold);
+                    ex = mx + MARKER_TEXT_DX + RESOURCE_EXPERT_DX;
+                }
+                if (r.expert != null) tiny.draw(g, r.expert, ex, top + EXPERT_DY, ink);
+                top += ROW_PITCH;
+            }
+            tiny.draw(g, moves, ROW_ICON_X, top, ink);
+            tiny.draw(g, defence, ROW_ICON_X + tiny.stringWidth(moves) + ROW_GAP, top, ink);
+            final int x0 = (321 - e.width) / 2;
+            for (Line l : body(e, tiny, top + ROW_PITCH)) {
+                tiny.drawMarked(g, l.text, x0, l.top, ink, gold);
+            }
+        } finally {
+            g.dispose();
+        }
+        return img;
+    }
+
+    /** Draw a pack sprite, if there is one, its corner at (x, y). */
+    private static void drawSprite(Graphics2D g, Function<String, BufferedImage> sprites,
+                                   String name, int x, int y) {
+        final BufferedImage s = (sprites == null) ? null : sprites.apply(name);
+        if (s != null) g.drawImage(s, x, y, null);
+    }
+
+    /**
+     * A terrain type's PEDIA.TXT {@code @TERRAINk} (the order of NAMES.TXT's
+     * {@code @UNFORESTED} 0-7, {@code @FORESTED} 8-15 and {@code @OTHER}
+     * 24-28, as {@link ClassicHud#terrainName}; V: REGENWALD 15,
+     * TROPENWÄLDER 13, LAUBWALD 11 by their texts).
+     *
+     * @param type The type, or null.
+     * @return k, or -1.
+     */
+    static int terrainEntry(TileType type) {
+        return (type == null) ? -1 : ClassicHud.terrainRow(type.getId());
+    }
+
+    /**
+     * The resource a terrain page shows: the type's first (each type of
+     * the original has one; FreeCol's mixed forest has two, its furs
+     * first: I).
+     *
+     * @param type The type.
+     * @return The resource type, or null.
+     */
+    static ResourceType pageResource(TileType type) {
+        final List<ResourceType> all = (type == null) ? null : type.getResourceTypeValues();
+        return (all == null || all.isEmpty()) ? null : all.get(0);
+    }
+
+    /**
+     * The rows of a terrain page (class comment of {@link #terrainPage}):
+     * NAMES {@code @JOB} 0-8 whose goods the type yields a free colonist
+     * (the type's production: Tropenwald Farmer 3, Zuckerpflanzer 1,
+     * Pelzjäger 2, Holzfäller 4, V #78325); the bonus «Pflügen/Fluß» of
+     * the goods the plow raises, «Straße/Fluß» of those the road raises
+     * (the river raises both alike), «Küste» the fisherman's (I); the
+     * expert's own modifier, "+n" or "xn" (the farmer {@link
+     * #EXPERT_FARMER_SHOWN}); the resource where it changes the goods for a
+     * free colonist, "+n", "+n/m" when the expert gets m (Wild +2/4,
+     * #121397), "xn" for a factor (I).
+     *
+     * @param t The texts.
+     * @param type The terrain type.
+     * @param resource The page's resource type, or null.
+     * @return The rows, top to bottom.
+     */
+    static List<TerrainRow> terrainRows(ClassicText t, TileType type, ResourceType resource) {
+        final List<TerrainRow> out = new ArrayList<>();
+        if (t == null || type == null) return out;
+        final Specification spec = type.getSpecification();
+        final UnitType colonist = spec.getDefaultUnitType();
+        for (int job = 0; job < ClassicColonyLayout.TILE_JOBS; job++) {
+            final GoodsType goods = tileGoods(spec, job);
+            final String word = ClassicColonyJobs.jobWord(t, job, 0);
+            if (goods == null || word == null) continue;
+            final int n = type.getPotentialProduction(goods, colonist);
+            if (n <= 0) continue;
+            final UnitType expert = spec.getExpertForProducing(goods);
+            String res = null;
+            int marker = -1;
+            final String value = (resource == null) ? null
+                : resourceBonus(resource, goods.getId(), colonist, expert);
+            final String resName = (value == null) ? null : resourceName(t, resource);
+            if (resName != null) {
+                res = resName + ": " + value;
+                marker = ClassicTileArt.resourceFrame(resource.getId());
+            }
+            out.add(new TerrainRow(job, word + ": " + n, improvementBonus(t, spec, goods.getId()),
+                                   expertBonus(t, job, goods, expert), res, marker));
+        }
+        return out;
+    }
+
+    /**
+     * The goods of a tile work: the farmer's FreeCol grain (stored as
+     * food), the others' NAMES {@code @JOB} goods.
+     */
+    private static GoodsType tileGoods(Specification spec, int job) {
+        if (job == 0) {
+            final GoodsType grain = spec.getGoodsType("model.goods.grain");
+            if (grain != null) return grain;
+        }
+        final String id = ClassicColonyLayout.jobGoods(job);
+        return (id == null) ? null : spec.getGoodsType(id);
+    }
+
+    /** «Pflügen/Fluß: +1», «Straße/Fluß: +2», «Küste: +2» or null. */
+    private static String improvementBonus(ClassicText t, Specification spec, String goodsId) {
+        final String river = t.misc(MISC_RIVER);
+        final int plow = additive(spec.getTileImprovementType("model.improvement.plow"), goodsId);
+        if (plow > 0) return (river == null || t.misc(MISC_PLOW) == null) ? null
+            : t.misc(MISC_PLOW) + "/" + river + ": +" + plow;
+        final int road = additive(spec.getTileImprovementType("model.improvement.road"), goodsId);
+        if (road > 0) return (river == null || t.misc(MISC_ROAD) == null) ? null
+            : t.misc(MISC_ROAD) + "/" + river + ": +" + road;
+        final int coast = additive(spec.getTileImprovementType("model.improvement.fishBonusLand"),
+                                   goodsId);
+        return (coast > 0 && t.misc(MISC_COAST) != null)
+            ? t.misc(MISC_COAST) + ": +" + coast : null;
+    }
+
+    /** «Experte: +3», «Experte: x2» or null. */
+    private static String expertBonus(ClassicText t, int job, GoodsType goods, UnitType expert) {
+        final String word = t.misc(MISC_EXPERT);
+        if (word == null || expert == null) return null;
+        if (job == 0) return word + ": +" + EXPERT_FARMER_SHOWN;
+        float add = 0f, mul = 1f;
+        for (Modifier m : toList(expert.getModifiers(goods.getId()))) {
+            if (m.getType() == Modifier.ModifierType.ADDITIVE) add += m.getValue();
+            if (m.getType() == Modifier.ModifierType.MULTIPLICATIVE) mul *= m.getValue();
+        }
+        return (add > 0f) ? word + ": +" + number(add)
+            : (mul > 1f) ? word + ": x" + number(mul) : null;
+    }
+
+    /** A resource's change of a goods: "+n", "+n/m", "xn", or null. */
+    private static String resourceBonus(ResourceType resource, String goodsId,
+                                        UnitType colonist, UnitType expert) {
+        float add = 0f, mul = 1f, addExpert = 0f;
+        for (Modifier m : toList(resource.getModifiers(goodsId, colonist))) {
+            if (m.getType() == Modifier.ModifierType.ADDITIVE) add += m.getValue();
+            if (m.getType() == Modifier.ModifierType.MULTIPLICATIVE) mul *= m.getValue();
+        }
+        if (expert != null) {
+            for (Modifier m : toList(resource.getModifiers(goodsId, expert))) {
+                if (m.getType() == Modifier.ModifierType.ADDITIVE) addExpert += m.getValue();
+            }
+        }
+        if (add > 0f) {
+            return "+" + number(add) + ((addExpert > add) ? "/" + number(addExpert) : "");
+        }
+        return (mul > 1f) ? "x" + number(mul) : null;
+    }
+
+    /** The sum of an object's additive modifiers of a goods (0 without the object). */
+    private static int additive(FreeColObject o, String goodsId) {
+        if (o == null) return 0;
+        float add = 0f;
+        for (Modifier m : toList(o.getModifiers(goodsId))) {
+            if (m.getType() == Modifier.ModifierType.ADDITIVE) add += m.getValue();
+        }
+        return Math.round(add);
+    }
+
+    /** A modifier's value as the page writes it: whole, else one decimal. */
+    private static String number(float v) {
+        return (v == Math.rint(v)) ? Integer.toString(Math.round(v))
+            : String.format(java.util.Locale.ROOT, "%.1f", v);
+    }
+
+    /** NAMES {@code @RESOURCE} column 0 of a resource type, or null. */
+    private static String resourceName(ClassicText t, ResourceType resource) {
+        final int row = ClassicHud.resourceRow(resource.getId());
+        final List<String[]> rows = t.names("RESOURCE");
+        if (row < 0 || rows == null || row >= rows.size()) return null;
+        final String s = rows.get(row)[0].trim();
+        return (s.isEmpty()) ? null : s;
+    }
+
+    /** «Bewegungskosten: 2» (FreeCol's move cost in whole moves), or null. */
+    static String movesText(ClassicText t, TileType type) {
+        final String w = t.misc(MISC_MOVES);
+        return (w == null) ? null : w + ": " + (type.getBasicMoveCost() / 3);
+    }
+
+    /** «Verteidigungs- oder Geländebonus: +50%» (FreeCol's defence modifier), or null. */
+    static String defenceText(ClassicText t, TileType type) {
+        final String w = t.misc(MISC_DEFENCE);
+        if (w == null) return null;
+        final int d = Math.round(type.apply(100f, null, Modifier.DEFENCE)) - 100;
+        return w + ": " + ((d >= 0) ? "+" : "") + d + "%";
+    }
+
     /** One line of a page: its glyph top and its marked text. */
     static final class Line {
 
@@ -308,10 +692,23 @@ final class ClassicPedia {
      * @return The lines, top to bottom.
      */
     static List<Line> body(Entry e, ClassicFont tiny) {
+        return body(e, tiny, TITLE_TOP);
+    }
+
+    /**
+     * {@link #body(Entry, ClassicFont)} from another glyph top (the
+     * terrain page's entry under its rows, part W).
+     *
+     * @param e The entry.
+     * @param tiny FONTTINY.
+     * @param top The title's glyph top.
+     * @return The lines, top to bottom.
+     */
+    static List<Line> body(Entry e, ClassicFont tiny, int top) {
         final List<Line> out = new ArrayList<>();
         if (e.lines.isEmpty()) return out;
         final int limit = 320 - 2 * ((321 - e.width) / 2);
-        int y = TITLE_TOP;
+        int y = top;
         String title = e.lines.get(0).trim();
         if (title.startsWith("^")) title = title.substring(1);
         out.add(new Line(y, title));

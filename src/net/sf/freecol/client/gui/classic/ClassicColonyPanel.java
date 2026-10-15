@@ -136,10 +136,17 @@ import net.sf.freecol.common.model.Unit;
  *
  * <p><b>Building</b> (M4.10, {@link ClassicColonyBuild}): ÄNDERN's release
  * opens the build list, a wood list box; KAUFEN's @BUYME0 / @BUYME1; a
- * completed building stays the current build «(ABGESCHLOSSEN)»; the first
- * opening after a completion dissolves the new building in and blinks
- * ÄNDERN.  A click on the colony's name in the top line renames it
- * (@RENAMECOLONY).  Escape or a click on the exit closes the screen.
+ * completed building stays the current build «(ABGESCHLOSSEN)»; @BUILT's
+ * zoom ({@link #opened(ClassicColonyRight.Opening, BuildingType, Unit)},
+ * part W) dissolves the new building in and blinks ÄNDERN.  A click on the
+ * colony's name in the top line renames it (@RENAMECOLONY).
+ *
+ * <p><b>In and out</b> (M4.11, M4.12, part W): Escape's release or a
+ * click on the exit closes the screen, the map {@link
+ * ClassicColonyMoves#EXIT_MAP_FRAMES} frames later ({@link #exit}); F1 (on
+ * the screen and in the job menu) asks the Colonopedia page of the
+ * cursor's tile ({@link #pedia}); a ship's docking opens the screen with
+ * the ship selected.
  */
 final class ClassicColonyPanel extends JPanel {
 
@@ -147,8 +154,7 @@ final class ClassicColonyPanel extends JPanel {
     private static final int VW = ClassicColonyLayout.W;
     private static final int VH = ClassicColonyLayout.H;
 
-    /** The exit's hit area: from the warehouse row's last box on (M4.11 makes it the E). */
-    private static final int WARE_Y = 178;
+    /** The warehouse row's goods end before x 306 (the exit's column; M4.9). */
     private static final int WARE_W = 306;
 
     private final FreeColClient freeColClient;
@@ -194,6 +200,23 @@ final class ClassicColonyPanel extends JPanel {
         default int ask(ClassicAdvisorBox.Request r) {
             return ClassicAdvisorBox.Bar.DISMISSED;
         }
+
+        /**
+         * A change on this screen made the colony's food run short
+         * (@TUTORIAL16's trigger, M4.11 target 2).
+         *
+         * @param colony The colony.
+         */
+        default void foodRanShort(Colony colony) {}
+
+        /**
+         * F1 on this screen (M4.11 target 4): the Colonopedia's page of a
+         * tile's terrain over the screen; returns when the page is closed.
+         *
+         * @param tile The tile (the white cursor's, or the selected
+         *     colonist's).
+         */
+        default void terrainPage(net.sf.freecol.common.model.Tile tile) {}
     }
 
     /** The units' box, or null (then a click only selects, as before). */
@@ -474,6 +497,16 @@ final class ClassicColonyPanel extends JPanel {
      */
     private BufferedImage leavingStill = null;
 
+    /** A press on the exit («Abb» over the red E), until its release (M4.11). */
+    private boolean pressedExit = false;
+
+    /**
+     * Escape pressed on this screen (not on a box over it), until its
+     * release, which exits (M4.11: the exit acts on the release; a box
+     * closed by the Escape press leaves its release to nobody).
+     */
+    private boolean escapeDown = false;
+
     /**
      * The selected carrier in port (M4.6, M4.9; its frame, caption and
      * holds), or null for the front one: the front one at every opening
@@ -542,32 +575,6 @@ final class ClassicColonyPanel extends JPanel {
      * horses differently) never dissolve.
      */
     private Colony plainColony = null;
-
-    /**
-     * The completions shown ("colony id@turn"): the dissolve and the
-     * ÄNDERN blink come at the first opening after it only (EDT).
-     */
-    private static final java.util.Set<String> shownCompletions = new java.util.HashSet<>();
-
-    /**
-     * The game {@link #shownCompletions} belong to (another game's, a
-     * loaded one's too, are dropped: the review of part V, regression L11).
-     */
-    private static java.lang.ref.WeakReference<Game> shownGame = new java.lang.ref.WeakReference<>(null);
-
-    /**
-     * The completions shown, those of another game dropped.
-     *
-     * @param game The game shown.
-     * @return The set (EDT).
-     */
-    private static java.util.Set<String> shownCompletions(Game game) {
-        if (shownGame.get() != game) {
-            shownCompletions.clear();
-            shownGame = new java.lang.ref.WeakReference<>(game);
-        }
-        return shownCompletions;
-    }
 
     /** Counts the pointer's moves and presses: a {@link #hoverLater} made before one is void. */
     private int hoverSeq = 0;
@@ -669,13 +676,34 @@ final class ClassicColonyPanel extends JPanel {
     private void installKeyBindings() {
         final InputMap im = getInputMap(WHEN_IN_FOCUSED_WINDOW);
         final ActionMap am = getActionMap();
-        im.put(KeyStroke.getKeyStroke("ESCAPE"), "classic_closeColony");
+        // The exit acts on Escape's release (M4.11 target 3; the manual's
+        // key card: "Exit and return to the Map . . . [ESC]"; no E key on
+        // this screen, it is Europe's): the press only notes it, so the
+        // release of an Escape that closed a box over the screen does not
+        // exit.  No input while the map is due (the review of part U,
+        // regression F1).
+        im.put(KeyStroke.getKeyStroke("ESCAPE"), "classic_escapeDown");
+        am.put("classic_escapeDown", new AbstractAction() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    escapeDown = !leaving && !asking;
+                }
+            });
+        im.put(KeyStroke.getKeyStroke("released ESCAPE"), "classic_closeColony");
         am.put("classic_closeColony", new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
-                    // No input while the abandoned colony's map is due
-                    // (the review of part U, regression F1).
-                    if (!leaving) close();
+                    final boolean down = escapeDown;
+                    escapeDown = false;
+                    if (down && !leaving && !asking) exit("escape");
+                }
+            });
+        // F1: the Colonopedia's page of the cursor's tile (M4.11 target 4).
+        im.put(KeyStroke.getKeyStroke("F1"), "classic_colonyPedia");
+        am.put("classic_colonyPedia", new AbstractAction() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    pedia();
                 }
             });
         // The manual's key card (colony display): "Buy the current
@@ -764,6 +792,18 @@ final class ClassicColonyPanel extends JPanel {
         this.pressedCarrier = null;
         this.pressedButton = 0;
         this.pressedName = false;
+        final boolean exitPressed = this.pressedExit;
+        this.pressedExit = false;
+        if (exitPressed && !this.leaving) {
+            // The exit acts on the release on it (M4.11 target 3); a
+            // release elsewhere does nothing, the blink goes on (I).
+            if (ClassicColonyLayout.EXIT.contains(vx, vy)) {
+                exit("click");
+            } else if (isDisplayable()) {
+                this.blink.arm();
+            }
+            return;
+        }
         if (this.leaving) {
             this.pressedUnit = null;
             this.modePressed = false;
@@ -924,7 +964,15 @@ final class ClassicColonyPanel extends JPanel {
             return;
         }
         if (pressRight(vx, vy)) return;
-        if (vx >= WARE_W && vy >= WARE_Y) { close(); return; }
+        // The exit: nothing shows at the press (no pressed look, V clip
+        // 008 #32736, clip 042 #17651) but the blink stops (V clip 042: the
+        // toggle due at #17662 never comes); the release on it exits.
+        if (ClassicColonyLayout.EXIT.contains(vx, vy)) {
+            this.pressedExit = true;
+            this.blink.stop();
+            hideHover();
+            return;
+        }
         // The colony's name in the top line: its rename on the release
         // (V clip 040 #48 939: a click at (97,4)).
         if (nameAt(vx, vy)) {
@@ -1423,6 +1471,7 @@ final class ClassicColonyPanel extends JPanel {
     private boolean act(Unit u, ClassicColonyMoves.Action a, Building b, ColonyTile ct) {
         final InGameController igc = igc();
         final Object was = u.getLocation();
+        final boolean shortBefore = foodShort();
         boolean ok = true;
         switch (a) {
         case BUILDING_JOB:
@@ -1459,7 +1508,30 @@ final class ClassicColonyPanel extends JPanel {
         }
         select(u);
         refresh();
+        foodCheck(shortBefore);
         return ok;
+    }
+
+    /**
+     * @return Whether the colony's food runs short now: it makes less than
+     *     its colonists eat (the band's crossed corn, M4.5, V #18955).
+     */
+    private boolean foodShort() {
+        return !this.colony.isDisposed()
+            && this.colony.getFoodProduction() < this.colony.getFoodConsumption();
+    }
+
+    /**
+     * After a change on the screen: if it made the colony's food run short,
+     * the GUI hears it (@TUTORIAL16 44 frames later, M4.11 target 2; V
+     * clip 020 #18949 -&gt; #18993: J2 moved the farmer into the smithy).
+     *
+     * @param before Whether the food ran short before the change.
+     */
+    private void foodCheck(boolean before) {
+        if (before || this.units == null || !foodShort()) return;
+        ClassicFrameRecorder.event("colony-food-short", this.colony.getName());
+        this.units.foodRanShort(this.colony);
     }
 
     /**
@@ -1475,6 +1547,50 @@ final class ClassicColonyPanel extends JPanel {
         if (was instanceof ColonyTile && tileCursor >= 0
             && tileCursor == this.tiles.placeOfTile((ColonyTile) was)) return;
         tileCursor = CURSOR_OFF_TILES;
+    }
+
+    /**
+     * F1 (build spec M4.11 target 4; the manual's key card: "Get
+     * information about the selected item . . . [F1]"): the Colonopedia's
+     * page of the white cursor's tile (V clip 020 #76921, #78325: the
+     * cursor colonist's tile, not the arrow's), else of the selected
+     * colonist's work tile (I), over the screen until a key or a click;
+     * the screen again after it (V #77167).  Nothing without a tile (I).
+     */
+    void pedia() {
+        if (this.leaving || this.asking || this.units == null) return;
+        final net.sf.freecol.common.model.Tile t = pediaTile();
+        ClassicFrameRecorder.event("colony-pedia", this.colony.getName() + " "
+            + ((t == null) ? "none" : t.getId()));
+        if (t == null) return;
+        this.gesture.cancel();
+        this.blink.stop();
+        this.asking = true;
+        try {
+            this.units.terrainPage(t);
+        } finally {
+            this.asking = false;
+            if (isDisplayable()) {
+                this.blinkOff = false;
+                this.blink.arm();
+            }
+        }
+        repaint();
+    }
+
+    /**
+     * The tile F1 is about: the white cursor's (on the 3x3 map), else the
+     * selected colonist's work tile, else null.
+     *
+     * @return The tile, or null.
+     */
+    net.sf.freecol.common.model.Tile pediaTile() {
+        if (tileCursor >= 0) {
+            final ClassicColonyTiles.Cell c = this.tiles.cell(tileCursor);
+            if (c != null && c.tile != null) return c.tile;
+        }
+        final Unit u = this.selectedUnit;
+        return (u == null || u.isDisposed()) ? null : u.getWorkTile();
     }
 
     /**
@@ -1520,6 +1636,16 @@ final class ClassicColonyPanel extends JPanel {
                 return;
             }
             final int answer = ask(ClassicColonyJobs.request(t, m, delay, chain));
+            if (answer == ClassicAdvisorBox.Bar.HELP) {
+                // F1, as the footer says: the menu goes, the Colonopedia
+                // page of the cursor's tile comes (part W; V clip 020: the
+                // pages 143 and 103 frames after a J2 closed, #76921,
+                // #78325; the key unseen: I).
+                ClassicFrameRecorder.event("colony-job", u.getId() + " " + kind + " " + page
+                    + " help");
+                pedia();
+                return;
+            }
             if (answer < 0 || answer >= m.rows.size()) {
                 ClassicFrameRecorder.event("colony-job", u.getId() + " " + kind + " " + page
                     + " none");
@@ -1551,6 +1677,7 @@ final class ClassicColonyPanel extends JPanel {
     private void pick(Unit u, ClassicColonyJobs.Kind kind, ClassicColonyJobs.Row row) {
         final InGameController igc = igc();
         final net.sf.freecol.common.model.Specification spec = this.colony.getSpecification();
+        final boolean shortBefore = foodShort();
         select(u);
         switch (row.pick) {
         case CLEAR:
@@ -1573,6 +1700,7 @@ final class ClassicColonyPanel extends JPanel {
         ClassicFrameRecorder.event("colony-picked", u.getId() + " " + row.pick + " "
             + row.job + " " + ((this.colony.isDisposed()) ? "abandoned" : outcome(u)));
         recordStill("picked " + u.getId());
+        foodCheck(shortBefore);
     }
 
     /**
@@ -1731,6 +1859,31 @@ final class ClassicColonyPanel extends JPanel {
     /** @return Whether the screen waits for the abandoned colony's map (tests). */
     boolean leaving() {
         return this.leaving;
+    }
+
+    /**
+     * The player leaves the screen (M4.11 target 3): the release on «Abb»
+     * or of Escape.  The screen stays as it is, no input, no label, its
+     * blink frozen, and the map replaces it
+     * {@link ClassicColonyMoves#EXIT_MAP_FRAMES} later (V clip 042 #17658
+     * -&gt; #17689).
+     *
+     * @param how "click" or "escape" (for the recorder).
+     */
+    void exit(String how) {
+        if (this.leaving) return;
+        this.leaving = true;
+        this.escapeDown = false;
+        this.pressedExit = false;
+        this.blink.stop();
+        hideHover();
+        ClassicFrameRecorder.event("colony-exit", this.colony.getName() + " " + how);
+        this.later.run((int) Math.round(ClassicColonyMoves.ms(
+            ClassicColonyMoves.EXIT_MAP_FRAMES)), () -> {
+                this.leaving = false;
+                close();
+            });
+        repaint();
     }
 
     /** Something run once after a time (the abandoned colony's map). */
@@ -2067,6 +2220,11 @@ final class ClassicColonyPanel extends JPanel {
     /** @return The selected carrier in port (tests), or null. */
     Unit selectedCarrier() {
         return (this.port == null) ? null : this.port.carrier;
+    }
+
+    /** @return The carrier chosen for the next paint (a docked ship, a press; tests), or null. */
+    Unit chosenCarrier() {
+        return this.selectedCarrier;
     }
 
 
@@ -2486,11 +2644,6 @@ final class ClassicColonyPanel extends JPanel {
     /** @return Whether ÄNDERN blinks for a completion (tests). */
     boolean completionBlink() {
         return this.completionBlink;
-    }
-
-    /** Forget the completions shown (the game view's teardown, tests). */
-    static void forgetCompletions() {
-        shownCompletions.clear();
     }
 
 
@@ -3579,27 +3732,33 @@ final class ClassicColonyPanel extends JPanel {
     /**
      * How the screen was opened (M4.7 target 6, spec §0.1 decision 8): the
      * right panel's mode from it and the last visit's
-     * ({@link ClassicColonyRight#modeAtOpening}); after a building's @BUILT
-     * zoom the hammer panel, the dissolve and ÄNDERN blinking against the
-     * white cursor, which stays where it stood (V ×3; the turn boxes' zoom
-     * rows come with M4.11).
+     * ({@link ClassicColonyRight#modeAtOpening}).
      *
      * @param how How it was opened.
      */
     void opened(ClassicColonyRight.Opening how) {
-        // The first opening after a building's completion (levi rule R4's
-        // record of this turn) as the @BUILT zoom's (I until M4.11 builds
-        // the turn box's «Zur Kolonie zoomen.»: the original's dissolve and
-        // ÄNDERN blink are seen after the zoom only, V visits 10, 13, 20).
-        final net.sf.freecol.common.model.BuildingType done
-            = ClassicColonyBuild.completed(this.colony);
-        final String key = this.colony.getId() + "@" + this.colony.getClassicBuiltTurn();
-        final java.util.Set<String> shown = shownCompletions(this.colony.getGame());
-        if (how == ClassicColonyRight.Opening.OTHER
-            && ClassicColonyBuild.completedThisTurn(this.colony)
-            && !shown.contains(key)) {
-            how = ClassicColonyRight.Opening.BUILT_BUILDING;
-        }
+        opened(how, null, null);
+    }
+
+    /**
+     * How the screen was opened (M4.7 target 6, M4.11, M4.12): the right
+     * panel's mode from it and the last visit's
+     * ({@link ClassicColonyRight#modeAtOpening}, spec §0.1 decision 8).
+     * «Zur Kolonie zoomen.» of a building's @BUILT: the hammer panel, the
+     * dissolve of the new building and ÄNDERN blinking against the white
+     * cursor, which stays where it stood (V clip 020 visits 10, 13, 20); any
+     * other opening neither (part W: the trigger is the zoom row, M4.11; I
+     * for an opening by a click in the completion's turn, not seen).  A
+     * ship's docking: that ship selected, the white cursor on it (V clip008
+     * #30022).
+     *
+     * @param how How it was opened.
+     * @param built The building a @BUILT zoom dissolves in, or null for
+     *     the levi rule R4's record of it.
+     * @param carrier The carrier to select, or null for the front one.
+     */
+    void opened(ClassicColonyRight.Opening how,
+                net.sf.freecol.common.model.BuildingType built, Unit carrier) {
         this.mode = this.buttonMode = ClassicColonyRight.modeAtOpening(how, lastMode);
         lastMode = this.mode;
         if (how == ClassicColonyRight.Opening.BUILT_BUILDING) {
@@ -3607,10 +3766,9 @@ final class ClassicColonyPanel extends JPanel {
             // selected colonist's tile, #105689: on his figure); ÄNDERN
             // blinks against it once the dissolve is over (paintRight).
             this.completionBlink = true;
-            if (done != null) {
-                shown.add(key);
-                startDissolve(done);
-            }
+            final net.sf.freecol.common.model.BuildingType done = (built != null)
+                ? built : ClassicColonyBuild.completed(this.colony);
+            if (done != null && this.colony.getBuilding(done) != null) startDissolve(done);
         }
         // Who is selected (M4.8 target 9): the founder at a founding, else
         // the one selected last here, else the row's first figure.
@@ -3628,6 +3786,13 @@ final class ClassicColonyPanel extends JPanel {
             + ((chosen == null) ? "none" : chosen.getId())
             + ((chosen != null && chosen == founder) ? " founder"
                : (chosen != null && chosen == last) ? " last" : " first"));
+        // A docked ship (M4.12): selected in port, the white cursor on it.
+        if (carrier != null && carrier.getTile() == this.colony.getTile()) {
+            this.selectedCarrier = carrier;
+            tileCursor = CURSOR_CARRIER;
+            ClassicFrameRecorder.event("colony-carrier", this.colony.getId() + " docked "
+                + carrier.getId());
+        }
         repaint();
     }
 

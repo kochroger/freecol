@@ -403,6 +403,21 @@
              freecol): the finished building leaves the queue. -->
         <booleanOption id="model.option.originalBuildCompletion"
                        defaultValue="true"/>
+        <!-- The original's colony reports at the turn start (part W,
+             build spec M4.11): @NEEDTOOLS every turn while a build has all
+             its hammers and lacks tools (clip 020 #35, #69, #75, #85, #91),
+             @CARGOREADY0-2 when a good's stock passes a multiple of 100
+             (clip 020 #236, #274, #283; clip 040 #84 666).  FreeCol
+             (classic, freecol): a warning when nobody makes the missing
+             goods, and at a store's high-water mark or capacity. -->
+        <booleanOption id="model.option.originalColonyReports"
+                       defaultValue="true"/>
+        <!-- The original's docking (part W, build spec M4.12 rule R5;
+             clip008 #29957 -> #32928, "Züge: 0"): a ship of ours that
+             sails into one of our colonies has no moves left; it sails on
+             next turn.  FreeCol (classic, freecol): only the move's cost. -->
+        <booleanOption id="model.option.dockingEndsMoves"
+                       defaultValue="true"/>
         <!-- Row 8: capture units under repair when a colony is
              captured. -->
         <booleanOption id="model.option.captureUnitsUnderRepair"

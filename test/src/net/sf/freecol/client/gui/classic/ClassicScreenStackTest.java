@@ -177,6 +177,21 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         SwingUtilities.invokeAndWait(() -> { });
     }
 
+    /**
+     * The colony screen's Escape, pressed and released (part W, M4.11: the
+     * exit acts on the release, the map 30 frames later; here at once).
+     * EDT only.
+     *
+     * @param cp The colony screen.
+     */
+    private static void escape(ClassicColonyPanel cp) {
+        cp.setLater((ms, r) -> r.run());
+        cp.getActionMap().get("classic_escapeDown").actionPerformed(
+            new ActionEvent(cp, ActionEvent.ACTION_PERFORMED, "esc"));
+        cp.getActionMap().get("classic_closeColony").actionPerformed(
+            new ActionEvent(cp, ActionEvent.ACTION_PERFORMED, "esc"));
+    }
+
     /** An answer that comes later. */
     private static final class Answer {
 
@@ -286,6 +301,33 @@ public class ClassicScreenStackTest extends FreeColTestCase {
 
         /** Each {@link #colonyScreenShown}'s moment. */
         final List<Long> colonyShownAt = new ArrayList<>();
+
+        /** The bands shown in the menu strip (part W: the docking's). */
+        final List<String> bands = new ArrayList<>();
+
+        @Override
+        void showBand(String text, double ms) {
+            this.bands.add(text);
+            super.showBand(text, ms);
+        }
+
+        /** The band cleared (part W: by the docked screen). */
+        int bandsCleared = 0;
+
+        @Override
+        void clearBand() {
+            this.bandsCleared++;
+            super.clearBand();
+        }
+
+        /** The colonies whose docked screen asked @TUTORIAL12 (part W). */
+        final List<Colony> docked = new ArrayList<>();
+
+        @Override
+        void shipDocked(Colony colony, long shownNanos) {
+            this.docked.add(colony);
+            super.shipDocked(colony, shownNanos);
+        }
 
         Rig rig;
 
@@ -590,8 +632,7 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         // The colony's own Escape: the map again.
         final ClassicColonyPanel cp = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
         edt(() -> {
-                cp.getActionMap().get("classic_closeColony").actionPerformed(
-                    new ActionEvent(cp, ActionEvent.ACTION_PERFORMED, "esc"));
+                escape(cp);
                 return null;
             });
         flush();
@@ -787,8 +828,7 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         // The colony's Escape: the New World part on the shown map.
         final ClassicColonyPanel cp = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
         edt(() -> {
-                cp.getActionMap().get("classic_closeColony").actionPerformed(
-                    new ActionEvent(cp, ActionEvent.ACTION_PERFORMED, "esc"));
+                escape(cp);
                 return null;
             });
         flush();
@@ -811,8 +851,7 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         assertTrue("the colony stays", edt(gui::colonyHosted));
         final ClassicColonyPanel cp2 = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
         edt(() -> {
-                cp2.getActionMap().get("classic_closeColony").actionPerformed(
-                    new ActionEvent(cp2, ActionEvent.ACTION_PERFORMED, "esc"));
+                escape(cp2);
                 return null;
             });
         flush();
@@ -1162,5 +1201,83 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         int n = 0;
         for (int i = s.indexOf(what); i >= 0; i = s.indexOf(what, i + 1)) n++;
         return n;
+    }
+    /**
+     * Part W (build spec M4.11, M4.12): the colony screen a report's zoom
+     * opens (a building's @BUILT: hammer mode, ÄNDERN blinking), and a
+     * ship's docking: the band «<Typ> Legt an in <Kolonie>» (LABELS
+     * {@code @MISC} 8, V clip008 #29957), the turn flow held meanwhile, the
+     * colony screen 64 frames later (V #30021) with the ship selected and
+     * the white cursor on it (V #30022), the band gone with it; the
+     * player's close lets a zoom's colony reports go on.
+     */
+    public void testTheZoomAndTheDocking() throws Exception {
+        final FakeClock clock = new FakeClock();
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Colony colony = createStandardColony(2, 9, 7);
+        final Player dutch = colony.getOwner();
+        final Unit ship = new ServerUnit(game, colony.getTile(), dutch, merchantman);
+        final HostGUI gui = new HostGUI(game, dutch, clock);
+        gui.host();
+        // The zoom of a building's @BUILT.
+        final boolean[] up = new boolean[1];
+        edt(() -> {
+                up[0] = gui.openColonyScreen(colony, null,
+                    ClassicColonyRight.Opening.BUILT_BUILDING,
+                    spec().getBuildingType("model.building.printingPress"), false);
+                return null;
+            });
+        assertTrue(up[0]);
+        final ClassicColonyPanel zoomed = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
+        assertEquals(ClassicColonyRight.Mode.HAMMER, zoomed.mode());
+        assertTrue(zoomed.completionBlink());
+        edt(() -> {
+                escape(zoomed);
+                return null;
+            });
+        assertFalse(edt(gui::screenHosted));
+        // The docking: the band first, the screen 64 frames later.
+        assertTrue(ClassicGUI.docks(ship, colony, dutch));
+        assertFalse(ClassicGUI.docks(null, colony, dutch));
+        assertFalse("a colonist is no docking",
+                    ClassicGUI.docks(colony.getUnitList().get(0), colony, dutch));
+        assertFalse("not our colony", ClassicGUI.docks(ship, colony,
+            game.getPlayerByNationId("model.nation.french")));
+        assertFalse(ClassicGUI.docks(ship, colony, null));
+        // Another player's ship on the tile (only its owner changed: FreeCol
+        // puts no foreign unit into a colony).
+        ship.setOwner(game.getPlayerByNationId("model.nation.french"));
+        assertFalse("not our ship", ClassicGUI.docks(ship, colony, dutch));
+        ship.setOwner(dutch);
+        gui.showColonyPanel(colony, ship);
+        flush();
+        assertFalse("the band first", edt(gui::screenHosted));
+        assertEquals(1, gui.bands.size());
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t != null) assertEquals("Handelsschiff Legt an in " + colony.getName(), gui.bands.get(0));
+        assertTrue("the turn flow waits", edt(gui::turnBlocked));
+        final ClassicOneShot timer = edt(gui::colonyTimer);
+        assertTrue(edt(timer::isScheduled));
+        assertEquals(clock.now + Math.round(ClassicColonyLayout.frames(64) * 1e6),
+                     edt(timer::dueNanos).longValue());
+        clock.now = edt(timer::dueNanos);
+        assertTrue(edt(timer::runIfDue));
+        flush();
+        assertTrue(edt(gui::colonyHosted));
+        assertFalse(edt(gui::turnBlocked) && !edt(gui::screenHosted));
+        final ClassicColonyPanel docked = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
+        assertSame(ship, edt(docked::chosenCarrier));
+        assertEquals(ClassicColonyPanel.CURSOR_CARRIER, ClassicColonyPanel.tileCursor());
+        assertEquals("@TUTORIAL12 asked for the docked screen, not the zoom's",
+                     List.of(colony), gui.docked);
+        assertEquals("the band went with the screen", 1, gui.bandsCleared);
+        edt(() -> {
+                escape(docked);
+                return null;
+            });
+        assertFalse(edt(gui::screenHosted));
+        ClassicColonyPanel.setTileCursor(ClassicColonyLayout.CENTRE_TILE);
     }
 }

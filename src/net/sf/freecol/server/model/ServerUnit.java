@@ -743,6 +743,30 @@ public class ServerUnit extends Unit implements TurnTaker {
     }
 
     /**
+     * Whether a move into a tile ends this unit's moves as the original's
+     * docking does (levi {@code GameOptions.DOCKING_ENDS_MOVES}, build
+     * spec M4.12 rule R5; V clip008: the merchantman docked at Base with
+     * 2 moves, "Züge: 0" on the map after the colony screen #32928, the
+     * next unit up 0.5 s later and the ship not again that turn): a ship
+     * of a human player into one of its own colonies.  FreeCol charges
+     * the move's cost only.  AI players never (I).
+     *
+     * @param newTile The tile moved into.
+     * @return True if the ship stops there for the turn.
+     */
+    boolean docksAndStops(Tile newTile) {
+        final Player owner = getOwner();
+        if (!isNaval() || newTile == null || owner == null || owner.isAI()
+            || !(newTile.getSettlement() instanceof Colony)
+            || newTile.getSettlement().getOwner() != owner) return false;
+        try {
+            return getSpecification().getBoolean(GameOptions.DOCKING_ENDS_MOVES);
+        } catch (RuntimeException e) {
+            return false;   // rules without the option: FreeCol's
+        }
+    }
+
+    /**
      * Move a unit.
      *
      * @param newTile The {@code Tile} to move to.
@@ -783,6 +807,10 @@ public class ServerUnit extends Unit implements TurnTaker {
                 setMovesLeft(0);
             }
             setMovesLeft(getMovesLeft() - getMoveCost(newTile));
+            // The original's docking (levi rule R5, part W): a ship of a
+            // human player that sails into one of its own colonies has no
+            // moves left there (V clip008 #32928 "Züge: 0").
+            if (docksAndStops(newTile)) setMovesLeft(0);
         }
 
         // Do the move and explore a rumour if needed.

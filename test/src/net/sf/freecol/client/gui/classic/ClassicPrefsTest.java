@@ -166,6 +166,22 @@ public class ClassicPrefsTest extends TestCase {
         assertTrue(p.showsReport("model.player.foundingFatherJoinedCongress"));
         assertTrue(p.showsReport("model.player.soLIncrease"));
         assertTrue(p.showsReport("model.colony.veryGoodGovernment"));
+        // The levi rules' own reports (part W) go with FreeCol's of the
+        // same thing, and only with them: the tools, the new goods.
+        final ClassicPrefs w = new ClassicPrefs(null);
+        w.set(ClassicPrefs.REPORT_TOOLS, false);
+        assertFalse(w.showsReport("model.colony.classicNeedTools"));
+        assertFalse(w.showsReport("model.colony.buildableNeedsGoods"));
+        for (int v = 0; v <= 2; v++) {
+            assertTrue(w.showsReport("model.colony.classicCargoReady" + v));
+        }
+        w.set(ClassicPrefs.REPORT_TOOLS, true);
+        w.set(ClassicPrefs.REPORT_NEW_GOODS, false);
+        assertTrue(w.showsReport("model.colony.classicNeedTools"));
+        for (int v = 0; v <= 2; v++) {
+            assertFalse(w.showsReport("model.colony.classicCargoReady" + v));
+        }
+        assertFalse(w.showsReport("model.colony.warehouseFull"));
         // Every report pref is a row of the colony box, and every report
         // row but the two label rows switches a notice.
         final java.util.Set<String> used = new java.util.HashSet<>(ClassicPrefs.REPORTS.values());

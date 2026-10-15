@@ -702,6 +702,14 @@ final class ClassicAdvisorBox {
         final double openDelayMs;
 
         /**
+         * How long a box without rows stays before it closes by itself
+         * (ms), or 0 for never: the colony's other turn reports after a
+         * zoom (part W, build spec M4.11; V clip 040 #85 061 - #85 184).
+         * A key or a click closes it sooner, as any notice (I).
+         */
+        final double closeAfterMs;
+
+        /**
          * When the box should be on screen, on the box layer's clock, or 0
          * for no such time: the landing box comes the original's time after
          * the move key (build spec W8b); a portrait palette goes in
@@ -812,6 +820,7 @@ final class ClassicAdvisorBox {
                 : Arrays.copyOf(b.checks, n);
             this.toggles = (this.checks == null) ? null : b.toggles;
             this.openDelayMs = Math.max(0.0, b.openDelayMs);
+            this.closeAfterMs = (n == 0) ? Math.max(0.0, b.closeAfterMs) : 0.0;
             this.showAtNanos = b.showAtNanos;
             this.rowIndent = b.rowIndent;
             this.footer = (b.footer == null || b.footer.isEmpty()) ? null : b.footer;
@@ -948,6 +957,7 @@ final class ClassicAdvisorBox {
         private boolean[] checks = null;
         private Toggles toggles = null;
         private double openDelayMs = 0.0;
+        private double closeAfterMs = 0.0;
         private long showAtNanos = 0L;
         private int rowIndent = ClassicMenuBox.ROW_INDENT;
         private String footer = null;
@@ -1186,6 +1196,15 @@ final class ClassicAdvisorBox {
         /** @param ms The box comes no earlier than this after it is asked for. */
         Builder openDelay(double ms) {
             this.openDelayMs = ms;
+            return this;
+        }
+
+        /**
+         * @param ms A box without rows closes by itself this long after it
+         *     came ({@link Request#closeAfterMs}).
+         */
+        Builder closeAfter(double ms) {
+            this.closeAfterMs = ms;
             return this;
         }
 

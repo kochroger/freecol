@@ -850,6 +850,9 @@ final class ClassicColonyJobs {
             .rowIndent(ClassicMenuBox.LIST_INDENT).current(yellow).disabled(grey)
             .footer(t.misc(ClassicFathers.MISC_F1_HELP)).defaultRow(m.bar)
             .noCancelRow().openDelay(openDelayMs).chain(chainMs)
+            // F1 closes the menu for the tile's Colonopedia page (part W,
+            // ClassicColonyPanel.jobMenu).
+            .help(row -> { })
             .stopgap(m.title, null).list().build();
     }
 }

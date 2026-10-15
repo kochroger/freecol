@@ -1582,6 +1582,30 @@ final class ClassicHud {
         return null;
     }
 
+    /**
+     * A tile type's row of the original's terrain list: NAMES.TXT
+     * {@code @UNFORESTED} 0-7, {@code @FORESTED} 8-15, {@code @OTHER} 24-28
+     * (arctic, ocean, high seas, mountains, hills), the order of
+     * PEDIA.TXT's {@code @TERRAINk} (part W: V clip 020 #76921 the rain
+     * forest's @TERRAIN15, #78325 the tropical forest's @TERRAIN13).
+     *
+     * @param tileTypeId The tile type's id.
+     * @return The row, or -1.
+     */
+    static int terrainRow(String tileTypeId) {
+        if (tileTypeId == null) return -1;
+        final String id = Role.getRoleIdSuffix(tileTypeId);
+        for (int i = 0; i < UNFORESTED.length; i++) {
+            if (UNFORESTED[i].equals(id)) return i;
+            if (FORESTED[i].equals(id)) return UNFORESTED.length + i;
+        }
+        for (int i = 0; i < OTHER.length; i++) {
+            if (OTHER[i].equals(id)) return 24 + i;
+        }
+        if ("lake".equals(id)) return 25;
+        return -1;
+    }
+
     /** Column 0 of a NAMES.TXT row, or null. */
     private static String cell(ClassicText t, String section, int row) {
         final List<String[]> rows = t.names(section);

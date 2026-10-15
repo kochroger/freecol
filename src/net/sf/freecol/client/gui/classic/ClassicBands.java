@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 import net.sf.freecol.common.i18n.Messages;
+import net.sf.freecol.common.model.Colony;
 import net.sf.freecol.common.model.Europe;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Unit;
@@ -58,6 +59,9 @@ final class ClassicBands {
 
     /** LABELS.TXT {@code @MISC} "Trifft jetzt ein in" (LABELS.TXT:22). */
     static final int MISC_ARRIVES_IN = 7;
+
+    /** LABELS.TXT {@code @MISC} "Legt an in" (LABELS.TXT:23; part W, M4.12). */
+    static final int MISC_DOCKS_IN = 8;
 
     /** GAME.TXT's tip at the first Europe screen of a game. */
     static final String TUTORIAL_EUROPE = "TUTORIAL17";
@@ -100,6 +104,33 @@ final class ClassicBands {
      */
     static String arrivalNewWorld(ClassicText t, Unit ship) {
         return band(t, ship, MISC_ARRIVAL_FROM);
+    }
+
+    /**
+     * "Handelsschiff Legt an in Base" (part W, build spec M4.12): a ship of
+     * ours docking in our colony, without the nationality (V clip008
+     * #29957, clip 020 #44590): the ship type's NAMES.TXT {@code @UNIT}
+     * name, LABELS.TXT {@code @MISC} 8, the colony's name.  FreeCol's words
+     * for a missing piece.
+     *
+     * @param t The original texts, or null.
+     * @param ship The ship.
+     * @param colony The colony.
+     * @return The band, never empty.
+     */
+    static String docking(ClassicText t, Unit ship, Colony colony) {
+        final int row = (ship == null) ? -1
+            : ClassicFirstScene.shipRow(ship.getType().getId());
+        String type = cell(t, "UNIT", row);
+        if (type == null && ship != null) type = Messages.getName(ship.getType());
+        final StringBuilder sb = new StringBuilder();
+        for (String s : new String[] { type, label(t, MISC_DOCKS_IN),
+                                       (colony == null) ? null : colony.getName() }) {
+            if (s == null || s.isEmpty()) continue;
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(s);
+        }
+        return (sb.length() == 0) ? "-" : sb.toString();
     }
 
     /**

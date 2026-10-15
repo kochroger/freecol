@@ -151,6 +151,22 @@ final class ClassicColonyMoves {
      */
     static final int ABANDON_MAP_FRAMES = 31;
 
+    /**
+     * The exit (build spec M4.11 target 3, part W): the map replaces the
+     * screen 30 frames after the release on «Abb» or of Escape, in one
+     * frame (a torn frame at most, clip 020 #11159); meanwhile the screen
+     * stays as it was, its blink frozen from the press, no label, while
+     * the arrow still moves (V clip 042 #17664 - #17688, clip 020 #74315 -
+     * #74327).  V: clip 042 #17658 -&gt; #17689 (+31), clip 043 #8090 -&gt;
+     * #8119 (+29), #8690 -&gt; #8722 (+32; the releases from the keylogs,
+     * a few frames' error), the abandon's box close -&gt; map +31 (V
+     * #35574 -&gt; #35605, frame-exact).  The original's wait varies: in
+     * clip 020's 15 exits the blink stops at the press and the map comes
+     * 7 to 56 frames later (I: its own work; the build spec's "1-2 frames"
+     * is the replacement itself, not the wait).
+     */
+    static final int EXIT_MAP_FRAMES = 30;
+
     /** The ghost's sprite at the hotspot − (1, 8) (V dago, 3 drops). */
     static final int GHOST_DX = -1, GHOST_DY = -8;
 

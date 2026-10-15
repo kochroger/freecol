@@ -41,6 +41,7 @@ import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.GoodsType;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.ProductionInfo;
+import net.sf.freecol.common.model.ResourceType;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TileType;
 import net.sf.freecol.common.model.Unit;
@@ -537,6 +538,58 @@ final class ClassicColonyTiles {
         /** The game palette (tests), or null. */
         ClassicGamePalette palette() {
             return this.palette;
+        }
+
+        /**
+         * The Colonopedia terrain page's picture (part W): three by three
+         * cells of a terrain type composed as the map composes them, with
+         * {@link ClassicTileArt#pediaFrames}' overlays.
+         *
+         * @param type The terrain type.
+         * @param resource The page's resource type, or null.
+         * @param phase The water's cycling phase.
+         * @return The 48x48 picture, or null without the pack's index
+         *     sheets.
+         */
+        BufferedImage pediaPicture(final TileType type, final ResourceType resource,
+                                   int phase) {
+            if (!indexed() || type == null) return null;
+            final int cell = ClassicTerrainComposer.CELL;
+            final int n = ClassicTileArt.PEDIA_CELLS, side = n * cell;
+            final ClassicTerrainComposer.TerrainSource block
+                = new ClassicTerrainComposer.TerrainSource() {
+                    @Override
+                    public boolean onMap(int x, int y) {
+                        return x >= 0 && y >= 0 && x < n && y < n;
+                    }
+
+                    @Override
+                    public boolean explored(int x, int y) {
+                        return onMap(x, y);
+                    }
+
+                    @Override
+                    public TileType type(int x, int y) {
+                        return onMap(x, y) ? type : null;
+                    }
+
+                    @Override
+                    public void overlays(int x, int y, IntConsumer frames) {
+                        ClassicTileArt.pediaFrames(type, resource, x, y, frames);
+                    }
+                };
+            final byte[] idx = new byte[side * side];
+            for (int y = 0; y < n; y++) {
+                for (int x = 0; x < n; x++) {
+                    this.composer.composeCell(block, x, y, idx, y * cell * side + x * cell, side);
+                }
+            }
+            final IndexColorModel cm = this.palette.colorModel(phase);
+            final BufferedImage out = new BufferedImage(side, side, BufferedImage.TYPE_INT_RGB);
+            for (int k = 0; k < idx.length; k++) {
+                out.setRGB(k % side, k / side, cm.getRGB(idx[k] & 0xFF));
+            }
+            return out;
         }
     }
 

@@ -140,6 +140,33 @@ public class GameOptions {
     public static final String ORIGINAL_BUILD_COMPLETION
         = "model.option.originalBuildCompletion";
 
+    /**
+     * The original's colony reports at the turn start (part W, build spec
+     * M4.11): "{Verlag} im Bau in {Base} benötigt {20 Werkzeuge} ..."
+     * (@NEEDTOOLS) every turn while a build has all its hammers and lacks
+     * tools (clip 020 #35, #69, #75, #85, #91: the stock 10, 10, 13, 16,
+     * 19 with the Verlag's 52 hammers stored), and "Eine neue Ladung
+     * {Rum} liegt in {Base} bereit" (@CARGOREADY0-2) when a good's stock
+     * passes a multiple of 100 (clip 020 #236 rum 103 with a Lagerhaus,
+     * clip 040 #84 666 horses at the capacity 300).  FreeCol warns of a
+     * build whose missing goods nobody makes, and of a store past its
+     * high-water mark or full.  On in the "levi" rules (and a levi save
+     * from before the rule).
+     */
+    public static final String ORIGINAL_COLONY_REPORTS
+        = "model.option.originalColonyReports";
+
+    /**
+     * The original's docking (part W, build spec M4.12 rule R5; clip008
+     * #29957 -&gt; #32928): a ship of a human player that sails into one of
+     * its own colonies has no moves left there; it sails on next turn.
+     * FreeCol charges only the move's cost.  On in the "levi" rules (and a
+     * levi save from before the rule).  AI players never (I: the original's
+     * computer ships are not seen docking).
+     */
+    public static final String DOCKING_ENDS_MOVES
+        = "model.option.dockingEndsMoves";
+
     /** Do missionaries provide extra benefits. */
     public static final String ENHANCED_MISSIONARIES
         = "model.option.enhancedMissionaries";

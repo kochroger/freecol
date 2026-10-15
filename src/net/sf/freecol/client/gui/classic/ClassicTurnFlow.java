@@ -848,6 +848,25 @@ final class ClassicTurnFlow {
     }
 
     /**
+     * A colony screen closed (part W, build spec M4.12): the map is back,
+     * and a hand-over the screen held runs its pause from now, its stages
+     * at their times (V clip008 #32928 -&gt; #32963: after the docked ship's
+     * colony screen the next unit 0.5 s after the map), not at once as
+     * after a box (landfall 03 section 6: the unit 1 frame after a tip's
+     * close).  Then as a box's close.
+     */
+    void screenClosed() {
+        if (this.disposed) return;
+        final Pending p = this.pending;
+        if (p != null && p.held && p.kind == Kind.HANDOVER) {
+            p.held = false;
+            p.base = this.clock.now();
+            schedule(p, "screen closed");
+        }
+        boxClosed();
+    }
+
+    /**
      * A band on the top strip ended (W13): a change the player saw.  A band
      * holds nothing: the automatic end after a departure comes 485 ms after
      * the band appeared, and the band stays through the AI phase until our

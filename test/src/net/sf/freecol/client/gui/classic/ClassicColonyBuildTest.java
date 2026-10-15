@@ -70,7 +70,7 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
             s.setBoolean(GameOptions.ORIGINAL_BUILD_PRICE, false);
             s.setBoolean(GameOptions.ORIGINAL_BUILD_COMPLETION, false);
         }
-        ClassicColonyPanel.forgetCompletions();
+
         ClassicColonyPanel.forgetFigureOrders();
         ClassicColonyPanel.forgetSelections();
         ClassicColonyPanel.setTileCursor(ClassicColonyLayout.CENTRE_TILE);
@@ -670,10 +670,11 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
     }
 
     /**
-     * The completion on the screen (targets 4, 5): the first opening in the
-     * completion's turn dissolves the new building in (its slot, from 19
-     * frames after the screen is complete, in 55 frames) and blinks ÄNDERN
-     * in hammer mode; a press ends the blink; a second opening neither.
+     * The completion on the screen (targets 4, 5): «Zur Kolonie zoomen.» of
+     * the building's @BUILT (part W, M4.11: the trigger is the zoom row)
+     * dissolves the new building in (its slot, from 19 frames after the
+     * screen is complete, in 55 frames) and blinks ÄNDERN in hammer mode; a
+     * press ends the blink; another opening neither.
      * The blink (the review of part V, fidelity M2; V clip 020 #57671 -&gt;
      * #57768 -&gt; #57791): the white cursor stays on the selected
      * colonist's tile; while the dissolve is due or runs nothing blinks
@@ -701,7 +702,7 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         ClassicColonyPanel.setTileCursor(tile);
         p.blink().arm();   // as the shown screen's addNotify
         final long complete = clock.now();
-        p.opened(ClassicColonyRight.Opening.OTHER);
+        p.opened(ClassicColonyRight.Opening.BUILT_BUILDING, press, null);
         assertEquals(ClassicColonyRight.Mode.HAMMER, p.mode());
         assertEquals("the cursor stays", tile, ClassicColonyPanel.tileCursor());
         assertTrue(p.completionBlink());
@@ -1004,9 +1005,10 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
     }
 
     /**
-     * The dissolve and the blink only at the first opening in the
-     * completion's own turn, opened from the map (regression L6): a turn
-     * later neither, another opening kind neither.
+     * The dissolve and the blink only at «Zur Kolonie zoomen.» of @BUILT
+     * (part W, M4.11; before: the first opening in the completion's turn,
+     * regression L6 of part V): an opening from the map in that turn
+     * neither, a founding neither, a turn later neither.
      */
     public void testTheDissolveOnlyInItsTurn() throws Exception {
         final Scene s = scene(true);
@@ -1019,6 +1021,11 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         assertTrue(ClassicColonyBuild.completedThisTurn(s.colony));
         // A founding's opening in that turn: neither.
         s.panel.opened(ClassicColonyRight.Opening.FOUNDING);
+        assertNull(s.panel.dissolve());
+        assertFalse(s.panel.completionBlink());
+        // An opening from the map in that turn: neither (part W: only the
+        // zoom row of @BUILT dissolves and blinks; I, not seen).
+        s.panel.opened(ClassicColonyRight.Opening.OTHER);
         assertNull(s.panel.dissolve());
         assertFalse(s.panel.completionBlink());
         // The next turn: neither.
@@ -1154,23 +1161,29 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
     }
 
     /**
-     * The completions shown belong to their game (regression L11): a new
-     * game whose colony finishes a building in the same turn shows its
-     * dissolve too.
+     * The zoom's dissolve in every game (regression L11 of part V, now
+     * part W: the trigger is «Zur Kolonie zoomen.»): two games whose colony
+     * (the same id) finishes a building in the same turn each dissolve it
+     * at the zoom; an opening from the map in that turn does not (I).
      */
     public void testTheCompletionsShownPerGame() throws Exception {
         String id = null;
         for (int k = 0; k < 2; k++) {
             final Scene s = scene(true);
             final Specification spec = spec();
-            s.colony.setBuildQueue(List.<BuildableType>of(building(spec, "printingPress")));
+            final BuildingType press = building(spec, "printingPress");
+            s.colony.setBuildQueue(List.<BuildableType>of(press));
             s.colony.addGoods(goods(spec, "hammers"), 52);
             s.colony.addGoods(goods(spec, "tools"), 20);
             newTurn(s);
             if (k == 1) assertEquals("the same colony id", id, s.colony.getId());
             id = s.colony.getId();
             s.panel.opened(ClassicColonyRight.Opening.OTHER);
-            assertNotNull("game " + k, s.panel.dissolve());
+            assertNull("a click's opening, game " + k, s.panel.dissolve());
+            assertFalse(s.panel.completionBlink());
+            s.panel.opened(ClassicColonyRight.Opening.BUILT_BUILDING, press, null);
+            assertNotNull("the zoom, game " + k, s.panel.dissolve());
+            assertTrue(s.panel.completionBlink());
             ServerTestHelper.stopServerGame();
         }
     }

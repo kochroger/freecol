@@ -731,4 +731,68 @@ public class ServerUnitTest extends FreeColTestCase {
             dutch.setAI(wasAI);
         }
     }
+
+    /**
+     * The original's docking (part W, build spec M4.12 rule R5; V clip008:
+     * the merchantman docked at Base with 2 moves left, "Züge: 0" on the
+     * map after its colony screen #32928, the next unit up and the ship not
+     * again that turn): with {@code model.option.dockingEndsMoves} (levi) a
+     * human player's ship that sails into one of its own colonies has no
+     * moves left; FreeCol's rules charge the move's cost; leaving the
+     * colony costs as ever; an AI player's ship keeps FreeCol's (I).
+     */
+    public void testDockingEndsMoves() {
+        Game game = ServerTestHelper.startServerGame(getCoastTestMap(plains));
+        final Specification spec = game.getSpecification();
+        final Map map = game.getMap();
+        final ServerPlayer dutch = (ServerPlayer)game.getPlayerByNationId("model.nation.dutch");
+        final boolean wasAI = dutch.isAI();
+        dutch.setAI(false);
+        try {
+            final Colony colony = createStandardColony(1, 9, 7);
+            final Tile port = colony.getTile();
+            final Tile sea = map.getTile(10, 7);
+            assertTrue(port.isLand());
+            assertFalse(sea.isLand());
+            final ServerUnit ship = new ServerUnit(game, sea, dutch,
+                spec.getUnitType("model.unit.merchantman"));
+            final int full = ship.getInitialMovesLeft();
+            final int into = ship.getMoveCost(port);
+            assertTrue("a move that leaves moves", full > into);
+
+            assertFalse("FreeCol's rules", spec.getBoolean(GameOptions.DOCKING_ENDS_MOVES));
+            ship.setMovesLeft(full);
+            assertFalse(ship.docksAndStops(port));
+            ship.csMove(port, new java.util.Random(1), new ChangeSet());
+            assertSame(port, ship.getTile());
+            assertEquals("FreeCol: the move's cost", full - into, ship.getMovesLeft());
+
+            spec.setBoolean(GameOptions.DOCKING_ENDS_MOVES, true);
+            ship.setLocation(sea);
+            ship.setMovesLeft(full);
+            assertTrue(ship.docksAndStops(port));
+            ship.csMove(port, new java.util.Random(1), new ChangeSet());
+            assertSame(port, ship.getTile());
+            assertEquals("the original's: docked, no moves", 0, ship.getMovesLeft());
+            // Leaving: the move's cost only.
+            ship.setMovesLeft(full);
+            final int out = ship.getMoveCost(sea);
+            assertFalse(ship.docksAndStops(sea));
+            ship.csMove(sea, new java.util.Random(1), new ChangeSet());
+            assertEquals(full - out, ship.getMovesLeft());
+            // A land unit into the colony: not a docking.
+            final ServerUnit walker = new ServerUnit(game, map.getTile(8, 7), dutch,
+                colonistType);
+            assertFalse(walker.docksAndStops(port));
+            // An AI player's ship: FreeCol's (I).
+            dutch.setAI(true);
+            ship.setMovesLeft(full);
+            assertFalse(ship.docksAndStops(port));
+            ship.csMove(port, new java.util.Random(1), new ChangeSet());
+            assertEquals(full - into, ship.getMovesLeft());
+        } finally {
+            spec.setBoolean(GameOptions.DOCKING_ENDS_MOVES, false);
+            dutch.setAI(wasAI);
+        }
+    }
 }

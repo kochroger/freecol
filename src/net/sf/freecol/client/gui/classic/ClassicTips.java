@@ -77,7 +77,14 @@ import net.sf.freecol.common.model.Unit;
  *       ({@link #colonyValues}).</li>
  *   <li>{@code @TUTORIAL12} (colonist): {@link #DOCK_TIP_MS} after the
  *       colony screen a ship's docking opened (V: clip008 #30022 -&gt;
- *       #30059); {@code %STRING0} the colony.  D10 builds the docking.</li>
+ *       #30059); {@code %STRING0} the colony.  The docking is part W's
+ *       (build spec M4.12, {@code ClassicGUI.shipDocks}).</li>
+ *   <li>{@code @TUTORIAL6} (admiral): {@link #CARGO_TIP_MS} after a
+ *       {@code @CARGOREADY0} report closed on «Runde fortsetzen.» (part W,
+ *       {@link #CARGO}).</li>
+ *   <li>{@code @TUTORIAL16} (no portrait): {@link #FOOD_TIP_MS} after a
+ *       change on the colony screen made the colony's food run short
+ *       (part W, {@link #FOOD}).</li>
  * </ul>
  * {@code @TUTORIAL1} is the first scene's ({@link ClassicFirstScene}),
  * {@code @TUTORIAL17} the Europe screen's ({@link ClassicBands}),
@@ -97,6 +104,31 @@ final class ClassicTips {
     /** The tips' numbers (GAME.TXT {@code @TUTORIALk}). */
     static final int LAND_HO = 2, SITE = 3, COLONY = 4, UNREST = 5,
         SHIP = 11, DOCK = 12, PIONEER = 13, SOLDIER = 14;
+
+    /**
+     * {@code @TUTORIAL6} (admiral): a new load is ready, ship it to Europe
+     * (part W, build spec M4.11): {@link #CARGO_TIP_MS} after a
+     * {@code @CARGOREADY0} closed on «Runde fortsetzen.» (V clip 020 #109608
+     * -&gt; #109641, box (49,115,226,42), MSS0 (45,44)); {@code %STRING0}
+     * the good, {@code %STRING1} the colony, {@code %NUMBER0} its stock
+     * («103 Rum»), {@code %STRING2} the home port.
+     */
+    static final int CARGO = 6;
+
+    /**
+     * {@code @TUTORIAL16} (no portrait, {@code @x=5 @y=10}): the food a
+     * colony needs (part W, build spec M4.11): {@link #FOOD_TIP_MS} after
+     * a change on the colony screen made the colony's food run short (V
+     * clip 020 #18949 -&gt; #18993, box (5,10,226,96); I: the first time
+     * a change makes a shortfall).
+     */
+    static final int FOOD = 16;
+
+    /** A @CARGOREADY0 closed to {@code @TUTORIAL6}: 33 frames (V clip 020 #109608 -&gt; #109641). */
+    static final double CARGO_TIP_MS = 33 * 1000.0 / 70.0863;
+
+    /** The colony screen's change to {@code @TUTORIAL16}: 44 frames (V clip 020 #18949 -&gt; #18993). */
+    static final double FOOD_TIP_MS = 44 * 1000.0 / 70.0863;
 
     /**
      * {@code @TUTORIAL18}: a full buy in Europe the gold cannot pay (V
@@ -142,7 +174,7 @@ final class ClassicTips {
         case SITE: case PIONEER: return ClassicAdvisorBox.Portrait.SCOUT;
         case SOLDIER: return ClassicAdvisorBox.Portrait.SOLDIER;
         case COLONY: case DOCK: return ClassicAdvisorBox.Portrait.COLONIST;
-        case PART: return ClassicAdvisorBox.Portrait.NONE;
+        case PART: case FOOD: return ClassicAdvisorBox.Portrait.NONE;
         default: return ClassicAdvisorBox.Portrait.ADMIRAL;
         }
     }
