@@ -379,11 +379,87 @@ final class ClassicTestHarness {
                 });
         }
 
+        /**
+         * The device point of a canvas point on the HUD pane, or null.
+         * A colony screen hosted there has its places painted first (a
+         * minimized run's screen never painted, part U).
+         */
+        private Point hudPoint(ClassicHudPane pane, int x, int y) {
+            if (pane == null) return null;
+            final java.awt.Container top = gui.hostedScreen();
+            if (top instanceof ClassicColonyPanel) ((ClassicColonyPanel) top).paintTargets();
+            final Rectangle cv = ClassicHudOverlay.canvas(pane.getWidth(), pane.getHeight());
+            final int s = ClassicHudOverlay.scale(pane.getWidth(), pane.getHeight());
+            return new Point(cv.x + x * s + s / 2, cv.y + y * s + s / 2);
+        }
+
+        @Override
+        public void drag(int ax, int ay, int bx, int by)
+            throws ClassicScriptDriver.ScriptException, InterruptedException {
+            final Component[] target = new Component[1];
+            final String what = ax + "," + ay + " -> " + bx + "," + by;
+            try {
+                SwingUtilities.invokeAndWait(() -> {
+                        final ClassicHudPane pane = gui.currentHudPane();
+                        final Point p = hudPoint(pane, ax, ay);
+                        final Component t = (p == null) ? null : mouseTarget(pane, p);
+                        if (t == null) return;
+                        target[0] = t;
+                        final Point q = SwingUtilities.convertPoint(pane, p, t);
+                        final long when = System.currentTimeMillis();
+                        ClassicFrameRecorder.event("drag", what + " -> "
+                            + t.getClass().getSimpleName());
+                        t.dispatchEvent(new MouseEvent(t, MouseEvent.MOUSE_MOVED, when, 0,
+                            q.x, q.y, 0, false, MouseEvent.NOBUTTON));
+                        t.dispatchEvent(new MouseEvent(t, MouseEvent.MOUSE_PRESSED, when,
+                            InputEvent.BUTTON1_DOWN_MASK, q.x, q.y, 1, false,
+                            MouseEvent.BUTTON1));
+                    });
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                throw new ClassicScriptDriver.ScriptException("drag: " + e.getCause());
+            }
+            if (target[0] == null) {
+                ClassicFrameRecorder.event("drag", what + " lost: nothing there");
+                throw new ClassicScriptDriver.ScriptException("drag: nothing at " + ax + "," + ay);
+            }
+            // The hand's way: 24 steps of 20 ms, the button held (the
+            // events go to the pressed component, as AWT sends them).
+            final int steps = 24;
+            for (int i = 1; i <= steps + 1; i++) {
+                Thread.sleep(20);
+                final int k = Math.min(i, steps);
+                final int x = ax + (bx - ax) * k / steps, y = ay + (by - ay) * k / steps;
+                final boolean up = i > steps;
+                SwingUtilities.invokeLater(() -> {
+                        final ClassicHudPane pane = gui.currentHudPane();
+                        final Component t = target[0];
+                        if (pane == null || t == null) return;
+                        final Rectangle cv = ClassicHudOverlay.canvas(pane.getWidth(),
+                                                                      pane.getHeight());
+                        final int s = ClassicHudOverlay.scale(pane.getWidth(), pane.getHeight());
+                        final Point q = SwingUtilities.convertPoint(pane,
+                            new Point(cv.x + x * s + s / 2, cv.y + y * s + s / 2), t);
+                        final long when = System.currentTimeMillis();
+                        if (up) {
+                            t.dispatchEvent(new MouseEvent(t, MouseEvent.MOUSE_RELEASED, when, 0,
+                                q.x, q.y, 1, false, MouseEvent.BUTTON1));
+                            ClassicFrameRecorder.event("drag", what + " released");
+                        } else {
+                            t.dispatchEvent(new MouseEvent(t, MouseEvent.MOUSE_DRAGGED, when,
+                                InputEvent.BUTTON1_DOWN_MASK, q.x, q.y, 0, false,
+                                MouseEvent.NOBUTTON));
+                        }
+                    });
+            }
+        }
+
         @Override
         public void click(int x, int y) throws InterruptedException {
             final long when = System.currentTimeMillis();
             SwingUtilities.invokeLater(() -> {
                     final ClassicHudPane pane = gui.currentHudPane();
+                    // A hosted colony screen's places, painted (part U).
+                    hudPoint(pane, x, y);
                     if (pane == null) {
                         ClassicFrameRecorder.event("click", x + "," + y + " lost: no HUD");
                         return;

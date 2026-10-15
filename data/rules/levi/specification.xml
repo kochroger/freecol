@@ -379,6 +379,14 @@
                        defaultValue="2" minimumValue="1" maximumValue="10"/>
       </optionGroup>
       <optionGroup id="gameOptions.colony">
+        <!-- The original's jobs after a move on the colony screen (part
+             U, build spec M4.8 R2/R3; clip 020 C5, C10, C14, dago D3): a
+             colonist dragged from a building onto a work tile becomes a
+             Farmer, whatever the tile or his expertise; one dragged from
+             tile to tile keeps his job, even where it makes nothing.
+             FreeCol (classic, freecol): the colony chooses the work. -->
+        <booleanOption id="model.option.originalDropJobs"
+                       defaultValue="true"/>
         <!-- Row 8: capture units under repair when a colony is
              captured. -->
         <booleanOption id="model.option.captureUnitsUnderRepair"

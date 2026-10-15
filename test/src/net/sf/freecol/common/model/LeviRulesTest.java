@@ -66,6 +66,7 @@ public class LeviRulesTest extends FreeColTestCase {
         CHANGED.put(GameOptions.FORTIFY_KEEPS_MOVES, Boolean.TRUE);        // the original's (J2)
         CHANGED.put(GameOptions.FORTIFY_DECLARES_WAR, Boolean.TRUE);       // the original's (B3)
         CHANGED.put(GameOptions.EUROPE_ARRIVAL_DOCKS, Boolean.TRUE);       // the original's (T3)
+        CHANGED.put(GameOptions.ORIGINAL_DROP_JOBS, Boolean.TRUE);         // the original's (U, R2/R3)
         CHANGED.put(GameOptions.CANCEL_KEEPS_MOVE, Boolean.TRUE);          // house rules
         CHANGED.put(GameOptions.REVENGE_MODE, Boolean.FALSE);
         CHANGED.put(GameOptions.LAST_COLONY_DEFEAT, Boolean.TRUE);
@@ -344,6 +345,27 @@ public class LeviRulesTest extends FreeColTestCase {
         assertTrue(Specification.europeArrivalDocksDefault(LEVI));
         assertFalse(Specification.europeArrivalDocksDefault("classic"));
         assertFalse(Specification.europeArrivalDocksDefault("freecol"));
+    }
+
+    /**
+     * The original's jobs after a move on the colony screen (part U, M4.8
+     * R2/R3): on in levi, off in classic and freecol (which get the option
+     * from Specification.fixGameOptions), a levi save from before the rule
+     * gets it; in the colony group.  The screen's side:
+     * {@code ClassicColonyMovesTest.testBuildingToTileMakesAFarmer},
+     * {@code testTileToTileKeepsTheWork}.
+     */
+    public void testOriginalDropJobs() {
+        assertTrue(spec(LEVI).getBoolean(GameOptions.ORIGINAL_DROP_JOBS));
+        assertFalse(spec("classic").getBoolean(GameOptions.ORIGINAL_DROP_JOBS));
+        assertFalse(spec("freecol").getBoolean(GameOptions.ORIGINAL_DROP_JOBS));
+        assertNotNull(spec(LEVI).getOptionGroup(GameOptions.GAMEOPTIONS_COLONY)
+                      .getOption(GameOptions.ORIGINAL_DROP_JOBS));
+        assertEquals("Moving colonists: the original jobs",
+                     Messages.getName(GameOptions.ORIGINAL_DROP_JOBS));
+        assertTrue(Specification.originalDropJobsDefault(LEVI));
+        assertFalse(Specification.originalDropJobsDefault("classic"));
+        assertFalse(Specification.originalDropJobsDefault("freecol"));
     }
 
     /**

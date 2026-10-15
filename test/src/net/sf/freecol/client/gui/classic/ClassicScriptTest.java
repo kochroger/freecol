@@ -238,6 +238,37 @@ public class ClassicScriptTest extends TestCase {
     }
 
     /**
+     * Part U: {@code drag ax ay bx by} is a drag as a hand makes it (real
+     * events), handed to the host with both points; bad arguments are
+     * refused; a host that cannot drag fails the script there.
+     */
+    public void testDrag() throws IOException {
+        final ClassicScript s = parse("drag 10 100 150 118");
+        final ClassicScript.Command c = s.commands.get(0);
+        assertEquals(ClassicScript.Op.DRAG, c.op);
+        assertEquals(10L, c.number);
+        assertEquals(100, c.y);
+        assertEquals(150, c.x2);
+        assertEquals(118, c.y2);
+        assertBad("drag 1 2 3", "drag needs ax ay bx by");
+        assertBad("drag 1 2 3 4 shift", "drag needs ax ay bx by");
+        assertBad("drag 1 2 320 4", "outside 0..319");
+        final FakeHost h = new FakeHost() {
+                @Override
+                public void drag(int ax, int ay, int bx, int by) {
+                    this.calls.add("drag " + ax + "," + ay + "->" + bx + "," + by);
+                }
+            };
+        File r = resultFile();
+        new ClassicScriptDriver(parse("drag 10 100 150 118", "quit"), h, r).run();
+        assertEquals(Arrays.asList("drag 10,100->150,118", "quit"), h.calls);
+        assertEquals("ok", result(r));
+        r = resultFile();
+        new ClassicScriptDriver(parse("drag 1 2 3 4", "log never"), new FakeHost(), r).run();
+        assertTrue(result(r), result(r).contains("no canvas to drag on"));
+    }
+
+    /**
      * J2: {@code tclick x y} clicks a map tile as the map shows it now
      * (a unit in the Spielzugende mode): the cell's centre on the canvas,
      * under the 8-px menu strip; a tile out of the 15x12 view, or no map,

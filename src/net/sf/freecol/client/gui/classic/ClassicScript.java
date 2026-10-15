@@ -60,6 +60,12 @@ import javax.swing.KeyStroke;
  *       at a, a motion on the way, the release at b (Europe: a trade, a
  *       sailing; the colony: its drags from M4.8 on, a press and a release
  *       before); {@code ... shift} with Shift held (a partial amount).</li>
+ *   <li>{@code drag <ax> <ay> <bx> <by>}: a left drag on the canvas as
+ *       a hand makes it (part U, M4.8): the press at a, the pointer
+ *       moved to b in 24 steps of 20 ms with the button held, the release
+ *       at b, real AWT events to the component under the press (the
+ *       colony screen's colonists; its places painted first, a minimized
+ *       run's screen never painted).</li>
  *   <li>{@code tclick <x> <y>}: a left click on map tile (x, y) as the
  *       map shows it now: the canvas point at its cell's centre in the
  *       15x12 view (a unit in the Spielzugende mode, J2); an error if the
@@ -100,7 +106,7 @@ final class ClassicScript {
 
     /** The commands. */
     enum Op { WAIT, KEY, CLICK, MOVE, WAIT_GAME, WAIT_IDLE, WAIT_TURN, PREF, LOG,
-        QUIT, GOTO, WAIT_BOX, SCREEN_CLICK, TILE_CLICK, MARK_TURN, SCREEN_DRAG }
+        QUIT, GOTO, WAIT_BOX, SCREEN_CLICK, TILE_CLICK, MARK_TURN, SCREEN_DRAG, DRAG }
 
     /** Default timeouts (ms) of the waits. */
     static final long WAIT_GAME_TIMEOUT = 180_000L;
@@ -242,6 +248,15 @@ final class ClassicScript {
             final int by = integer(p[3], ClassicFrameRecorder.H);
             return new Command(Op.SCREEN_DRAG, n, s, ax, ay, null, null, p.length == 5,
                                bx, by);
+        }
+        case "drag": {
+            final String[] p = rest.split("\\s+");
+            if (p.length != 4) throw new IllegalArgumentException(cmd + " needs ax ay bx by");
+            final int ax = integer(p[0], ClassicFrameRecorder.W);
+            final int ay = integer(p[1], ClassicFrameRecorder.H);
+            final int bx = integer(p[2], ClassicFrameRecorder.W);
+            final int by = integer(p[3], ClassicFrameRecorder.H);
+            return new Command(Op.DRAG, n, s, ax, ay, null, null, false, bx, by);
         }
         case "tclick": {
             final String[] xy = rest.split("\\s+");

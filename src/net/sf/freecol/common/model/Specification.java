@@ -3105,6 +3105,12 @@ public final class Specification implements OptionContainer {
         ret |= checkOp(GameOptions.EUROPE_ARRIVAL_DOCKS,
                        GameOptions.GAMEOPTIONS_MAP,
                        europeArrivalDocksDefault(getId()), BooleanOption.class);
+        // The original's jobs after a move on the colony screen (levi,
+        // part U): without it the colony chooses the work, as FreeCol has
+        // it; a levi save from before the rule gets the levi rules' value.
+        ret |= checkOp(GameOptions.ORIGINAL_DROP_JOBS,
+                       GameOptions.GAMEOPTIONS_COLONY,
+                       originalDropJobsDefault(getId()), BooleanOption.class);
         ret |= checkOp(GameOptions.REVENGE_MODE,
                        GameOptions.GAMEOPTIONS_VICTORY_CONDITIONS,
                        Boolean.TRUE, BooleanOption.class);
@@ -3157,6 +3163,19 @@ public final class Specification implements OptionContainer {
      * @return The value.
      */
     static Boolean europeArrivalDocksDefault(String specId) {
+        return "levi".equals(specId);
+    }
+
+    /**
+     * The value {@code GameOptions.ORIGINAL_DROP_JOBS} gets in rules or a
+     * save that lack it ({@link #fixGameOptions}): on for the "levi" rules
+     * (a game of Roger's begun before part U moves its colonists as the
+     * original does), off for any other.
+     *
+     * @param specId The specification's id.
+     * @return The value.
+     */
+    static Boolean originalDropJobsDefault(String specId) {
         return "levi".equals(specId);
     }
 

@@ -1403,6 +1403,7 @@ public class ClassicGUI extends GUI {
         // The colony screen's remembered rows and holds hold their game:
         // none outlives it (S final fixer, the review's leak probe).
         ClassicColonyPanel.forgetFigureOrders();
+        ClassicColonyPanel.forgetSelections();
         ClassicColonyPort.forgetOrders();
         if (this.menuStrip != null) this.menuStrip.setBand(null);
         // FreeCol's goto batch again for whatever comes next (W5f), and
@@ -2421,6 +2422,11 @@ public class ClassicGUI extends GUI {
         @Override
         public void options(Unit unit, boolean first) {
             colonyUnitOptions(unit, first);
+        }
+
+        @Override
+        public int ask(ClassicAdvisorBox.Request r) {
+            return colonyPrompter.ask(r);
         }
     }
 
@@ -7573,6 +7579,13 @@ public class ClassicGUI extends GUI {
         if (template != null && DISBAND_QUESTION.equals(template.getId())) {
             return askDisband(getActiveUnit());
         }
+        // The job menu's «(SPEZIALFÄHIGKEIT LÖSCHEN)»: the original's
+        // @LOBOTOMIZE (part U, M4.8; SRC, not seen: its rows «Ja» / «Nein»,
+        // the bar on «Ja» as GAME.TXT gives no @default, Escape «Nein»).
+        if (template != null && CLEAR_SPECIALITY_QUESTION.equals(template.getId())) {
+            final Boolean clear = askLobotomize(template);
+            if (clear != null) return clear;
+        }
         // The learn question is a village box: the first entry's woodcut
         // before it when no key brought one (W9); then the chief's offer
         // in the original's words (part O B2).
@@ -7784,6 +7797,38 @@ public class ClassicGUI extends GUI {
      */
     static boolean confirmed(int chosen) {
         return chosen == 0;
+    }
+
+    /** FreeCol's question before a speciality is cleared ({@code InGameController.clearSpeciality}). */
+    static final String CLEAR_SPECIALITY_QUESTION = "clearSpeciality.areYouSure";
+
+    /**
+     * FreeCol's question before a colonist's speciality is cleared (the
+     * job menu's «(SPEZIALFÄHIGKEIT LÖSCHEN)», M4.8) as the original's
+     * @LOBOTOMIZE: {@code %STRING0} the colonist's NAMES {@code @JOB}
+     * plural (the colony screen's selected colonist; I: the original's
+     * word is not seen), «Ja» clears; the bar on «Ja» (GAME.TXT gives no
+     * @default), Escape «Nein».
+     *
+     * @param template FreeCol's question.
+     * @return Whether to clear, or null without the texts.
+     */
+    private Boolean askLobotomize(StringTemplate template) {
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final ClassicText.Message m = (t == null) ? null : t.message("LOBOTOMIZE");
+        final ClassicColonyPanel cp = this.colonyPanel;
+        final Unit u = (cp == null) ? null : cp.selected();
+        final StringTemplate old = template.getReplacement("%oldUnit%");
+        final String who = (u != null) ? ClassicColonyJobs.typeWord(t, u)
+            : (old == null) ? "" : Messages.message(old);
+        final Map<String, String> values = new HashMap<>();
+        values.put("STRING0", who);
+        final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText("LOBOTOMIZE", m,
+                                                                           values);
+        if (b == null) return null;
+        final int chosen = onEventThread(() -> screenBox(b.stopgap("FreeCol", null).build()),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        return confirmed(chosen);
     }
 
     /** FreeCol's arrears question ({@code InGameController.payArrears}). */

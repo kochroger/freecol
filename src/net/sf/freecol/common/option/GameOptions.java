@@ -105,6 +105,19 @@ public class GameOptions {
     public static final String EUROPE_ARRIVAL_DOCKS
         = "model.option.europeArrivalDocks";
 
+    /**
+     * The original's jobs after a colonist is moved on the colony screen
+     * (part U, build spec M4.8 rules R2 and R3; clip 020 C5, C10, C14 and
+     * dago D3): one dragged from a building onto a work tile becomes a
+     * Farmer whatever the tile or his expertise, one dragged from tile to
+     * tile keeps his job even where it makes nothing.  FreeCol lets the
+     * colony choose the work for the tile.  On in the "levi" rules (and a
+     * levi save from before the rule); rules and saves without it play as
+     * FreeCol does.
+     */
+    public static final String ORIGINAL_DROP_JOBS
+        = "model.option.originalDropJobs";
+
     /** Do missionaries provide extra benefits. */
     public static final String ENHANCED_MISSIONARIES
         = "model.option.enhancedMissionaries";

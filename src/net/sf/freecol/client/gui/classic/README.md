@@ -3837,51 +3837,71 @@ build-selection screen's actual look (Q-worthy, see above). Loading cargo and
 caption localization are both closed — see "Cargo & set sail" and "Caption
 localization" below.
 
-### Work assignment (drag interaction) — the colony-screen blocker, closed
+### Moving colonists (`ClassicColonyMoves`, `ClassicColonyJobs`; build spec M4.8, part U)
 
-Until this slice, a colonist could be *founded into* a colony (via `B` on the map) but never told
-*where* to work once inside: the colony screen only rendered the buildings/work-tile grid and let you
-pick a build target, so a newly arrived colonist had no path to a job without leaving the screen and
-finding some other, non-existent seam.
+Every way the original moves a colonist on the colony screen, with its menus
+(clip 020 `02-colony-operations.md` §2-6, `10-dialog-catalogue.md` §3; dago
+`01-interact.md`; dago-colony2 `01-base.md`, `01-abandon.md`). V = seen on the
+frames, I = our choice where no clip shows it.
 
-**The seam.** `InGameController.work(Unit, WorkLocation)` — `Building` and `ColonyTile` both implement
-`WorkLocation`, so the one call handles moving a colonist into either. It already claims an unowned
-tile and confirms abandoning education when needed, so `ClassicColonyPanel` calls it directly with no
-extra guarding, the same way `boardShip` needed none for Europe boarding.
-
-**Click-to-select, click-to-target — not drag-and-drop**, continuing the pattern of every other
-classic screen (order buttons, report rows, the build queue, Europe boarding). `ClassicColonyPanel`
-gained a `selectedUnit` field: clicking any colonist sprite on the screen — standing idle in the
-colony (the population panel's own unit row, the very case that was previously a dead end), already
-working a building, or already working a tile — selects it (a second click on the same unit
-deselects); while one is selected, every building and every non-centre work-tile cell gets a gold hint
-border, mirroring Europe's `BOARD_HINT` treatment of ships during boarding. Clicking a building or
-tile then calls `InGameController.work(selectedUnit, target)` and clears the selection.
-`paintWorkers` (used by both the buildings pane and the work-tile grid) and `paintPopulation` now
-record each drawn colonist's virtual-space bounds + unit into shared `unitBounds`/`unitTargets` lists,
-rebuilt once per paint (unlike `buildingBounds`, which only one method populates, these three
-populating methods all run within a single `paintComponent` pass, so the lists are cleared once at
-its top rather than per-method). `paintBuildings`/`paintWorkTiles` separately record `buildingTargets`/
-`tileTargets` parallel to their existing bounds lists as the click-to-move targets.
-
-**The refresh gap, again.** `InGameController.work`'s `updateGUI` has the same shape as `setBuildQueue`
-and `boardShip` — it only refreshes map controls and the menu bar, never calls `GUI.refresh()` — so
-`assignWork` calls the panel's own `refresh()` after the controller call, unconditionally (matching
-`ClassicEuropePanel.boardSelected`), rather than leaving the screen showing the colonist in its old
-spot until an unrelated repaint.
-
-**Verified live (2026-07-25):** resumed the save with **Nieuw Amsterdam** (1 colonist, working the
-Town Hall, producing 4 bells); clicked the Town Hall's colonist — it gained a selection box and every
-building/work-tile gained a gold hint border; clicked the chapel — the real server call fired and was
-correctly *rejected* (`CAPACITY_EXCEEDED`, shown via the existing `showErrorPanel` popup — see Phase 3
-— not a bug, a legitimate validation failure); re-selected the same colonist and clicked the NW work
-tile instead — the colonist moved there live, the Town Hall's production tag dropped to 1 (base, no
-worker) and the tile gained a "3" grain production tag plus a matching net-production entry in the
-band, all without leaving or reopening the screen. 0 SEVERE throughout (only the pre-existing benign
-first-launch `options.xml` warning and the expected `CAPACITY_EXCEEDED` client warning).
-
-**Follow-ups:** the original's fixed building ground-slots remain a flow layout (Q5, unchanged by this
-slice); loading cargo and per-nation tints are still open, tracked above.
+- **The press** on a colonist (in a building, on a tile, at the fence) selects
+  him (his green frames), freezes the blink, takes the hover label away; the
+  white cursor goes to his tile, else to his figure in the band. Where figures
+  overlap, the first drawn wins (as the buildings, I). A press on a figure of
+  the band's row only selects (I).
+- **The drag**: the first motion starts it, the arrow is hidden, his own
+  figure follows as the ghost at the hotspot − (1,8) with a black silhouette
+  2 px left (V dago), no hover label; the source keeps its figure.
+- **The drop** (`ClassicColonyMoves.resolve`): building → building the target's
+  work; building → tile **Farmer** (R2), tile → tile **his work kept**, even at
+  0 (R3), both only with the levi option `model.option.originalDropJobs`
+  (FreeCol's rules: the colony chooses the work); tile → building and fence →
+  building the building's work (the role's goods back to the warehouse: the
+  server's `work`); fence → tile Farmer (I); anything → fence **J1** (+5
+  frames); a full building **@MORETHANTHREE** (+32 frames, MSS5, nothing
+  moves, he stays selected; V dago-colony2); his own place, the centre, an
+  occupied tile, a placeholder: nothing. Through `InGameController.work`,
+  then `changeWorkType` for R2/R3.
+- **A click** (a release without motion): on the colonist who was already
+  selected **J2** (+5 frames after the release; a first click only selects,
+  V dago-colony2); on a unit at the fence **his job menu** (44 frames after
+  the press, V ×3); on an empty tile or a building the selected colonist goes
+  there by the drop's rule (V ×4 for a tile, I for a building).
+- **The menus** (`ClassicColonyJobs.menu`; list boxes, golden 0 px on clip 020
+  #13, #16, #18, #37, #96, #103, #253, #254 with the clip's numbers):
+  «Beruf wählen für» + the type's NAMES plural (+ «(job)» off his speciality,
+  not at the fence); «(SPEZIALFÄHIGKEIT LÖSCHEN)» only for an expert
+  (FreeCol's question as **@LOBOTOMIZE**); the colony's works of NAMES
+  `@JOB` 0-18 (Waffenschmied with the armory, Prediger with a church, not
+  FreeCol's chapel, Lehrer with a school), the first 16, «(Weitere)»; the
+  page «(Weitere)» (+3 frames): «(Weitere)» (back), the rest, Siedler,
+  Pionier «(n Werkzeuge)» (n = max(20, min(100, 20·⌊tools/20⌋))), Soldat,
+  Späher, Dragoner, Missionar (with a church); grey where the warehouse
+  cannot equip it; J1: his work, then the roles. Right column: «a/b Ware»
+  for a tile worker's tile works (a his tile, b the best of his and the free
+  tiles), else «n Ware» (FreeCol's potential production). Yellow: the
+  expert's own work or role. The bar: on his work where the page lists it,
+  else row 1. Escape and a click outside: no change.
+- **Picks**: a tile's work for a tile worker on the same tile (no move, V
+  #48712), for anyone else onto the best free tile (V #4690, #20760); a
+  building's work into it; a role outside with the warehouse's goods
+  (`putOutsideColony`, `equipUnitForRole`: Soldat 50 → 0 muskets, Pionier
+  75 → 15 tools); at the fence the role there.
+- **Abandon**: the last colonist leaving asks **@ABANDON** (@ABANDON2 when it
+  is the only colony) +8 frames, MSS5, the bar and Escape on «Niemals!»;
+  «Ja» puts him outside in his role at once, gives up the colony
+  (`abandonColony`) and closes the screen 31 frames later (V #35574 →
+  #35605), no input meanwhile; «Niemals!» changes nothing.
+- **The opening's selection**: the founder at a founding, else the colonist
+  selected last in this colony (kept across visits, forgotten at a new game),
+  else the row's first figure (V 23 of 23 openings; I for the last case).
+- Recorder events: `colony-drag`, `colony-click`, `colony-job`,
+  `colony-abandon`, `colony-select`.
+- Not built (Unsichtbarkeiten, `freecol-spike-results\u\ACCEPTANCE.md`): the
+  menus are drawn in one frame (the original two, the lower part first);
+  J1's first row green where clip 020 #77 shows it yellow once; the
+  equipment's warehouse number changes at once, the original's 5-6 frames
+  later; the keys of the colony screen.
 
 ### The units standing in the colony (`ClassicColonyUnits`; clip 019, part M2)
 

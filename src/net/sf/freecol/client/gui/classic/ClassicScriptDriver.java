@@ -178,6 +178,23 @@ final class ClassicScriptDriver {
         }
 
         /**
+         * A left drag on the canvas as a hand makes it (part U): real
+         * events, the press at a, the motion to b with the button held,
+         * the release at b ({@link ClassicScript}'s {@code drag}).
+         *
+         * @param ax The press x.
+         * @param ay The press y.
+         * @param bx The release x.
+         * @param by The release y.
+         * @exception ScriptException if nothing is there.
+         * @exception InterruptedException if interrupted.
+         */
+        default void drag(int ax, int ay, int bx, int by)
+            throws ScriptException, InterruptedException {
+            throw new ScriptException("no canvas to drag on");
+        }
+
+        /**
          * Click the left button on a map tile as the map shows it now
          * ({@link ClassicScriptDriver#tileCanvasPoint}).
          *
@@ -334,6 +351,9 @@ final class ClassicScriptDriver {
         case SCREEN_DRAG:
             this.host.screenDrag((int)c.number, c.y, c.x2, c.y2, c.value);
             Thread.sleep(KEY_HOLD_MS);
+            break;
+        case DRAG:
+            this.host.drag((int)c.number, c.y, c.x2, c.y2);
             break;
         case TILE_CLICK:
             this.host.tileClick((int)c.number, c.y);

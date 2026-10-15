@@ -1006,18 +1006,19 @@ public class ClassicColonyBuildingsTest extends FreeColTestCase {
     }
 
     /**
-     * The presses on the building area (the first slice's select-then-
-     * target, unchanged): a worker's figure selects him, a figure on the
-     * fence does nothing yet (M4.8), the build list opens from ÄNDERN in the
-     * hammer panel (M4.7: the construction plate is gone, the first slice's
-     * press anywhere on the right panel too).
+     * The presses on the building area: a worker's figure selects him, a
+     * figure on the fence selects that unit (CHANGED by part U, M4.8: his
+     * job menu comes with the click, without the boxes here none), the
+     * build list opens from ÄNDERN in the hammer panel (M4.7: the
+     * construction plate is gone, the first slice's press anywhere on the
+     * right panel too).
      */
     public void testThePresses() throws Exception {
         final State s = base1539();
         final Unit vet = s.in("veteranSoldier", "townHall");
         s.in("masterCarpenter", "lumberMill");
         s.finish();
-        s.outside("veteranSoldier", "soldier");
+        final Unit fenced = s.outside("veteranSoldier", "soldier");
         final int[] lists = { 0 };
         final FreeColClient fcc = client(s.game, s.owner);
         final ClassicGUI gui = new ClassicGUI(null) {
@@ -1038,7 +1039,9 @@ public class ClassicColonyBuildingsTest extends FreeColTestCase {
         assertNull(p.selected());
         p.clickAt(125, 40);                    // the Staatsmann in the Rathaus
         assertSame(vet, p.selected());
-        p.clickAt(160, 118);                   // the soldier on the fence
+        p.clickAt(160, 118);                   // the soldier on the fence (part U)
+        assertSame(fenced, p.selected());
+        p.clickAt(125, 40);
         assertSame(vet, p.selected());
         p.clickAt(20, 20);                     // trees (M1): no target, nothing
         assertSame(vet, p.selected());
@@ -1173,13 +1176,15 @@ public class ClassicColonyBuildingsTest extends FreeColTestCase {
         p.hoverAt(160, 84);
         assertEquals("the harbour's own place", w.index, p.hovered());
         p.hoverAt(-1, -1);
-        // A press there with a colonist selected moves him into the Sägewerk.
+        // A click there with a colonist selected moves him into the
+        // Sägewerk; he stays selected (CHANGED by part U, M4.8: the
+        // original keeps the moved colonist selected).
         p.select(worker);
         p.clickAt(143, 63);
         assertEquals(1, work.size());
         assertSame(worker, work.get(0)[0]);
         assertSame(mill.target, work.get(0)[1]);
-        assertNull("the selection is used", p.selected());
+        assertSame("the selection stays", worker, p.selected());
         // A press on the harbour's own place: no target, the selection stays.
         p.select(worker);
         p.clickAt(160, 84);

@@ -195,6 +195,21 @@ final class ClassicColonyTiles {
             return -1;
         }
 
+        /**
+         * The place of a work tile (the white cursor after a move onto it,
+         * M4.8), or -1.
+         *
+         * @param ct The work tile, or null.
+         * @return The place.
+         */
+        int placeOfTile(ColonyTile ct) {
+            if (ct == null) return -1;
+            for (Cell c : this.cells) {
+                if (c != null && c.colonyTile == ct) return c.index;
+            }
+            return -1;
+        }
+
         @Override
         public String toString() {
             final StringBuilder sb = new StringBuilder();
