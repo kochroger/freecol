@@ -1696,6 +1696,10 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
      */
     public void testATileWorkPrefersTheColonysOwnLand() throws Exception {
         final Scene s = scene(1, true);
+        // In the Rathaus first (in the square topology he works N, and a
+        // tile changing hands sends its worker away).
+        final Unit u = s.colony.getUnitList().get(0);
+        u.setLocation(building(s.colony, "townHall"));
         final Tile n = s.colony.getTile().getNeighbourOrNull(Direction.N);
         final ServerPlayer natives = getServerPlayer(s.game, "model.nation.arawak");
         n.changeOwnership(natives, null);
@@ -1703,7 +1707,7 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         final ColonyTile ct = s.colony.getColonyTile(n);
         assertEquals(net.sf.freecol.common.model.UnitLocation.NoAddReason.CLAIM_REQUIRED,
                      ct.getNoWorkReason());
-        final UnitType ut = s.colony.getUnitList().get(0).getType();
+        final UnitType ut = u.getType();
         assertTrue("the forest is the best for lumber",
                    ct.getPotentialProduction(lumber, ut) > 0);
         final ColonyTile best = ClassicColonyJobs.bestFreeTile(s.colony, ut, lumber);
