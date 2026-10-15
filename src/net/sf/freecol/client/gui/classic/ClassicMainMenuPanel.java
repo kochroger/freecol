@@ -937,8 +937,10 @@ final class ClassicMainMenuPanel extends JPanel {
         logger.info("Classic menu: " + what + " made "
             + (painted ? (when - this.shownAt) + " ms after the " + screen
                 + " was shown"
-               : Math.max(0L, this.changedAt - when) + " ms before the " + screen
-                + " came (not yet shown)")
+               : ((when < this.changedAt)
+                  ? (this.changedAt - when) + " ms before the " + screen + " came"
+                  : (when - this.changedAt) + " ms after the " + screen + " came")
+                + " (not yet shown)")
             + " -- ignored (" + (burst ? "continues an ignored burst" : "typed ahead")
             + ")");
     }
