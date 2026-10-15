@@ -660,6 +660,7 @@ public class ServerUnitTest extends FreeColTestCase {
             pioneer = new ServerUnit(game, ship, dutch, pioneerType);
             soldier = new ServerUnit(game, ship, dutch, soldierType);
             soldier.setState(Unit.UnitState.ACTIVE);
+            pioneer.setDestination(europe);    // P7: arrived, so cleared
             ship.addGoods(furs, 100);
             ship.addGoods(furs, 50);
             ship.setDestination(europe);
@@ -673,6 +674,8 @@ public class ServerUnitTest extends FreeColTestCase {
             assertSame(europe, soldier.getLocation());
             assertEquals(Unit.UnitState.SENTRY, pioneer.getState());
             assertEquals(Unit.UnitState.SENTRY, soldier.getState());
+            assertNull("a landed unit's Europe destination is cleared",
+                       pioneer.getDestination());
             // In the order they were aboard: the pioneer (aboard first)
             // stands right on the dock, the soldier, the newest, at the left.
             final List<Unit> dock = new ArrayList<>();

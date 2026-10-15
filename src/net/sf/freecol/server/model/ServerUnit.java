@@ -1093,17 +1093,26 @@ public class ServerUnit extends Unit implements TurnTaker {
      * the state SENTRY («S»: it boards the next ship that sails, see
      * {@code ClassicEuropePanel.boarders}, unless the player chose «Nicht
      * aufs nächste Schiff gehen.» for it, Roger 2026-10-13); the goods
-     * stay in the holds (as in the picture: the two crates are the holds
-     * the ship lacks, nothing was unloaded).
+     * stay in the holds (clip 020 E1 #24111-#24112: the merchantman
+     * arrives with Erz and Rum in its holds, and they are sold out of the
+     * holds afterwards, #24243, #24337; the picture's two crates only show
+     * that a merchantman has four holds).  Every unit aboard lands,
+     * soldiers, dragoons, artillery and scouts too (V only for the
+     * picture's soldier and pioneer; bought artillery stands on the dock
+     * in the original as well).  A landed unit's destination is cleared
+     * when it is this Europe (it has arrived; part T's play review, P7).
      *
      * <p>Only with {@code GameOptions.EUROPE_ARRIVAL_DOCKS} (the levi
      * rules) and only for a human player: AI players and the REF keep
      * their units aboard, as FreeCol does.  Kept aboard as well, I: a
      * ship on a trade route (it sails on by itself, and nothing would
      * board it again: the dock's «S» boarding is the Europe screen's
-     * sailing) and a treasure train (FreeCol cashes it in aboard; the
-     * original's treasure goes to the king with the galleon, never seen
-     * on the dock).  The units land in the order they are aboard, so the
+     * sailing) and a treasure train (as in FreeCol it stays in the hold:
+     * nothing cashes it in on arrival -- the cash-in runs only on the
+     * client's arrival at a colony, a disembark or a colony's founding,
+     * {@code InGameController.checkCashInTreasureTrain}; the original's
+     * treasure goes to the king with the galleon, never seen on the dock;
+     * an open point, part T's fidelity review F7).  The units land in the order they are aboard, so the
      * one aboard longest stands right on the dock and boards first again
      * (the dock draws the newest at the left: the picture's soldier left
      * of the pioneer, our holds had the pioneer first); I: whether one
@@ -1123,7 +1132,11 @@ public class ServerUnit extends Unit implements TurnTaker {
         for (Unit u : getUnitList()) {   // a copy: safe to move them
             if (u.isNaval() || u.canCarryTreasure()) continue;
             if (!u.setLocation(europe)) continue;//-vis: safe/Europe
+            // Europe.add already puts a land unit into SENTRY; said again
+            // here on purpose, so the rule does not hang on that detail
+            // (change both or neither).
             u.setState(UnitState.SENTRY);
+            if (u.getDestination() == europe) u.setDestination(null);
             n++;
         }
         return n;
