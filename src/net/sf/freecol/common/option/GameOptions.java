@@ -93,6 +93,18 @@ public class GameOptions {
     public static final String FORTIFY_DECLARES_WAR
         = "model.option.fortifyDeclaresWar";
 
+    /**
+     * The original's arrival in Europe (part T3, Roger's screenshots
+     * 2026-10-14, freecol-spike-results/t/roger-evidence): when a human
+     * player's ship arrives in Europe, every unit aboard goes onto the
+     * dock at once, marked "S" (SENTRY: boards the next ship that sails);
+     * the holds keep only the goods.  FreeCol keeps them aboard.  On in
+     * the "levi" rules (and a levi save from before the rule); rules and
+     * saves without it keep them aboard.  AI players and the REF never.
+     */
+    public static final String EUROPE_ARRIVAL_DOCKS
+        = "model.option.europeArrivalDocks";
+
     /** Do missionaries provide extra benefits. */
     public static final String ENHANCED_MISSIONARIES
         = "model.option.enhancedMissionaries";

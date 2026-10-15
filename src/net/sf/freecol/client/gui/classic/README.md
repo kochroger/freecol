@@ -97,6 +97,27 @@ save plays on as it was (R1b re-applies the rules on load, later).
   (`Specification.fortifyDeclaresWarDefault`: the game Roger is playing).
   (`UnitTest.testFortifyWarColony`, `InGameControllerTest.testFortifyBreaksTheTreaty`,
   `MoveTest.testFortifyNextToAForeignColony`, `LeviRulesTest.testFortifyDeclaresWar`.)
+- **The original's arrival in Europe** (part T3; Roger's screenshots
+  2026-10-14, `freecol-spike-results\t\roger-evidence`: the original's
+  merchantman in port with four empty holds and two crates, the soldier and
+  the pioneer on the dock with the orange flag's «S»; ours had them in the
+  holds): `model.option.europeArrivalDocks` on. When a human player's ship
+  arrives in Europe (`ServerUnit.csNewTurn`), every unit aboard goes onto the
+  dock at once, SENTRY («S»: boards the next ship that sails, the Europe
+  screen's `boarders`, unless «Nicht aufs nächste Schiff gehen.» was chosen
+  for it; Roger 2026-10-13), in the order it was aboard, so the one aboard
+  longest stands at the right and boards first again, the newest at the left
+  (the picture: soldier left of the pioneer; `ServerUnit.landPassengersInEurope`).
+  The goods stay in the holds (the picture's two crates are the holds the
+  ship lacks). Kept aboard (I): an AI player's or the REF's units (FreeCol's
+  behaviour), a ship on a trade route (it sails on by itself and nothing
+  would board them again), a treasure train (cashed in aboard). A unit
+  already in port before the rule (an older save) stays aboard until it
+  leaves; a colonist dragged from the dock onto a ship is still drawn in its
+  holds (I). Classic and freecol: off; a levi save from before the rule gets
+  it on (`Specification.europeArrivalDocksDefault`).
+  (`ServerUnitTest.testArrivalInEuropePutsThePassengersOnTheDock`,
+  `LeviRulesTest.testEuropeArrivalDocks`.)
 - **House rules** (game options; rules and saves without them get FreeCol's
   behaviour from `Specification.fixGameOptions`):
   - `model.option.cancelKeepsMove` on (D1, moved here from the classic

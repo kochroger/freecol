@@ -616,4 +616,116 @@ public class ServerUnitTest extends FreeColTestCase {
             }
         }
     }
+
+    /**
+     * The original's arrival in Europe (part T3; Roger's screenshots
+     * 2026-10-14, t/roger-evidence: the original's merchantman in port with
+     * empty holds and two crates, the soldier and the pioneer on the dock
+     * with «S»): with {@code model.option.europeArrivalDocks} (levi) every
+     * unit aboard a human player's ship goes onto the dock at once, SENTRY,
+     * in the order it was aboard; the goods stay aboard; the ship is in
+     * port and active.  Without the option (classic, freecol) they stay
+     * aboard, as FreeCol has it.  AI players, a trade-route ship and a
+     * treasure train keep theirs aboard; nobody comes up (no passenger is
+     * a candidate for the next active unit).
+     */
+    public void testArrivalInEuropePutsThePassengersOnTheDock() {
+        Game game = ServerTestHelper.startServerGame(getTestMap(plains));
+        final Specification spec = game.getSpecification();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final net.sf.freecol.common.model.Europe europe = dutch.getEurope();
+        final UnitType merchantman = spec.getUnitType("model.unit.merchantman");
+        final UnitType galleon = spec.getUnitType("model.unit.galleon");
+        final UnitType treasure = spec.getUnitType("model.unit.treasureTrain");
+        final GoodsType furs = spec.getGoodsType("model.goods.furs");
+        assertFalse("FreeCol's rules", spec.getBoolean(GameOptions.EUROPE_ARRIVAL_DOCKS));
+        final boolean wasAI = dutch.isAI();
+        dutch.setAI(false);           // Roger: a human player
+
+        // FreeCol's rules: the passengers stay aboard.
+        ServerUnit ship = new ServerUnit(game, dutch.getHighSeas(), dutch, merchantman);
+        ServerUnit pioneer = new ServerUnit(game, ship, dutch, pioneerType);
+        ServerUnit soldier = new ServerUnit(game, ship, dutch, soldierType);
+        ship.setDestination(europe);
+        ship.setWorkLeft(1);
+        ServerTestHelper.newTurn();
+        assertTrue(ship.isInEurope());
+        assertSame(ship, pioneer.getLocation());
+        assertSame(ship, soldier.getLocation());
+        final ServerUnit ship0 = ship;
+
+        spec.setBoolean(GameOptions.EUROPE_ARRIVAL_DOCKS, true);
+        try {
+            ship = new ServerUnit(game, dutch.getHighSeas(), dutch, merchantman);
+            pioneer = new ServerUnit(game, ship, dutch, pioneerType);
+            soldier = new ServerUnit(game, ship, dutch, soldierType);
+            soldier.setState(Unit.UnitState.ACTIVE);
+            ship.addGoods(furs, 100);
+            ship.addGoods(furs, 50);
+            ship.setDestination(europe);
+            ship.setWorkLeft(1);
+            ServerTestHelper.newTurn();
+            assertSame(europe, ship.getLocation());
+            assertEquals(Unit.UnitState.ACTIVE, ship.getState());
+            assertEquals("the holds: goods only", 0, ship.getUnitCount());
+            assertEquals(150, ship.getGoodsCount(furs));
+            assertSame(europe, pioneer.getLocation());
+            assertSame(europe, soldier.getLocation());
+            assertEquals(Unit.UnitState.SENTRY, pioneer.getState());
+            assertEquals(Unit.UnitState.SENTRY, soldier.getState());
+            // In the order they were aboard: the pioneer (aboard first)
+            // stands right on the dock, the soldier, the newest, at the left.
+            final List<Unit> dock = new ArrayList<>();
+            for (Unit u : europe.getUnitList()) if (!u.isNaval()) dock.add(u);
+            assertTrue(dock.indexOf(pioneer) >= 0);
+            assertTrue(dock.indexOf(pioneer) < dock.indexOf(soldier));
+            assertFalse(pioneer.isCandidateForNextActiveUnit());
+            assertFalse(soldier.isCandidateForNextActiveUnit());
+            // The first ship, in port since before the rule: its
+            // passengers stay aboard (only an arrival lands them).
+            ServerTestHelper.newTurn();
+            assertTrue(ship0.isInEurope());
+            assertEquals(2, ship0.getUnitCount());
+
+            // A treasure train stays aboard its galleon.
+            final ServerUnit g = new ServerUnit(game, dutch.getHighSeas(), dutch, galleon);
+            final ServerUnit gold = new ServerUnit(game, g, dutch, treasure);
+            gold.setTreasureAmount(100);
+            g.setDestination(europe);
+            g.setWorkLeft(1);
+            ServerTestHelper.newTurn();
+            assertTrue(g.isInEurope());
+            assertSame(g, gold.getLocation());
+
+            // A trade-route ship keeps its passengers (I).
+            final ServerUnit route = new ServerUnit(game, dutch.getHighSeas(), dutch, merchantman);
+            final ServerUnit rider = new ServerUnit(game, route, dutch, colonistType);
+            route.setTradeRoute(new net.sf.freecol.common.model.TradeRoute(game, "r", dutch));
+            route.setWorkLeft(0);
+            assertEquals(0, route.landPassengersInEurope(europe));   // not in Europe yet
+            route.setLocation(europe);
+            assertEquals(0, route.landPassengersInEurope(europe));
+            assertSame(route, rider.getLocation());
+            route.setTradeRoute(null);
+            assertEquals(1, route.landPassengersInEurope(europe));
+            assertSame(europe, rider.getLocation());
+
+            // An AI player's ship keeps its passengers.
+            dutch.setAI(true);
+            try {
+                final ServerUnit ai = new ServerUnit(game, dutch.getHighSeas(), dutch, merchantman);
+                final ServerUnit aboard = new ServerUnit(game, ai, dutch, colonistType);
+                ai.setDestination(europe);
+                ai.setWorkLeft(1);
+                ServerTestHelper.newTurn();
+                assertTrue(ai.isInEurope());
+                assertSame(ai, aboard.getLocation());
+            } finally {
+                dutch.setAI(false);
+            }
+        } finally {
+            spec.setBoolean(GameOptions.EUROPE_ARRIVAL_DOCKS, false);
+            dutch.setAI(wasAI);
+        }
+    }
 }

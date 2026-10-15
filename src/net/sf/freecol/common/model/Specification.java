@@ -3099,6 +3099,12 @@ public final class Specification implements OptionContainer {
         ret |= checkOp(GameOptions.FORTIFY_DECLARES_WAR,
                        GameOptions.GAMEOPTIONS_MAP,
                        fortifyDeclaresWarDefault(getId()), BooleanOption.class);
+        // The original's arrival in Europe (levi, T3): without it the units
+        // stay aboard, as FreeCol has it; a levi save from before the rule
+        // gets the levi rules' value.
+        ret |= checkOp(GameOptions.EUROPE_ARRIVAL_DOCKS,
+                       GameOptions.GAMEOPTIONS_MAP,
+                       europeArrivalDocksDefault(getId()), BooleanOption.class);
         ret |= checkOp(GameOptions.REVENGE_MODE,
                        GameOptions.GAMEOPTIONS_VICTORY_CONDITIONS,
                        Boolean.TRUE, BooleanOption.class);
@@ -3138,6 +3144,19 @@ public final class Specification implements OptionContainer {
      * @return The value.
      */
     static Boolean fortifyDeclaresWarDefault(String specId) {
+        return "levi".equals(specId);
+    }
+
+    /**
+     * The value {@code GameOptions.EUROPE_ARRIVAL_DOCKS} gets in rules or a
+     * save that lack it ({@link #fixGameOptions}): on for the "levi" rules
+     * (a game of Roger's begun before part T3 lands its passengers on the
+     * dock as the original does), off for any other.
+     *
+     * @param specId The specification's id.
+     * @return The value.
+     */
+    static Boolean europeArrivalDocksDefault(String specId) {
         return "levi".equals(specId);
     }
 

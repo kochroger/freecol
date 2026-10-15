@@ -361,6 +361,15 @@
              owner. -->
         <booleanOption id="model.option.fortifyDeclaresWar"
                        defaultValue="true"/>
+        <!-- The original's arrival in Europe (part T3, Roger's
+             screenshots 2026-10-14 in freecol-spike-results\t\
+             roger-evidence): a human player's ship arriving in Europe
+             puts every unit aboard onto the dock at once, marked "S"
+             (boards the next ship that sails); the holds keep only the
+             goods.  FreeCol (classic, freecol), AI players and the REF:
+             the units stay aboard. -->
+        <booleanOption id="model.option.europeArrivalDocks"
+                       defaultValue="true"/>
         <!-- The original's sailing time between Europe and the New
              World: two turns each way (landfall: off the map in 1503,
              in Amsterdam at the start of 1505; clip008: off the map in

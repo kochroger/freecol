@@ -1083,6 +1083,52 @@ public class ServerUnit extends Unit implements TurnTaker {
         this.dispose();
     }
 
+    /**
+     * The original's arrival in Europe (part T3; Roger's screenshots
+     * 2026-10-14, {@code freecol-spike-results/t/roger-evidence}: the
+     * original's merchantman in port shows four empty holds and two
+     * crates, its soldier and pioneer stand on the dock with the orange
+     * flag's «S»; ours had them in the holds).  When this ship has just
+     * arrived in Europe, every unit aboard goes onto the dock at once in
+     * the state SENTRY («S»: it boards the next ship that sails, see
+     * {@code ClassicEuropePanel.boarders}, unless the player chose «Nicht
+     * aufs nächste Schiff gehen.» for it, Roger 2026-10-13); the goods
+     * stay in the holds (as in the picture: the two crates are the holds
+     * the ship lacks, nothing was unloaded).
+     *
+     * <p>Only with {@code GameOptions.EUROPE_ARRIVAL_DOCKS} (the levi
+     * rules) and only for a human player: AI players and the REF keep
+     * their units aboard, as FreeCol does.  Kept aboard as well, I: a
+     * ship on a trade route (it sails on by itself, and nothing would
+     * board it again: the dock's «S» boarding is the Europe screen's
+     * sailing) and a treasure train (FreeCol cashes it in aboard; the
+     * original's treasure goes to the king with the galleon, never seen
+     * on the dock).  The units land in the order they are aboard, so the
+     * one aboard longest stands right on the dock and boards first again
+     * (the dock draws the newest at the left: the picture's soldier left
+     * of the pioneer, our holds had the pioneer first); I: whether one
+     * already marked otherwise keeps its mark is not seen, all get «S»
+     * (the original's arrival has only «S» in the picture).
+     *
+     * @param europe The player's Europe, where this ship now is.
+     * @return How many units went onto the dock.
+     */
+    public int landPassengersInEurope(Europe europe) {
+        final Player owner = getOwner();
+        if (europe == null || !isNaval() || getLocation() != europe
+            || !getSpecification().getBoolean(GameOptions.EUROPE_ARRIVAL_DOCKS)
+            || owner == null || owner.isAI() || owner.isREF()
+            || getTradeRoute() != null) return 0;
+        int n = 0;
+        for (Unit u : getUnitList()) {   // a copy: safe to move them
+            if (u.isNaval() || u.canCarryTreasure()) continue;
+            if (!u.setLocation(europe)) continue;//-vis: safe/Europe
+            u.setState(UnitState.SENTRY);
+            n++;
+        }
+        return n;
+    }
+
 
     // Implement TurnTaker
 
@@ -1225,8 +1271,10 @@ public class ServerUnit extends Unit implements TurnTaker {
                     }
                     setState(UnitState.ACTIVE);
                     setLocation(europe);//-vis: safe/Europe
+                    final int landed = landPassengersInEurope(europe);
+                    if (landed > 0) lb.add(", ", landed, " onto the dock");
                     cs.add(See.only(owner), owner.getHighSeas());
-                    locDirty = true;
+                    locDirty = true; // Europe, with the ship and the dock
                 } else {
                     if (!(result instanceof Tile)) {
                         logger.warning("Unit has unsupported destination: "

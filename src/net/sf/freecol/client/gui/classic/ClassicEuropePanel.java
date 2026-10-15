@@ -86,14 +86,20 @@ import net.sf.freecol.common.model.UnitType;
  *       «Einladen:» and the selected ship's type, or «Keine Schiffe im
  *       Hafen».</li>
  *   <li><b>Ships in port</b> 1:1 with their flag in box 3 at (146 + 18i,
- *       146); the selected one in an 18&times;18 green frame.  The first
+ *       146); the selected one in an 18&times;18 green frame (on arrival
+ *       its passengers are already on the dock with «S», part T3: the
+ *       server's {@code ServerUnit.landPassengersInEurope}, levi).  The first
  *       ship is selected when the screen opens, after each change and
  *       after a ship sailed (V clip008 #17007, clip 020 #24220).  A ship
  *       under repair lies there too but is never selected, dragged or
  *       sailed ({@link #underRepair}).</li>
  *   <li><b>The selected ship's six holds</b> (x 147 + 12k, y 165): the
  *       colonists aboard first (I: how the original draws them is not
- *       seen, question 1), then the goods, one hold per 100 (an icon,
+ *       seen, question 1; since part T3 an arriving ship's colonists
+ *       stand on the dock, Roger's screenshot 2026-10-14 shows the
+ *       original's holds with goods only, so a colonist is in the holds
+ *       only after a drag from the dock or with FreeCol's rules), then the
+ *       goods, one hold per 100 (an icon,
  *       grey below 100, V clip008 §2.5), crates on the holds the ship does
  *       not have, six crates without a ship.</li>
  *   <li><b>The docks</b> at (233 + 17i, 138), three per row, the next row

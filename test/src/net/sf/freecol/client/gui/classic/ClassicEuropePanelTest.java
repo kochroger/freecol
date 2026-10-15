@@ -514,6 +514,61 @@ public class ClassicEuropePanelTest extends FreeColTestCase {
     }
 
     /**
+     * Part T3, Roger's screenshots of 2026-10-14 (t/roger-evidence): the
+     * same arrival with the levi rule ({@code model.option.europeArrivalDocks})
+     * and the server's real turn: the merchantman in port shows its goods
+     * and empty holds only (the original: four empty, two crates), the
+     * soldier and the pioneer stand on the dock with «S», the soldier (the
+     * newest) at the left under the dock's frame, the pioneer right of him
+     * (as the original's picture); when the ship sails both board again,
+     * the pioneer first.
+     */
+    public void testTheArrivalPutsThePassengersOnTheDock() throws Exception {
+        final Game game = ServerTestHelper.startServerGame(getTestMap(true));
+        final ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+        final net.sf.freecol.common.model.Specification spec = game.getSpecification();
+        final boolean wasAI = dutch.isAI();
+        dutch.setAI(false);
+        spec.setBoolean(net.sf.freecol.common.option.GameOptions.EUROPE_ARRIVAL_DOCKS, true);
+        try {
+            final Europe europe = dutch.getEurope();
+            final Unit ship = new ServerUnit(game, dutch.getHighSeas(), dutch, merchantman);
+            final Unit p = new ServerUnit(game, ship, dutch, colonist, pioneer);
+            p.setRoleCount(pioneer.getMaximumCount());
+            final Unit v = new ServerUnit(game, ship, dutch, veteran, soldier);
+            ship.addGoods(tools, 50);
+            ship.setDestination(europe);
+            ship.setWorkLeft(1);
+            ServerTestHelper.newTurn();
+            assertSame(europe, ship.getLocation());
+            assertEquals("[tools:50, empty, empty, empty, crate, crate]",
+                         ClassicEuropePanel.holds(ship).toString());
+            assertEquals(Unit.UnitState.SENTRY, p.getState());
+            assertEquals(Unit.UnitState.SENTRY, v.getState());
+            final Loopback api = new Loopback(ServerTestHelper.getServer(), dutch);
+            final ClassicEuropePanel panel = new ClassicEuropePanel(client(game, dutch, api),
+                library(), europe, () -> {}, u -> {}, new Boxes());
+            panel.setSize(W, H);
+            assertSame(ship, panel.selectedShip());
+            assertEquals(List.of(v, p), panel.dockUnits());
+            final Rectangle c0 = ClassicEuropePanel.dockCell(0, 2);
+            final Rectangle c1 = ClassicEuropePanel.dockCell(1, 2);
+            assertEquals(new Rectangle(233, 138, c0.width, c0.height), c0);
+            assertEquals(250, c1.x);
+            assertSame("the soldier at the left", v, panel.hitAt(cx(c0), cy(c0)).unit);
+            assertSame(p, panel.hitAt(cx(c1), cy(c1)).unit);
+            assertEquals(ClassicEuropePanel.Kind.HOLD, panel.hitAt(152, 170).kind);
+            assertNull("no colonist in the holds", panel.hitAt(152, 170).hold.unit);
+            panel.canvas();
+            // Sailing takes both again, the one aboard longest first.
+            assertEquals(List.of(p, v), ClassicEuropePanel.boarders(europe, ship));
+        } finally {
+            spec.setBoolean(net.sf.freecol.common.option.GameOptions.EUROPE_ARRIVAL_DOCKS, false);
+            dutch.setAI(wasAI);
+        }
+    }
+
+    /**
      * Buying and selling as the original (clip008 §3.4, §3.5): a market
      * slot dropped on a hold buys a hold (gold - 100 x ask); with Shift on
      * the ship {@code @HOWMUCH4}, "50" typed buys 50; a click on a market

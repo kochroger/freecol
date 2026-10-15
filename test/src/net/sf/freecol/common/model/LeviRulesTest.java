@@ -65,6 +65,7 @@ public class LeviRulesTest extends FreeColTestCase {
         CHANGED.put(GameOptions.TURNS_TO_SAIL, "2");                       // the original's (W13)
         CHANGED.put(GameOptions.FORTIFY_KEEPS_MOVES, Boolean.TRUE);        // the original's (J2)
         CHANGED.put(GameOptions.FORTIFY_DECLARES_WAR, Boolean.TRUE);       // the original's (B3)
+        CHANGED.put(GameOptions.EUROPE_ARRIVAL_DOCKS, Boolean.TRUE);       // the original's (T3)
         CHANGED.put(GameOptions.CANCEL_KEEPS_MOVE, Boolean.TRUE);          // house rules
         CHANGED.put(GameOptions.REVENGE_MODE, Boolean.FALSE);
         CHANGED.put(GameOptions.LAST_COLONY_DEFEAT, Boolean.TRUE);
@@ -321,6 +322,28 @@ public class LeviRulesTest extends FreeColTestCase {
         dutch.addFather(game.getSpecification()
             .getFoundingFather("model.foundingFather.ferdinandMagellan"));
         assertEquals(1, ship.getSailTurns());
+    }
+
+    /**
+     * The original's arrival in Europe (T3, Roger's screenshots of
+     * 2026-10-14): the passengers go onto the dock in levi, not in classic
+     * and freecol (which get the option from Specification.fixGameOptions),
+     * and a levi save from before the rule gets it too; it sits where the
+     * game options dialog shows it.  The server's side:
+     * {@code ServerUnitTest.testArrivalInEuropePutsThePassengersOnTheDock}.
+     */
+    public void testEuropeArrivalDocks() {
+        assertTrue(spec(LEVI).getBoolean(GameOptions.EUROPE_ARRIVAL_DOCKS));
+        assertFalse(spec("classic").getBoolean(GameOptions.EUROPE_ARRIVAL_DOCKS));
+        assertFalse(spec("freecol").getBoolean(GameOptions.EUROPE_ARRIVAL_DOCKS));
+        assertNotNull(spec(LEVI).getOptionGroup(GameOptions.GAMEOPTIONS_MAP)
+                      .getOption(GameOptions.EUROPE_ARRIVAL_DOCKS));
+        assertEquals("Arrival in Europe: all onto the dock",
+                     Messages.getName(GameOptions.EUROPE_ARRIVAL_DOCKS));
+        // A levi save from before the rule plays it; any other does not.
+        assertTrue(Specification.europeArrivalDocksDefault(LEVI));
+        assertFalse(Specification.europeArrivalDocksDefault("classic"));
+        assertFalse(Specification.europeArrivalDocksDefault("freecol"));
     }
 
     /**
