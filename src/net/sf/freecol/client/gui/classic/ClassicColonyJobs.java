@@ -67,9 +67,13 @@ import net.sf.freecol.common.model.UnitType;
  *       dago-colony2 #8986): a colonist dropped on the fence: his job
  *       (without a cell), then the roles; no «LÖSCHEN», no «(Weitere)».</li>
  *   <li><b>A unit at the fence</b> ({@link Kind#OUTSIDE}; V #96, #97,
- *       #253): «Beruf wählen für &lt;Typ&gt;:» with no «(job)», every right
- *       cell «n Ware», «LÖSCHEN» only for an expert, the bar on row 1; its
- *       «(Weitere)» page has the bar on his role (#254: «Siedler»).</li>
+ *       #253, clip 042 #15426, #15901): a click on the one already
+ *       selected (the first only selects); «Beruf wählen für &lt;Typ&gt;:»
+ *       with no «(job)» for a Siedler, «(Rolle)» for an armed or equipped
+ *       one («Meister-Waffenschmiede(Soldat):»), every right cell «n
+ *       Ware», «LÖSCHEN» only for an expert, the expert's work yellow, the
+ *       bar on row 1; its «(Weitere)» page has the bar on his role (#254:
+ *       «Siedler»).</li>
  * </ul>
  *
  * <p><b>Right column</b> (V, all 28 menus): for a tile worker the tile
@@ -92,8 +96,18 @@ final class ClassicColonyJobs {
         WORKER,
         /** A unit standing at the fence, clicked. */
         OUTSIDE,
-        /** J1: a colonist dropped on the fence. */
-        FENCE_DROP
+        /**
+         * J1: a colonist dropped on the fence, or a colonist in the colony
+         * selected and an empty spot of the fence clicked (V clip 043
+         * #3326, #8471: the menu only, he stays where he is).
+         */
+        FENCE_DROP,
+        /**
+         * A unit at the fence selected and an empty spot of the fence
+         * clicked: the roles only, the bar on his role, its row without a
+         * cell (V clip 042 #15119, clip 043 #7048).
+         */
+        FENCE_ROLE
     }
 
     /** What a row does. */
@@ -403,17 +417,115 @@ final class ClassicColonyJobs {
      * @return The tile, or null if none is free.
      */
     static ColonyTile bestFreeTile(Colony c, UnitType ut, GoodsType g) {
-        ColonyTile best = null;
-        int most = -1;
-        for (ColonyTile ct : c.getColonyTiles()) {
-            if (!free(ct)) continue;
-            final int n = ct.getPotentialProduction(g, ut);
-            if (n > most) {
-                most = n;
-                best = ct;
+        // The colony's own tiles first; one that must be claimed (a
+        // native's land: FreeCol's land-purchase question, the original's
+        // @INDIANLAND) only where no own tile is free (the review of part
+        // U, play L7: no unasked land purchase).
+        for (boolean claim : new boolean[] { false, true }) {
+            ColonyTile best = null;
+            int most = -1;
+            for (ColonyTile ct : c.getColonyTiles()) {
+                if (!free(ct)) continue;
+                if ((ct.getNoWorkReason() == NoAddReason.CLAIM_REQUIRED) != claim) continue;
+                final int n = ct.getPotentialProduction(g, ut);
+                if (n > most) {
+                    most = n;
+                    best = ct;
+                }
             }
+            if (best != null) return best;
         }
-        return best;
+        return null;
+    }
+
+    /**
+     * Why a colonist cannot go into a building or onto a tile, as the
+     * original says it (the review of part U, play M2/M3, L1, fidelity
+     * M3; GAME.TXT; the triggers I, the boxes not seen in a clip).
+     */
+    static final class Refusal {
+
+        /** The GAME.TXT section, or null for a silent refusal (nothing happens). */
+        final String section;
+
+        /** Its {@code %STRING0}, or null. */
+        final String value;
+
+        Refusal(String section, String value) {
+            this.section = section;
+            this.value = value;
+        }
+
+        @Override
+        public String toString() {
+            return (this.section == null) ? "silent" : this.section
+                + ((this.value == null) ? "" : "(" + this.value + ")");
+        }
+    }
+
+    /** A convert's type (FreeCol's id). */
+    private static final String CONVERT = "model.unit.indianConvert";
+
+    /**
+     * Why a building refuses a colonist (FreeCol's {@code getNoAddReason}
+     * in the original's words): a full school @SCHOOL1 / @COLLEGE2 /
+     * @UNIV3 by its places, another full building @MORETHANTHREE; a school
+     * for someone without a skill to teach @NOTEACHER (a convert
+     * @TEACHCONVERT), for a skill above it @NEEDCOLLEGE (skill 2) or
+     * @NEEDUNIVERSITY with the work's NAMES {@code @JOB} word as
+     * {@code %STRING0}; any other reason silent.  Null where he can go in
+     * (or is there already).
+     *
+     * @param t The texts, or null.
+     * @param b The building.
+     * @param u The colonist.
+     * @return The refusal, or null.
+     */
+    static Refusal refusal(ClassicText t, Building b, Unit u) {
+        final NoAddReason r = b.getNoAddReason(u);
+        switch (r) {
+        case NONE: case ALREADY_PRESENT:
+            return null;
+        case CAPACITY_EXCEEDED:
+            if (!b.canTeach()) return new Refusal("MORETHANTHREE", null);
+            switch (b.getType().getWorkPlaces()) {
+            case 1: return new Refusal("SCHOOL1", null);
+            case 2: return new Refusal("COLLEGE2", null);
+            default: return new Refusal("UNIV3", null);
+            }
+        case MINIMUM_SKILL: case MISSING_SKILL:
+            if (!b.canTeach()) return new Refusal(null, null);
+            return new Refusal((CONVERT.equals(u.getType().getId())) ? "TEACHCONVERT"
+                               : "NOTEACHER", null);
+        case MAXIMUM_SKILL: {
+            if (!b.canTeach()) return new Refusal(null, null);
+            final int ex = expertJob(u);
+            final String w = jobWord(t, ex, 0);
+            return new Refusal((u.getType().getSkill() <= 2) ? "NEEDCOLLEGE" : "NEEDUNIVERSITY",
+                               (w != null) ? w : Messages.getName(u.getType()));
+        }
+        default:
+            return new Refusal(null, null);
+        }
+    }
+
+    /**
+     * Why a work tile refuses a colonist: water without docks @NODOCKS
+     * (GAME.TXT; I: not seen); anything else (worked, the centre, a
+     * neighbour's, an enemy on it) silent (V clip 042 #4150, #4839: a
+     * worked tile, no box).  Null where he can go there (a native's tile
+     * too: FreeCol's land question).
+     *
+     * @param ct The tile.
+     * @param u The colonist.
+     * @return The refusal, or null.
+     */
+    static Refusal refusal(ColonyTile ct, Unit u) {
+        if (ct == null) return new Refusal(null, null);
+        if (u.getLocation() == ct) return null;
+        if (ct.getNoWorkReason() == NoAddReason.MISSING_ABILITY && ct.getWorkTile() != null
+            && !ct.getWorkTile().isLand()) return new Refusal("NODOCKS", null);
+        return (free(ct)) ? null : new Refusal(null, null);
     }
 
     /**
@@ -455,6 +567,13 @@ final class ClassicColonyJobs {
         for (int j = 0; j <= ClassicColonyLayout.JOB_TEACHER; j++) {
             if (j < ClassicColonyLayout.TILE_JOBS) {
                 if (goodsOf(spec, j) != null) out.add(j);
+            } else if (j == ClassicColonyLayout.JOB_TEACHER) {
+                // Lehrer only for whom the school takes (V clip 042
+                // #8890: the expert with a college; the review of part U,
+                // play M2: never a pick the server refuses; I: the
+                // original's rule for the others not seen).
+                final Building b = buildingFor(c, j, null, ut);
+                if (b != null && b.getType().getNoAddReason(ut) == NoAddReason.NONE) out.add(j);
             } else if (buildingFor(c, j, goodsOf(spec, j), ut) != null) {
                 out.add(j);
             }
@@ -516,7 +635,9 @@ final class ClassicColonyJobs {
         if (job == ClassicColonyLayout.JOB_PIONEER) {
             final GoodsType tools = spec.getGoodsType("model.goods.tools");
             final int per = perCount(role, tools);
-            final int n = pioneerTools(c.getGoodsCount(tools));
+            // The warehouse's tools and what he carries (a pioneer at the
+            // fence: the review of part U, play M1).
+            final int n = pioneerTools(c.getGoodsCount(tools) + carried(u, tools));
             count = Math.max(1, Math.min(role.getMaximumCount(), n / Math.max(1, per)));
         }
         final StringBuilder cell = new StringBuilder();
@@ -526,11 +647,37 @@ final class ClassicColonyJobs {
                 .append(cargoName(t, ag.getType())).append(')');
         }
         boolean grey = false;
-        for (AbstractGoods ag : u.getGoodsDifference(role, count)) {
-            if (ag.getAmount() > 0 && c.getGoodsCount(ag.getType()) < ag.getAmount()) grey = true;
+        if (role == u.getRole()) {
+            // The same role with another count: what it needs beyond what
+            // he carries (FreeCol's getGoodsDifference gives nothing for
+            // the same role).
+            for (AbstractGoods ag : role.getRequiredGoodsList(count)) {
+                final int need = ag.getAmount() - carried(u, ag.getType());
+                if (need > 0 && c.getGoodsCount(ag.getType()) < need) grey = true;
+            }
+        } else {
+            for (AbstractGoods ag : u.getGoodsDifference(role, count)) {
+                if (ag.getAmount() > 0 && c.getGoodsCount(ag.getType()) < ag.getAmount()) {
+                    grey = true;
+                }
+            }
         }
         return new Row(Pick.ROLE, job, label, (cell.length() == 0) ? null : cell.toString(),
                        yellow, grey, count);
+    }
+
+    /**
+     * @param u A unit.
+     * @param g A good.
+     * @return How much of it his role's equipment holds (a pioneer's tools).
+     */
+    static int carried(Unit u, GoodsType g) {
+        int n = 0;
+        if (u.getRole() == null || u.hasDefaultRole()) return 0;
+        for (AbstractGoods ag : u.getRole().getRequiredGoodsList(u.getRoleCount())) {
+            if (ag.getType() == g) n += ag.getAmount();
+        }
+        return n;
     }
 
     /** @return A role's goods of a type per count (the pioneer's 20 tools). */
@@ -569,7 +716,11 @@ final class ClassicColonyJobs {
         final StringBuilder sb = new StringBuilder((choose == null) ? "Beruf wählen für"
                                                    : choose.trim());
         sb.append(' ').append(typeWord(t, u));
-        if (kind != Kind.OUTSIDE) {
+        // A unit at the fence: «(Rolle)» only for an armed or equipped one
+        // (V clip 042 #15426 «Meister-Waffenschmiede(Soldat):», #15901
+        // «Erfahrene Holzfäller(Dragoner):»; clip 020 #96, #253: none for a
+        // Siedler).
+        if ((kind != Kind.OUTSIDE && kind != Kind.FENCE_ROLE) || !u.hasDefaultRole()) {
             final int now = currentJob(u);
             if (now != expertJob(u)) {
                 final String w = jobWord(t, now, 0);
@@ -598,14 +749,35 @@ final class ClassicColonyJobs {
         final List<Row> rows = new ArrayList<>();
         if (kind == Kind.FENCE_DROP) {
             final String w = jobWord(t, now, 0);
-            rows.add(new Row(Pick.STAY, now, (w == null) ? "?" : w, null, now == expert,
-                             false, 0));
+            // His work green, the expert's own too (V clip 042 #3512: the
+            // Meister-Tabakhändler's «Tabakhändler»; clip 020 #16; #77's
+            // yellow for a scout as sugar planter stays unexplained).
+            rows.add(new Row(Pick.STAY, now, (w == null) ? "?" : w, null, false, false, 0));
             for (int j = ClassicColonyLayout.JOB_COLONIST;
                  j <= ClassicColonyLayout.JOB_MISSIONARY; j++) {
                 final Row r = roleRow(t, c, u, j, j == expert);
                 if (r != null) rows.add(r);
             }
             return new Menu(kind, 1, title(t, u, kind), rows, 0);
+        }
+        if (kind == Kind.FENCE_ROLE) {
+            // The roles; his own as he has it, no cell, its pick no
+            // change (V clip 042 #15119 «Soldat», clip 043 #7048
+            // «Pionier»; the pick's effect not seen, I).
+            int bar = 0;
+            for (int j = ClassicColonyLayout.JOB_COLONIST;
+                 j <= ClassicColonyLayout.JOB_MISSIONARY; j++) {
+                final Row r = roleRow(t, c, u, j, j == expert);
+                if (r == null) continue;
+                if (j == now) {
+                    bar = rows.size();
+                    rows.add(new Row(Pick.ROLE, j, r.label, null, r.yellow, false,
+                                     u.getRoleCount()));
+                } else {
+                    rows.add(r);
+                }
+            }
+            return new Menu(kind, 1, title(t, u, kind), rows, bar);
         }
         final List<Integer> works = works(c, u.getType());
         final List<Integer> first = works.subList(0, Math.min(PAGE_JOBS, works.size()));

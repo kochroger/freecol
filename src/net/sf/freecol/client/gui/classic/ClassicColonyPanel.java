@@ -106,19 +106,24 @@ import net.sf.freecol.common.model.Unit;
  * ({@link ClassicColonyDissolve}).
  *
  * <p><b>Moving colonists</b> (M4.8, {@link ClassicColonyMoves},
- * {@link ClassicColonyJobs}): the press on a colonist (in a building, on a
- * tile, at the fence) selects him, moves the white cursor (his tile, or
- * his figure in the band) and freezes the blink; motion drags his figure
- * as the ghost, the arrow hidden, no hover label; the drop acts by the
- * drop matrix (a building's work, a tile as Farmer or keeping his work,
- * the fence's J1, @MORETHANTHREE).  A release without motion on the
- * colonist who was already selected opens J2, on a unit at the fence his
- * job menu; on an empty tile or a building it moves the selected
- * colonist there.  A role leaves the colony with the warehouse's goods;
- * the last colonist leaving asks @ABANDON (@ABANDON2 for the only colony)
- * with the bar on «Niemals!», whose «Ja» gives up the colony.  Goods,
- * KAUFEN and the build list remain later steps (M4.9, M4.10); Escape or a
- * click on the exit closes the screen.
+ * {@link ClassicColonyJobs}): the press on a colonist freezes the blink and
+ * takes the hover label away; a tile worker is selected at once (the white
+ * cursor on his tile), an unselected building worker or unit at the fence
+ * at the release or the drag's start (clip 042); motion drags his figure
+ * as the ghost, the arrow hidden; the drop acts by the drop matrix (a
+ * building's work, a tile as Farmer, Fischer on the ocean, or keeping his
+ * work, the fence's J1), the original's refusal boxes (@MORETHANTHREE, the
+ * school's, @NODOCKS) checked before the server is asked.  A release
+ * without motion on the colonist who was already selected opens J2 (on a
+ * unit at the fence his job menu); on an empty tile or a building, where
+ * the button goes up, it moves the selected colonist there; on an empty
+ * spot of the fence it opens his role menu (clip 043).  A role leaves the
+ * colony with the warehouse's goods; the last colonist leaving asks
+ * @ABANDON (@ABANDON2 for the only colony) with the bar on «Niemals!»,
+ * whose «Ja» gives up the colony at once, the screen closing 31 frames
+ * later with no input meanwhile.  Goods, KAUFEN and the build list remain
+ * later steps (M4.9, M4.10); Escape or a click on the exit closes the
+ * screen.
  */
 final class ClassicColonyPanel extends JPanel {
 
@@ -229,9 +234,8 @@ final class ClassicColonyPanel extends JPanel {
     private boolean blinkUsed = false;
 
     /**
-     * The press / drag / release machine (M4.0 target 3).  Nothing on the
-     * screen can be dragged yet ({@link #canDragAt}): the colony's drags
-     * come with M4.8/M4.9, and until then its presses act as before.
+     * The press / drag / release machine (M4.0 target 3): the colonists'
+     * drags (M4.8, {@link #canDragAt}); the goods' come with M4.9.
      */
     private final ClassicDragGesture gesture = new ClassicDragGesture();
 
@@ -435,9 +439,6 @@ final class ClassicColonyPanel extends JPanel {
     /** Whether {@link #pressedUnit} was the selected one before the press (a click: J2). */
     private boolean pressedWasSelected = false;
 
-    /** When the press came (the clock's nanoseconds; a fence unit's menu, +44 frames). */
-    private long pressedAt = 0L;
-
     /** A press elsewhere: where it was (a tile 0-8 or a slot), for a click's move; -1 for none. */
     private int pressedTile = -1, pressedSlot = -1;
 
@@ -450,6 +451,15 @@ final class ClassicColonyPanel extends JPanel {
      * meanwhile.
      */
     private boolean leaving = false;
+
+    /**
+     * While {@link #leaving}: the colony as it was, painted instead of the
+     * given-up colony (first without, then with the unit on the fence).
+     */
+    private BufferedImage leavingStill = null;
+
+    /** Counts the pointer's moves and presses: a {@link #hoverLater} made before one is void. */
+    private int hoverSeq = 0;
 
     /** Device-space scale + origin of the virtual canvas, set on each paint. */
     private int scale = 1;
@@ -551,7 +561,9 @@ final class ClassicColonyPanel extends JPanel {
         am.put("classic_closeColony", new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
-                    close();
+                    // No input while the abandoned colony's map is due
+                    // (the review of part U, regression F1).
+                    if (!leaving) close();
                 }
             });
     }
@@ -619,38 +631,48 @@ final class ClassicColonyPanel extends JPanel {
         this.pressedUnit = null;
         this.pressedPlace = ClassicColonyMoves.Place.NONE;
         this.pressedTile = this.pressedSlot = -1;
+        if (this.leaving) {
+            this.pressedUnit = null;
+            this.modePressed = false;
+            this.pressedBand = null;
+            return;
+        }
         if (u != null) {
             if (!this.gesture.dragging() && isDisplayable()) this.blink.arm();
             repaint();
-            if (this.leaving) return;
             if (result == ClassicDragGesture.Result.DROP) {
                 drop(u, from, vx, vy);
-            } else if (result == ClassicDragGesture.Result.CLICK && figureAt(vx, vy) == u) {
-                if (from == ClassicColonyMoves.Place.FENCE) {
-                    // A unit at the fence: his job menu (V ×3), 44
-                    // frames after the press.
-                    final double held = (this.clock.now() - this.pressedAt) / 1e6;
-                    jobMenu(u, ClassicColonyJobs.Kind.OUTSIDE, Math.max(
-                        ClassicColonyMoves.ms(ClassicColonyMoves.J2_FRAMES),
-                        ClassicColonyMoves.ms(ClassicColonyMoves.FENCE_MENU_FRAMES) - held));
-                } else if (wasSelected) {
-                    jobMenu(u, ClassicColonyJobs.Kind.WORKER,
-                            ClassicColonyMoves.ms(ClassicColonyMoves.J2_FRAMES));
-                }
+            } else if (result == ClassicDragGesture.Result.CLICK && figureAt(vx, vy) == u
+                       && wasSelected) {
+                // A click on the one already selected (a first click only
+                // selects: dago-colony2 #7520/#7607, clip 042 #11157,
+                // #15765): J2, for a unit at the fence his job menu (V
+                // clip 042 #15426, #15901), 5 frames after the release.
+                jobMenu(u, (from == ClassicColonyMoves.Place.FENCE)
+                        ? ClassicColonyJobs.Kind.OUTSIDE : ClassicColonyJobs.Kind.WORKER,
+                        ClassicColonyMoves.ms(ClassicColonyMoves.J2_FRAMES));
+            } else {
+                // An unselected building worker or unit at the fence: the
+                // release selects him (V clip 042 #11168).
+                this.pressedUnit = u;
+                takePressed();
+                this.pressedUnit = null;
             }
             return;
         }
-        if (!this.leaving && result == ClassicDragGesture.Result.CLICK
-            && this.selectedUnit != null) {
+        if (result == ClassicDragGesture.Result.CLICK && this.selectedUnit != null
+            && (tile >= 0 || slot >= 0)) {
             // A click on an empty tile or a building: the selected
-            // colonist goes there (V ×4 for the tile, I for the building).
-            final int t = ClassicColonyLayout.tileAt(vx, vy);
-            if (tile >= 0 && t == tile) {
-                moveSelectedTo(ClassicColonyMoves.Place.TILE, vx, vy);
+            // colonist goes there at the release, where the button goes
+            // up (V clip 042 #6047, #7128, #2423; clip 020 ×4 for the
+            // tile).
+            final ClassicColonyMoves.Place to = placeAt(vx, vy);
+            if (to == ClassicColonyMoves.Place.TILE || to == ClassicColonyMoves.Place.BUILDING) {
+                moveSelectedTo(to, vx, vy);
                 return;
             }
-            if (slot >= 0 && slotAt(vx, vy) == slot) {
-                moveSelectedTo(ClassicColonyMoves.Place.BUILDING, vx, vy);
+            if (to == ClassicColonyMoves.Place.FENCE) {
+                fenceClick(this.selectedUnit);
                 return;
             }
         }
@@ -716,6 +738,10 @@ final class ClassicColonyPanel extends JPanel {
 
     private void pressAt(int vx, int vy) {
         this.pressedBand = null;
+        // Nothing reacts while the abandoned colony's map is due: the
+        // mode buttons, the right panel, the exit, the colonists (the
+        // review of part U, regression F1, play L2).
+        if (this.leaving) return;
         // The right panel's mode buttons (M4.7): the pressed look at once,
         // the panel at the release.
         final int button = ClassicColonyLayout.modeAt(vx, vy);
@@ -747,22 +773,32 @@ final class ClassicColonyPanel extends JPanel {
             return;
         }
 
-        if (this.leaving) return;
         // A colonist in a building, on a tile or at the fence (M4.8): the
-        // press selects him and freezes the blink, his hover label goes
-        // (dago §0.1, dago-colony2 §4); the white cursor to his tile, else
-        // to his figure in the band.
+        // press freezes the blink and his hover label goes (dago §0.1,
+        // dago-colony2 §4, clip 042: the label's removal is the press's
+        // first sign, V ×14).  A tile worker is selected at once, the
+        // white cursor on his tile (V clip 042 #5829); the one already
+        // selected keeps it, the cursor to his figure in the band (his
+        // frame green meanwhile, dago-colony2 #8886); an unselected
+        // building worker or unit at the fence changes nothing until the
+        // release or the drag's start (V dago-colony2 #7520 → #7532, clip
+        // 042 #11157, #11498; the drag's start #3374).
         final Hit h = hitAt(vx, vy);
         if (h != null) {
             this.pressedUnit = h.unit;
             this.pressedPlace = h.place;
             this.pressedKey = h.key;
             this.pressedWasSelected = this.selectedUnit == h.unit;
-            this.pressedAt = this.clock.now();
-            tileCursor = (h.place == ClassicColonyMoves.Place.TILE) ? h.tile : CURSOR_OFF_TILES;
             this.hovered = this.hoveredTile = this.hoveredBox = -1;
+            this.hoverSeq++;
             this.blink.stop();
-            select(h.unit);
+            if (h.place == ClassicColonyMoves.Place.TILE) {
+                tileCursor = h.tile;
+                select(h.unit);
+            } else if (this.pressedWasSelected) {
+                tileCursor = CURSOR_OFF_TILES;
+            }
+            repaint();
             return;
         }
         // A figure of the band's row: it is selected (I: the original's
@@ -773,18 +809,69 @@ final class ClassicColonyPanel extends JPanel {
             select(this.figures.get(f).unit);
             return;
         }
+        // A press on a tile or a building with a colonist selected (a
+        // click's move; the target is where the button goes up, V clip 042
+        // #2371: pressed on the Zigarrenfabrik, released over the
+        // Kathedrale): its label goes (V #6034, back after the move,
+        // {@link #hoverLater}).
         if (tile >= 0) {
             this.pressedTile = tile;
+            if (this.selectedUnit != null) hideHover();
             repaint();
             return;
         }
         // A building with workplaces (not a placeholder, the harbour, the
         // fortification or the Lagerhaus' slot): a click's target.
+        // The fence picture too: a click on an empty spot of it opens the
+        // selected colonist's role menu (V clip 043 #3326, #7048).
         final int slot = slotAt(vx, vy);
         if (slot >= 0 && slot < this.area.slots.size()
-            && this.area.slots.get(slot).target != null) {
+            && (this.area.slots.get(slot).target != null
+                || (this.selectedUnit != null && ClassicColonyLayout.SLOTS[slot].cls
+                    == ClassicColonyLayout.SlotClass.FENCE))) {
             this.pressedSlot = slot;
+            if (this.selectedUnit != null) {
+                hideHover();
+                repaint();
+            }
         }
+    }
+
+    /** No hover label until the pointer moves or {@link #hoverLater} brings it. */
+    private void hideHover() {
+        this.hovered = this.hoveredTile = this.hoveredBox = -1;
+        this.hoverSeq++;
+    }
+
+    /**
+     * The pressed colonist becomes the selected one (an unselected
+     * building worker or unit at the fence: at the release or the drag's
+     * start, V clip 042 #11168, #3374): the white cursor to his figure in
+     * the band.
+     */
+    private void takePressed() {
+        final Unit u = this.pressedUnit;
+        if (u == null || u == this.selectedUnit) return;
+        tileCursor = CURSOR_OFF_TILES;
+        select(u);
+    }
+
+    /**
+     * The hover label at a point some frames from now, if the pointer has
+     * not moved meanwhile (clip 042: after a drop or a click's move the
+     * target's label comes back by itself, {@link
+     * ClassicColonyMoves#HOVER_TILE_FRAMES}).
+     *
+     * @param vx The x.
+     * @param vy The y.
+     * @param frames The frames.
+     */
+    private void hoverLater(int vx, int vy, int frames) {
+        final int seq = this.hoverSeq;
+        this.later.run((int) Math.round(ClassicColonyMoves.ms(frames)), () -> {
+                if (seq == this.hoverSeq && !this.leaving && this.pressedUnit == null
+                    && !this.gesture.dragging()) hoverAt(vx, vy);
+            });
     }
 
     /** A figure a press can pick and drag: the unit, his place, his tile, his sprite. */
@@ -971,15 +1058,6 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * Whether a building is full for a colonist (FreeCol's capacity, the
-     * original's three, @MORETHANTHREE).
-     */
-    private static boolean full(Building b, Unit u) {
-        return b.getNoAddReason(u)
-            == net.sf.freecol.common.model.UnitLocation.NoAddReason.CAPACITY_EXCEEDED;
-    }
-
-    /**
      * A drop of a dragged colonist (the drop matrix,
      * {@link ClassicColonyMoves#resolve}).
      *
@@ -994,20 +1072,66 @@ final class ClassicColonyPanel extends JPanel {
         final ColonyTile ct = (to == ClassicColonyMoves.Place.TILE) ? colonyTileAt(vx, vy) : null;
         final boolean same = (b != null && u.getLocation() == b)
             || (ct != null && u.getLocation() == ct);
-        final boolean blocked = (b != null && !same && full(b, u))
-            || (ct != null && !same && !ClassicColonyJobs.free(ct));
-        final ClassicColonyMoves.Action a = ClassicColonyMoves.resolve(from, to, same, blocked,
+        final ClassicColonyJobs.Refusal no = (same) ? null : refusalAt(u, b, ct);
+        final ClassicColonyMoves.Action a = ClassicColonyMoves.resolve(from, to, same, no != null,
                                                                        originalJobs());
         final boolean done = act(u, a, b, ct);
         ClassicFrameRecorder.event("colony-drag", u.getId() + " " + from + " -> " + to
-            + " " + a + ((done) ? "" : " refused") + " " + outcome(u));
+            + " " + a + ((no == null) ? "" : " " + no) + ((done) ? "" : " refused") + " "
+            + outcome(u));
         recordStill("drop " + u.getId());
         if (a == ClassicColonyMoves.Action.ROLE_MENU) {
             jobMenu(u, ClassicColonyJobs.Kind.FENCE_DROP,
                     ClassicColonyMoves.ms(ClassicColonyMoves.J1_FRAMES));
-        } else if (a == ClassicColonyMoves.Action.FULL) {
-            moreThanThree(ClassicColonyMoves.ms(ClassicColonyMoves.FULL_FRAMES));
+        } else if (!refuse(no)) {
+            afterMove(a, done, vx, vy);
         }
+    }
+
+    /**
+     * Why a colonist cannot go into a building or onto a tile
+     * ({@link ClassicColonyJobs#refusal}), checked before the server is
+     * asked (never FreeCol's «Der Server kann das nicht ausführen.»).
+     *
+     * @param u The colonist.
+     * @param b The building, or null.
+     * @param ct The tile, or null.
+     * @return The refusal, or null.
+     */
+    private ClassicColonyJobs.Refusal refusalAt(Unit u, Building b, ColonyTile ct) {
+        if (b != null) {
+            return ClassicColonyJobs.refusal(ClassicText.load(ClassicPackFiles.runtime()), b, u);
+        }
+        return (ct != null) ? ClassicColonyJobs.refusal(ct, u) : null;
+    }
+
+    /**
+     * A refusal's box (@MORETHANTHREE, the school's, @NODOCKS), 32 frames
+     * after the drop, MSS5 over it, no rows; a silent one shows nothing.
+     *
+     * @param no The refusal, or null.
+     * @return Whether a box was shown.
+     */
+    private boolean refuse(ClassicColonyJobs.Refusal no) {
+        if (no == null || no.section == null) return false;
+        refusalBox(no, ClassicColonyMoves.ms(ClassicColonyMoves.FULL_FRAMES));
+        return true;
+    }
+
+    /**
+     * After a drop or a click's move: the target's hover label comes back
+     * by itself (clip 042: +13 frames on a tile, +16 in a building, +3
+     * after a refusal).
+     */
+    private void afterMove(ClassicColonyMoves.Action a, boolean done, int vx, int vy) {
+        final boolean moved = done && (a == ClassicColonyMoves.Action.BUILDING_JOB
+            || a == ClassicColonyMoves.Action.TILE_FARMER
+            || a == ClassicColonyMoves.Action.TILE_KEEP_JOB
+            || a == ClassicColonyMoves.Action.TILE_FREECOL);
+        hoverLater(vx, vy, (!moved) ? ClassicColonyMoves.HOVER_REFUSED_FRAMES
+                   : (a == ClassicColonyMoves.Action.BUILDING_JOB)
+                   ? ClassicColonyMoves.HOVER_BUILDING_FRAMES
+                   : ClassicColonyMoves.HOVER_TILE_FRAMES);
     }
 
     /**
@@ -1029,17 +1153,37 @@ final class ClassicColonyPanel extends JPanel {
         if (b == null && ct == null) return;
         final boolean same = (b != null && u.getLocation() == b)
             || (ct != null && u.getLocation() == ct);
-        final boolean blocked = (b != null && !same && full(b, u))
-            || (ct != null && !same && !ClassicColonyJobs.free(ct));
+        final ClassicColonyJobs.Refusal no = (same) ? null : refusalAt(u, b, ct);
         // A click on a tile, the fence's role menu: none (the menus are J1's).
-        final ClassicColonyMoves.Action a = ClassicColonyMoves.resolve(from, to, same, blocked,
+        final ClassicColonyMoves.Action a = ClassicColonyMoves.resolve(from, to, same, no != null,
                                                                        originalJobs());
         final boolean done = act(u, a, b, ct);
         ClassicFrameRecorder.event("colony-click", u.getId() + " " + from + " -> " + to
-            + " " + a + ((done) ? "" : " refused") + " " + outcome(u));
-        if (a == ClassicColonyMoves.Action.FULL) {
-            moreThanThree(ClassicColonyMoves.ms(ClassicColonyMoves.FULL_FRAMES));
-        }
+            + " " + a + ((no == null) ? "" : " " + no) + ((done) ? "" : " refused") + " "
+            + outcome(u));
+        if (!refuse(no)) afterMove(a, done, vx, vy);
+    }
+
+    /**
+     * A click on an empty spot of the fence with a colonist selected (V
+     * clip 043, Roger 2026-10-15): his role menu opens and he stays where
+     * he is; only a pick acts.  A colonist in the colony gets J1 (his work
+     * on row 1, the bar there, then the roles, #3326, #8471), a unit at
+     * the fence the roles with the bar on his (#7048; clip 042 #15119);
+     * +3 frames after the release.  A role picked equips him and puts him
+     * at the fence at once, as on the «(Weitere)» page (V Roger
+     * 2026-10-15: «springt der Siedler direkt als Soldat zum Zaun»); his
+     * own work or role, Escape: no change (I).
+     *
+     * @param u The selected colonist.
+     */
+    private void fenceClick(Unit u) {
+        final ClassicColonyMoves.Place at = placeOf(u);
+        if (at == ClassicColonyMoves.Place.NONE) return;
+        ClassicFrameRecorder.event("colony-click", u.getId() + " " + at + " -> FENCE menu");
+        jobMenu(u, (at == ClassicColonyMoves.Place.FENCE) ? ClassicColonyJobs.Kind.FENCE_ROLE
+                : ClassicColonyJobs.Kind.FENCE_DROP,
+                ClassicColonyMoves.ms(ClassicColonyMoves.FENCE_CLICK_FRAMES));
     }
 
     /** @return Where a unit of this colony stands (building, tile, fence, or nowhere). */
@@ -1085,8 +1229,8 @@ final class ClassicColonyPanel extends JPanel {
      * into a building or onto a tile (it claims a tile and confirms an
      * education given up), then for the levi rule the Farmer's work or the
      * work he had ({@code changeWorkType}, R2/R3).  The selection stays on
-     * him (V #97000, dago-colony2 §4); the white cursor goes to his tile,
-     * else to his figure in the band (I).
+     * him (V #97000, dago-colony2 §4); the white cursor goes to his new
+     * tile (V clip 020 #50260), off a tile as {@link #cursorOffTile} says.
      *
      * @param u The colonist.
      * @param a The action.
@@ -1096,13 +1240,19 @@ final class ClassicColonyPanel extends JPanel {
      */
     private boolean act(Unit u, ClassicColonyMoves.Action a, Building b, ColonyTile ct) {
         final InGameController igc = igc();
+        final Object was = u.getLocation();
         boolean ok = true;
         switch (a) {
         case BUILDING_JOB:
             ok = igc.work(u, b);
             break;
         case TILE_FARMER: {
-            final GoodsType farm = ClassicColonyJobs.goodsOf(this.colony.getSpecification(), 0);
+            // On an ocean tile (with docks) the Fischer, not the Farmer (I:
+            // the review of part U, play M4; the Farmer rule's evidence is
+            // land only).
+            final boolean water = ct.getWorkTile() != null && !ct.getWorkTile().isLand();
+            final GoodsType farm = ClassicColonyJobs.goodsOf(this.colony.getSpecification(),
+                (water) ? ClassicColonyLayout.JOB_FISHERMAN : 0);
             ok = igc.work(u, ct);
             if (ok && farm != null && u.getWorkType() != farm) ok = igc.changeWorkType(u, farm);
             break;
@@ -1122,12 +1272,27 @@ final class ClassicColonyPanel extends JPanel {
         if (ct != null && u.getLocation() == ct) {
             final int at = this.tiles.placeOfTile(ct);
             if (at >= 0) tileCursor = at;
-        } else if (a != ClassicColonyMoves.Action.NOTHING) {
-            tileCursor = CURSOR_OFF_TILES;
+        } else if (a != ClassicColonyMoves.Action.NOTHING && u.getLocation() != was) {
+            cursorOffTile(was);
         }
         select(u);
         refresh();
         return ok;
+    }
+
+    /**
+     * The white cursor after a colonist left a tile for a building or the
+     * fence (the review of part U, fidelity M1, clip 042): it stays on the
+     * emptied tile where it stood on it (V dago D2 #4016, clip008 #43301,
+     * dago-colony2 #5812, clip 042 #6047 … #7108); stood it elsewhere (the
+     * centre), it goes to his figure in the band (V clip 042 #2457).
+     *
+     * @param was Where he was.
+     */
+    private void cursorOffTile(Object was) {
+        if (was instanceof ColonyTile && tileCursor >= 0
+            && tileCursor == this.tiles.placeOfTile((ColonyTile) was)) return;
+        tileCursor = CURSOR_OFF_TILES;
     }
 
     /**
@@ -1220,8 +1385,9 @@ final class ClassicColonyPanel extends JPanel {
         }
         select(u);
         refresh();
+        // A colony given up (@ABANDON's «Ja») is not read any more.
         ClassicFrameRecorder.event("colony-picked", u.getId() + " " + row.pick + " "
-            + row.job + " " + outcome(u));
+            + row.job + " " + ((this.colony.isDisposed()) ? "abandoned" : outcome(u)));
         recordStill("picked " + u.getId());
     }
 
@@ -1255,12 +1421,16 @@ final class ClassicColonyPanel extends JPanel {
         }
         final Building b = ClassicColonyJobs.buildingFor(this.colony, job, g, u.getType());
         if (b == null || u.getLocation() == b) return;
-        if (full(b, u)) {
-            moreThanThree(ClassicColonyMoves.ms(ClassicColonyMoves.FULL_FRAMES));
+        // The original's box where he cannot go in (a full building, the
+        // school's rules), never the server's refusal.
+        final ClassicColonyJobs.Refusal no = refusalAt(u, b, null);
+        if (no != null) {
+            ClassicFrameRecorder.event("colony-job", u.getId() + " refused " + no);
+            refuse(no);
             return;
         }
-        igc.work(u, b);
-        tileCursor = CURSOR_OFF_TILES;
+        final Object was = u.getLocation();
+        if (igc.work(u, b) && u.getLocation() != was) cursorOffTile(was);
     }
 
     /**
@@ -1278,47 +1448,100 @@ final class ClassicColonyPanel extends JPanel {
         if (role == null) return;
         final InGameController igc = igc();
         if (!u.isInColony()) {
-            if (role != u.getRole() || count != u.getRoleCount()) {
-                igc.equipUnitForRole(u, role, (role.isDefaultRole()) ? 0 : count);
+            if (role == u.getRole() && count == u.getRoleCount()) return;
+            if (role == u.getRole() && !role.isDefaultRole()) {
+                // The same role with another count (a pioneer's tools):
+                // FreeCol moves no goods for the same role, so his old
+                // equipment goes back first (the review of part U, play
+                // M1: tools lost or made out of nothing).
+                if (!igc.equipUnitForRole(u, this.colony.getSpecification().getDefaultRole(),
+                                          0)) return;
             }
+            igc.equipUnitForRole(u, role, (role.isDefaultRole()) ? 0 : count);
             return;
         }
         if (this.colony.getUnitCount() <= 1) {
             if (!askAbandon()) return;
-            leave(u, role, count);
-            if (u.isInColony()) return;
-            // The unit on the fence in its role, the map without the
-            // colony 31 frames after «Ja» (V #35577, #35605).
-            this.leaving = true;
-            ClassicFrameRecorder.event("colony-abandon", this.colony.getName() + " yes");
-            this.later.run((int) Math.round(ClassicColonyMoves.ms(
-                ClassicColonyMoves.ABANDON_MAP_FRAMES)), this::abandonNow);
+            abandon(u, role, count);
             return;
         }
         leave(u, role, count);
     }
 
-    /** A colonist leaves the colony in a role: outside, then equipped. */
-    private void leave(Unit u, net.sf.freecol.common.model.Role role, int count) {
-        final InGameController igc = igc();
-        if (!igc.putOutsideColony(u)) return;
-        if (!role.isDefaultRole() && u.getLocation() == this.colony.getTile()) {
-            igc.equipUnitForRole(u, role, count);
-        }
-        tileCursor = CURSOR_OFF_TILES;
-    }
-
-    /** The colony with nobody in it is given up and the screen goes (target 8). */
-    void abandonNow() {
-        if (this.colony.isDisposed() || this.colony.getUnitCount() > 0) {
-            this.leaving = false;
-            return;
-        }
+    /**
+     * «Ja» on @ABANDON (target 8; the review of part U, regression F1):
+     * he goes outside in his role and the colony is given up at once;
+     * only the screen's close waits (the unit on the fence +3 frames, the
+     * map 31 frames after «Ja», V clip 020 #35577, #35605), showing the
+     * colony as it was, with no input meanwhile.  A refusal of the server
+     * puts him back where he was, so no colony stays with nobody in it.
+     *
+     * @param u The last colonist.
+     * @param role His role.
+     * @param count Its count.
+     */
+    private void abandon(Unit u, net.sf.freecol.common.model.Role role, int count) {
+        final Object was = u.getLocation();
+        final GoodsType work = u.getWorkType();
+        final BufferedImage before = canvas();
+        if (!leave(u, role, count)) return;
+        final BufferedImage after = canvas();
+        ClassicFrameRecorder.event("colony-abandon", this.colony.getName() + " yes");
         final boolean done = igc().abandonColony(this.colony);
         ClassicFrameRecorder.event("colony-abandon", this.colony.getName()
             + ((done) ? " done" : " refused"));
-        this.leaving = false;
-        if (done) close();
+        if (!done) {
+            putBack(u, was, work);
+            refresh();
+            return;
+        }
+        this.leaving = true;
+        this.leavingStill = before;
+        this.later.run((int) Math.round(ClassicColonyMoves.ms(
+            ClassicColonyMoves.ABANDON_FENCE_FRAMES)), () -> {
+                this.leavingStill = after;
+                repaint();
+            });
+        this.later.run((int) Math.round(ClassicColonyMoves.ms(
+            ClassicColonyMoves.ABANDON_MAP_FRAMES)), () -> {
+                this.leaving = false;
+                close();
+            });
+        repaint();
+    }
+
+    /**
+     * A colonist back where he worked (a refused abandon or equip): into
+     * his building or onto his tile, his work again; his role's goods go
+     * back to the warehouse with the join.
+     */
+    private void putBack(Unit u, Object was, GoodsType work) {
+        if (!(was instanceof net.sf.freecol.common.model.WorkLocation)) return;
+        final InGameController igc = igc();
+        if (igc.work(u, (net.sf.freecol.common.model.WorkLocation) was)
+            && work != null && u.getWorkType() != work) igc.changeWorkType(u, work);
+        ClassicFrameRecorder.event("colony-back", u.getId() + " " + outcome(u));
+    }
+
+    /**
+     * A colonist leaves the colony in a role: outside, then equipped; an
+     * equip the server refuses puts him back (the review of part U,
+     * regression L8).
+     *
+     * @return Whether he stands outside in the role.
+     */
+    private boolean leave(Unit u, net.sf.freecol.common.model.Role role, int count) {
+        final InGameController igc = igc();
+        final Object was = u.getLocation();
+        final GoodsType work = u.getWorkType();
+        if (!igc.putOutsideColony(u)) return false;
+        if (!role.isDefaultRole() && u.getLocation() == this.colony.getTile()
+            && !igc.equipUnitForRole(u, role, count)) {
+            putBack(u, was, work);
+            return false;
+        }
+        cursorOffTile(was);
+        return !u.isInColony();
     }
 
     /** @return Whether the screen waits for the abandoned colony's map (tests). */
@@ -1378,15 +1601,22 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * @MORETHANTHREE: a building full, nothing moves (V dago-colony2
-     * #10945: 32 frames after the drop, MSS5 over it, no rows).
+     * A refusal's box: @MORETHANTHREE, a building full, nothing moves (V
+     * dago-colony2 #10945: 32 frames after the drop, MSS5 over it, no
+     * rows); the school's and @NODOCKS the same way (I).
      *
+     * @param no The refusal (its GAME.TXT section and {@code %STRING0}).
      * @param delayMs When it comes.
      */
-    private void moreThanThree(double delayMs) {
+    private void refusalBox(ClassicColonyJobs.Refusal no, double delayMs) {
         final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
-        final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText("MORETHANTHREE",
-            (t == null) ? null : t.message("MORETHANTHREE"), null);
+        java.util.Map<String, String> values = null;
+        if (no.value != null) {
+            values = new java.util.HashMap<>();
+            values.put("STRING0", no.value);
+        }
+        final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText(no.section,
+            (t == null) ? null : t.message(no.section), values);
         if (b == null) return;
         // With the portrait's palette lead (3 frames) the layer adds.
         ask(b.portrait(ClassicAdvisorBox.Portrait.COLONIST)
@@ -1397,6 +1627,7 @@ final class ClassicColonyPanel extends JPanel {
     /** Track which building the pointer is over, and repaint if it changed. */
     private void onHover(MouseEvent e) {
         if (this.scale <= 0) return;
+        this.hoverSeq++;
         hoverAt((e.getX() - this.originX) / this.scale,
                 (e.getY() - this.originY) / this.scale);
     }
@@ -1410,6 +1641,7 @@ final class ClassicColonyPanel extends JPanel {
      * @param vy The y.
      */
     void hoverAt(int vx, int vy) {
+        if (this.leaving) return;
         final int found = (vx < 0) ? -1 : slotAt(vx, vy);
         final int box = (vx < 0) ? -1 : ClassicColonyLayout.warehouseBoxAt(vx, vy);
         // A tile of the 3x3 map: its terrain's words (dago §3.5).
@@ -1425,6 +1657,11 @@ final class ClassicColonyPanel extends JPanel {
     /** @return The hovered slot's index in {@link ClassicColonyLayout#SLOTS} (tests), or -1. */
     int hovered() {
         return this.hovered;
+    }
+
+    /** @return The hovered tile of the 3x3 map (tests), or -1. */
+    int hoveredTile() {
+        return this.hoveredTile;
     }
 
     private void close() {
@@ -1509,6 +1746,8 @@ final class ClassicColonyPanel extends JPanel {
     /** A drag started: no blink during it (dago §4.1), the arrow goes. */
     private void dragStarted() {
         this.blink.stop();
+        // The drag's start selects the dragged one (V clip 042 #3374).
+        takePressed();
         final int[] p = this.gesture.pressPoint();
         this.ghostX = p[0];
         this.ghostY = p[1];
@@ -1665,19 +1904,29 @@ final class ClassicColonyPanel extends JPanel {
         super.paintComponent(g0);
         final Graphics2D g = (Graphics2D) g0.create();
 
-        // Fit the 320x200 canvas into the window at the largest integer scale.
-        this.scale = Math.max(1, Math.min(getWidth() / VW, getHeight() / VH));
-        this.originX = (getWidth() - VW * this.scale) / 2;
-        this.originY = (getHeight() - VH * this.scale) / 2;
+        fit();
         g.translate(this.originX, this.originY);
         g.scale(this.scale, this.scale);
         paintCanvas(g);
         g.dispose();
-        recordBuildings();
+        if (this.leavingStill == null) recordBuildings();
+    }
+
+    /** Fit the 320x200 canvas into the window at the largest integer scale (scale, origin). */
+    private void fit() {
+        this.scale = Math.max(1, Math.min(getWidth() / VW, getHeight() / VH));
+        this.originX = (getWidth() - VW * this.scale) / 2;
+        this.originY = (getHeight() - VH * this.scale) / 2;
     }
 
     /** Paint the 320x200 canvas into {@code g}, in canvas coordinates. */
     private void paintCanvas(Graphics2D g) {
+        // The abandoned colony: as it was, until the map comes.
+        final BufferedImage still = this.leavingStill;
+        if (still != null) {
+            g.drawImage(still, 0, 0, null);
+            return;
+        }
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
                            RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
@@ -2157,7 +2406,8 @@ final class ClassicColonyPanel extends JPanel {
         // green (dago-colony2 #8886, #10718), the white cursor after it.
         boolean onFigure = false;
         if (tileCursor == CURSOR_OFF_TILES && this.selectedUnit != null
-            && this.pressedUnit == null && !this.gesture.dragging()) {
+            && !(this.pressedUnit != null && this.pressedUnit == this.selectedUnit)
+            && !this.gesture.dragging()) {
             for (ClassicColonyBuildings.Figure f : figures) {
                 if (f.unit == this.selectedUnit) onFigure = true;
             }
@@ -2273,11 +2523,7 @@ final class ClassicColonyPanel extends JPanel {
         try {
             // The scale and origin a paint of this size would set, so that
             // real mouse events land where they would (part U's drags).
-            if (getWidth() >= VW && getHeight() >= VH) {
-                this.scale = Math.max(1, Math.min(getWidth() / VW, getHeight() / VH));
-                this.originX = (getWidth() - VW * this.scale) / 2;
-                this.originY = (getHeight() - VH * this.scale) / 2;
-            }
+            if (getWidth() >= VW && getHeight() >= VH) fit();
             this.scale = Math.max(1, this.scale);
             paintCanvas(g);
         } finally {

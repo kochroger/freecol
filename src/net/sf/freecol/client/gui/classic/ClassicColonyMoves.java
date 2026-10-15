@@ -48,12 +48,21 @@ import java.util.List;
  *       goods back to the warehouse (C8, C9, C13)</td></tr>
  *   <tr><td>fence &rarr; tile</td><td>Farmer (I: not seen; as from a
  *       building, the work the original gives a newcomer on a tile)</td></tr>
+ *   <tr><td>building or fence &rarr; an ocean tile (with docks)</td><td>
+ *       <b>Fischer</b>, not Farmer (I: the Farmer rule's evidence is land
+ *       only, no clip shows a drop on water)</td></tr>
  *   <tr><td>anything &rarr; fence</td><td>J1 (C7, C11)</td></tr>
  *   <tr><td>onto a full building</td><td>@MORETHANTHREE, nothing moves
  *       (V dago-colony2 #10945)</td></tr>
+ *   <tr><td>onto a school he may not teach in, a full school, water
+ *       without docks</td><td>the original's box (@NOTEACHER, @TEACHCONVERT,
+ *       @NEEDCOLLEGE, @NEEDUNIVERSITY, @SCHOOL1, @COLLEGE2, @UNIV3,
+ *       @NODOCKS; GAME.TXT, the triggers I), nothing moves, nothing is
+ *       asked of the server</td></tr>
  *   <tr><td>onto his own place, the centre, an occupied tile, a
  *       placeholder, nowhere</td><td>nothing (V dago P1: a drag dropped
- *       in place did nothing; I for the rest)</td></tr>
+ *       in place did nothing; clip 042 #4150, #4839: two drops on a worked
+ *       tile, no box, he stays selected; I for the rest)</td></tr>
  * </table>
  * Without the levi rule ({@code model.option.originalDropJobs}) a move
  * onto a tile takes FreeCol's choice of work ({@link Action#TILE_FREECOL}).
@@ -93,15 +102,34 @@ final class ClassicColonyMoves {
     /** J1 after the drop: +5 frames (V #6310 → #6315; #77 +4; dago +5, +6, +7). */
     static final int J1_FRAMES = 5;
 
-    /** J2 after the release: +5 frames (I: dago P2, the menu ≈5 frames after the release). */
+    /**
+     * J2 after the release: +5 frames (I: dago P2, the menu ≈5 frames after
+     * the release; clip 042: release +5 and +8/+9 for a worker, +4…+6 for
+     * a unit at the fence, #15426, #15901).  A unit at the fence opens it
+     * the same way, from the release (clip 042; clip 020's +44 from the
+     * press, #46063 → #46108, was a long hold, I).
+     */
     static final int J2_FRAMES = 5;
 
     /**
-     * A fence unit's menu after the press: +44 frames (V #46063 → #46108,
-     * #120600 → #120644; the release is not seen, I: counted from the
-     * press).
+     * The target's hover label after a drop or a click's move, the pointer
+     * still (clip 042): +13 frames on a tile (#2863 → #2876), +16 in a
+     * building (#4700 → #4716, #16934 → #16951), +3 after a refused drop
+     * (#4341 → #4344, #5070 → #5073).
      */
-    static final int FENCE_MENU_FRAMES = 44;
+    static final int HOVER_TILE_FRAMES = 13, HOVER_BUILDING_FRAMES = 16,
+        HOVER_REFUSED_FRAMES = 3;
+
+    /**
+     * A click on an empty spot of the fence with a colonist selected: his
+     * role menu (J1, or the roles of a unit at the fence) +3 frames after
+     * the release (V clip 043: #3326 ≈ +3, #7048 +2, #8471 +3; clip 042
+     * #15119 ≈ +2; the release from the keylog, I ±1).
+     */
+    static final int FENCE_CLICK_FRAMES = 3;
+
+    /** After «Ja» on @ABANDON: the unit on the fence +3 frames (V clip 020 #35574 → #35577). */
+    static final int ABANDON_FENCE_FRAMES = 3;
 
     /** The «(Weitere)» page after the pick: +3 frames (V #7188 → #7191; dago-colony2 +3). */
     static final int MORE_FRAMES = 3;
@@ -109,7 +137,12 @@ final class ClassicColonyMoves {
     /** @ABANDON after J1 closes: +8 frames (V #35371 → #35379). */
     static final int ABANDON_FRAMES = 8;
 
-    /** @MORETHANTHREE after the drop: +32 frames (V dago-colony2 #10913 → #10945). */
+    /**
+     * @MORETHANTHREE after the drop: +32 frames (V dago-colony2 #10913 →
+     * #10945); the school's and the docks' refusals (@NOTEACHER,
+     * @NEEDCOLLEGE, @NEEDUNIVERSITY, @TEACHCONVERT, @SCHOOL1, @COLLEGE2,
+     * @UNIV3, @NODOCKS) the same (I: not seen).
+     */
     static final int FULL_FRAMES = 32;
 
     /**

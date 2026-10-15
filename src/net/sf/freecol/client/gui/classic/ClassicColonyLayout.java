@@ -1233,6 +1233,9 @@ final class ClassicColonyLayout {
     /** The farmed works and the fisherman's, NAMES {@code @JOB} 0-8 (the tiles' jobs). */
     static final int TILE_JOBS = 9;
 
+    /** NAMES {@code @JOB} 8: Fischer (the water tiles' work). */
+    static final int JOB_FISHERMAN = 8;
+
     /** NAMES {@code @JOB}: Lehrer, Siedler, Pionier, Soldat, Späher, Dragoner, Missionar, Knecht, Krimineller. */
     static final int JOB_TEACHER = 18, JOB_COLONIST = 19, JOB_PIONEER = 20,
         JOB_SOLDIER = 21, JOB_SCOUT = 22, JOB_DRAGOON = 23, JOB_MISSIONARY = 24,

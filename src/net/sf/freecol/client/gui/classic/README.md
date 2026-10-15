@@ -3707,7 +3707,7 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
 - **The kit** (M4.0): one blink for the cursors (`ClassicBlink`, 23 frames, armed
   while the screen is shown, stopped during a drag; a toggle repaints only if a
   painter asked `blinkOff()`), the press / drag / release machine
-  (`ClassicDragGesture`; nothing can be dragged yet, so the presses act as before),
+  (`ClassicDragGesture`; since M4.8 the colonists are dragged, see "Moving colonists"),
   the hover label (white FONTTINY on its black (w + 1) × 7 box, x = sx + sw/2 −
   (w + 1)/2 clamped to 0…198 − w), the completion dissolve
   (`ClassicColonyDissolve`: the changed rectangles' pixels, 19 frames after the
@@ -3841,67 +3841,101 @@ localization" below.
 
 Every way the original moves a colonist on the colony screen, with its menus
 (clip 020 `02-colony-operations.md` §2-6, `10-dialog-catalogue.md` §3; dago
-`01-interact.md`; dago-colony2 `01-base.md`, `01-abandon.md`). V = seen on the
-frames, I = our choice where no clip shows it.
+`01-interact.md`; dago-colony2 `01-base.md`, `01-abandon.md`; clip 042
+`colony-moves-analysis/10-colony-moves.md`; clip 043, the fence click). V =
+seen on the frames, I = our choice where no clip shows it.
 
-- **The press** on a colonist (in a building, on a tile, at the fence) selects
-  him (his green frames), freezes the blink, takes the hover label away; the
-  white cursor goes to his tile, else to his figure in the band. Where figures
-  overlap, the first drawn wins (as the buildings, I). A press on a figure of
-  the band's row only selects (I).
+- **The press** on a colonist (in a building, on a tile, at the fence) freezes
+  the blink and takes the hover label away (V clip 042 ×14). A tile worker is
+  selected at once, the white cursor on his tile (V #5829); the colonist
+  already selected keeps it, the cursor goes to his figure in the band; an
+  unselected building worker or unit at the fence changes nothing until the
+  release or the drag's start, which select him (V dago-colony2 #7520 →
+  #7532, clip 042 #11157 → #11168, #3374). Where figures overlap, the first
+  drawn wins (as the buildings, I). A press on a figure of the band's row
+  only selects (I).
 - **The drag**: the first motion starts it, the arrow is hidden, his own
   figure follows as the ghost at the hotspot − (1,8) with a black silhouette
   2 px left (V dago), no hover label; the source keeps its figure.
 - **The drop** (`ClassicColonyMoves.resolve`): building → building the target's
   work; building → tile **Farmer** (R2), tile → tile **his work kept**, even at
   0 (R3), both only with the levi option `model.option.originalDropJobs`
-  (FreeCol's rules: the colony chooses the work); tile → building and fence →
-  building the building's work (the role's goods back to the warehouse: the
-  server's `work`); fence → tile Farmer (I); anything → fence **J1** (+5
-  frames); a full building **@MORETHANTHREE** (+32 frames, MSS5, nothing
-  moves, he stays selected; V dago-colony2); his own place, the centre, an
-  occupied tile, a placeholder: nothing. Through `InGameController.work`,
-  then `changeWorkType` for R2/R3.
+  (FreeCol's rules: the colony chooses the work); building or fence → an
+  ocean tile with docks **Fischer** (I); tile → building and fence → building
+  the building's work (the role's goods back to the warehouse: the server's
+  `work`); fence → tile Farmer (I); anything → fence **J1** (+5 frames).
+  Refusals are checked before the server is asked, with the original's
+  boxes (+32 frames, MSS5, nothing moves, he stays selected): a full
+  building **@MORETHANTHREE** (V dago-colony2), a full school **@SCHOOL1** /
+  **@COLLEGE2** / **@UNIV3**, a school he may not teach in **@NOTEACHER**
+  (a convert **@TEACHCONVERT**), a skill above the school **@NEEDCOLLEGE** /
+  **@NEEDUNIVERSITY** with the work's word, water without docks
+  **@NODOCKS** (GAME.TXT; the triggers I). His own place, the centre, a worked
+  tile (V clip 042 #4150, #4839: no box), a neighbour's tile, a placeholder:
+  nothing. Through `InGameController.work`, then `changeWorkType` for R2/R3.
+- **The white cursor after a move**: onto a tile, to that tile (V clip 020
+  #50260); off a tile it stays on the emptied tile where it stood (V dago D2
+  #4016, clip008 #43301, dago-colony2 #5812, clip 042 #6047), from elsewhere
+  (the centre) to his figure in the band (V clip 042 #2457).
+- **The hover label** comes back by itself after a move, the pointer still:
+  +13 frames on a tile, +16 in a building, +3 after a refused drop (V clip
+  042 #2876, #4716, #4344).
 - **A click** (a release without motion): on the colonist who was already
   selected **J2** (+5 frames after the release; a first click only selects,
-  V dago-colony2); on a unit at the fence **his job menu** (44 frames after
-  the press, V ×3); on an empty tile or a building the selected colonist goes
-  there by the drop's rule (V ×4 for a tile, I for a building).
+  V dago-colony2, clip 042), on a unit at the fence the same way **his job
+  menu** (+5 frames after the release, V clip 042 #15426, #15901); on an
+  empty tile or a building the selected colonist goes there by the drop's
+  rule, at the release, where the button goes up (V clip 042 #6047, #7128,
+  #2423: pressed on the Zigarrenfabrik, released over the Kathedrale); on an
+  empty spot of the **fence** his **role menu**, he stays where he is (V clip
+  043 #3326, #7048, #8471, clip 042 #15119; Roger 2026-10-15): a colonist in
+  the colony J1, a unit at the fence the roles with the bar on his own, its
+  row without a cell, box (62,58,196,84); +3 frames after the release; a role
+  picked equips him and puts him at the fence at once (V Roger).
 - **The menus** (`ClassicColonyJobs.menu`; list boxes, golden 0 px on clip 020
-  #13, #16, #18, #37, #96, #103, #253, #254 with the clip's numbers):
-  «Beruf wählen für» + the type's NAMES plural (+ «(job)» off his speciality,
-  not at the fence); «(SPEZIALFÄHIGKEIT LÖSCHEN)» only for an expert
-  (FreeCol's question as **@LOBOTOMIZE**); the colony's works of NAMES
-  `@JOB` 0-18 (Waffenschmied with the armory, Prediger with a church, not
-  FreeCol's chapel, Lehrer with a school), the first 16, «(Weitere)»; the
-  page «(Weitere)» (+3 frames): «(Weitere)» (back), the rest, Siedler,
-  Pionier «(n Werkzeuge)» (n = max(20, min(100, 20·⌊tools/20⌋))), Soldat,
-  Späher, Dragoner, Missionar (with a church); grey where the warehouse
-  cannot equip it; J1: his work, then the roles. Right column: «a/b Ware»
-  for a tile worker's tile works (a his tile, b the best of his and the free
-  tiles), else «n Ware» (FreeCol's potential production). Yellow: the
-  expert's own work or role. The bar: on his work where the page lists it,
-  else row 1. Escape and a click outside: no change.
+  #13, #16, #18, #37, #96, #103, #253, #254 and clip 042 #15426, #15119 with
+  the clips' numbers): «Beruf wählen für» + the type's NAMES plural (+
+  «(job)» off his speciality; at the fence «(Rolle)» only for an armed or
+  equipped unit, «Meister-Waffenschmiede(Soldat):»); «(SPEZIALFÄHIGKEIT
+  LÖSCHEN)» only for an expert (FreeCol's question as **@LOBOTOMIZE**); the
+  colony's works of NAMES `@JOB` 0-18 (Waffenschmied with the armory,
+  Prediger with a church, not FreeCol's chapel, Lehrer with a school and only
+  for whom it takes), the first 16, «(Weitere)»; the page «(Weitere)» (+3
+  frames): «(Weitere)» (back), the rest, Siedler, Pionier «(n Werkzeuge)» (n
+  = max(20, min(100, 20·⌊tools/20⌋)), the tools of the warehouse and those
+  he carries), Soldat, Späher, Dragoner, Missionar (with a church); grey
+  where the warehouse cannot equip it; J1: his work (green, the expert's own
+  too, V clip 042 #3512), then the roles. Right column: «a/b Ware» for a tile
+  worker's tile works (a his tile, b the best of his and the free tiles),
+  else «n Ware» (FreeCol's potential production). Yellow: the expert's own
+  work or role. The bar: on his work where the page lists it, else row 1.
+  Escape and a click outside: no change.
 - **Picks**: a tile's work for a tile worker on the same tile (no move, V
-  #48712), for anyone else onto the best free tile (V #4690, #20760); a
-  building's work into it; a role outside with the warehouse's goods
-  (`putOutsideColony`, `equipUnitForRole`: Soldat 50 → 0 muskets, Pionier
-  75 → 15 tools); at the fence the role there.
+  #48712), for anyone else onto the best free tile, the colony's own before a
+  native's (V #4690, #20760; I for the order); a building's work into it; a
+  role outside with the warehouse's goods (`putOutsideColony`,
+  `equipUnitForRole`: Soldat 50 → 0 muskets, Pionier 75 → 15 tools; an equip
+  refused puts him back); at the fence the role there (the same role with
+  another count gives the old equipment back first).
 - **Abandon**: the last colonist leaving asks **@ABANDON** (@ABANDON2 when it
   is the only colony) +8 frames, MSS5, the bar and Escape on «Niemals!»;
-  «Ja» puts him outside in his role at once, gives up the colony
-  (`abandonColony`) and closes the screen 31 frames later (V #35574 →
-  #35605), no input meanwhile; «Niemals!» changes nothing.
+  «Ja» puts him outside in his role and gives up the colony at once
+  (`abandonColony`); only the close waits: the screen shows the colony as it
+  was, the unit on the fence +3 frames, the map 31 frames after «Ja» (V
+  #35574 → #35577 → #35605), no input meanwhile (no key, exit, mode button,
+  panel, colonist). A refusal of the server puts him back where he worked.
+  «Niemals!» and Escape change nothing.
 - **The opening's selection**: the founder at a founding, else the colonist
   selected last in this colony (kept across visits, forgotten at a new game),
   else the row's first figure (V 23 of 23 openings; I for the last case).
 - Recorder events: `colony-drag`, `colony-click`, `colony-job`,
-  `colony-abandon`, `colony-select`.
-- Not built (Unsichtbarkeiten, `freecol-spike-results\u\ACCEPTANCE.md`): the
-  menus are drawn in one frame (the original two, the lower part first);
+  `colony-picked`, `colony-abandon`, `colony-back`, `colony-select`.
+- Not built (Unsichtbarkeiten, `freecol-spike-results\u\FINAL.md`): the menus
+  are drawn in one frame (the clips show 1 or 2, split at varying heights);
   J1's first row green where clip 020 #77 shows it yellow once; the
-  equipment's warehouse number changes at once, the original's 5-6 frames
-  later; the keys of the colony screen.
+  equipment's warehouse number changes at once (the original +5/+6 frames in
+  clip 020, +11 in clip 042); the fence's order after a menu closed with
+  Escape (clip 042 #16142); the keys of the colony screen.
 
 ### The units standing in the colony (`ClassicColonyUnits`; clip 019, part M2)
 
