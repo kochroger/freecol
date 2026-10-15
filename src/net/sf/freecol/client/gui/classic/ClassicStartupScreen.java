@@ -68,9 +68,12 @@ import net.sf.freecol.FreeCol;
  * it is shown, so the picture is on screen while the constructor blocks the
  * EDT: Swing's back buffer then also answers the OS's expose requests
  * without the EDT.  During those ~3 s the window cannot react; the keys and
- * clicks are queued by AWT and handled once the client is attached, and the
- * Windows arrow stays visible (the panel draws its own arrow only once it
- * sees the mouse move on a responsive EDT).
+ * clicks are queued by AWT and dispatched once the client is attached, and
+ * the Windows arrow stays visible (the panel draws its own arrow only once
+ * it sees the mouse move on a responsive EDT).  Since part T1 the panel
+ * keeps only what was meant for a screen the player saw: a queued press
+ * made before the current screen was painted (+ its reaction time) is
+ * ignored, see {@code ClassicMainMenuPanel.typedAhead}.
  *
  * <p><b>Early choices.</b>  In practice almost no input reaches this window
  * before the constructor starts: {@link #show} runs in the very EDT task
@@ -97,8 +100,15 @@ import net.sf.freecol.FreeCol;
  * build-up, drawn by a {@link ClassicIntroPlayer} thread because the EDT is
  * blocked by the client constructor right now; it ends on the live title.
  * The title piece ({@link ClassicEarlyMusic}) starts with that first
- * picture.  Typed-ahead input still works as described above, except that
- * its first fresh key or click is spent skipping the intro.
+ * picture.  The first fresh key or click skips the intro; the rest of a
+ * burst queued while the constructor blocked the EDT is ignored, so the
+ * title appears and waits for a new, deliberate choice, and so does every
+ * screen after it (part T1, Roger 2026-10-14: the queued presses used to
+ * open NEUE WELT and confirm «Entdecker» on screens he never saw;
+ * t/menu-skip.md).  Typing ahead through the chain is therefore no longer
+ * possible: what the paragraph above says about early choices now concerns
+ * input on a screen that was painted in time (a fast machine, or no
+ * intro).
  *
  * <p>Without the pack (or if anything here fails) {@link #show} returns
  * false and the old start-up runs unchanged: the black screen, and the

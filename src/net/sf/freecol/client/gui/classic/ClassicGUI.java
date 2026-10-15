@@ -546,6 +546,13 @@ public class ClassicGUI extends GUI {
      * live title: the audience would be replaced by the menu for the seconds
      * the server needs, and NEUE WELT clicked there would start a second
      * game while logged in.  See {@link #showMainPanel}.
+     *
+     * <p>Since part T1 the panel ignores presses made before the screen
+     * they land on was painted ({@code ClassicMainMenuPanel.typedAhead}), so
+     * a burst queued during the intro now ends on the live title; this call
+     * then finds a live panel and keeps it (the flag is still needed for a
+     * choice made on a screen that was painted in time, e.g. without the
+     * intro on a fast machine).
      */
     private boolean startupTitlePending = false;
 
@@ -576,6 +583,9 @@ public class ClassicGUI extends GUI {
         // the start-up's showMainPanel must not undo what the player types
         // ahead while the constructor still blocks the EDT.
         this.startupTitlePending = !this.mainMenuPanel.isPassive();
+        // Part T1 (F3): read the new-game chain's material now, while the
+        // intro runs, not when the title first goes live.
+        if (this.startupTitlePending) this.mainMenuPanel.prefetchChain();
         logger.info("Classic start-up: client attached after "
             + ClassicStartupScreen.sinceLaunchMs() + " ms ("
             + (this.frameState.isFullScreen() ? "borderless full screen" : "windowed")

@@ -4910,7 +4910,9 @@ with `--fast` or `-Dfreecol.classic.intro=false` (`ClassicIntro.enabled`).
   nothing in INTRO; the pointer is hidden unconditionally (the EDT is
   blocked, so no mouse event could tell where it is); `offerQuit` stops it
   and opens the quit box; any mode change away from INTRO stops the thread.
-  Typed-ahead input spends its first fresh key or click on the skip.
+  The first fresh key or click skips; the rest of a burst queued while the
+  EDT was blocked is ignored and the title waits (part T1, see "Title screen
+  & main menu").
 - **Log lines:** `Classic start-up: intro shown after N ms`,
   `Classic intro: started after N ms since launch`,
   `Classic intro: chart assets ready after N ms` (or `... opening material
@@ -4957,6 +4959,34 @@ differing pixels.
   `STARTING` (the departure's last picture — or, without the departure, the
   audience — frozen while the engine starts). In PASSIVE, BUSY and
   STARTING all input is ignored, which guards against starting twice.
+- **An input counts only for a screen the player has seen (part T1).** Roger
+  2026-10-14 ~22:50: "Ich kann gar nicht auswählen, ob ich in der Neuen Welt,
+  in Amerika oder in einer individualisierten Welt starten will"
+  (`freecol-spike-results\t\menu-skip.md`): the client constructor blocks the
+  EDT for the intro's first ~3 s while the intro thread keeps drawing, so
+  AWT queues every key and click and dispatches them in one burst — the first
+  skipped the intro, the second opened NEUE WELT on a title never painted,
+  the third confirmed «Entdecker». Now `processKeyEvent` / `processMouseEvent`
+  (and, for a panel that is not the focus owner, the window bindings with the
+  `ActionEvent`'s time) ask `typedAhead(getWhen)`: a press **made** before the
+  current screen (mode + chain step) was painted, or less than
+  `REACTION_MS` = 200 ms after (OWN CHOICE), is ignored together with its
+  typed character, its auto-repeat and its release; a press less than
+  `BURST_GAP_MS` = 400 ms after an ignored one continues the burst and is
+  ignored too (OWN CHOICE: mashing Enter every 300 ms must not pass the
+  title); after an intro **skip** the title waits `TITLE_SETTLE_MS` = 600 ms
+  (OWN CHOICE; how the original takes several presses during its intro is not
+  recorded). No lock-out: a screen never painted (a minimized window) takes a press
+  made `UNPAINTED_GRACE_MS` = 1 s or more after its change. Not
+  gated: the intro (any input skips it), PASSIVE / BUSY / STARTING (input
+  ignored anyway), chords with Alt/Ctrl/Meta (Alt+Enter, Alt+F4), bare
+  modifiers, the held intro skip key (swallowed as before). One INFO line per
+  ignored press: `Classic menu: <key|click> made N ms before the <screen>
+  came (not yet shown) -- ignored (typed ahead)` (or `… after the <screen>
+  was shown …`, `… continues an ignored burst`). The chain's material is now
+  read from the moment the client is attached (`prefetchChain` from
+  `ClassicGUI.adoptStartupWindow`), not when the title first goes live.
+  Tests: `ClassicMenuTypeAheadTest`.
   All painting is in package-private **static** methods (`paintTitleScreen`,
   `paintLoadBox`, `paintNotice`) taking explicit `MenuAssets`. A scratch
   harness calls them from a jar classpath without a `FreeColClient` and diffs
@@ -6145,6 +6175,11 @@ gone, and the title is painted before the client even exists. (2026-10-05)
     music was chosen yet (`playTitleMusicIfSilent`). Without it the frozen
     audience was replaced by a live title for the seconds the server needs,
     and NEUE WELT clicked there started a second game while logged in.
+    **Since part T1** such a burst no longer passes a screen the player has
+    not seen (see "Title screen & main menu": an input counts only for a
+    screen the player has seen); with the intro it ends on the live title,
+    which the start-up call keeps. The flag stays for a choice made on a
+    screen that was painted in time (no intro, a fast machine).
   - Input that does reach the early window before the constructor (rare) is
     handled by the panel itself (the bar, the load box and the whole
     new-game chain need no client). A choice that needs the client (the end

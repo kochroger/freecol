@@ -673,6 +673,84 @@ final class ClassicMainMenuPanel extends JPanel {
     private int pressItem = -1;
 
 
+    // Input made before its screen was seen (part T1)
+
+    /*
+     * WHY (Roger 2026-10-14 ~22:50, "Ich kann gar nicht auswählen, ob ich in
+     * der Neuen Welt, in Amerika oder in einer individualisierten Welt starten
+     * will"; t/menu-skip.md): during the first ~3 s of the intro the EDT is
+     * blocked by the FreeColClient constructor while the intro thread keeps
+     * drawing, so every key and click of that time is queued by AWT and then
+     * dispatched in one burst: the first skips the intro, the second already
+     * hits the title (NEUE WELT barred), the third confirms «Entdecker» --
+     * the title was never on screen.  The same happens on every later screen
+     * whose change or start blocks the EDT for a moment.  The rule now: an
+     * input counts only for a screen the player has seen.  A key press or
+     * mouse press made (InputEvent.getWhen, the time the OS took it, not the
+     * time the EDT got to it) before the current screen was painted, or less
+     * than REACTION_MS after, is swallowed with its typed character, its
+     * auto-repeat and its release; so is one made less than BURST_GAP_MS
+     * after an ignored one.  After the intro was skipped the title waits
+     * TITLE_SETTLE_MS for a press.  The intro itself takes any input (that
+     * is what skips it), and PASSIVE / BUSY / STARTING ignore input anyway.
+     */
+
+    /** OWN CHOICE: no one reacts to a new picture faster; catches the rest of a burst. */
+    static final long REACTION_MS = 200L;
+
+    /**
+     * OWN CHOICE: after an intro SKIP the title waits this long for a press
+     * (whoever skips with several presses must still see the menu).  How the
+     * original takes several presses during its intro is not recorded
+     * (t/menu-skip.md, end).
+     */
+    static final long TITLE_SETTLE_MS = 600L;
+
+    /** No lock-out: a screen never painted still takes input made this long after it came. */
+    static final long UNPAINTED_GRACE_MS = 1000L;
+
+    /**
+     * OWN CHOICE: a press made less than this after an IGNORED press
+     * continues that burst and is ignored too (mashing Enter every 300 ms
+     * must not pass the title at its third press).
+     */
+    static final long BURST_GAP_MS = 400L;
+
+    /** The clock of {@code InputEvent.getWhen} (tests replace it). */
+    java.util.function.LongSupplier clock = System::currentTimeMillis;
+
+    /** Tests: gate a panel that is not on screen (headless). */
+    boolean gateOffScreen = false;
+
+    /** The screen (mode and chain step) the last paint showed, and when. */
+    private Mode shownMode = null;
+    private ClassicNewWorldChain.Step shownStep = null;
+    private long shownAt = 0L;
+
+    /** The screen the last change brought, and when it came. */
+    private Mode changedMode = null;
+    private ClassicNewWorldChain.Step changedStep = null;
+    private long changedAt = 0L;
+
+    /** {@code getWhen} of the last ignored press or click. */
+    private long lastIgnoredAt = Long.MIN_VALUE / 2;
+
+    /** Whether the title came from an intro skip (see {@link #TITLE_SETTLE_MS}). */
+    private boolean titleAfterSkip = false;
+
+    /** Keys whose press was ignored and are still down (their repeats and release go too). */
+    private final Set<Integer> swallowedKeys = new HashSet<>();
+
+    /** Whether the next typed character belongs to an ignored press. */
+    private boolean swallowTyped = false;
+
+    /** The button of an ignored mouse press until its release. */
+    private int swallowedButton = MouseEvent.NOBUTTON;
+
+    /** Tests: whether the gate swallowed the last key or mouse press. */
+    boolean typedAheadSwallowedLast = false;
+
+
     /**
      * Create the panel (in {@link Mode#PASSIVE}).
      *
@@ -773,8 +851,166 @@ final class ClassicMainMenuPanel extends JPanel {
                 public void focusLost(FocusEvent e) {
                     heldKeys.clear();
                     introSkipKey = -1;
+                    swallowedKeys.clear();
+                    swallowTyped = false;
                 }
             });
+    }
+
+
+    // Input made before its screen was seen (part T1)
+
+    /** The chain's step, or null without a chain. */
+    private ClassicNewWorldChain.Step currentStep() {
+        return (this.chain == null) ? null : this.chain.step();
+    }
+
+    /** Note a change of screen (mode or chain step), see {@link #typedAhead}. */
+    private void noteScreen() {
+        final ClassicNewWorldChain.Step st = currentStep();
+        if (this.mode != this.changedMode || st != this.changedStep) {
+            this.changedMode = this.mode;
+            this.changedStep = st;
+            this.changedAt = this.clock.getAsLong();
+        }
+    }
+
+    /**
+     * The paint's bookkeeping: the screen now on screen and since when.
+     * Package-private for the headless tests, which have no real paint.
+     */
+    void screenPainted() {
+        final ClassicNewWorldChain.Step st = currentStep();
+        if (this.mode != this.shownMode || st != this.shownStep) {
+            this.shownMode = this.mode;
+            this.shownStep = st;
+            this.shownAt = this.clock.getAsLong();
+        }
+    }
+
+    /**
+     * Whether a press made at {@code when} was made before the player could
+     * have seen the current screen (see the rule above {@link #REACTION_MS}).
+     *
+     * @param when The press's {@code InputEvent.getWhen}.
+     * @return True to ignore it.
+     */
+    boolean typedAhead(long when) {
+        switch (this.mode) {
+        case INTRO:                       // any input may end the intro
+        case PASSIVE: case BUSY: case STARTING:   // input ignored anyway
+            return false;
+        default:
+            break;
+        }
+        if (!isShowing() && !this.gateOffScreen) return false;   // headless
+        if (when < this.lastIgnoredAt + BURST_GAP_MS) return true;
+        noteScreen();
+        final ClassicNewWorldChain.Step st = currentStep();
+        if (this.mode != this.shownMode || st != this.shownStep) {   // not painted yet
+            // (the proposal measured the grace on the clock of the dispatch;
+            // on the press's own time a press queued behind a long block is
+            // still caught)
+            return when < this.changedAt + UNPAINTED_GRACE_MS;
+        }
+        return when < this.shownAt + ((this.mode == Mode.TITLE && this.titleAfterSkip)
+            ? TITLE_SETTLE_MS : REACTION_MS);
+    }
+
+    /** One INFO line per ignored press or click. */
+    private void logIgnored(String what, long when) {
+        final boolean burst = when < this.lastIgnoredAt + BURST_GAP_MS;
+        this.lastIgnoredAt = when;
+        this.typedAheadSwallowedLast = true;
+        final ClassicNewWorldChain.Step st = currentStep();
+        final String screen;
+        switch (this.mode) {
+        case NEW_WORLD:
+            screen = ((st == null) ? "chain" : st.toString().toLowerCase(java.util.Locale.ROOT))
+                + " screen";
+            break;
+        case QUIT: screen = "quit box"; break;
+        case LOAD: screen = "load box"; break;
+        default: screen = this.mode.toString().toLowerCase(java.util.Locale.ROOT); break;
+        }
+        final boolean painted = this.mode == this.shownMode && st == this.shownStep;
+        logger.info("Classic menu: " + what + " made "
+            + (painted ? (when - this.shownAt) + " ms after the " + screen
+                + " was shown"
+               : Math.max(0L, this.changedAt - when) + " ms before the " + screen
+                + " came (not yet shown)")
+            + " -- ignored (" + (burst ? "continues an ignored burst" : "typed ahead")
+            + ")");
+    }
+
+    /**
+     * The gate for keys, ahead of the key listener and the focused path of
+     * the key bindings (see {@link #typedAhead}).  Chords with Alt, Ctrl or
+     * Meta (Alt+Enter, Alt+F4) and bare modifiers pass, as do the held
+     * intro skip key's repeats (the listener swallows them).
+     */
+    @Override
+    protected void processKeyEvent(KeyEvent e) {
+        final int k = e.getKeyCode();
+        switch (e.getID()) {
+        case KeyEvent.KEY_PRESSED:
+            this.typedAheadSwallowedLast = false;
+            if (this.swallowedKeys.contains(k)) {      // its auto-repeat
+                this.typedAheadSwallowedLast = true;
+                this.swallowTyped = true;
+                e.consume();
+                return;
+            }
+            this.swallowTyped = false;
+            if (k != this.introSkipKey
+                && !(e.isAltDown() || e.isControlDown() || e.isMetaDown()
+                     || isModifierKey(k))
+                && typedAhead(e.getWhen())) {
+                this.swallowedKeys.add(k);
+                this.swallowTyped = true;
+                logIgnored("key " + KeyEvent.getKeyText(k) + " (" + k + ")", e.getWhen());
+                e.consume();
+                return;
+            }
+            break;
+        case KeyEvent.KEY_TYPED:   // no typed-ahead character reaches the name
+            if (this.swallowTyped) {
+                this.swallowTyped = false;
+                e.consume();
+                return;
+            }
+            break;
+        case KeyEvent.KEY_RELEASED:
+            if (this.swallowedKeys.remove(k)) {
+                this.heldKeys.remove(k);
+                e.consume();
+                return;
+            }
+            break;
+        default:
+            break;
+        }
+        super.processKeyEvent(e);
+    }
+
+    /** The gate for mouse presses (see {@link #typedAhead}); a gated press's release does nothing. */
+    @Override
+    protected void processMouseEvent(MouseEvent e) {
+        if (e.getID() == MouseEvent.MOUSE_PRESSED) this.typedAheadSwallowedLast = false;
+        if (e.getID() == MouseEvent.MOUSE_PRESSED && typedAhead(e.getWhen())) {
+            this.swallowedButton = e.getButton();
+            logIgnored("click", e.getWhen());
+            e.consume();
+            return;
+        }
+        if (e.getID() == MouseEvent.MOUSE_RELEASED
+            && this.swallowedButton != MouseEvent.NOBUTTON
+            && e.getButton() == this.swallowedButton) {
+            this.swallowedButton = MouseEvent.NOBUTTON;
+            e.consume();
+            return;
+        }
+        super.processMouseEvent(e);
     }
 
 
@@ -796,6 +1032,8 @@ final class ClassicMainMenuPanel extends JPanel {
             this.departure = null;
         }
         this.mode = m;
+        if (m != Mode.TITLE) this.titleAfterSkip = false;
+        noteScreen();
         if (isLive()) this.frozenFrame = null;
         updatePointerShape();
     }
@@ -897,6 +1135,7 @@ final class ClassicMainMenuPanel extends JPanel {
         final ClassicIntroPlayer p = this.introPlayer;
         logger.info("Classic intro: " + (skipped ? "skipped" : "finished")
             + " after " + ((p == null) ? 0L : p.elapsedMs()) + " ms");
+        this.titleAfterSkip = skipped;    // the title then settles (T1)
         showTitle(null);
     }
 
@@ -1173,6 +1412,7 @@ final class ClassicMainMenuPanel extends JPanel {
         } finally {
             g.dispose();
         }
+        screenPainted();    // T1: from now on the player has seen this screen
     }
 
 
@@ -1333,6 +1573,12 @@ final class ClassicMainMenuPanel extends JPanel {
                     if (ClassicMainMenuPanel.this.mode == Mode.INTRO
                         || ClassicMainMenuPanel.this.mode == Mode.NEW_WORLD
                         || ClassicMainMenuPanel.this.mode == Mode.DEPARTURE) return;
+                    // T1: while the panel is not the focus owner the key
+                    // comes here without processKeyEvent's gate.
+                    if (e != null && typedAhead(e.getWhen())) {
+                        logIgnored("key binding " + name, e.getWhen());
+                        return;
+                    }
                     r.run();
                 }
             });
@@ -1450,8 +1696,13 @@ final class ClassicMainMenuPanel extends JPanel {
      * Start reading the chain's art and texts in the background, once.
      * They come from plain pack files ({@link ClassicPackFiles}), not from
      * the resource manager, so this never waits for or competes with it.
+     * {@code ClassicGUI.adoptStartupWindow} starts it as soon as the client
+     * is attached (part T1, F3): the intro runs for minutes, so NEUE WELT
+     * then opens without joining the load on the EDT (130-290 ms in part
+     * P, another window in which presses queue up); {@link #showTitle}
+     * still starts it where there was no intro.  EDT only.
      */
-    private void prefetchChain() {
+    void prefetchChain() {
         if (this.chainPrefetch != null) return;
         this.chainPrefetch = new FutureTask<>(ClassicMainMenuPanel::loadChainData);
         final Thread t = new Thread(this.chainPrefetch, "classic-newworld-prefetch");
@@ -1554,6 +1805,7 @@ final class ClassicMainMenuPanel extends JPanel {
 
     /** Act on what a chain operation returned. */
     private void handleChain(ClassicNewWorldChain.Result r) {
+        noteScreen();      // T1: the operation may have changed the step
         switch (r) {
         case REPAINT:
             repaint();
