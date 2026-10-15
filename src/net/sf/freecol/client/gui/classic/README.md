@@ -5716,8 +5716,20 @@ shows the original scene instead.
   menu bar's accelerators cannot fire) and every mouse event. It is
   dismissed by a key press that is not auto-repeat, not a bare modifier and
   without Alt/Ctrl/Meta, or by a left/right press. Input made before the
-  scene was on screen never dismisses it: events time-stamped before the
-  show are ignored, and the auto-repeat of a key held since before (for
+  scene was on screen never dismisses it. **Since part T2** that means the
+  scene's first *paint*, not the moment `showScene` ran (the game's start
+  keeps the EDT busy after it: the agent's `p-enters20-early` had an Enter
+  made 78 ms after the show and dispatched before the paint; Roger's
+  recording 2026-10-14_2243 closed the scene 0.8 s after it opened): a press
+  made before the first paint or less than `REACTION_MS` = 200 ms after it
+  is ignored, and so is one less than `BURST_GAP_MS` = 400 ms after an
+  ignored one (the title menu's constants and rule, see "Title screen &
+  main menu"); a scene never painted (a minimized window) takes a press made
+  1 s or more after the show; INFO `Classic first scene: a press made … --
+  ignored (…)`. Only the first scene: the ordinary boxes
+  (`ClassicAdvisorLayer`) keep their rule (a press made before the box was
+  shown), so play is not slowed. Tests: `ClassicSceneTypeAheadTest`. The
+  auto-repeat of a key held since before (for
   example one that skipped the departure and stayed down through the
   engine start) is recognised by `FrameKeys`, which now records every key's
   press and release frame-wide (`isAutoRepeat`; a press more than 1.1 s

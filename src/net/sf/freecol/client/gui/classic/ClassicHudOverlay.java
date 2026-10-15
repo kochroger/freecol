@@ -33,6 +33,7 @@ import java.awt.event.MouseWheelEvent;
 import java.awt.geom.Area;
 import java.awt.image.BufferedImage;
 import java.util.function.Predicate;
+import java.util.logging.Logger;
 
 import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
@@ -68,13 +69,27 @@ import javax.swing.SwingUtilities;
  *       component by {@code ClassicGUI.FrameKeys});</li>
  *   <li>a left or right mouse press.</li>
  * </ul>
- * Input made before the scene was on screen never dismisses it: a press
- * whose event time precedes the moment the scene was shown is ignored, and
- * the auto-repeat of a key held since then (for instance since skipping the
- * departure, through the engine's ~2 s start) is recognised by the
- * frame-wide key tracker passed in as {@code autoRepeat}.  The original's
- * own dismiss rule is not visible in stills (a proposal, like the
- * departure's skip).
+ * Input made before the scene was on screen never dismisses it (part T2,
+ * the rule of the title menu, {@code ClassicMainMenuPanel.typedAhead}): a
+ * press made before the scene's <em>first paint</em> or less than
+ * {@code REACTION_MS} after it is ignored, and so is a press made less than
+ * {@code BURST_GAP_MS} after an ignored one (mashing Enter through the
+ * departure and the engine start).  WHY the paint and not the moment
+ * {@link #showScene} ran: the game's start keeps the EDT busy after it, so
+ * presses made between the two were dispatched only afterwards and closed
+ * the scene before it had ever been drawn (t/menu-skip.md F4: the agent's
+ * {@code p-enters20-early}, an Enter made 78 ms after the show and
+ * dispatched 91 ms later; Roger's recording 2026-10-14_2243 closed it
+ * 0.8 s after it opened).  A scene that is never painted (a minimized
+ * window) still takes a press made {@code UNPAINTED_GRACE_MS} or more after
+ * the show.  The auto-repeat of a key held
+ * since then (for instance since skipping the departure, through the
+ * engine's ~2 s start) is recognised by the frame-wide key tracker passed
+ * in as {@code autoRepeat}.  The original's own dismiss rule is not visible
+ * in stills (a proposal, like the departure's skip).  Only the first scene
+ * has this rule; the ordinary advisor boxes ({@link ClassicAdvisorLayer})
+ * keep theirs (a press made before the box was shown is ignored), so
+ * normal play is not slowed.
  *
  * <p><b>Arrow.</b>  083/049 show the original arrow at (160,100), where the
  * game parks the mouse when the scene appears.  A {@link ClassicPointer}
@@ -84,6 +99,8 @@ import javax.swing.SwingUtilities;
  * arrow is the same picture for the preview harness.
  */
 final class ClassicHudOverlay extends JComponent {
+
+    private static final Logger logger = Logger.getLogger(ClassicHudOverlay.class.getName());
 
     /** Whether a key event's time looks like wall-clock milliseconds. */
     private static final long CLOCK_SANITY_MS = 60_000L;
@@ -102,6 +119,15 @@ final class ClassicHudOverlay extends JComponent {
 
     /** When the scene was shown (wall clock, ms). */
     private long shownAt = 0L;
+
+    /** When the scene was first painted (wall clock, ms), or -1 (not yet). */
+    private long paintedAt = -1L;
+
+    /** {@code getWhen} of the last ignored press (part T2). */
+    private long lastIgnoredAt = Long.MIN_VALUE / 2;
+
+    /** The clock of {@code InputEvent.getWhen} (tests replace it). */
+    java.util.function.LongSupplier clock = System::currentTimeMillis;
 
     /** The original arrow over the scene. */
     private final ClassicPointer pointer;
@@ -191,7 +217,8 @@ final class ClassicHudOverlay extends JComponent {
         this.scene = picture;
         this.mapView = mapView;
         this.onDismiss = dismiss;
-        this.shownAt = System.currentTimeMillis();
+        this.shownAt = this.clock.getAsLong();
+        this.paintedAt = -1L;
         setVisible(true);
         doLayout();
         // The original parks the mouse in the screen's centre (083/049).
@@ -216,11 +243,42 @@ final class ClassicHudOverlay extends JComponent {
 
     // Input
 
-    /** Whether an input event was made before the scene was on screen. */
-    private boolean predates(long when) {
-        final long now = System.currentTimeMillis();
+    /**
+     * Whether a press made at {@code when} came before the player could
+     * have seen the scene (see the class comment, "Input"); an ignored
+     * press is remembered for the burst rule and logged.
+     *
+     * @param when The press's {@code InputEvent.getWhen}.
+     * @return True to ignore it.
+     */
+    boolean predates(long when) {
+        final long now = this.clock.getAsLong();
         if (Math.abs(now - when) > CLOCK_SANITY_MS) return false;
-        return when < this.shownAt;
+        final boolean burst = when < this.lastIgnoredAt + ClassicMainMenuPanel.BURST_GAP_MS;
+        final boolean early = (this.paintedAt < 0L)
+            ? when < this.shownAt + ClassicMainMenuPanel.UNPAINTED_GRACE_MS
+            : when < this.paintedAt + ClassicMainMenuPanel.REACTION_MS;
+        if (!burst && !early) return false;
+        this.lastIgnoredAt = when;
+        logger.info("Classic first scene: a press made "
+            + ((this.paintedAt < 0L) ? (when - this.shownAt) + " ms after the scene"
+                + " came (not yet painted)"
+               : (when - this.paintedAt) + " ms after its first paint")
+            + " -- ignored (" + (burst ? "continues an ignored burst" : "typed ahead")
+            + ")");
+        return true;
+    }
+
+    /** The paint's bookkeeping (package-private for the headless tests). */
+    void scenePainted() {
+        if (this.scene != null && this.paintedAt < 0L) {
+            this.paintedAt = this.clock.getAsLong();
+        }
+    }
+
+    /** @return Whether the scene has been painted (tests). */
+    boolean scenePaintedYet() {
+        return this.paintedAt >= 0L;
     }
 
     private void onKey(KeyEvent e) {
@@ -339,5 +397,6 @@ final class ClassicHudOverlay extends JComponent {
             mv = SwingUtilities.convertRectangle(m.getParent(), m.getBounds(), this);
         }
         paintOverlay((Graphics2D) g, getWidth(), getHeight(), img, mv);
+        scenePainted();    // T2: from now on the player has seen the scene
     }
 }
