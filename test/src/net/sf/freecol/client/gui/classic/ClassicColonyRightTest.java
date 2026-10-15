@@ -520,7 +520,7 @@ public class ClassicColonyRightTest extends FreeColTestCase {
      * The mode buttons: a press shows the pressed button at once and the
      * panel at the release (I); the mode carries over to the next screen
      * (global, spec §0.1 decision 8); a founding opens in house mode, a
-     * building's @BUILT zoom in hammer mode with the cursor on ÄNDERN.
+     * building's @BUILT zoom in hammer mode, ÄNDERN blinking, the cursor kept.
      */
     public void testTheModeButtons() throws Exception {
         final State s = ClassicColonyBuildingsTest.base1539();
@@ -553,10 +553,14 @@ public class ClassicColonyRightTest extends FreeColTestCase {
         q.opened(ClassicColonyRight.Opening.FOUNDING);
         q.canvas();
         assertEquals(Mode.HOUSE, q.right().mode);
+        final int cursor = ClassicColonyPanel.tileCursor();
         q.opened(ClassicColonyRight.Opening.BUILT_BUILDING);
         q.canvas();
         assertEquals(Mode.HAMMER, q.right().mode);
-        assertEquals(ClassicColonyPanel.CURSOR_CHANGE, ClassicColonyPanel.tileCursor());
+        // The white cursor stays where it stood, ÄNDERN blinks against it
+        // (the review of part V, fidelity M2: V clip 020 #57767/#57768).
+        assertEquals(cursor, ClassicColonyPanel.tileCursor());
+        assertTrue(q.completionBlink());
     }
 
     /**

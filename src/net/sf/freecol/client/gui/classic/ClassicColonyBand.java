@@ -160,6 +160,28 @@ final class ClassicColonyBand {
     }
 
     /**
+     * The production row as it was before a building was completed (the
+     * completion dissolve's old picture, build spec M4.10 target 4; V clip
+     * 020 #57671 -&gt; #57768: the Verlag's bells): the row shown, changed
+     * by what a copy of the colony without the building makes differently
+     * from a copy with it (so a copy's own deviations cancel).
+     *
+     * @param now The row shown.
+     * @param before A copy's without the building.
+     * @param plain A copy's with it.
+     * @return The old row.
+     */
+    static Model before(Model now, Model before, Model plain) {
+        if (now == null || before == null || plain == null) return now;
+        return now.with(now.fishUsed + before.fishUsed - plain.fishUsed,
+                        now.cornUsed + before.cornUsed - plain.cornUsed,
+                        now.stored + before.stored - plain.stored,
+                        now.shortfall + before.shortfall - plain.shortfall,
+                        now.crosses + before.crosses - plain.crosses,
+                        now.bells + before.bells - plain.bells);
+    }
+
+    /**
      * The left panel's model of a colony now (FreeCol's numbers): the SoL
      * percentage; the food made (its tiles: fish and the rest), what its
      * colonists eat (2 each) and its horses take of the surplus (FreeCol's

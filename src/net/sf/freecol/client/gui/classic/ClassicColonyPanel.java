@@ -528,10 +528,46 @@ final class ClassicColonyPanel extends JPanel {
     private net.sf.freecol.common.model.BuildingType paintBefore = null;
 
     /**
+     * While painting the old picture of a completion: a scratch copy of the
+     * colony without the new building ({@link Colony#copyColonyBefore}),
+     * whose production the town hall's bells and the band's row show, or
+     * null.
+     */
+    private Colony beforeColony = null;
+
+    /**
+     * Its twin with the building (a plain {@link Colony#copyColony}): only
+     * what the two copies make differently is taken into the old picture,
+     * so the copy's own deviations (FreeCol's scratch copy feeds its
+     * horses differently) never dissolve.
+     */
+    private Colony plainColony = null;
+
+    /**
      * The completions shown ("colony id@turn"): the dissolve and the
      * ÄNDERN blink come at the first opening after it only (EDT).
      */
     private static final java.util.Set<String> shownCompletions = new java.util.HashSet<>();
+
+    /**
+     * The game {@link #shownCompletions} belong to (another game's, a
+     * loaded one's too, are dropped: the review of part V, regression L11).
+     */
+    private static java.lang.ref.WeakReference<Game> shownGame = new java.lang.ref.WeakReference<>(null);
+
+    /**
+     * The completions shown, those of another game dropped.
+     *
+     * @param game The game shown.
+     * @return The set (EDT).
+     */
+    private static java.util.Set<String> shownCompletions(Game game) {
+        if (shownGame.get() != game) {
+            shownCompletions.clear();
+            shownGame = new java.lang.ref.WeakReference<>(game);
+        }
+        return shownCompletions;
+    }
 
     /** Counts the pointer's moves and presses: a {@link #hoverLater} made before one is void. */
     private int hoverSeq = 0;
@@ -642,7 +678,20 @@ final class ClassicColonyPanel extends JPanel {
                     if (!leaving) close();
                 }
             });
+        // The manual's key card (colony display): "Buy the current
+        // construction project . . . B" (the review of part V, fidelity
+        // L6; I: KAUFEN's look on the key is not seen).
+        im.put(KeyStroke.getKeyStroke("B"), "classic_buyBuild");
+        am.put("classic_buyBuild", new AbstractAction() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    if (!leaving && !asking) buy();
+                }
+            });
     }
+
+    /** Whether a box of this screen is open ({@link #ask}). */
+    private boolean asking = false;
 
     /**
      * The original's exit button is the red "E" at the bottom right of the
@@ -863,11 +912,8 @@ final class ClassicColonyPanel extends JPanel {
             this.notice.clear();
         }
         // The ÄNDERN blink of a completion runs until the next press
-        // (V clip 020 visit 10; I: the cursor then on the selected figure).
-        if (this.completionBlink) {
-            this.completionBlink = false;
-            if (tileCursor == CURSOR_CHANGE) tileCursor = CURSOR_OFF_TILES;
-        }
+        // (V clip 020 visit 10).
+        this.completionBlink = false;
         // The right panel's mode buttons (M4.7): the pressed look at once,
         // the panel at the release.
         final int button = ClassicColonyLayout.modeAt(vx, vy);
@@ -1443,9 +1489,11 @@ final class ClassicColonyPanel extends JPanel {
         this.gesture.cancel();
         // No blink while a box is open (dago §0.6, dago-colony2 §3.4).
         this.blink.stop();
+        this.asking = true;
         try {
             return this.units.ask(r);
         } finally {
+            this.asking = false;
             if (isDisplayable()) {
                 this.blinkOff = false;
                 this.blink.arm();
@@ -1808,7 +1856,7 @@ final class ClassicColonyPanel extends JPanel {
         return this.freeColClient.getInGameController();
     }
 
-    /** Repaint after a model change (a build-queue pick, production, gold). */
+    /** Repaint after a model change (a build-list pick, production, gold). */
     void refresh() {
         repaint();
     }
@@ -1831,14 +1879,17 @@ final class ClassicColonyPanel extends JPanel {
     private boolean pressGoods(int vx, int vy) {
         final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
         final int k = ClassicColonyLayout.holdAt(vx, vy);
-        if (k >= 0 && this.port != null && this.port.carrier != null
-            && k < this.port.holds.size()) {
-            final ClassicColonyPort.Hold h = this.port.holds.get(k);
+        // The holds as the screen shows them: until a transfer's redraw the
+        // old ones (the review of part V, play L2: a quick press on «hold
+        // 1» took what had closed up into it).
+        final ClassicColonyPort.Model shown = portShown();
+        if (k >= 0 && shown != null && shown.carrier != null && k < shown.holds.size()) {
+            final ClassicColonyPort.Hold h = shown.holds.get(k);
             if (h.goods == null || h.amount <= 0) return false;
             this.goodsType = h.goods;
             this.goodsHold = k;
             this.goodsHoldAmount = h.amount;
-            this.goodsCarrier = this.port.carrier;
+            this.goodsCarrier = shown.carrier;
             hideHover();
             holdNotice(ClassicColonyGoods.dragNotice(t, false, h.goods));
             return true;
@@ -2133,9 +2184,8 @@ final class ClassicColonyPanel extends JPanel {
         boolean done = true;
         if (!row.done && !(row.type != null && row.type == now)
             && !(row.type == null && now == null && ClassicColonyBuild.completed(this.colony) == null)) {
-            final List<net.sf.freecol.common.model.BuildableType> queue = new ArrayList<>();
-            if (row.type != null) queue.add(row.type);
-            done = igc().setBuildQueue(this.colony, queue);
+            done = igc().setBuildQueue(this.colony,
+                ClassicColonyBuild.picked(this.colony.getBuildQueue(), row.type));
         }
         ClassicFrameRecorder.event("colony-build", this.colony.getName() + " "
             + ((row.type == null) ? "none" : row.type.getSuffix()) + ((row.done) ? " done" : "")
@@ -2153,6 +2203,23 @@ final class ClassicColonyPanel extends JPanel {
      * there): nothing (I).
      */
     void buy() {
+        // FreeCol's option off (never in the shipped rules): KAUFEN does
+        // nothing, as the server would refuse it (the review of part V,
+        // regression L11).
+        final net.sf.freecol.common.model.Specification spec = this.colony.getSpecification();
+        if (spec != null && spec.hasOption(net.sf.freecol.common.option.GameOptions.PAY_FOR_BUILDING,
+                                           net.sf.freecol.common.option.BooleanOption.class)
+            && !spec.getBoolean(net.sf.freecol.common.option.GameOptions.PAY_FOR_BUILDING)) {
+            ClassicFrameRecorder.event("colony-buy", this.colony.getName() + " disabled");
+            return;
+        }
+        // A missing good boycotted: nothing (I; play L1).
+        final GoodsType boycott = ClassicColonyBuild.boycotted(this.colony);
+        if (boycott != null) {
+            ClassicFrameRecorder.event("colony-buy", this.colony.getName() + " boycott "
+                + boycott.getSuffix());
+            return;
+        }
         final int price = ClassicColonyBuild.price(this.colony);
         final Player owner = this.colony.getOwner();
         final int gold = (owner == null) ? 0 : owner.getGold();
@@ -2247,25 +2314,46 @@ final class ClassicColonyPanel extends JPanel {
      * (the new building's slot as it was, {@link ClassicColonyBuildings#before})
      * shown over it until the dissolve reveals it, 19 frames after the
      * screen is complete, in 55 frames (V clip 020 #57671 -&gt;
-     * #57690-#57744).  Only the building's slot dissolves; the Rathaus'
-     * bells and the band's row change at once (I: an Unsichtbarkeit).
+     * #57690-#57744).  The building's slot, the Rathaus' bells and the
+     * band's production row dissolve together (V #57671 -&gt; #57768: x
+     * 88-167, y 15-41 and x 3-116, y 163-174 in the same 55 frames): the
+     * old picture is the new one with the slot as it was
+     * ({@link ClassicColonyBuildings#before}) and the rows of a copy of the
+     * colony without the new building ({@link Colony#copyColonyBefore});
+     * the changed pixels' bounds in the building area and in the left
+     * panel are the rectangles (a building that changes no row, the
+     * Lagerhaus #105689, its slot alone).
      *
      * @param built The building finished.
      */
     void startDissolve(net.sf.freecol.common.model.BuildingType built) {
         final int[] to = pixelsOf(canvas());
         this.paintBefore = built;
+        Colony before, plain;
+        try {
+            before = this.colony.copyColonyBefore(built);
+            plain = this.colony.copyColony();
+        } catch (RuntimeException e) {
+            before = plain = null;   // the slot alone (the copies are the rows' only source)
+        }
+        this.beforeColony = (plain == null) ? null : before;
+        this.plainColony = (before == null) ? null : plain;
         final int[] from;
         try {
             from = pixelsOf(canvas());
         } finally {
             this.paintBefore = null;
+            this.beforeColony = this.plainColony = null;
         }
         // Paint the new picture again, so the hit places are the new area's.
         canvas();
-        final Rectangle r = diffBounds(from, to);
-        if (r == null) return;
-        this.dissolve = new ClassicColonyDissolve(from, to, java.util.Collections.singletonList(r));
+        final List<Rectangle> rs = new ArrayList<>();
+        for (Rectangle region : DISSOLVE_REGIONS) {
+            final Rectangle r = diffBounds(from, to, region);
+            if (r != null) rs.add(r);
+        }
+        if (rs.isEmpty()) return;
+        this.dissolve = new ClassicColonyDissolve(from, to, rs);
         this.dissolveFrom = from;
         this.dissolveStart = this.clock.now();
         ClassicFrameRecorder.event("colony-dissolve", this.colony.getName() + " "
@@ -2294,10 +2382,32 @@ final class ClassicColonyPanel extends JPanel {
      * @return The bounds, or null when they are equal.
      */
     static Rectangle diffBounds(int[] a, int[] b) {
+        return diffBounds(a, b, new Rectangle(0, 0, VW, VH));
+    }
+
+    /**
+     * The regions a completion's old and new picture are compared in: the
+     * building area (the slot, the Rathaus' bells) and the left panel (the
+     * band's production row).
+     */
+    static final List<Rectangle> DISSOLVE_REGIONS = java.util.Collections.unmodifiableList(
+        java.util.Arrays.asList(ClassicColonyLayout.BUILDING_AREA,
+                                ClassicColonyLayout.LEFT_PANEL));
+
+    /**
+     * The bounds of the pixels two pictures differ in inside a region.
+     *
+     * @param a A picture's pixels.
+     * @param b The other's.
+     * @param in The region.
+     * @return The bounds, or null when they are equal there.
+     */
+    static Rectangle diffBounds(int[] a, int[] b, Rectangle in) {
         int x0 = VW, y0 = VH, x1 = -1, y1 = -1;
         for (int i = 0; i < a.length && i < b.length; i++) {
             if (a[i] == b[i]) continue;
             final int x = i % VW, y = i / VW;
+            if (!in.contains(x, y)) continue;
             x0 = Math.min(x0, x);
             y0 = Math.min(y0, y);
             x1 = Math.max(x1, x);
@@ -2306,16 +2416,47 @@ final class ClassicColonyPanel extends JPanel {
         return (x1 < 0) ? null : new Rectangle(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
     }
 
-    /** The dissolve is over: the new picture alone. */
+    /**
+     * The dissolve is over: the new picture alone.  The blink, held in its
+     * on half meanwhile ({@link #blinkOff}), starts again: its first toggle
+     * {@link ClassicColonyLayout#BLINK_AFTER_DISSOLVE_FRAMES} after the
+     * dissolve's last frame (the review of part V, fidelity M2).
+     */
     private void stopDissolve() {
+        final boolean over = this.dissolve != null && this.dissolveAt < 0.0;
         this.dissolve = null;
         this.dissolveFrom = null;
         if (this.dissolveTimer != null) this.dissolveTimer.stop();
+        if (over && this.blink.isArmed() && !this.gesture.dragging()
+            && this.pressedUnit == null && this.goodsType == null) {
+            this.blinkOff = false;
+            this.blink.armFrom(blinkAfterDissolve(this.dissolveStart));
+        }
+    }
+
+    /**
+     * The blink's phase start after a dissolve (its first toggle, OFF, one
+     * half-period later).
+     *
+     * @param dissolveStart When the screen was complete (clock units).
+     * @return The phase's start.
+     */
+    static long blinkAfterDissolve(long dissolveStart) {
+        return dissolveStart + Math.round((ClassicColonyDissolve.START_MS
+            + ClassicColonyLayout.frames(ClassicColonyLayout.DISSOLVE_FRAMES - 1
+                                         + ClassicColonyLayout.BLINK_AFTER_DISSOLVE_FRAMES)
+            - ClassicBlink.HALF_PERIOD_MS) * 1_000_000.0);
     }
 
     /** @return The running dissolve (tests), or null. */
     ClassicColonyDissolve dissolve() {
         return this.dissolve;
+    }
+
+    /** End the dissolve as the paint after its last frame does (tests). */
+    void finishDissolve() {
+        this.dissolveAt = -1.0;
+        if (this.dissolve != null) stopDissolve();
     }
 
     /** A test's time into the dissolve (ms since the screen was complete), or -1. */
@@ -2391,8 +2532,9 @@ final class ClassicColonyPanel extends JPanel {
      */
     private GoodsType goodsAt(int vx, int vy) {
         final int k = ClassicColonyLayout.holdAt(vx, vy);
-        if (k >= 0 && this.port != null && this.port.carrier != null && k < this.port.holds.size()) {
-            final ClassicColonyPort.Hold h = this.port.holds.get(k);
+        final ClassicColonyPort.Model shown = portShown();
+        if (k >= 0 && shown != null && shown.carrier != null && k < shown.holds.size()) {
+            final ClassicColonyPort.Hold h = shown.holds.get(k);
             return (h.goods != null && h.amount > 0) ? h.goods : null;
         }
         final int box = (vx < WARE_W) ? ClassicColonyLayout.warehouseBoxAt(vx, vy) : -1;
@@ -2495,6 +2637,10 @@ final class ClassicColonyPanel extends JPanel {
      */
     boolean blinkOff() {
         this.blinkUsed = true;
+        // Nothing blinks while a completion's dissolve is due or runs: the
+        // cursor stays, ÄNDERN normal (V clip 020 #57671-#57767,
+        // #105689-#105805; the review of part V, fidelity M2).
+        if (this.dissolve != null) return false;
         return this.blinkOff;
     }
 
@@ -2803,6 +2949,14 @@ final class ClassicColonyPanel extends JPanel {
         // it was (M4.10 target 4).
         if (this.paintBefore != null) {
             this.area = ClassicColonyBuildings.before(this.area, this.paintBefore);
+            // The rows (the Rathaus' bells) as the colony made them without it.
+            if (this.beforeColony != null && this.plainColony != null) {
+                this.area = ClassicColonyBuildings.withRows(this.area,
+                    ClassicColonyBuildings.model(this.beforeColony, text, this.buildingArt,
+                        this.founding, new ArrayList<>(), new ArrayList<>()),
+                    ClassicColonyBuildings.model(this.plainColony, text, this.buildingArt,
+                        this.founding, new ArrayList<>(), new ArrayList<>()));
+            }
         }
         this.buildingsDrawn = this.area.toString();
         final Graphics2D g = (Graphics2D) g0.create();
@@ -3133,8 +3287,14 @@ final class ClassicColonyPanel extends JPanel {
      * only there; a wagon train stands in the port since M4.6.
      */
     private void paintPopulation(Graphics2D g) {
-        final ClassicColonyBand.Model m = ClassicColonyBand.model(this.colony,
-                                                                  this.buildingArt);
+        ClassicColonyBand.Model m = ClassicColonyBand.model(this.colony, this.buildingArt);
+        // A completion's old picture: the production row as the colony
+        // made it without the new building (M4.10 target 4).
+        if (this.beforeColony != null && this.plainColony != null) {
+            m = ClassicColonyBand.before(m,
+                ClassicColonyBand.model(this.beforeColony, this.buildingArt),
+                ClassicColonyBand.model(this.plainColony, this.buildingArt));
+        }
         this.band = (this.bandAdjust == null) ? m : this.bandAdjust.apply(m);
         final Rectangle left = ClassicColonyLayout.LEFT_PANEL;
         {
@@ -3376,8 +3536,17 @@ final class ClassicColonyPanel extends JPanel {
                 && cursor != ClassicColonyRight.Cursor.LIST
                 && this.mode == ClassicColonyRight.Mode.HAMMER);
         boolean on = blinks && !blinkOff();
-        // KAUFEN or ÄNDERN held: inverted (dago-colony2 #2349).
         ClassicColonyRight.Cursor drawn = cursor;
+        // A completion's ÄNDERN in anti-phase with the white cursor, which
+        // stays on the selected colonist's tile or figure: inverted in the
+        // cursor's off half (V clip 020 #57768 -&gt; #57791, #105806; the
+        // review of part V, fidelity M2).
+        if (this.completionBlink && cursor == ClassicColonyRight.Cursor.NONE
+            && this.mode == ClassicColonyRight.Mode.HAMMER) {
+            drawn = ClassicColonyRight.Cursor.CHANGE;
+            on = blinkOff();
+        }
+        // KAUFEN or ÄNDERN held: inverted (dago-colony2 #2349).
         if (this.pressedButton != 0) {
             drawn = (this.pressedButton == CURSOR_BUY) ? ClassicColonyRight.Cursor.BUY
                 : ClassicColonyRight.Cursor.CHANGE;
@@ -3411,8 +3580,9 @@ final class ClassicColonyPanel extends JPanel {
      * How the screen was opened (M4.7 target 6, spec §0.1 decision 8): the
      * right panel's mode from it and the last visit's
      * ({@link ClassicColonyRight#modeAtOpening}); after a building's @BUILT
-     * zoom the white cursor on ÄNDERN (V ×3; the turn boxes' zoom rows come
-     * with M4.11).
+     * zoom the hammer panel, the dissolve and ÄNDERN blinking against the
+     * white cursor, which stays where it stood (V ×3; the turn boxes' zoom
+     * rows come with M4.11).
      *
      * @param how How it was opened.
      */
@@ -3424,18 +3594,21 @@ final class ClassicColonyPanel extends JPanel {
         final net.sf.freecol.common.model.BuildingType done
             = ClassicColonyBuild.completed(this.colony);
         final String key = this.colony.getId() + "@" + this.colony.getClassicBuiltTurn();
+        final java.util.Set<String> shown = shownCompletions(this.colony.getGame());
         if (how == ClassicColonyRight.Opening.OTHER
             && ClassicColonyBuild.completedThisTurn(this.colony)
-            && !shownCompletions.contains(key)) {
+            && !shown.contains(key)) {
             how = ClassicColonyRight.Opening.BUILT_BUILDING;
         }
         this.mode = this.buttonMode = ClassicColonyRight.modeAtOpening(how, lastMode);
         lastMode = this.mode;
         if (how == ClassicColonyRight.Opening.BUILT_BUILDING) {
-            tileCursor = CURSOR_CHANGE;
+            // The white cursor stays where it stands (V #57671: on the
+            // selected colonist's tile, #105689: on his figure); ÄNDERN
+            // blinks against it once the dissolve is over (paintRight).
             this.completionBlink = true;
             if (done != null) {
-                shownCompletions.add(key);
+                shown.add(key);
                 startDissolve(done);
             }
         }

@@ -367,6 +367,9 @@ public class ServerColony extends Colony implements TurnTaker {
 
         for (Tile t : owned) t.cacheUnseen(newOwner);//+til
         changeOwner(newOwner);//-vis(both),-til
+        // The old owner's completed build is not the new owner's (levi
+        // rule R4; the review of part V, regression L8).
+        setClassicBuilt(null, -1);
 
         List<Unit> units = getAllUnitsList();
         for (Unit u : units) {//-vis(both)
@@ -653,7 +656,13 @@ public class ServerColony extends Colony implements TurnTaker {
         // queue.  Thus, if hammers are being produced it is worth
         // warning about, but not if producing tools.
         // Not while the original's completed build is the current one
-        // (levi rule R4): the player has not chosen anything else yet.
+        // (levi rule R4): the player has not chosen anything else yet.  A
+        // record whose building the colony no longer has (damaged by a
+        // raid, downgraded) is dropped first, so the warning comes again
+        // (the review of part V, play L6, regression L8).
+        if (getClassicBuilt() != null && !hasClassicBuilt()) {
+            setClassicBuilt(null, -1);
+        }
         if (any(queues, BuildQueue::isEmpty)
             && !(getClassicBuilt() != null && originalBuildCompletion())
             && any(spec.getGoodsTypeList(), g ->

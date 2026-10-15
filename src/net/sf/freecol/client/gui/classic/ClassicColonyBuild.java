@@ -323,6 +323,30 @@ final class ClassicColonyBuild {
     }
 
     /**
+     * The build queue after a pick in the list: the picked build replaces
+     * the current one, the rest of an old queue (FreeCol's build-queue
+     * screen, before part V) stays behind it (a building picked not twice; the review
+     * of part V, play L4); «(Keine Produktion)» empties it (nothing is
+     * built, as the player asked).
+     *
+     * @param queue The queue now.
+     * @param pick The build picked, or null for «(Keine Produktion)».
+     * @return The new queue.
+     */
+    static List<BuildableType> picked(List<BuildableType> queue, BuildableType pick) {
+        final List<BuildableType> out = new ArrayList<>();
+        if (pick == null) return out;
+        out.add(pick);
+        if (queue != null) {
+            for (int i = 1; i < queue.size(); i++) {
+                final BuildableType b = queue.get(i);
+                if (b != null && !(b == pick && b instanceof BuildingType)) out.add(b);
+            }
+        }
+        return out;
+    }
+
+    /**
      * @param rows The rows.
      * @return The bar's row: the current build's, else row 0.
      */
@@ -369,17 +393,42 @@ final class ClassicColonyBuild {
      * What KAUFEN costs now: the colony's price for the missing goods of
      * its build (levi rule R1 inside {@code Colony.priceGoodsForBuilding}),
      * or -1 when there is nothing to buy (no build, the completed building,
-     * everything there).
+     * everything there) or a missing good cannot be bought in Europe (a
+     * boycott: the review of part V, play L1; the server refuses it too;
+     * I: what the original does is not seen).
      *
      * @param colony The colony.
      * @return The price, or -1.
      */
     static int price(Colony colony) {
         final BuildableType b = colony.getCurrentlyBuilding();
-        if (b == null) return -1;
+        if (b == null || boycotted(colony) != null) return -1;
         final int p = colony.getPriceForBuilding(b);
         return (p <= 0) ? -1 : p;
     }
+
+    /**
+     * A missing good of the colony's build that cannot be bought in Europe
+     * now (Parliament's boycott, {@code Player.canTrade}).
+     *
+     * @param colony The colony.
+     * @return The good, or null.
+     */
+    static GoodsType boycotted(Colony colony) {
+        final BuildableType b = colony.getCurrentlyBuilding();
+        final net.sf.freecol.common.model.Player owner = colony.getOwner();
+        if (b == null || owner == null) return null;
+        for (AbstractGoods ag : colony.getRequiredGoods(b)) {
+            final GoodsType gt = ag.getType();
+            if (gt.isStorable() && !owner.canTrade(gt, net.sf.freecol.common.model.Market.Access.EUROPE)) {
+                return gt;
+            }
+        }
+        return null;
+    }
+
+    /** KAUFEN's box comes 8 frames after the release (V dago-colony2 #12053 -&gt; #12061, #12904 -&gt; #12912). */
+    static final int BUY_BOX_FRAMES = 8;
 
     /**
      * KAUFEN's box (class comment): {@code @BUYME0} with the gold short,
@@ -402,7 +451,8 @@ final class ClassicColonyBuild {
         final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText(section,
             (t == null) ? null : t.message(section), values);
         if (b == null) return null;
-        b.portrait(ClassicAdvisorBox.Portrait.COLONIST).stopgap(buildName, null);
+        b.portrait(ClassicAdvisorBox.Portrait.COLONIST).stopgap(buildName, null)
+            .openDelay(ClassicColonyLayout.frames(BUY_BOX_FRAMES));
         // Escape is «Na, dann nicht.», never the purchase (as part O's rule).
         if (!shortOf) b.cancelRow(BUY_NO);
         return b.build();

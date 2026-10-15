@@ -218,6 +218,24 @@ final class ClassicBlink {
     }
 
     /**
+     * Start a new phase that began, or begins, at a given time: ON, toggle
+     * {@code n} due at {@code t0 + n * H}; toggles already gone by are not
+     * posted (the colony screen's blink after a completion's dissolve,
+     * build spec M4.10 target 5).  No panel re-basing.
+     *
+     * @param start The phase's start ({@link ClassicSlide.Clock#now} units).
+     */
+    synchronized void armFrom(long start) {
+        if (this.closed) return;
+        this.t0 = start;
+        this.armedAt = this.clock.now();
+        this.armed = true;
+        this.awaitPanel = false;
+        newGeneration();
+        startThread();
+    }
+
+    /**
      * The panel was painted: if this is the refresh of the current arm,
      * the phase starts now instead.
      *

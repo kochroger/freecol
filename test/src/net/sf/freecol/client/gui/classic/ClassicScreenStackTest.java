@@ -608,6 +608,13 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         flush();
         final ClassicColonyPanel cp2 = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
         if (boxes) {
+            // Another colony's list while this one is up: nothing (the
+            // review of part V, regression L9).
+            final Colony other = createStandardColony(1, 10, 8);
+            gui.showBuildQueuePanel(other);
+            flush();
+            final ClassicAdvisorLayer layer = edt(gui::colonyBoxLayer);
+            assertFalse("no list for another colony", edt(layer::isBusy));
             gui.showBuildQueuePanel(colony);
             awaitBusy(edt(gui::colonyBoxLayer));
             assertSame("the colony stays the screen", cp2, edt(gui::hostedScreen));

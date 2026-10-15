@@ -33,7 +33,7 @@ import javax.swing.SwingUtilities;
 
 /**
  * The classic screens hosted in the main window (master plan M4.0, build
- * spec {@code prep2/M40-mainwindow.md}): the colony screen, its build list
+ * spec {@code prep2/M40-mainwindow.md}): the colony screen
  * and the Europe screen replace the map in the one 320x200 picture, as in
  * the original (V clip 020 #2260, #24106 -&gt; #24111, #28207 -&gt;
  * #28238; the manual l.83: "you are immediately shown the colony
@@ -52,8 +52,9 @@ import javax.swing.SwingUtilities;
  * ({@link ClassicHudOverlay#canvas}), so its pixels lie on the HUD's grid
  * and on the recorder's sampling grid.
  *
- * <p>A screen may belong over another one (the build list over its
- * colony): its pop goes with its parent's.  A screen popped from under
+ * <p>A screen may belong over another one (none since part V: until then
+ * the build list over its colony, now a box on it): its pop goes with its
+ * parent's.  A screen popped from under
  * another one (the older screen when a newer one replaced it, decision H5)
  * goes without any visible change; when the top goes, the next one down,
  * or the game parts, show in the same paint (V #11159: 1-2 frames, one torn
@@ -68,7 +69,14 @@ final class ClassicScreenStack {
 
     /** What a hosted screen is (the recorder's names). */
     enum Kind {
-        COLONY("colony"), BUILD_LIST("buildlist"), EUROPE("europe");
+        COLONY("colony"),
+        /**
+         * Unused by the game since part V (the build list is a wood box on
+         * the colony screen, {@code ClassicColonyBuild}); kept for the
+         * stack's screen-over-a-screen tests.
+         */
+        BUILD_LIST("buildlist"),
+        EUROPE("europe");
 
         /** The recorder's name. */
         final String id;
@@ -84,13 +92,13 @@ final class ClassicScreenStack {
         final Kind kind;
         final JComponent screen;
 
-        /** The wood boxes over it, or null (the build list: its colony's). */
+        /** The wood boxes over it, or null (a screen over another: its parent's). */
         final ClassicAdvisorLayer boxes;
 
         /** The colony's or Europe's name (for the recorder). */
         final String name;
 
-        /** The screen it belongs over (the build list's colony), or null. */
+        /** The screen it belongs over, or null. */
         final JComponent parent;
 
         Slot(Kind kind, JComponent screen, ClassicAdvisorLayer boxes,
@@ -171,7 +179,7 @@ final class ClassicScreenStack {
 
     /**
      * @return The box layer over the top screen: its own, else the
-     *     nearest one under it (the build list shows its colony's boxes);
+     *     nearest one under it (a screen over another shows its parent's);
      *     null without a screen or boxes.
      */
     ClassicAdvisorLayer topBoxes() {
@@ -312,7 +320,7 @@ final class ClassicScreenStack {
                 }
             }
         }
-        // The highest first: a build list goes before its colony.
+        // The highest first: a screen goes before the one it belongs over.
         for (int i = going.size() - 1; i >= 0; i--) remove(going.get(i), why);
         final Slot after = top();
         if (after != before) {

@@ -901,6 +901,47 @@ final class ClassicColonyBuildings {
         return (changed) ? new Model(out, m.layout) : m;
     }
 
+    /**
+     * The building area with another state's production rows (the
+     * completion dissolve's old picture, M4.10 target 4: the Rathaus' 4
+     * bells before the Verlag's 6, V clip 020 #57671 -&gt; #57768): a slot
+     * that shows the same sprite takes the copy's row where the copy
+     * without the new building makes another row than the copy with it;
+     * the sprites, labels, figures and every other row stay.
+     *
+     * @param m The building area to show.
+     * @param before The building area of a copy of the colony without the
+     *     new building.
+     * @param plain The building area of a copy with it.
+     * @return The area with those rows, or {@code m} when nothing changes.
+     */
+    static Model withRows(Model m, Model before, Model plain) {
+        if (m == null || before == null || plain == null) return m;
+        final List<Placed> out = new ArrayList<>(m.slots.size());
+        boolean changed = false;
+        for (Placed p : m.slots) {
+            Placed q = p;
+            final Placed o = (p.placeholder) ? null : sameSlot(before, p);
+            final Placed w = (o == null) ? null : sameSlot(plain, p);
+            if (o != null && w != null
+                && (!String.valueOf(o.row).equals(String.valueOf(w.row)) || o.rowIcon != w.rowIcon)) {
+                q = new Placed(p.slot, p.frame, false, p.label, p.labelY, p.target,
+                               p.expansion, o.row, o.rowIcon, p.figures);
+            }
+            changed |= q != p;
+            out.add(q);
+        }
+        return (changed) ? new Model(out, m.layout) : m;
+    }
+
+    /** @return The slot of an area showing the same sprite as {@code p} there, or null. */
+    private static Placed sameSlot(Model m, Placed p) {
+        for (Placed o : m.slots) {
+            if (!o.placeholder && o.slot.id.equals(p.slot.id) && o.frame == p.frame) return o;
+        }
+        return null;
+    }
+
     /** A slot showing its class's placeholder: no building, no workers, no row. */
     private static Placed placeholderOf(Placed p) {
         return new Placed(p.slot, p.slot.cls.placeholder, true, p.label, p.labelY, null,

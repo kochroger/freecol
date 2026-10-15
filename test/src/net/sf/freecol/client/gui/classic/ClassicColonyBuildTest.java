@@ -307,6 +307,81 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         System.out.println(getName() + ": @BUYME0 #94078 " + got[0] + "/" + got[1]
                            + " arrow " + got[2]);
         assertEquals(0, got[1]);
+        // @BUYME1 (the review of part V, fidelity L3): dago-colony2 #12061
+        // «Artillerie» 1248 of 115103, box (77,108,166,46), the bar on
+        // «Na, dann nicht.»; playthrough-2 #37082 «Sägewerk» 364 of 534.
+        final Object[][] ones = {
+            { "dago-colony2", 12061, "Artillerie", 1248, 115103 },
+            { "playthrough-2", 37082, "Sägewerk", 364, 534 },
+        };
+        for (Object[] o : ones) {
+            final java.io.File f = ClassicTerrainGoldenTest.frameFile(
+                new java.io.File(gold.recordings, (String) o[0]), (Integer) o[1]);
+            if (f == null) {
+                System.out.println(getName() + ": " + o[0] + " #" + o[1] + " skipped, no frame");
+                continue;
+            }
+            final ClassicAdvisorBox.Request r1 = ClassicColonyBuild.buyRequest(t, (String) o[2],
+                (Integer) o[3], (Integer) o[4]);
+            assertEquals("BUYME1", r1.id);
+            final ClassicAdvisorBox.Layout l1 = ClassicAdvisorBox.layout(r1, tiny,
+                gold.pack.image(ClassicPackFiles.ssKey(r1.portrait.sprite)));
+            if ("dago-colony2".equals(o[0])) {
+                assertEquals(new Rectangle(77, 108, 166, 46), l1.box);
+            }
+            final int[] g1 = ClassicColonyMovesTest.overFrame(gold, javax.imageio.ImageIO.read(f),
+                l1, 0, gold.pack.image(ClassicMenuBar.WOOD_KEY), tiny);
+            System.out.println(getName() + ": @BUYME1 " + o[0] + " #" + o[1] + " " + g1[0] + "/"
+                               + g1[1] + " arrow " + g1[2]);
+            assertEquals(o[0] + " #" + o[1], 0, g1[1]);
+        }
+    }
+
+    /**
+     * KAUFEN's look and its box's time (the review of part V, fidelity L1,
+     * L2; V dago-colony2 K1, K2): pressed, the box inverted (background 54
+     * -&gt; 0, x 216-244, y 138-146, #12044 and #12890) and normal again at
+     * the release (#12053); the box 8 frames after the release (#12061,
+     * #12912).
+     */
+    public void testKaufenPressedAndItsTime() throws Exception {
+        final Scene s = scene(true);
+        final Specification spec = spec();
+        s.colony.setBuildQueue(List.<BuildableType>of(building(spec, "printingPress")));
+        s.colony.addGoods(goods(spec, "tools"), 20);
+        s.dutch.setGold(10000);
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        ClassicColonyServerScene.paint(s.panel);
+        final int[] normal = ClassicColonyPanel.pixelsOf(s.panel.canvas());
+        ClassicColonyServerScene.mouse(s.panel, java.awt.event.MouseEvent.MOUSE_PRESSED, 230, 142,
+                                       false);
+        final int[] pressed = ClassicColonyPanel.pixelsOf(s.panel.canvas());
+        final Rectangle buy = ClassicColonyLayout.BUY_BOX;
+        assertFalse("inverted while held", same(normal, pressed, buy));
+        s.boxes.answers.add(0);
+        ClassicColonyServerScene.mouse(s.panel, java.awt.event.MouseEvent.MOUSE_RELEASED, 230, 142,
+                                       false);
+        assertTrue("normal again", same(normal, ClassicColonyPanel.pixelsOf(s.panel.canvas()), buy));
+        if (t != null) {
+            assertEquals("BUYME1", s.boxes.last().id);
+            assertEquals(ClassicColonyLayout.frames(8), s.boxes.last().openDelayMs, 1e-9);
+            assertEquals(ClassicColonyLayout.frames(8), ClassicColonyBuild.buyRequest(t, "x", 5, 1)
+                         .openDelayMs, 1e-9);
+        }
+        // Against the clip's press frames (the arrow left out).
+        final ClassicColonyGolden gold = ClassicColonyGolden.open(getName());
+        if (gold == null) return;
+        for (int n : new int[] { 12044, 12890 }) {
+            final java.io.File f = ClassicTerrainGoldenTest.frameFile(
+                new java.io.File(gold.recordings, "dago-colony2"), n);
+            if (f == null) continue;
+            final BufferedImage frame = javax.imageio.ImageIO.read(f);
+            final ClassicColonyGolden.Diff d = ClassicColonyGolden.compare("KAUFEN #" + n, pressed,
+                ClassicColonyGolden.pixels(frame), new Rectangle(216, 138, 29, 9),
+                gold.pointer(frame), null);
+            System.out.println(getName() + ": " + d);
+            assertEquals(d.toString(), 0, d.differing);
+        }
     }
 
 
@@ -322,7 +397,30 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         ClassicColonyPanel panel;
     }
 
+    /** A clock the test moves (nanoseconds). */
+    private static final class FakeClock implements ClassicSlide.Clock {
+        long now = 1_000_000_000L;
+
+        @Override
+        public long now() {
+            return this.now;
+        }
+
+        @Override
+        public void waitUntil(long due) {
+            if (due > this.now) this.now = due;
+        }
+
+        void ms(double ms) {
+            this.now += Math.round(ms * 1_000_000.0);
+        }
+    }
+
     private Scene scene(boolean original) throws Exception {
+        return scene(original, ClassicSlide.SYSTEM);
+    }
+
+    private Scene scene(boolean original, ClassicSlide.Clock clock) throws Exception {
         spec().setBoolean(GameOptions.ORIGINAL_BUILD_PRICE, original);
         spec().setBoolean(GameOptions.ORIGINAL_BUILD_COMPLETION, original);
         final Scene s = new Scene();
@@ -335,8 +433,7 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         s.boxes = new ClassicColonyServerScene.Boxes();
         ClassicColonyPanel.forgetFigureOrders();
         s.panel = new ClassicColonyPanel(ClassicColonyServerScene.client(s.game, s.dutch, s.api),
-            ClassicColonyBuildingsTest.library(), s.colony, null, s.boxes, ClassicSlide.SYSTEM,
-            false);
+            ClassicColonyBuildingsTest.library(), s.colony, null, s.boxes, clock, false);
         s.panel.setSize(960, 600);
         s.panel.setMode(ClassicColonyRight.Mode.HAMMER);
         ClassicColonyServerScene.paint(s.panel);
@@ -577,9 +674,16 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
      * completion's turn dissolves the new building in (its slot, from 19
      * frames after the screen is complete, in 55 frames) and blinks ÄNDERN
      * in hammer mode; a press ends the blink; a second opening neither.
+     * The blink (the review of part V, fidelity M2; V clip 020 #57671 -&gt;
+     * #57768 -&gt; #57791): the white cursor stays on the selected
+     * colonist's tile; while the dissolve is due or runs nothing blinks
+     * (cursor shown, ÄNDERN normal, whatever the blink's half); after it
+     * the blink starts again, its first toggle 24 frames after the
+     * dissolve's last frame, ÄNDERN inverted in the cursor's off half.
      */
     public void testTheDissolveAndTheBlink() throws Exception {
-        final Scene s = scene(true);
+        final FakeClock clock = new FakeClock();
+        final Scene s = scene(true, clock);
         final Specification spec = spec();
         final BuildingType press = building(spec, "printingPress");
         s.colony.setBuildQueue(List.<BuildableType>of(press));
@@ -587,27 +691,66 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         s.colony.addGoods(goods(spec, "tools"), 20);
         newTurn(s);
         final ClassicColonyPanel p = s.panel;
+        // The cursor on a worked tile (the colonist selected last).
+        int tile = -1;
+        for (int i = 0; i < ClassicColonyLayout.TILE_COUNT; i++) {
+            final ClassicColonyTiles.Cell c = p.tiles().cell(i);
+            if (i != ClassicColonyLayout.CENTRE_TILE && c != null && c.worker != null) tile = i;
+        }
+        assertTrue("a worked tile", tile >= 0);
+        ClassicColonyPanel.setTileCursor(tile);
+        p.blink().arm();   // as the shown screen's addNotify
+        final long complete = clock.now();
         p.opened(ClassicColonyRight.Opening.OTHER);
         assertEquals(ClassicColonyRight.Mode.HAMMER, p.mode());
-        assertEquals(ClassicColonyPanel.CURSOR_CHANGE, ClassicColonyPanel.tileCursor());
+        assertEquals("the cursor stays", tile, ClassicColonyPanel.tileCursor());
         assertTrue(p.completionBlink());
         final ClassicColonyDissolve d = p.dissolve();
         assertNotNull("the dissolve", d);
         assertTrue(d.changed() > 100);
-        final Rectangle r = d.rects().get(0);
-        // Inside the Verlag's slot.
+        // The Verlag's slot is in it.
         Rectangle slot = null;
         for (ClassicColonyBuildings.Placed pl : p.area().slots) {
             if (pl.frame == 19) slot = pl.slot.bounds();
         }
         assertNotNull(slot);
-        assertTrue(r + " in " + slot, slot.contains(r));
+        boolean inSlot = false;
+        for (Rectangle r : d.rects()) inSlot |= r.intersects(slot);
+        assertTrue(d.describe() + " " + slot, inSlot);
         assertEquals(d.changed(), d.pending(ClassicColonyDissolve.START_MS - 1).length);
         assertEquals(0, d.pending(ClassicColonyDissolve.START_MS
                                   + ClassicColonyLayout.frames(54) + 0.5).length);
+        // During the dissolve: the off half shows the on half's picture.
+        final Rectangle change = ClassicColonyLayout.CHANGE_BOX;
+        final Rectangle cell = p.tiles().cell(tile).bounds();
+        clock.ms(ClassicColonyDissolve.START_MS + ClassicColonyLayout.frames(20));
+        p.blinkPhase(false);
+        final int[] on = ClassicColonyPanel.pixelsOf(p.canvas());
+        p.blinkPhase(true);
+        final int[] offDuring = ClassicColonyPanel.pixelsOf(p.canvas());
+        assertTrue(same(on, offDuring, change));
+        assertTrue(same(on, offDuring, cell));
+        assertNotNull("still running", p.dissolve());
+        // After its last frame: the blink's new phase, the first toggle
+        // 24 frames after that frame.
+        clock.ms(ClassicColonyLayout.frames(36));
+        p.canvas();
+        assertNull("over", p.dissolve());
+        assertEquals(complete + Math.round((ClassicColonyDissolve.START_MS
+            + ClassicColonyLayout.frames(54 + 24)) * 1e6), p.blink().phaseStart()
+            + Math.round(ClassicBlink.HALF_PERIOD_MS * 1e6), 2);
+        p.blinkPhase(false);
+        final int[] on2 = ClassicColonyPanel.pixelsOf(p.canvas());
+        p.blinkPhase(true);
+        final int[] off = ClassicColonyPanel.pixelsOf(p.canvas());
+        assertFalse("ÄNDERN inverted in the off half", same(on2, off, change));
+        assertFalse("the cursor off in the off half", same(on2, off, cell));
+        assertTrue("the same picture in the on half", same(on, on2, change));
         // A press ends the blink.
         ClassicColonyServerScene.click(s.panel, 230, 40);
         assertFalse(p.completionBlink());
+        p.blinkPhase(true);
+        assertTrue("ÄNDERN normal", same(on2, ClassicColonyPanel.pixelsOf(p.canvas()), change));
         // A second opening: neither.
         final ClassicColonyPanel q = new ClassicColonyPanel(
             ClassicColonyServerScene.client(s.game, s.dutch, s.api),
@@ -624,9 +767,14 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
      * The dissolve's two pictures against clip 020 (V visit 10: the tree
      * in H2 at #57671, the Verlag at #57768; visit 20: the Lagerhaus' slot
      * M1 at #105689 and #105790): the old and the new picture of the
-     * dissolving rectangle, 0 px apart from the arrow.  (The original also
-     * dissolves the Rathaus' bells and the band's row: ours change at once,
-     * an Unsichtbarkeit.)
+     * dissolving rectangles, 0 px apart from the arrow: the Verlag's the
+     * slot with the Rathaus' bells (x 88-167, y 15-41, 4 bells before, 6
+     * after) and the band's production row (y 163-174), the old ones from a
+     * copy of the colony without the Verlag, in the same 55 frames (the
+     * review of part V, fidelity M1); the Lagerhaus' its slot alone (no
+     * row changes).  The clip's colony has 8 colonists, ours 5: the row's
+     * food and cross are the clip's (6 fish and 10 corn used, 1 stored, 1
+     * cross), the bells ours.
      */
     public void testTheDissolveOverTheClip() throws Exception {
         final ClassicColonyGolden gold = ClassicColonyGolden.open(getName());
@@ -635,34 +783,424 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         final StringBuilder out = new StringBuilder();
         int bad = 0;
         final Object[][] cases = {
-            { "printingPress", 57671, 57768, new String[] { "printingPress" } },
+            { "printingPress", 57671, 57768, new String[] { "printingPress" }, 57767 },
             { "warehouse", 105689, 105790, new String[] { "printingPress", "blacksmithShop",
-                                                          "warehouse" } },
+                                                          "warehouse" }, 105805 },
         };
         for (Object[] c : cases) {
             final State st = base(1547, (String[]) c[3]);
             st.colony.setClassicBuilt("model.building." + c[0], st.game.getTurn().getNumber());
             final ClassicColonyPanel p = ClassicColonyBuildingsTest.panel(st,
                 ClassicColonyBuildingsTest.BASE);
+            // The clip's colony has 8 colonists (ours 5): its row's food
+            // and cross (16 corn used, 1 stored, 1 cross), the bells ours
+            // (6 with the Verlag, 4 in the old picture from the copy).
+            final boolean press = "printingPress".equals(c[0]);
+            if (press) p.setBandAdjust(m -> m.with(6, 10, 1, 0, 1, m.bells));
+            p.setMode(ClassicColonyRight.Mode.HAMMER);
+            p.canvas();
+            // The white cursor: on the selected colonist's tile NE (the
+            // Verlag), on the band's first figure (the Lagerhaus).
+            if (press) {
+                // The colonist selected in his building (the clip's off
+                // half shows the tile without a green frame).
+                ClassicColonyPanel.setTileCursor(2);
+                p.select(p.rowFigures().get(0).unit);
+            } else {
+                ClassicColonyPanel.setTileCursor(ClassicColonyPanel.CURSOR_OFF_TILES);
+                p.select(p.rowFigures().get(0).unit);
+            }
             p.canvas();
             p.opened(ClassicColonyRight.Opening.BUILT_BUILDING);
             final ClassicColonyDissolve d = p.dissolve();
             assertNotNull((String) c[0], d);
-            final Rectangle r = d.rects().get(0);
+            out.append("\n  ").append(c[0]).append(' ').append(d.describe());
+            // The Verlag: the slot with the Rathaus' bells (V x 88-167, y
+            // 15-41) and the band's row; the Lagerhaus: its slot alone.
+            assertEquals(d.describe(), (press) ? 2 : 1, d.rects().size());
+            if (press) {
+                assertEquals(new Rectangle(88, 15, 80, 27), d.rects().get(0));
+                assertTrue(d.describe(), d.rects().get(1).y >= 163
+                           && d.rects().get(1).y + d.rects().get(1).height <= 175);
+                // One dissolve: both regions half done at its 28th frame,
+                // done together after its 55th (V #57690-#57744).
+                final int[] half = d.pending(ClassicColonyDissolve.START_MS
+                                             + ClassicColonyLayout.frames(27) + 0.5);
+                int top = 0, row = 0;
+                for (int i : half) {
+                    if (i / 320 < 100) top++;
+                    else row++;
+                }
+                assertTrue(top + " " + row, top > 0 && row > 0);
+                assertEquals(0, d.pending(ClassicColonyDissolve.START_MS
+                                          + ClassicColonyLayout.frames(54) + 0.5).length);
+            }
             final int[] to = ClassicColonyPanel.pixelsOf(p.canvasAt(ClassicColonyDissolve.START_MS
                 + ClassicColonyLayout.frames(60)));
             // The old picture: what shows before the dissolve starts.
             final int[] from = ClassicColonyPanel.pixelsOf(p.canvasAt(0.0));
             for (int k = 0; k < 2; k++) {
                 final BufferedImage f = gold.frame((Integer) c[1 + k]);
-                final ClassicColonyGolden.Diff diff = ClassicColonyGolden.compare(
-                    c[0] + " #" + c[1 + k], (k == 0) ? from : to, ClassicColonyGolden.pixels(f),
-                    r, gold.pointer(f), null);
-                out.append("\n  ").append(diff);
-                bad += diff.differing;
+                final List<Rectangle> regions = new ArrayList<>(d.rects());
+                // The band's whole production row (the clip's: x 3-116, y 163-174).
+                if (press) regions.add(new Rectangle(0, 163, 119, 12));
+                for (Rectangle r : regions) {
+                    final ClassicColonyGolden.Diff diff = ClassicColonyGolden.compare(
+                        c[0] + " #" + c[1 + k] + " " + r.x + "," + r.y + "," + r.width + "x"
+                        + r.height, (k == 0) ? from : to, ClassicColonyGolden.pixels(f),
+                        r, gold.pointer(f), null);
+                    out.append("\n  ").append(diff);
+                    bad += diff.differing;
+                }
+            }
+            // The blink after the dissolve (fidelity M2): the cursor's on
+            // half with ÄNDERN normal, its off half with ÄNDERN inverted
+            // (#57767 / #57768, #105805 / #105806): ÄNDERN's box and the
+            // cursor's place (the NE tile, the band's first figure).
+            p.finishDissolve();
+            assertNull(p.dissolve());
+            // The tile's cursor: its frame's four edges (the rebuilt map's
+            // terrain inside is not the clip's); in the off half no white
+            // or green pixel on them, in ours and in the clip.
+            final Rectangle t = p.tiles().cell(2).bounds();
+            final Rectangle[] ring = (press)
+                ? new Rectangle[] { new Rectangle(t.x, t.y, t.width, 1),
+                                    new Rectangle(t.x, t.y + t.height - 1, t.width, 1),
+                                    new Rectangle(t.x, t.y, 1, t.height),
+                                    new Rectangle(t.x + t.width - 1, t.y, 1, t.height) }
+                : new Rectangle[] { new Rectangle(1, 143, 10, 16) };
+            for (int k = 0; k < 2; k++) {
+                final int n = (Integer) c[4] + k;
+                p.blinkPhase(k == 1);
+                final int[] ours = ClassicColonyPanel.pixelsOf(p.canvas());
+                final BufferedImage f = gold.frame(n);
+                final List<Rectangle> rs = new ArrayList<>();
+                rs.add(ClassicColonyLayout.CHANGE_BOX);
+                if (press && k == 1) {
+                    final int[] th = ClassicColonyGolden.pixels(f);
+                    for (Rectangle r : ring) {
+                        for (int y = r.y; y < r.y + r.height; y++) {
+                            for (int x = r.x; x < r.x + r.width; x++) {
+                                for (int[] pic : new int[][] { ours, th }) {
+                                    final int v = pic[y * 320 + x];
+                                    assertTrue(n + " (" + x + "," + y + ")",
+                                               v != 0xFFFFFF && v != 0x55FF55);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    rs.addAll(Arrays.asList(ring));
+                }
+                for (Rectangle r : rs) {
+                    final ClassicColonyGolden.Diff diff = ClassicColonyGolden.compare(
+                        c[0] + " blink #" + n + " " + r.x + "," + r.y + "," + r.width + "x"
+                        + r.height, ours, ClassicColonyGolden.pixels(f), r, gold.pointer(f),
+                        null);
+                    out.append("\n  ").append(diff);
+                    bad += diff.differing;
+                }
             }
         }
         System.out.println(getName() + ":" + out);
         assertEquals("pixels off:" + out, 0, bad);
+    }
+
+
+    // The review of part V: the record's way, its edges, KAUFEN's guards
+
+    /**
+     * The record reaches the owner's client the way an update does (the
+     * owner's serialized copy into the client's colony, {@code copyIn});
+     * a foreign player's copy has none; the server's clear arrives too
+     * (regression L1).
+     */
+    public void testTheRecordReachesTheClient() throws Exception {
+        final Scene s = scene(true);
+        final Specification spec = spec();
+        // The update as the server sends it: the owner's serialized copy
+        // (a colony whose colonist stands outside: a copy's units cannot
+        // be copied in here, the scene shares the server's objects).
+        final Colony c = createStandardColony(1, 10, 8);
+        for (net.sf.freecol.common.model.Unit u : c.getUnitList()) u.setLocation(c.getTile());
+        c.setClassicBuilt("model.building.printingPress", 7);
+        final Colony update = c.copy(s.game, Colony.class, s.dutch);
+        assertEquals("model.building.printingPress", update.getClassicBuilt());
+        final ServerPlayer french = getServerPlayer(s.game, "model.nation.french");
+        assertNull(c.copy(s.game, Colony.class, french).getClassicBuilt());
+        // The client's colony without it, brought up to date by the update.
+        c.setClassicBuilt(null, -1);
+        assertTrue(c.copyIn(update));
+        assertEquals("model.building.printingPress", c.getClassicBuilt());
+        assertEquals(7, c.getClassicBuiltTurn());
+        // The server's clear arrives the same way.
+        update.setClassicBuilt(null, -1);
+        assertTrue(c.copyIn(update));
+        assertNull(c.getClassicBuilt());
+        assertEquals(-1, c.getClassicBuiltTurn());
+        // And the server's own clear at a choice.
+        s.colony.setClassicBuilt("model.building.printingPress", 7);
+        assertTrue(s.api.setBuildQueue(s.colony, List.of(building(spec, "printingPress"))));
+    }
+
+    /** An AI colony keeps FreeCol's queue: no record (regression L3). */
+    public void testNoRecordForTheAI() throws Exception {
+        final Scene s = scene(true);
+        final Specification spec = spec();
+        s.dutch.setAI(true);
+        final BuildingType press = building(spec, "printingPress");
+        s.colony.setBuildQueue(List.<BuildableType>of(press));
+        s.colony.addGoods(goods(spec, "hammers"), 52);
+        s.colony.addGoods(goods(spec, "tools"), 20);
+        newTurn(s);
+        assertNotNull("built", s.colony.getBuilding(press));
+        assertNull(s.colony.getClassicBuilt());
+        assertNull(ClassicColonyBuild.current(s.colony));
+    }
+
+    /**
+     * «(Keine Produktion)» picked while the completed building is current
+     * sends an empty queue, which clears the record (regression L5); a
+     * pick with an old FreeCol queue replaces only its first item (play
+     * L4).
+     */
+    public void testThePicksAndTheQueue() throws Exception {
+        final Scene s = scene(true);
+        final Specification spec = spec();
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t == null) return;
+        final BuildingType press = building(spec, "printingPress");
+        s.colony.setBuildQueue(List.<BuildableType>of(press));
+        s.colony.addGoods(goods(spec, "hammers"), 52);
+        s.colony.addGoods(goods(spec, "tools"), 20);
+        newTurn(s);
+        assertSame(press, ClassicColonyBuild.current(s.colony));
+        s.boxes.answers.add(0);   // «(Keine Produktion)»
+        ClassicColonyServerScene.click(s.panel, 280, 142);
+        assertTrue(s.api.log.toString(), s.api.log.contains("buildQueue []"));
+        assertNull(s.colony.getClassicBuilt());
+        assertNull(ClassicColonyBuild.current(s.colony));
+        // An old queue of three: the pick replaces the first.
+        final BuildingType lager = building(spec, "warehouse");
+        final BuildingType school = building(spec, "schoolhouse");
+        final UnitType wagon = spec.getUnitType("model.unit.wagonTrain");
+        s.colony.setBuildQueue(new ArrayList<BuildableType>(List.of(lager, school, wagon)));
+        final List<ClassicColonyBuild.Row> rows = ClassicColonyBuild.rows(s.colony, t);
+        int stockade = -1;
+        for (int i = 0; i < rows.size(); i++) {
+            if (rows.get(i).type == building(spec, "stockade")) stockade = i;
+        }
+        assertTrue(stockade > 0);
+        s.boxes.answers.add(stockade);
+        ClassicColonyServerScene.click(s.panel, 280, 142);
+        assertEquals(List.of(building(spec, "stockade"), school, wagon), s.colony.getBuildQueue());
+        // The rule itself.
+        assertEquals("a building not twice", List.of(school, wagon),
+                     ClassicColonyBuild.picked(List.of(lager, school, wagon), school));
+        assertEquals(List.of(wagon, school, wagon),
+                     ClassicColonyBuild.picked(List.of(lager, school, wagon), wagon));
+        assertEquals(List.of(), ClassicColonyBuild.picked(List.of(lager, school), null));
+        assertEquals(List.of(lager), ClassicColonyBuild.picked(List.of(), lager));
+    }
+
+    /**
+     * The dissolve and the blink only at the first opening in the
+     * completion's own turn, opened from the map (regression L6): a turn
+     * later neither, another opening kind neither.
+     */
+    public void testTheDissolveOnlyInItsTurn() throws Exception {
+        final Scene s = scene(true);
+        final Specification spec = spec();
+        final BuildingType press = building(spec, "printingPress");
+        s.colony.setBuildQueue(List.<BuildableType>of(press));
+        s.colony.addGoods(goods(spec, "hammers"), 52);
+        s.colony.addGoods(goods(spec, "tools"), 20);
+        newTurn(s);
+        assertTrue(ClassicColonyBuild.completedThisTurn(s.colony));
+        // A founding's opening in that turn: neither.
+        s.panel.opened(ClassicColonyRight.Opening.FOUNDING);
+        assertNull(s.panel.dissolve());
+        assertFalse(s.panel.completionBlink());
+        // The next turn: neither.
+        s.game.setTurn(new net.sf.freecol.common.model.Turn(
+            s.game.getTurn().getNumber() + 1));
+        assertFalse(ClassicColonyBuild.completedThisTurn(s.colony));
+        assertSame("still the current build", press, ClassicColonyBuild.current(s.colony));
+        s.panel.opened(ClassicColonyRight.Opening.OTHER);
+        assertNull(s.panel.dissolve());
+        assertFalse(s.panel.completionBlink());
+    }
+
+    /**
+     * The completed row's defensive edges (regression L7, play L6): a
+     * record whose building the colony does not have (any more) is no
+     * completed build, nor one with something queued; the server drops
+     * such a record at the turn's warnings and warns again; a capture
+     * drops it (regression L8).
+     */
+    public void testTheRecordsEdges() throws Exception {
+        final Scene s = scene(true);
+        final Specification spec = spec();
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        // A record of a building the colony lacks.
+        s.colony.setBuildQueue(List.<BuildableType>of());
+        s.colony.setClassicBuilt("model.building.printingPress", s.game.getTurn().getNumber());
+        assertNull(ClassicColonyBuild.completed(s.colony));
+        assertNull(ClassicColonyBuild.current(s.colony));
+        assertFalse(s.colony.hasClassicBuilt());
+        if (t != null) {
+            for (ClassicColonyBuild.Row r : ClassicColonyBuild.rows(s.colony, t)) {
+                assertFalse(r.name, r.done);
+            }
+        }
+        carpenter(s);
+        ChangeSet cs = newTurn(s);
+        assertNull("dropped", s.colony.getClassicBuilt());
+        assertTrue(cs.toString(), cs.toString().contains("notBuildingAnything"));
+        // A record with something queued: the queue's item.
+        final BuildingType press = building(spec, "printingPress");
+        s.colony.addBuilding(new net.sf.freecol.server.model.ServerBuilding(s.game, s.colony,
+                                                                            press));
+        s.colony.setClassicBuilt(press.getId(), s.game.getTurn().getNumber());
+        assertTrue(s.colony.hasClassicBuilt());
+        assertSame(press, ClassicColonyBuild.completed(s.colony));
+        final BuildingType lager = building(spec, "warehouse");
+        s.colony.setBuildQueue(List.<BuildableType>of(lager));
+        assertNull(ClassicColonyBuild.completed(s.colony));
+        assertSame(lager, ClassicColonyBuild.current(s.colony));
+        // A capture: the new owner has no record.
+        s.colony.setBuildQueue(List.<BuildableType>of());
+        assertSame(press, ClassicColonyBuild.completed(s.colony));
+        final ServerPlayer french = getServerPlayer(s.game, "model.nation.french");
+        ((ServerColony) s.colony).csChangeOwner(french, false, "capture", new ChangeSet());
+        assertNull(s.colony.getClassicBuilt());
+    }
+
+    /**
+     * KAUFEN's guards (play L1, regression L11): a missing good boycotted
+     * is not bought (no box, no purchase; the server refuses it too);
+     * FreeCol's payForBuilding off: nothing; the manual's B key buys
+     * (fidelity L6).
+     */
+    public void testKaufensGuards() throws Exception {
+        final Scene s = scene(true);
+        final Specification spec = spec();
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final GoodsType tools = goods(spec, "tools");
+        s.colony.setBuildQueue(List.<BuildableType>of(building(spec, "printingPress")));
+        s.dutch.setGold(5000);
+        s.dutch.getMarket().setArrears(tools, 500);
+        assertSame(tools, ClassicColonyBuild.boycotted(s.colony));
+        assertEquals(-1, ClassicColonyBuild.price(s.colony));
+        final int asked = s.boxes.asked.size();
+        ClassicColonyServerScene.click(s.panel, 230, 142);
+        assertEquals("no box", asked, s.boxes.asked.size());
+        assertFalse(s.api.log.toString(), s.api.log.stream().anyMatch(l -> l.startsWith("pay")));
+        assertFalse("the server refuses", s.api.payForBuilding(s.colony));
+        assertEquals(5000, s.dutch.getGold());
+        assertEquals(0, s.colony.getGoodsCount(tools));
+        // The boycott lifted: the box; the tools in stock: no boycott matters.
+        s.dutch.getMarket().setArrears(tools, 0);
+        assertNull(ClassicColonyBuild.boycotted(s.colony));
+        if (t != null) {
+            s.boxes.answers.add(ClassicColonyBuild.BUY_NO);
+            ClassicColonyServerScene.click(s.panel, 230, 142);
+            assertEquals("BUYME1", s.boxes.last().id);
+        }
+        s.colony.addGoods(tools, 20);
+        s.dutch.getMarket().setArrears(tools, 500);
+        assertNull("nothing boycotted is missing", ClassicColonyBuild.boycotted(s.colony));
+        assertTrue(ClassicColonyBuild.price(s.colony) > 0);
+        // The B key: KAUFEN.
+        assertEquals("classic_buyBuild", s.panel.getInputMap(
+            javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).get(
+                javax.swing.KeyStroke.getKeyStroke("B")));
+        if (t != null) {
+            final int n = s.boxes.asked.size();
+            s.boxes.answers.add(ClassicColonyBuild.BUY_NO);
+            s.panel.getActionMap().get("classic_buyBuild").actionPerformed(null);
+            assertEquals(n + 1, s.boxes.asked.size());
+            assertEquals("BUYME1", s.boxes.last().id);
+        }
+        // payForBuilding off: nothing.
+        final boolean was = spec.getBoolean(GameOptions.PAY_FOR_BUILDING);
+        try {
+            spec.setBoolean(GameOptions.PAY_FOR_BUILDING, false);
+            final int n = s.boxes.asked.size();
+            ClassicColonyServerScene.click(s.panel, 230, 142);
+            assertEquals("no box", n, s.boxes.asked.size());
+        } finally {
+            spec.setBoolean(GameOptions.PAY_FOR_BUILDING, was);
+        }
+    }
+
+    /**
+     * No record while something else is queued (the reviewer's R07): the
+     * Verlag done with the Lagerhaus queued behind it, the Lagerhaus is
+     * the build.
+     */
+    public void testNoRecordWithAQueue() throws Exception {
+        final Scene s = scene(true);
+        final Specification spec = spec();
+        final BuildingType press = building(spec, "printingPress");
+        final BuildingType lager = building(spec, "warehouse");
+        s.colony.setBuildQueue(new ArrayList<BuildableType>(List.of(press, lager)));
+        s.colony.addGoods(goods(spec, "hammers"), 52);
+        s.colony.addGoods(goods(spec, "tools"), 20);
+        newTurn(s);
+        assertNotNull("built", s.colony.getBuilding(press));
+        assertNull(s.colony.getClassicBuilt());
+        assertSame(lager, ClassicColonyBuild.current(s.colony));
+    }
+
+    /**
+     * The completions shown belong to their game (regression L11): a new
+     * game whose colony finishes a building in the same turn shows its
+     * dissolve too.
+     */
+    public void testTheCompletionsShownPerGame() throws Exception {
+        String id = null;
+        for (int k = 0; k < 2; k++) {
+            final Scene s = scene(true);
+            final Specification spec = spec();
+            s.colony.setBuildQueue(List.<BuildableType>of(building(spec, "printingPress")));
+            s.colony.addGoods(goods(spec, "hammers"), 52);
+            s.colony.addGoods(goods(spec, "tools"), 20);
+            newTurn(s);
+            if (k == 1) assertEquals("the same colony id", id, s.colony.getId());
+            id = s.colony.getId();
+            s.panel.opened(ClassicColonyRight.Opening.OTHER);
+            assertNotNull("game " + k, s.panel.dissolve());
+            ServerTestHelper.stopServerGame();
+        }
+    }
+
+    /** A rename to another colony's name changes nothing (regression L9). */
+    public void testTheRenameToAnotherColonysName() throws Exception {
+        final Scene s = scene(true);
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t == null) return;
+        final Colony other = createStandardColony(1, 10, 8);
+        other.setName("Zweite Kolonie");
+        assertSame(s.dutch, other.getOwner());
+        final String old = s.colony.getName();
+        assertFalse(old.equals(other.getName()));
+        int x = -1;
+        for (int i = 0; i < 320 && x < 0; i++) if (s.panel.nameAt(i, 3)) x = i;
+        s.boxes.answers.add(other.getName());
+        ClassicColonyServerScene.click(s.panel, x + 2, 3);
+        assertEquals("RENAMECOLONY", s.boxes.last().id);
+        assertEquals(old, s.colony.getName());
+        assertFalse(s.api.log.toString(), s.api.log.stream().anyMatch(l -> l.startsWith("rename")));
+    }
+
+    /** @return Whether two pictures are equal inside a rectangle. */
+    static boolean same(int[] a, int[] b, Rectangle r) {
+        for (int y = r.y; y < r.y + r.height; y++) {
+            for (int x = r.x; x < r.x + r.width; x++) {
+                if (a[y * 320 + x] != b[y * 320 + x]) return false;
+            }
+        }
+        return true;
     }
 }

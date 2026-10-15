@@ -396,6 +396,41 @@ public class LeviRulesTest extends FreeColTestCase {
     }
 
     /**
+     * A save from before part V (its specification without the two
+     * options) gets them through Specification.fixGameOptions: on for a
+     * levi game, off for classic (the review of part V, regression L2).
+     */
+    public void testOriginalBuildRulesInAnOldSave() throws Exception {
+        for (String rules : new String[] { LEVI, "classic" }) {
+            final java.io.StringWriter sw = new java.io.StringWriter();
+            try (net.sf.freecol.common.io.FreeColXMLWriter xw
+                 = new net.sf.freecol.common.io.FreeColXMLWriter(sw,
+                     net.sf.freecol.common.io.FreeColXMLWriter.WriteScope.toSave())) {
+                spec(rules).toXML(xw);
+            }
+            String xml = sw.toString();
+            for (String id : new String[] { GameOptions.ORIGINAL_BUILD_PRICE,
+                                            GameOptions.ORIGINAL_BUILD_COMPLETION }) {
+                final String before = xml;
+                xml = xml.replaceAll("<[A-Za-z]+Option[^>]*id=\"" + java.util.regex.Pattern.quote(id)
+                                     + "\"[^>]*/>", "");
+                if (before.equals(xml)) {
+                    xml = xml.replaceAll("<[A-Za-z]+Option[^>]*id=\""
+                        + java.util.regex.Pattern.quote(id) + "\"[^>]*>.*?</[A-Za-z]+Option>", "");
+                }
+                assertFalse(rules + " " + id + " taken out", xml.contains("\"" + id + "\""));
+            }
+            // Reading it runs the fixes (Specification.fixGameOptions).
+            final Specification old = new Specification(
+                new java.io.ByteArrayInputStream(xml.getBytes("UTF-8")));
+            for (String id : new String[] { GameOptions.ORIGINAL_BUILD_PRICE,
+                                            GameOptions.ORIGINAL_BUILD_COMPLETION }) {
+                assertEquals(rules + " " + id, LEVI.equals(rules), old.getBoolean(id));
+            }
+        }
+    }
+
+    /**
      * The original's fortification (J2): a completed fortification keeps
      * the turn's moves in levi, not in classic and freecol (which get the
      * option from Specification.fixGameOptions); it sits where the game

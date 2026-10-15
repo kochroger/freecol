@@ -3648,14 +3648,15 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   - **Port** (M4.6, `ClassicColonyPort`): the caption in ink 57 at floor((328 −
     w)/2), «Keine Schiffe im Hafen» or «Einladen: Handelsschiff» (LABELS `@MISC` 26 /
     38 and the NAMES `@UNIT` name; it starts at x 121, over the panel's edge);
-    the tile's first ship, else its first **wagon train** (V: it counts; I: a ship
-    before a wagon train that came first, two carriers at once never seen; it no longer
-    stands at the figure row's end), drawn as the map draws a unit (`ClassicHud`'s
+    the carriers on the tile, ships and **wagon trains** alike, in the port order
+    (since part V; see "Carriers, goods and building": several carriers, the newest
+    arrival in front, the front one selected; a wagon train no longer stands at the
+    figure row's end), the selected one drawn as the map draws a unit (`ClassicHud`'s
     box icon: its 2-px black shadow, its flag in the owner's colour with the order
     letter) in its 16×16 cell at (130,146), a wagon train at (130,147) (V), in an
     18×18 frame, green, white while the white cursor stands on it in the blink's
     on half (V #120499, #120521, #10483, #134899; a press on the carrier brings the
-    cursor, on a wagon train also its box on the release); its six holds: the goods'
+    cursor and selects it, a click on the selected one opens its box, part V); its six holds: the goods'
     icons at x = 128 + 12k + floor((9 − w)/2), y 165, the full colours for a hold of
     100, the grey set for a part, no number; the crate ICONS.SS.122 at (127 + 12k,
     165) over the holds it lacks, six without a carrier. The holds are in the order
@@ -3782,14 +3783,17 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   on the colony tile, ships and wagon trains alike, in the **port order** — the newest arrival in front
   (the first look at a port: the tile's last unit first), «Nach vorne bewegen.» puts one in front, one
   that leaves is taken out, the rest keep their order (`ClassicColonyPort.carriers`, `front`; EDT memory
-  per colony, dropped with the game). The first four full size at x 130 + 18i (a ship one pixel higher
+  per colony, dropped with the game, not saved: a loaded game starts with the tile's order, I). A carrier
+  leaves the order where the client sees it go (`ClassicColonyPort.moved` from `ClassicGUI.animateUnitMove`,
+  `observe` from `refresh` / `refreshTile`), so one that sails off and comes back between two visits is a
+  new arrival in front (review of part V, fidelity M3). The first four full size at x 130 + 18i (a ship one pixel higher
   outside slot 0), the rest as 4×4 **tiny icons** at (123 + 5k, 139) (pixel (i, j) = the sprite's
   (4i + 1, 4j + 1) where opaque and not black). One is **selected**: the front one at every opening (not
   remembered); its frame (full size or the tiny 5×6), its caption «Einladen: <Typ>» and its six holds.
   A press on a carrier that is not selected selects it; a click on the selected one opens its box
   «Optionen für  (Galeone):» (`@COLONYUNIT` + `@SHIPOPTIONS`, `ClassicColonyUnits.carrierOptions`):
   «Nach vorne bewegen.» unless in front, «Befehle aufheben.» with orders (I), «Wache.», «Im Hafen ankern
-  ("Befestigen").» for a ship, «Alle Waren entladen.» with cargo, «Keine Veränderungen.»; w 258, x 31,
+  ("Befestigen").» for a ship with moves left (FreeCol's fortify needs them; I), «Alle Waren entladen.» with cargo, «Keine Veränderungen.»; w 258, x 31,
   h = 24 + 8·rows centred, the carrier's icon at box + (5,6), the bar on row 1. «Vorhandene Einheiten»
   lists neither ships nor wagon trains (the S interim's «the first ship, else the wagon train» and its
   wagon-train @COLONYUNIT are gone).
@@ -3803,33 +3807,46 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   `@HOWMUCH1` / `@HOWMUCH2` 27 frames after the drop, the field's **preset the maximum** (Europe's
   @HOWMUCH5 keeps «100»). The result «<n> <Ware> bewegt nach <Typ | Kolonie>» 2 frames after the drop
   (1 after a box), for 138 frames or until the next press; the hold and the warehouse number 8 frames
-  after the drop (`freeze`). Through `InGameController.loadCargo` / `unloadCargo`. Recorder:
+  after the drop (`freeze`; a press meanwhile takes the holds as shown). Through `InGameController.loadCargo` / `unloadCargo`. Recorder:
   `colony-goods`, `colony-howmuch`, `colony-carrier`.
 - **Building** (M4.10): KAUFEN and ÄNDERN are inverted while held, act on the release. ÄNDERN's **build
   list** 6 frames later: a wood list box «Objekt zum Bauen wählen», «(Keine Produktion)», the buildings
   in NAMES order, then Artillerie, Wagenzug and the ships (no colonists), upper case with a small «ä»,
   «(n Hämmer)(m Werkzeuge)» n = max(0, cost − stored), w = max(name + cost) + 26, the current build
-  yellow under the bar, «(F1 für Hilfe)»; a pick sets a queue of one (`setBuildQueue`). **KAUFEN**:
+  yellow under the bar, «(F1 für Hilfe)»; a pick replaces the current build, the rest of an old
+  FreeCol queue stays behind it, «(Keine Produktion)» empties the queue (`setBuildQueue`). **KAUFEN**:
   `@BUYME0` with MSS5 when the treasury is short, else `@BUYME1` («Na, dann nicht.» the bar and
-  Escape, «Trotzdem abschließen.» pays through `payForBuilding`); the price is the colony's, in levi
+  Escape, «Trotzdem abschließen.» pays through `payForBuilding`), 8 frames after the release
+  (dago-colony2 #12053 → #12061); the price is the colony's, in levi
   13 per missing hammer and the tools at the market's ask (game option `originalBuildPrice`, R1).
+  Nothing when a missing good is boycotted (the server refuses that purchase too, all rules; I) or
+  FreeCol's `payForBuilding` option is off.
 - **The completed build** (levi game option `originalBuildCompletion`, R4): a building finished with
   nothing else queued is recorded by the server (`Colony.classicBuilt` and its turn, in the save) and
   stays the current build — the hammer panel keeps its name and its «(Benötigt …)» line, the list shows
   «NAME (ABGESCHLOSSEN)» in its NAMES place, yellow, with the bar; no turn warns that nothing is built;
-  the player's next choice clears it. A finished unit is built again (FreeCol's queue of one unit).
+  the player's next choice clears it, so do a capture and the building's loss (a raid). A finished
+  unit is built again (FreeCol's queue of one unit).
   The first opening in the completion's turn (I until M4.11 builds @BUILT's «Zur Kolonie zoomen.»)
-  opens in hammer mode with ÄNDERN blinking until the next press and dissolves the new building in: the
-  old picture of its slot (`ClassicColonyBuildings.before`) 19 frames, then 55 frames of the woodcuts'
-  dissolve (`colony-dissolve`); the Rathaus' bells and the band row change at once (the original
-  dissolves them too).
+  opens in hammer mode and dissolves the new building in: the old picture — its slot as it was
+  (`ClassicColonyBuildings.before`), the Rathaus' bells and the band's production row from a copy of the
+  colony without it (`Colony.copyColonyBefore`, only what it changes) — 19 frames, then 55 frames of the
+  woodcuts' dissolve over the changed pixels' bounds in the building area and the left panel
+  (`colony-dissolve`; V clip 020 #57671 → #57768). Meanwhile nothing blinks; 24 frames after the
+  dissolve's last frame ÄNDERN starts blinking in anti-phase with the white cursor, which stays on the
+  selected colonist's tile or figure, until the next press (V #57768, #105806; the Lagerhaus' first
+  toggle came after 46 frames, I).
 - **Renaming**: a click on the colony's name in the top line opens `@RENAMECOLONY` with the name
   preset (at most 23 characters); Enter renames it through the server (`colony-rename`).
 - **Tests**: `ClassicColonyCarriersTest` (the port of 8 clip 040 frames and its 5 boxes, @HOWMUCH1 and
   @RENAMECOLONY 0 px), `ClassicColonyGoodsTest` (words, boxes, notices and the cell frame over clip 020
   0 px; loads and unloads with the real controller and server), `ClassicColonyBuildTest` (R1, R4 on the
   server, the three lists with «(ABGESCHLOSSEN)» and @BUYME0 over clip 020 0 px, ÄNDERN and KAUFEN on
-  the screen, the dissolve's two pictures against #57671/#57768 and #105689/#105790 0 px).
+  the screen, the dissolve's two pictures against #57671/#57768 and #105689/#105790 0 px: the
+  Verlag's slot with the Rathaus' bells and the band's row, the blink after it against #57767/#57768
+  and #105805/#105806, KAUFEN pressed against dago-colony2 #12044/#12890 and @BUYME1 against #12061
+  and playthrough-2 #37082 0 px; the record's way to the client, the AI, a queue, a capture, a lost
+  building, the boycott, the B key); `ClassicColonyPortTest.testACarrierBackFromATripIsInFront`.
 
 ### Moving colonists (`ClassicColonyMoves`, `ClassicColonyJobs`; build spec M4.8, part U)
 

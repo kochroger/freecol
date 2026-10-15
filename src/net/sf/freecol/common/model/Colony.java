@@ -507,6 +507,26 @@ public class Colony extends Settlement implements TradeLocation {
     }
 
     /**
+     * Whether the colony still has its completed build (levi rule R4): the
+     * building of that type, not lost or downgraded since.
+     *
+     * @return True if so; false without a completed build.
+     */
+    public boolean hasClassicBuilt() {
+        final String id = this.classicBuilt;
+        final Specification spec = getSpecification();
+        if (id == null || spec == null) return false;
+        final BuildingType bt;
+        try {
+            bt = spec.getBuildingType(id);
+        } catch (RuntimeException e) {
+            return false;
+        }
+        final Building b = (bt == null) ? null : getBuilding(bt);
+        return b != null && b.getType() == bt;
+    }
+
+    /**
      * Sets the apparent number of units at this colony.
      * Used in client enemy colonies
      *
@@ -2605,6 +2625,31 @@ public class Colony extends Settlement implements TradeLocation {
             }
             ct.setWorkTile(wt);
         }
+        return colony;
+    }
+
+    /**
+     * Creates a temporary copy of this colony as it was before a building
+     * was finished (the Classic UI's completion dissolve, build spec M4.10
+     * target 4: the old picture's town hall bells and production row): a
+     * {@link #copyColony} with that building taken out again, or set back
+     * to the level it was upgraded from.
+     *
+     * @param built The {@code BuildingType} finished.
+     * @return A scratch version of this colony without it (the plain
+     *     scratch copy when the colony does not have it).
+     */
+    public Colony copyColonyBefore(BuildingType built) {
+        final Colony colony = copyColony();
+        if (colony == null || built == null) return colony;
+        final Building b = colony.getBuilding(built);
+        if (b == null || b.getType() != built) return colony;
+        if (built.getUpgradesFrom() == null) {
+            colony.removeBuilding(b);
+        } else {
+            b.downgrade();
+        }
+        colony.invalidateCache();
         return colony;
     }
 

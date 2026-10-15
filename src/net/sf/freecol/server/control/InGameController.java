@@ -3338,6 +3338,16 @@ public final class InGameController extends Controller {
                 + " is not building anything!");
         }
         List<AbstractGoods> required = colony.getRequiredGoods(build);
+        // A boycotted good cannot be bought for a build either (FreeCol's
+        // FIXME below; the review of part V, play L1: KAUFEN delivered
+        // boycotted tools).
+        for (AbstractGoods ag : required) {
+            if (ag.getType().isStorable()
+                && !serverPlayer.canTrade(ag.getType(), Access.EUROPE)) {
+                return serverPlayer.clientError("Can not buy boycotted "
+                    + ag.getType().getSuffix() + " for " + build);
+            }
+        }
         int price = colony.priceGoodsForBuilding(required);
         if (!serverPlayer.checkGold(price)) {
             return serverPlayer.clientError("Insufficient funds to pay for build.");
@@ -3356,7 +3366,7 @@ public final class InGameController extends Controller {
             GoodsType type = ag.getType();
             int amount = ag.getAmount();
             if (type.isStorable()) {
-                // FIXME: should also check canTrade(type, Access.?)
+                // The boycott is checked above.
                 if ((amount = serverPlayer.buyInEurope(random, container,
                                                        type, amount)) < 0) {
                     return serverPlayer.clientError("Can not buy " + amount

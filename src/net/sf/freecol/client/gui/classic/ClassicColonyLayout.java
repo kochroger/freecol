@@ -1730,4 +1730,12 @@ final class ClassicColonyLayout {
 
     /** The completion dissolve's frames, the first and the last included (V: 55, 3 cases). */
     static final int DISSOLVE_FRAMES = 55;
+
+    /**
+     * After a completion's dissolve the blink (the white cursor and ÄNDERN
+     * in anti-phase) starts again, its first toggle this many frames after
+     * the dissolve's last frame (V clip 020 #57744 -&gt; #57768, the Verlag;
+     * the Lagerhaus' #105760 -&gt; #105806 is 46, I: unexplained).
+     */
+    static final int BLINK_AFTER_DISSOLVE_FRAMES = 24;
 }

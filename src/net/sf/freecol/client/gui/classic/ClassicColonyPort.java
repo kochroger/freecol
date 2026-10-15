@@ -66,7 +66,13 @@ import net.sf.freecol.common.model.Unit;
  * tile's last unit (FreeCol appends an arriving unit).  One opening
  * (#61 104) shows an order the rule does not explain (I).  At every
  * opening the front carrier is selected, not the one selected last
- * (#52 642 ended with slot 3, #61 104 opened with slot 0).
+ * (#52 642 ended with slot 3, #61 104 opened with slot 0).  A carrier
+ * leaves the order where the client sees it go, not only at the next
+ * look at the port ({@link #moved}: the map's move of a unit off the
+ * colony's tile; {@link #observe}: a carrier seen elsewhere at a refresh),
+ * so one that sails away and comes back between two visits is a new
+ * arrival in front (the review of part V, fidelity M3).  The order is the
+ * client's memory: a loaded game starts with the tile's order (I).
  *
  * <p>The holds are in the order the goods came aboard as this client saw
  * them (V clip008 §2.5, clip 020 #120499: rum before furs, the loading
@@ -263,6 +269,51 @@ final class ClassicColonyPort {
         for (Unit u : out) ids.add(u.getId());
         PORTS.put(colony.getId(), ids);
         return out;
+    }
+
+    /**
+     * A unit moved from a tile to another (the map's move, ClassicGUI's
+     * {@code animateUnitMove}; EDT): leaving a colony's tile it leaves
+     * that colony's port order, so when it comes back it is a new arrival
+     * in front (class comment).
+     *
+     * @param unit The unit.
+     * @param from The tile it left.
+     * @param to The tile it went to.
+     */
+    static void moved(Unit unit, Tile from, Tile to) {
+        if (unit == null || from == null || from == to) return;
+        final Colony c = from.getColony();
+        if (c == null) return;
+        final List<String> ids = PORTS.get(c.getId());
+        if (ids != null) ids.remove(unit.getId());
+    }
+
+    /**
+     * What the client sees now (ClassicGUI's refresh; EDT): every carrier
+     * in a colony's port order that is no longer on the colony's tile (it
+     * sailed to Europe, drove off, sank, was captured) leaves that order;
+     * the order of a colony gone is dropped.
+     *
+     * @param game The game shown, or null.
+     */
+    static void observe(Game game) {
+        if (game == null || PORTS.isEmpty()) return;
+        sameGame(game);
+        for (java.util.Iterator<Map.Entry<String, List<String>>> it = PORTS.entrySet().iterator();
+             it.hasNext();) {
+            final Map.Entry<String, List<String>> e = it.next();
+            final Colony c = game.getFreeColGameObject(e.getKey(), Colony.class);
+            final Tile t = (c == null || c.isDisposed()) ? null : c.getTile();
+            if (t == null) {
+                it.remove();
+                continue;
+            }
+            e.getValue().removeIf(id -> {
+                    final Unit u = game.getFreeColGameObject(id, Unit.class);
+                    return u == null || u.isDisposed() || u.getTile() != t;
+                });
+        }
     }
 
     /**

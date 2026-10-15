@@ -27,6 +27,7 @@ import java.util.List;
 import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.GoodsType;
 import net.sf.freecol.common.model.Specification;
+import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.server.model.ServerUnit;
@@ -243,6 +244,57 @@ public class ClassicColonyPortTest extends FreeColTestCase {
         p.canvas();
         assertNull(p.port().carrier);
         assertEquals("Keine Schiffe im Hafen", p.port().caption);
+    }
+
+    /**
+     * A carrier that leaves and comes back between two visits is a new
+     * arrival: in front, selected at the next opening (V clip 040 ×6, the
+     * review of part V, fidelity M3): the map's move off the colony's tile
+     * (ClassicGUI.animateUnitMove), a refresh that sees it elsewhere
+     * (ClassicGUI.refresh, e.g. in Europe); one that stays keeps its place.
+     */
+    public void testACarrierBackFromATripIsInFront() throws Exception {
+        final State s = ClassicColonyBuildingsTest.base1539();
+        s.on("expertFarmer", Direction.NW, "grain");
+        s.finish();
+        final Tile home = s.colony.getTile();
+        Tile away = null;
+        for (Tile t : home.getSurroundingTiles(1)) if (t.getColony() == null) away = t;
+        assertNotNull(away);
+        final Unit galleon = carrier(s, "galleon");
+        final Unit wagon = carrier(s, "wagonTrain");
+        // Last seen W G.
+        final ClassicColonyPanel p = ClassicColonyBuildingsTest.panel(s,
+            ClassicColonyBuildingsTest.BASE);
+        p.canvas();
+        assertEquals(List.of(wagon, galleon), p.port().carriers);
+        // The galleon sails off (the map's move) and comes back unseen.
+        final ClassicGUI gui = new ClassicGUI(null) {
+            @Override
+            protected net.sf.freecol.common.model.Game getGame() {
+                return s.game;
+            }
+        };
+        galleon.setLocation(away);
+        gui.animateUnitMove(galleon, home, away);
+        galleon.setLocation(home);
+        ClassicColonyPanel q = ClassicColonyBuildingsTest.panel(s, ClassicColonyBuildingsTest.BASE);
+        q.canvas();
+        assertEquals("G* W", List.of(galleon, wagon), q.port().carriers);
+        assertSame("the newcomer selected", galleon, q.port().carrier);
+        // The wagon train to Europe's way and back, seen at a refresh.
+        wagon.setLocation(null);
+        gui.refresh();
+        javax.swing.SwingUtilities.invokeAndWait(() -> { });   // the refresh's look, on the event thread
+        wagon.setLocation(home);
+        q = ClassicColonyBuildingsTest.panel(s, ClassicColonyBuildingsTest.BASE);
+        q.canvas();
+        assertEquals("W* G", List.of(wagon, galleon), q.port().carriers);
+        // Nothing moved: the order kept.
+        gui.refresh();
+        javax.swing.SwingUtilities.invokeAndWait(() -> { });   // the refresh's look, on the event thread
+        gui.animateUnitMove(galleon, away, home);
+        assertEquals(List.of(wagon, galleon), ClassicColonyPort.carriers(s.colony));
     }
 
     /** A screen whose boxes are noted (their ids and rows), all dismissed. */

@@ -597,4 +597,102 @@ public class ClassicColonyGoodsTest extends FreeColTestCase {
         assertEquals(was, wagon.getState());
         assertEquals(List.of(wagon, ship), ClassicColonyPort.carriers(s.colony));
     }
+
+
+    // The review of part V (play L2, L3; regression L4, L9)
+
+    /**
+     * One hold of a good spread over two (121 rum: 100 + 21) unloads that
+     * hold only (regression L4): the 21 hold moves 21, the 100 stay.
+     */
+    public void testOneHoldOfTwo() throws Exception {
+        final Scene s = scene();
+        final Unit galleon = s.carrier("galleon");
+        galleon.addGoods(goods("rum"), 121);
+        open(s);
+        assertEquals(2, s.panel.port().holds.stream().filter(h -> h.goods != null).count());
+        assertEquals(21, s.panel.port().holds.get(1).amount);
+        final int[] h1 = hold(1), w = cell("rum");
+        ClassicColonyServerScene.drag(s.panel, h1[0], h1[1], w[0], w[1], false);
+        s.runLater();
+        assertEquals("the 21 hold only", 100, galleon.getGoodsCount(goods("rum")));
+        assertEquals(21, s.colony.getGoodsCount(goods("rum")));
+    }
+
+    /**
+     * A press within the 8 frames before a transfer's redraw takes the
+     * holds as the screen shows them (play L2): after hold 0 is unloaded
+     * the holds close up, but until the redraw hold 1 still shows the
+     * second good on the screen, and that good moves.
+     */
+    public void testAPressBeforeTheRedraw() throws Exception {
+        final Scene s = scene();
+        final Unit galleon = s.carrier("galleon");
+        galleon.addGoods(goods("cloth"), 100);
+        galleon.addGoods(goods("furs"), 50);
+        open(s);
+        s.runLater();
+        final GoodsType first = s.panel.port().holds.get(0).goods;
+        final GoodsType second = s.panel.port().holds.get(1).goods;
+        assertNotNull(first);
+        assertNotNull(second);
+        final int[] h0 = hold(0), h1 = hold(1), w = cell("cloth");
+        ClassicColonyServerScene.drag(s.panel, h0[0], h0[1], w[0], w[1], false);
+        assertEquals(0, galleon.getGoodsCount(first));
+        // Not redrawn yet: the old holds shown.
+        assertEquals(second, s.panel.portShown().holds.get(1).goods);
+        ClassicColonyServerScene.drag(s.panel, h1[0], h1[1], w[0], w[1], false);
+        s.runLater();
+        assertEquals("the good shown in hold 1 moved", 0, galleon.getGoodsCount(second));
+        assertFalse(galleon.hasGoodsCargo());
+    }
+
+    /**
+     * A refused transfer shows the screen as it is at once (regression
+     * L9, R25): not our turn, the load refused, no frozen picture.
+     */
+    public void testARefusedTransferUnfreezes() throws Exception {
+        final Scene s = scene();
+        final Unit ship = s.carrier("merchantman");
+        s.colony.addGoods(goods("ore"), 30);
+        open(s);
+        s.game.setCurrentPlayer(getServerPlayer(s.game, "model.nation.french"));
+        final int[] ore = cell("ore"), h0 = hold(0);
+        ClassicColonyServerScene.drag(s.panel, ore[0], ore[1], h0[0], h0[1], false);
+        assertEquals("refused", 0, ship.getGoodsCount(goods("ore")));
+        assertSame("no frozen picture", s.panel.port(), s.panel.portShown());
+        assertTrue(java.util.Arrays.equals(ClassicColonyChrome.amounts(s.colony),
+                                           s.panel.amountsShown()));
+        assertNull(s.panel.noticeShown());
+    }
+
+    /**
+     * A carrier's box (regression L9, R14; play L3): only a release on
+     * the same carrier opens it; «Im Hafen ankern» only with moves left
+     * (FreeCol's fortify needs them).
+     */
+    public void testTheCarriersBoxGuards() throws Exception {
+        final Scene s = scene();
+        final Unit ship = s.carrier("merchantman");
+        open(s);
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t == null) return;
+        final int[] f0 = slot(0);
+        // Pressed on the selected ship, released beside it: no box.
+        final int asked = s.boxes.asked.size();
+        ClassicColonyServerScene.mouse(s.panel, java.awt.event.MouseEvent.MOUSE_PRESSED,
+                                       f0[0], f0[1], false);
+        ClassicColonyServerScene.mouse(s.panel, java.awt.event.MouseEvent.MOUSE_RELEASED,
+                                       f0[0] + 40, f0[1], false);
+        assertEquals("no box", asked, s.boxes.asked.size());
+        // No moves left: no «Im Hafen ankern».
+        ship.setMovesLeft(0);
+        assertFalse(ClassicColonyUnits.carrierOptions(ship, true)
+                    .contains(ClassicColonyUnits.CarrierOption.ANCHOR));
+        ClassicColonyServerScene.click(s.panel, f0[0], f0[1]);
+        assertEquals("COLONYUNIT [Wache., Keine Veränderungen.] bar=0", s.boxes.lastRows());
+        ship.setMovesLeft(ship.getInitialMovesLeft());
+        assertTrue(ClassicColonyUnits.carrierOptions(ship, true)
+                   .contains(ClassicColonyUnits.CarrierOption.ANCHOR));
+    }
 }

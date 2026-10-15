@@ -155,7 +155,7 @@ public class ClassicGUI extends GUI {
 
     /**
      * The classic screens hosted in the main window (master plan M4.0,
-     * {@link ClassicScreenStack}): the colony screen, its build list and
+     * {@link ClassicScreenStack}): the colony screen and
      * Europe replace the map in the HUD pane, as in the original.  Created
      * with the HUD ({@link #installInGameHud}), emptied and dropped with it
      * ({@link #teardownInGame}); null without a game view (a test puts its
@@ -611,7 +611,7 @@ public class ClassicGUI extends GUI {
      * window, as in DOSBox.  EDT only.
      *
      * <p>The main window switches first ({@link #applyFrameMode}), with the
-     * colony, build-list and Europe screens in it (M4.0, nothing to
+     * colony and Europe screens in it (M4.0, nothing to
      * re-frame); then the report window, if one is open, is re-framed for
      * the new mode through the same {@link #prepareChildWindow} that framed
      * it; finally the window that was active comes back to the front and
@@ -714,12 +714,12 @@ public class ClassicGUI extends GUI {
     /**
      * THE one place that frames a classic sub-window for the current mode;
      * call it after the content is set and before {@code setVisible(true)}.
-     * Every window the classic UI opens goes through here -- the colony,
-     * build-queue, Europe and report screens ({@code fullScreenSized}), and
+     * Every window the classic UI opens goes through here -- the
+     * report screens ({@code fullScreenSized}), and
      * every {@link ClassicDialog} popup and the choice list
      * ({@code !fullScreenSized}) -- so "no OS window chrome anywhere while
      * full screen" is decided once, not per screen.  (Since M4.0 the
-     * colony, build-list and Europe screens are no windows: they are
+     * colony and Europe screens are no windows: they are
      * hosted in the main window, {@link ClassicScreenStack}; only the
      * report screens still come here.)
      *
@@ -775,7 +775,7 @@ public class ClassicGUI extends GUI {
     /**
      * The classic screen window in front, for the scripted harness's keys
      * when no window has the focus (a minimized run): the report screen if
-     * one is open, else null.  The colony, build-list and Europe screens are
+     * one is open, else null.  The colony and Europe screens are
      * no windows since M4.0 ({@link #hostedScreen}).  EDT only.
      *
      * @return The screen's window, or null.
@@ -788,7 +788,7 @@ public class ClassicGUI extends GUI {
      * The owner (and centring reference) for a popup: the report window if
      * the player is looking at one, else the main frame.  EDT only.
      *
-     * <p>The colony, build-list and Europe screens are in the main window
+     * <p>The colony and Europe screens are in the main window
      * since M4.0 ({@link ClassicScreenStack}), so the main frame owns every
      * popup over them, and a popup can no longer pull the map above them:
      * the map is hidden while they are up.  Only a report screen is still a
@@ -865,7 +865,7 @@ public class ClassicGUI extends GUI {
      *
      * <p><b>Alt+F4</b> posts {@code WINDOW_CLOSING} to the window that has
      * focus: on the main frame that is {@link #closeRequested} (it asks
-     * before anything ends) -- also over the colony, build-list and Europe
+     * before anything ends) -- also over the colony and Europe
      * screens, which are in the main window since M4.0 (decision H3: the
      * original has no Alt+F4; Escape leaves a screen) -- a report window
      * or popup closes as through its close box.  Windows normally sends
@@ -1354,7 +1354,7 @@ public class ClassicGUI extends GUI {
      * Take the in-game view down so the title can replace it, and so the next
      * {@link #reconnectGUI} builds a fresh one (it only does while
      * {@code mapViewer} is null).  Takes every hosted screen away (the
-     * colony, its build list, Europe: their boxes answer "dismissed") and
+     * colony, Europe: their boxes answer "dismissed") and
      * closes the report window -- except an open high-score window, which an
      * ended game leaves for the player to read over the title -- stops the
      * map's timer and removes the menu bar.  EDT only; a no-op when no game
@@ -2106,7 +2106,7 @@ public class ClassicGUI extends GUI {
         this.boxLayer = new ClassicAdvisorLayer(new BoxHost(pack, tiny, wood),
             waitClock(), SwingUtilities::invokeLater, true);
         this.hudPane.installBoxes(this.boxLayer);
-        // The colony, build-list and Europe screens in this window (M4.0):
+        // The colony and Europe screens in this window (M4.0):
         // over the strip's dropdowns, under the map's boxes and the arrow.
         this.screens = new ClassicScreenStack(this.hudPane, this.hudPane.gameParts(),
             () -> {
@@ -2603,7 +2603,7 @@ public class ClassicGUI extends GUI {
     // The screens in the main window (master plan M4.0, ClassicScreenStack)
 
     /**
-     * Whether a classic screen (the colony, its build list, Europe) is
+     * Whether a classic screen (the colony, Europe) is
      * hosted in the main window now: the map, the panel and the strip are
      * hidden, the HUD's keys are disabled ({@link ClassicKeyMap}), the turn
      * flow and the blink hold ({@link #classicScreenUp}), the map's index
@@ -3767,7 +3767,7 @@ public class ClassicGUI extends GUI {
 
     /**
      * Whether a classic screen is up where the player can be looking at
-     * it.  A hosted screen (the colony, its build list, Europe; M4.0) always
+     * it.  A hosted screen (the colony, Europe; M4.0) always
      * is: it is what the main window shows instead of the map, also while
      * the window is minimized (decision H4).  A report screen is still a
      * window of its own ({@link #screenUp}): while windowed the player can
@@ -4130,9 +4130,12 @@ public class ClassicGUI extends GUI {
      *
      * <p>The base seam no-ops, which made every move an abrupt teleport; the
      * classic viewer slides the sprite tile-to-tile like the original game.
+     * A carrier leaving a colony's tile leaves its port order
+     * ({@link ClassicColonyPort#moved}; the review of part V, fidelity M3).
      */
     @Override
     public void animateUnitMove(Unit unit, Tile srcTile, Tile dstTile) {
+        ClassicColonyPort.moved(unit, srcTile, dstTile);
         if (this.mapViewer == null) return;
         final String pref = movesPref(unit, getMyPlayer());
         if (pref != null && !ClassicPrefs.get().is(pref)) {
@@ -4318,6 +4321,7 @@ public class ClassicGUI extends GUI {
             this.mapViewer.invalidateMinimap();
             this.mapViewer.repaint();
         }
+        observePorts();
         repaintInfo();
     }
 
@@ -4328,7 +4332,27 @@ public class ClassicGUI extends GUI {
             this.mapViewer.invalidateMinimap();
             this.mapViewer.repaint();
         }
+        observePorts();
         repaintInfo();
+    }
+
+    /**
+     * A model change: the colonies' port orders drop the carriers that are
+     * no longer in port ({@link ClassicColonyPort#observe}; the review of
+     * part V, fidelity M3), on the event thread.
+     */
+    private void observePorts() {
+        final Runnable r = () -> {
+            Game game;
+            try {
+                game = getGame();
+            } catch (RuntimeException e) {
+                game = null;   // no client (a test's GUI)
+            }
+            ClassicColonyPort.observe(game);
+        };
+        if (SwingUtilities.isEventDispatchThread()) r.run();
+        else SwingUtilities.invokeLater(r);
     }
 
     // Core screens
@@ -5031,7 +5055,7 @@ public class ClassicGUI extends GUI {
 
         /**
          * A box, a scene or a modal dialog up, or a hosted colony screen
-         * (with or without its build list): the chain waits for its
+         * (its build list is a box over it): the chain waits for its
          * close.  A colony can come while the chain runs: in windowed play
          * a report window (decision H7) left beside the active map does not
          * hold the turn start, and its colony row opens the colony in the

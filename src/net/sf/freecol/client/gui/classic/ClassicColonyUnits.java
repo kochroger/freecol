@@ -245,7 +245,7 @@ final class ClassicColonyUnits {
      * 10-port-carriers.md} §1.5, 5 boxes: #50 654, #69 235, #72 028,
      * #51 100, #51 450): «Nach vorne bewegen.» only when it is not in front,
      * «Befehle aufheben.» only with orders (I: never seen), «Wache.»
-     * always, «Im Hafen ankern» only for a ship, «Alle Waren entladen.»
+     * always, «Im Hafen ankern» only for a ship with moves left, «Alle Waren entladen.»
      * only with goods aboard, «Keine Veränderungen.» always.
      *
      * @param u The carrier.
@@ -257,7 +257,13 @@ final class ClassicColonyUnits {
         if (!front) out.add(CarrierOption.FRONT);
         if (u != null && hasOrders(u)) out.add(CarrierOption.CLEAR);
         out.add(CarrierOption.SENTRY);
-        if (u != null && u.isNaval()) out.add(CarrierOption.ANCHOR);
+        // Only a ship that can anchor now (FreeCol's fortify needs moves
+        // left; the review of part V, play L3: offered without, it did
+        // nothing; I: the original's row without moves is not seen).
+        if (u != null && u.isNaval()
+            && u.checkSetState(net.sf.freecol.common.model.Unit.UnitState.FORTIFYING)) {
+            out.add(CarrierOption.ANCHOR);
+        }
         if (u != null && u.hasGoodsCargo()) out.add(CarrierOption.UNLOAD);
         out.add(CarrierOption.NOTHING);
         return out;
