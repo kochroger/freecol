@@ -57,6 +57,13 @@ import javax.swing.SwingUtilities;
  * picture).  If they are missing, or not ready when the fade starts, the
  * timeline goes from the emblem straight to the title.
  *
+ * <p><b>One press, one stage</b> ({@link #pressed}, part T's fixer, as the
+ * original): a press during the emblem ends the emblem stage (black, then
+ * the chart from its frame 0); a press during the chart ends the intro.
+ * A press made before the chart's first picture was on screen (+
+ * {@code REACTION_MS}) is ignored, so a burst queued during the start's
+ * EDT block cannot skip the chart unseen.
+ *
  * <p>At the end the thread posts {@code finishIntro(false)} to the EDT and
  * keeps the title picture on screen until the panel stops it -- the EDT may
  * still be busy, and the title is what the panel will show anyway.
@@ -97,6 +104,32 @@ final class ClassicIntroPlayer {
 
     /** Whether the end was posted to the EDT. */
     private boolean donePosted = false;
+
+    /**
+     * What a press during the intro does (part T's fixer; the original,
+     * clip 040 with keylog 2026-10-15_095711, and Roger 2026-10-15: "jeder
+     * Tastendruck (Enter, Space, Enter auf dem numerischen Block oder Klick
+     * mit der Maus!) [überspringt] immer nur einen Abschnitt des
+     * Vorspanns"): our emblem plays the role of the original's MPS logo,
+     * the chart is the original's own stage.
+     */
+    enum Skip {
+        /** The emblem stage ends; the chart comes (the intro goes on). */
+        TO_CHART,
+        /** Made before the chart was on screen (+ REACTION_MS): nothing. */
+        IGNORED,
+        /** The last stage ends: the title menu. */
+        FINISH
+    }
+
+    /** Whether a press asked to end the emblem stage (EDT writes, the render thread reads). */
+    private volatile boolean chartRequested = false;
+
+    /** Wall-clock ms ({@code InputEvent.getWhen}'s base) of the chart's first picture, or -1. */
+    private volatile long chartShownAt = -1L;
+
+    /** The wall clock (tests replace it). */
+    java.util.function.LongSupplier clock = System::currentTimeMillis;
 
 
     /**
@@ -148,6 +181,52 @@ final class ClassicIntroPlayer {
         return (System.nanoTime() - this.t0) / 1_000_000L;
     }
 
+    /**
+     * A fresh press (key or click) during the intro, made at {@code when}:
+     * one press ends one stage.  In the emblem stage it asks for the chart
+     * (the render thread jumps there once the chart's material is
+     * decided; without a chart it ends the intro); in the chart a press
+     * made at least {@code REACTION_MS} after the chart's first picture
+     * ends the intro; one made earlier -- the rest of a burst queued while
+     * the EDT was blocked, or the second press of a fast double tap -- is
+     * ignored, so a burst cannot skip a stage the player never saw (the
+     * rule of the title menu, part T1).  A strange or stepped-back clock
+     * never makes the chart deaf ({@link ClassicTypeAhead}).  EDT.
+     *
+     * @param when The press's {@code InputEvent.getWhen}.
+     * @return What the press does.
+     */
+    synchronized Skip pressed(long when) {
+        final long shown = this.chartShownAt;
+        if (shown >= 0L) {
+            final long now = this.clock.getAsLong();
+            if (ClassicTypeAhead.strangeTime(now, when) || now < shown) return Skip.FINISH;
+            return (when < shown + ClassicMainMenuPanel.REACTION_MS) ? Skip.IGNORED
+                : Skip.FINISH;
+        }
+        if (this.chartRequested) return Skip.IGNORED;
+        if (!this.timeline.hasChart() || !this.timeline.inEmblemStage(elapsedMs())) {
+            return Skip.FINISH;
+        }
+        this.chartRequested = true;
+        return Skip.TO_CHART;
+    }
+
+    /** The chart's first picture is on screen (the render thread; tests). */
+    void chartShown(long wallMs) {
+        if (this.chartShownAt < 0L) this.chartShownAt = wallMs;
+    }
+
+    /** @return Whether the chart has been on screen (the stage the intro is in). */
+    boolean chartSeen() {
+        return this.chartShownAt >= 0L;
+    }
+
+    /** @return The timeline (tests). */
+    ClassicIntroTimeline timeline() {
+        return this.timeline;
+    }
+
 
     // The render thread
 
@@ -194,6 +273,17 @@ final class ClassicIntroPlayer {
                     logger.info("Classic intro: opening material not ready after "
                         + e + " ms; emblem then title");
                 }
+                // A press ended the emblem stage (pressed): jump to the
+                // chart once its material is decided; without it the
+                // intro ends (as a skip).
+                if (this.chartRequested && chartDecided) {
+                    if (this.timeline.hasChart()) {
+                        this.timeline.skipToChart(e);
+                    } else if (!this.donePosted) {
+                        this.donePosted = true;
+                        SwingUtilities.invokeLater(() -> this.panel.finishIntro(true));
+                    }
+                }
                 final ClassicIntroTimeline.State st = this.timeline.at(e);
                 if (st.done() && title == null) {
                     title = ClassicIntro.titlePixels(this.menuAssets, this.titleItems);
@@ -205,6 +295,9 @@ final class ClassicIntroPlayer {
                     ClassicIntro.frame(ClassicIntro.pixels(img), st, assets, script, title);
                     this.latest = img;
                     shown = st;
+                    if (st.phase == ClassicIntroTimeline.Phase.CHART) {
+                        chartShown(this.clock.getAsLong());
+                    }
                 }
                 final long now = System.nanoTime();
                 if (fresh || now - lastBlit > REFRESH_NS) {

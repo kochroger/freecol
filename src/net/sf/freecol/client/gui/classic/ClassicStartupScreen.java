@@ -100,9 +100,10 @@ import net.sf.freecol.FreeCol;
  * build-up, drawn by a {@link ClassicIntroPlayer} thread because the EDT is
  * blocked by the client constructor right now; it ends on the live title.
  * The title piece ({@link ClassicEarlyMusic}) starts with that first
- * picture.  The first fresh key or click skips the intro; the rest of a
- * burst queued while the constructor blocked the EDT is ignored, so the
- * title appears and waits for a new, deliberate choice, and so does every
+ * picture.  One fresh key or click ends one stage of the intro (the
+ * emblem, then the chart, as the original); the rest of a burst queued
+ * while the constructor blocked the EDT is ignored, so the chart and then
+ * the title appear and wait for a new, deliberate choice, and so does every
  * screen after it (part T1, Roger 2026-10-14: the queued presses used to
  * open NEUE WELT and confirm «Entdecker» on screens he never saw;
  * t/menu-skip.md).  Typing ahead through the chain is therefore no longer

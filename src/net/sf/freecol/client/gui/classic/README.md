@@ -108,16 +108,22 @@ save plays on as it was (R1b re-applies the rules on load, later).
   for it; Roger 2026-10-13), in the order it was aboard, so the one aboard
   longest stands at the right and boards first again, the newest at the left
   (the picture: soldier left of the pioneer; `ServerUnit.landPassengersInEurope`).
-  The goods stay in the holds (the picture's two crates are the holds the
-  ship lacks). Kept aboard (I): an AI player's or the REF's units (FreeCol's
+  Every unit aboard lands: colonists, soldiers, dragoons, artillery, scouts (V
+  only for the soldier and pioneer of the picture); a landed unit whose
+  destination was this Europe has it cleared. The goods stay in the holds
+  (clip 020 E1 #24111-#24112: the merchantman arrives with Erz and Rum aboard,
+  sold out of the holds afterwards). The rule rests on one still of
+  passengers arriving; no clip shows it. Kept aboard (I): an AI player's or the REF's units (FreeCol's
   behaviour), a ship on a trade route (it sails on by itself and nothing
-  would board them again), a treasure train (cashed in aboard). A unit
+  would board them again), a treasure train (nothing cashes it in on arrival, as in FreeCol;
+  an open point). A unit
   already in port before the rule (an older save) stays aboard until it
   leaves; a colonist dragged from the dock onto a ship is still drawn in its
   holds (I). Classic and freecol: off; a levi save from before the rule gets
   it on (`Specification.europeArrivalDocksDefault`).
   (`ServerUnitTest.testArrivalInEuropePutsThePassengersOnTheDock`,
-  `LeviRulesTest.testEuropeArrivalDocks`.)
+  `LeviRulesTest.testEuropeArrivalDocks`,
+  `ClassicEuropePanelTest.testTheArrivalPutsThePassengersOnTheDock`.)
 - **House rules** (game options; rules and saves without them get FreeCol's
   behaviour from `Specification.fixGameOptions`):
   - `model.option.cancelKeepsMove` on (D1, moved here from the classic
@@ -4823,7 +4829,16 @@ picture; ≈2:08 in all):
 | 11,100-~128,300 | CHART | the original's sea-chart credits and title build-up, chart frames 0..890 at 7.603 fps, frozen from frame 769 | faithful, 0 px vs captures |
 | from ~128,300 | DONE | cut to the live title menu | faithful (165 → 166) |
 
-Any fresh key or a left/right click skips straight to the title menu; the
+One fresh key or a left/right click ends ONE stage of the intro, as the
+original (clip 040 with keylog 2026-10-15_095711, frames #83, #101, #258,
+#417; Roger 2026-10-15: every key, keypad Enter or click skips one part):
+during the emblem it jumps to the black before the chart (the chart then
+starts at its frame 0, 300 ms later), during the chart it cuts to the title
+menu (`ClassicIntroPlayer.pressed`). A press made before the chart was on
+screen, or less than `REACTION_MS` after its first picture, is ignored (a
+burst queued during the start's EDT block cannot skip the chart unseen). The
+original then dissolves the chart into the title and shows «Loading
+Game...» (~2.35 s) before its menu; ours cuts at once (a difference). The
 skipping key is used up (its auto-repeat and typed character are swallowed
 until release, so a held Enter cannot also open NEUE WELT, and the rest of a
 skipping double click is inert). Alt/Ctrl/Meta chords and bare modifiers do
@@ -4931,8 +4946,9 @@ with `--fast` or `-Dfreecol.classic.intro=false` (`ClassicIntro.enabled`).
   nothing in INTRO; the pointer is hidden unconditionally (the EDT is
   blocked, so no mouse event could tell where it is); `offerQuit` stops it
   and opens the quit box; any mode change away from INTRO stops the thread.
-  The first fresh key or click skips; the rest of a burst queued while the
-  EDT was blocked is ignored and the title waits (part T1, see "Title screen
+  One fresh key or click ends one stage (emblem, then chart); the rest of a
+  burst queued while the EDT was blocked is ignored and the chart, then the
+  title, waits (part T1, see "Title screen
   & main menu").
 - **Log lines:** `Classic start-up: intro shown after N ms`,
   `Classic intro: started after N ms since launch`,
@@ -4995,11 +5011,25 @@ differing pixels.
   typed character, its auto-repeat and its release; a press less than
   `BURST_GAP_MS` = 400 ms after an ignored one continues the burst and is
   ignored too (OWN CHOICE: mashing Enter every 300 ms must not pass the
-  title); after an intro **skip** the title waits `TITLE_SETTLE_MS` = 600 ms
-  (OWN CHOICE; how the original takes several presses during its intro is not
-  recorded). No lock-out: a screen never painted (a minimized window) takes a press
+  title) -- since part T's fixer only for a press made less than
+  `ClassicTypeAhead.BURST_WINDOW_MS` = 1.5 s after its screen came or one
+  dispatched more than 100 ms late (queued), so live mashing on a screen that
+  has been up longer is served, and on the NAME page only the same key
+  continues a burst (a fast-typed name counts); after an intro **skip** the
+  title waits `TITLE_SETTLE_MS` = 600 ms (OWN CHOICE; the original shows its
+  menu ~2.35 s after the last skip press and the menu then waits; whether
+  DOS buffers a fast burst made meanwhile is not recorded). The shared rules
+  (`ClassicTypeAhead`): an event time more than a minute off is not gated,
+  and a wall clock that stepped back resets the bookkeeping, so the menu is
+  never deaf. A swallowed key whose release was lost counts as new 1.1 s
+  after its last event; a held key on the window-binding path gives one log
+  line, not one per repeat; a click that passes forgets an earlier gated
+  press whose release never came. Enter on the title and the choice screens
+  confirms the barred choice as before (Roger 2026-10-15: Enter, Enter, Enter
+  gives «Neue Welt», the first difficulty, England). No lock-out: a screen never painted (a minimized window) takes a
+  press
   made `UNPAINTED_GRACE_MS` = 1 s or more after its change. Not
-  gated: the intro (any input skips it), PASSIVE / BUSY / STARTING (input
+  gated: the intro (its own stage rule, see "Opening"), PASSIVE / BUSY / STARTING (input
   ignored anyway), chords with Alt/Ctrl/Meta (Alt+Enter, Alt+F4), bare
   modifiers, the held intro skip key (swallowed as before). One INFO line per
   ignored press: `Classic menu: <key|click> made N ms before the <screen>
@@ -5322,8 +5352,10 @@ game opens on the original's first scene with the admiral (083/049, see
   and the initial index 0; the rest are documented assumptions:
   - Pickers: Left/Up/keypad 4/8 previous, Right/Down/keypad 6/2 next,
     clamped without wrap (like the title menu); Home/End first/last; Enter
-    confirms. A click on a card selects it, a click on the selected card or
-    on the footer confirms. Hover does nothing. Forward entry starts at 0
+    confirms. A click on a card only selects it (also on the selected card);
+    only a click on the footer «(Nach Abschluß hier anklicken)» confirms
+    (Roger 2026-10-15; before, a click on the selected card confirmed too).
+    The world screen of «Neue Welt INDIVIDUALISIEREN» was already so. Hover does nothing. Forward entry starts at 0
     (England on the power screen); a Back return keeps the choice.
   - Name: on every forward entry the nation's default leader, highlighted.
     The first typed character replaces it; markup characters and characters
@@ -5350,7 +5382,7 @@ game opens on the original's first scene with the admiral (083/049, see
     click on the bonus page skipped the audience. Now (`ClassicMainMenuPanel`
     `onPress` / `onChainKey`): the later presses of a click series whose
     press changed the screen are ignored (`chainPressChangedScreen`; a double
-    click on a card that is not yet selected still selects and confirms it),
+    click on a card now only selects it),
     and a key's auto-repeat (`heldKeys`, cleared on focus loss) only steps
     through a picker or repeats Backspace on the name — Enter, Escape and the
     pages' "any key" act once per press.
@@ -5744,8 +5776,9 @@ shows the original scene instead.
   recording 2026-10-14_2243 closed the scene 0.8 s after it opened): a press
   made before the first paint or less than `REACTION_MS` = 200 ms after it
   is ignored, and so is one less than `BURST_GAP_MS` = 400 ms after an
-  ignored one (the title menu's constants and rule, see "Title screen &
-  main menu"); a scene never painted (a minimized window) takes a press made
+  ignored one, this only within 1.5 s of the paint or for a queued press
+  (the title menu's constants and rule, see "Title screen & main menu";
+  a held key's auto-repeat is dropped before the gate, part T's fixer); a scene never painted (a minimized window) takes a press made
   1 s or more after the show; INFO `Classic first scene: a press made … --
   ignored (…)`. Only the first scene: the ordinary boxes
   (`ClassicAdvisorLayer`) keep their rule (a press made before the box was

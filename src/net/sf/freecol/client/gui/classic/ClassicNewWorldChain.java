@@ -56,7 +56,8 @@ import net.sf.freecol.common.option.OriginalWorldSettings;
  * {@code @default=1} is 1-based); the arrow stays parked, so the original
  * was driven by keyboard.  Everything else here is a documented assumption
  * (see the README's input model): clamped stepping without wrap like the
- * title menu, click-to-select and click-again-to-confirm, the footer as a
+ * title menu, click-to-select (a click on a card never confirms: Roger
+ * 2026-10-15, «nur der Klick auf (Nach Abschluß hier anklicken)»), the footer as a
  * confirm button, Escape or a right click = back, any key or click advances
  * the text pages and the audience, typing replaces the highlighted default
  * name.
@@ -434,8 +435,9 @@ final class ClassicNewWorldChain {
 
     /**
      * A left click at a virtual point.  World screen: a picture is chosen
-     * in its column, the footer goes on.  Pickers: a card selects it, the
-     * highlighted card again or the footer confirms.  Name: a click in the
+     * in its column, the footer goes on.  Pickers: a card selects it (the
+     * highlighted one: nothing more), only the footer confirms (Roger
+     * 2026-10-15).  Name: a click in the
      * box drops the default's highlight.  Pages and audience: advance.
      */
     Result clickPrimary(int x, int y) {
@@ -448,7 +450,9 @@ final class ClassicNewWorldChain {
         case DIFFICULTY: case NATION:
             final int card = ClassicNewWorldScreens.cardAt(this.step, x, y);
             if (card >= 0) {
-                return (card == current()) ? confirm() : select(card);
+                // Roger 2026-10-15: a click on an option only selects it;
+                // only the footer «(Nach Abschluß hier anklicken)» goes on.
+                return (card == current()) ? Result.STAY : select(card);
             }
             return ClassicNewWorldScreens.footerHit(this.step, x, y)
                 ? confirm() : Result.STAY;

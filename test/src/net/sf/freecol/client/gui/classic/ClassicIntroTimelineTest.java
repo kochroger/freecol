@@ -127,6 +127,34 @@ public class ClassicIntroTimelineTest extends TestCase {
         assertTrue(tl.at(0).done());
     }
 
+    /**
+     * Part T's fixer: a press in the emblem stage jumps to the black before
+     * the chart (the original: logo -> black -> chart, clip 040); the chart
+     * then starts at its frame 0, 300 ms later; past that point nothing.
+     */
+    public void testSkipToChart() {
+        final ClassicIntroTimeline tl = new ClassicIntroTimeline();
+        assertTrue(tl.inEmblemStage(2600));
+        tl.skipToChart(2600);
+        assertEquals(Phase.BLACK, tl.at(2600).phase);
+        assertEquals(Phase.BLACK, tl.at(2899).phase);
+        final ClassicIntroTimeline.State s = tl.at(2900);
+        assertEquals(Phase.CHART, s.phase);
+        assertEquals(0, s.chartFrame);
+        assertFalse(tl.inEmblemStage(2900));
+        assertEquals(10800L + 1000L, tl.showMs(3600));
+        tl.skipToChart(5000);                    // in the chart: no second jump
+        assertEquals(Phase.CHART, tl.at(5000).phase);
+        assertEquals(10800L + 2400L, tl.showMs(5000));
+        // From the lead-in, and at the very start of the chart's black.
+        final ClassicIntroTimeline a = new ClassicIntroTimeline();
+        a.skipToChart(100);
+        assertEquals(Phase.CHART, a.at(400).phase);
+        final ClassicIntroTimeline b = new ClassicIntroTimeline();
+        b.skipToChart(10900);
+        assertEquals(10900L, b.showMs(10900));
+    }
+
     public void testWithoutChart() {
         final ClassicIntroTimeline tl = new ClassicIntroTimeline();
         tl.setHasChart(false);

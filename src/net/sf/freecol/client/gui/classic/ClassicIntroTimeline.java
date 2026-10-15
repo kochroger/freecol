@@ -24,6 +24,7 @@ package net.sf.freecol.client.gui.classic;
  * The clock of the <b>intro</b> (the Vorspann before the title menu):
  * which phase is on screen after a given number of milliseconds, and which
  * frame of it.  Swing-free; immutable apart from {@link #skip},
+ * {@link #skipToChart} (one press ends the emblem stage only),
  * {@link #setHasChart} and {@link #setEndFrame}, so it is unit-tested
  * headless like {@link ClassicDepartureTimeline}.
  *
@@ -138,14 +139,56 @@ final class ClassicIntroTimeline {
     }
 
 
-    private boolean skipped = false;
-    private boolean hasChart = true;
+    private volatile boolean skipped = false;
+    private volatile boolean hasChart = true;
     private int endFrame = DEFAULT_END_FRAME;
+
+    /**
+     * Milliseconds added to the elapsed time: set by {@link #skipToChart}
+     * (a press during the emblem stage jumps to the black before the
+     * chart).  Written by the render thread only.
+     */
+    private volatile long shiftMs = 0L;
 
 
     /** End the intro now: every later {@link #at} is DONE. */
     void skip() {
         this.skipped = true;
+    }
+
+    /**
+     * End the emblem stage now (part T's fixer, the original's rule: one
+     * press ends one intro stage; clip 040 with keylog 2026-10-15_095711:
+     * Enter during the MPS logo -> black -> the sea chart): the show jumps
+     * to the black before the chart ({@link #FADE_START_MS} +
+     * {@link #FADE_MS}), so the chart starts 300 ms later at its frame 0
+     * (the original: logo end -> chart in ~0.26 s, #83 -> #101).  Nothing
+     * happens once the show is past that point.
+     *
+     * @param elapsedMs Milliseconds since the first picture.
+     */
+    void skipToChart(long elapsedMs) {
+        final long target = FADE_START_MS + FADE_MS;
+        final long e = Math.max(0L, elapsedMs) + this.shiftMs;
+        if (e < target) this.shiftMs += target - e;
+    }
+
+    /**
+     * @param elapsedMs Milliseconds since the first picture.
+     * @return The show's own time (the elapsed time plus the skips' jump).
+     */
+    long showMs(long elapsedMs) {
+        return Math.max(0L, elapsedMs) + this.shiftMs;
+    }
+
+    /**
+     * @param elapsedMs Milliseconds since the first picture.
+     * @return Whether the show is still in the emblem stage (lead-in,
+     *     emblem, fade, the black before the chart), so a press ends that
+     *     stage only.
+     */
+    boolean inEmblemStage(long elapsedMs) {
+        return !this.skipped && showMs(elapsedMs) < CHART_START_MS;
     }
 
     /**
@@ -197,7 +240,7 @@ final class ClassicIntroTimeline {
      * @return The state.
      */
     State at(long elapsedMs) {
-        final long e = Math.max(0L, elapsedMs);
+        final long e = showMs(elapsedMs);
         if (this.skipped) return new State(Phase.DONE, 0, 0, 8, 0);
         if (e < LEAD_MS) return new State(Phase.BLACK, 0, 0, 8, 0);
         if (e < FADE_START_MS + FADE_MS) {

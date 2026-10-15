@@ -74,7 +74,13 @@ import javax.swing.SwingUtilities;
  * press made before the scene's <em>first paint</em> or less than
  * {@code REACTION_MS} after it is ignored, and so is a press made less than
  * {@code BURST_GAP_MS} after an ignored one (mashing Enter through the
- * departure and the engine start).  WHY the paint and not the moment
+ * departure and the engine start) -- this burst rule only for a press made
+ * less than {@code ClassicTypeAhead.BURST_WINDOW_MS} after the paint or one
+ * that was queued (dispatched late), so a child hammering Enter on a scene
+ * that has been up for a while closes it (part T's fixer; the shared rules,
+ * also for a strange or stepped-back clock, are {@link ClassicTypeAhead}).
+ * A held key's auto-repeat is dropped before the gate and never counts as
+ * an ignored press.  WHY the paint and not the moment
  * {@link #showScene} ran: the game's start keeps the EDT busy after it, so
  * presses made between the two were dispatched only afterwards and closed
  * the scene before it had ever been drawn (t/menu-skip.md F4: the agent's
@@ -101,9 +107,6 @@ import javax.swing.SwingUtilities;
 final class ClassicHudOverlay extends JComponent {
 
     private static final Logger logger = Logger.getLogger(ClassicHudOverlay.class.getName());
-
-    /** Whether a key event's time looks like wall-clock milliseconds. */
-    private static final long CLOCK_SANITY_MS = 60_000L;
 
     /** Tells whether a KEY_PRESSED is an auto-repeat (frame-wide tracker). */
     private final Predicate<KeyEvent> autoRepeat;
@@ -253,8 +256,22 @@ final class ClassicHudOverlay extends JComponent {
      */
     boolean predates(long when) {
         final long now = this.clock.getAsLong();
-        if (Math.abs(now - when) > CLOCK_SANITY_MS) return false;
-        final boolean burst = when < this.lastIgnoredAt + ClassicMainMenuPanel.BURST_GAP_MS;
+        // The shared rules (ClassicTypeAhead): a strange event time is not
+        // gated, and a clock that stepped back never makes the scene deaf.
+        if (ClassicTypeAhead.strangeTime(now, when)) {
+            forgetTimes(now);
+            return false;
+        }
+        if (ClassicTypeAhead.clockWentBack(now, Math.max(this.shownAt, this.paintedAt),
+                                           this.lastIgnoredAt)) {
+            forgetTimes(now);
+        }
+        // The burst rule only shortly after the paint, or for a press that
+        // was queued (ClassicTypeAhead.burstMayHold): live mashing on a
+        // scene up for a while is served by the reaction rule.
+        final long seenAt = (this.paintedAt < 0L) ? this.shownAt : this.paintedAt;
+        final boolean burst = when < this.lastIgnoredAt + ClassicMainMenuPanel.BURST_GAP_MS
+            && ClassicTypeAhead.burstMayHold(now, when, seenAt);
         final boolean early = (this.paintedAt < 0L)
             ? when < this.shownAt + ClassicMainMenuPanel.UNPAINTED_GRACE_MS
             : when < this.paintedAt + ClassicMainMenuPanel.REACTION_MS;
@@ -267,6 +284,18 @@ final class ClassicHudOverlay extends JComponent {
             + " -- ignored (" + (burst ? "continues an ignored burst" : "typed ahead")
             + ")");
         return true;
+    }
+
+    /**
+     * The clock stepped back or an event time was strange: the scene counts
+     * as seen long enough and the last ignored press is forgotten, so the
+     * next press counts ({@link ClassicTypeAhead}).
+     */
+    private void forgetTimes(long now) {
+        final long seen = now - ClassicTypeAhead.BURST_WINDOW_MS;
+        this.shownAt = seen;
+        if (this.paintedAt >= 0L) this.paintedAt = seen;
+        this.lastIgnoredAt = Long.MIN_VALUE / 2;
     }
 
     /** The paint's bookkeeping (package-private for the headless tests). */
@@ -294,8 +323,12 @@ final class ClassicHudOverlay extends JComponent {
         }
         if (e.isAltDown() || e.isControlDown() || e.isMetaDown()
             || e.isAltGraphDown()) return;
-        if (predates(e.getWhen())) return;
+        // The auto-repeat first: a held key's repeats are dropped silently
+        // and never count as ignored presses (else ~30 log lines a second,
+        // and a "burst" kept alive until the release, so the deliberate
+        // press after it was lost too; part T's regression review, F1).
         if (this.autoRepeat != null && this.autoRepeat.test(e)) return;
+        if (predates(e.getWhen())) return;
         dismiss();
     }
 

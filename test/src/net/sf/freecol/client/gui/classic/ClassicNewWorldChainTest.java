@@ -82,7 +82,12 @@ public class ClassicNewWorldChainTest extends TestCase {
         assertEquals(Result.REPAINT, click(c, ClassicNewWorldScreens.DIFF_CARDS[2]));
         assertEquals(2, c.view().diffSel);
         assertEquals(Step.DIFFICULTY, c.step());
-        assertEquals(Result.REPAINT, click(c, ClassicNewWorldScreens.DIFF_CARDS[2]));
+        // Roger 2026-10-15: a click on the chosen card does not go on; only
+        // the footer «(Nach Abschluß hier anklicken)» does.
+        assertEquals(Result.STAY, click(c, ClassicNewWorldScreens.DIFF_CARDS[2]));
+        assertEquals(Step.DIFFICULTY, c.step());
+        assertEquals(2, c.view().diffSel);
+        assertEquals(Result.REPAINT, c.clickPrimary(50, 82));
         assertEquals(Step.NATION, c.step());
         // Outside any card: nothing.
         assertEquals(Result.STAY, c.clickPrimary(5, 5));

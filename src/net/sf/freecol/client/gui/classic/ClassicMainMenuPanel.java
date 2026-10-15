@@ -41,8 +41,10 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
@@ -691,8 +693,9 @@ final class ClassicMainMenuPanel extends JPanel {
      * than REACTION_MS after, is swallowed with its typed character, its
      * auto-repeat and its release; so is one made less than BURST_GAP_MS
      * after an ignored one.  After the intro was skipped the title waits
-     * TITLE_SETTLE_MS for a press.  The intro itself takes any input (that
-     * is what skips it), and PASSIVE / BUSY / STARTING ignore input anyway.
+     * TITLE_SETTLE_MS for a press.  The intro has its own rule (one press
+     * ends one stage, {@link ClassicIntroPlayer#pressed}), and PASSIVE /
+     * BUSY / STARTING ignore input anyway.
      */
 
     /** OWN CHOICE: no one reacts to a new picture faster; catches the rest of a burst. */
@@ -700,9 +703,11 @@ final class ClassicMainMenuPanel extends JPanel {
 
     /**
      * OWN CHOICE: after an intro SKIP the title waits this long for a press
-     * (whoever skips with several presses must still see the menu).  How the
-     * original takes several presses during its intro is not recorded
-     * (t/menu-skip.md, end).
+     * (whoever skips with several presses must still see the menu).  The
+     * original (clip 040 with keylog 2026-10-15_095711) ends one intro
+     * stage per press and shows its menu ~2.35 s after the last one
+     * (dissolve, «Loading Game...»); the menu then waits.  Whether DOS
+     * buffers a fast burst made during that time is not recorded.
      */
     static final long TITLE_SETTLE_MS = 600L;
 
@@ -712,9 +717,14 @@ final class ClassicMainMenuPanel extends JPanel {
     /**
      * OWN CHOICE: a press made less than this after an IGNORED press
      * continues that burst and is ignored too (mashing Enter every 300 ms
-     * must not pass the title at its third press).
+     * must not pass the title at its third press) -- only shortly after the
+     * screen came or for a queued press ({@link ClassicTypeAhead#burstMayHold});
+     * on the NAME page only the very same key continues it.
      */
     static final long BURST_GAP_MS = 400L;
+
+    /** A key code standing for "no key" (the window bindings) in {@link #typedAhead(long, int)}. */
+    static final int NO_KEY = Integer.MIN_VALUE;
 
     /** The clock of {@code InputEvent.getWhen} (tests replace it). */
     java.util.function.LongSupplier clock = System::currentTimeMillis;
@@ -735,17 +745,37 @@ final class ClassicMainMenuPanel extends JPanel {
     /** {@code getWhen} of the last ignored press or click. */
     private long lastIgnoredAt = Long.MIN_VALUE / 2;
 
+    /** The key code of the last ignored press (a mouse button: {@code -100 - button}). */
+    private int lastIgnoredKey = NO_KEY;
+
+    /** Whether the last press {@link #typedAhead} ignored continued a burst (the log line). */
+    private boolean lastWasBurst = false;
+
     /** Whether the title came from an intro skip (see {@link #TITLE_SETTLE_MS}). */
     private boolean titleAfterSkip = false;
 
-    /** Keys whose press was ignored and are still down (their repeats and release go too). */
-    private final Set<Integer> swallowedKeys = new HashSet<>();
+    /**
+     * Keys whose press was ignored and are still down (their repeats and
+     * release go too): key code -> time of its latest press.  A press more
+     * than {@link ClassicTypeAhead#REPEAT_GAP_MS} after that is a new press
+     * (the release can be lost, as {@code ClassicGUI.FrameKeys} knows).
+     */
+    private final Map<Integer, Long> swallowedKeys = new HashMap<>();
 
     /** Whether the next typed character belongs to an ignored press. */
     private boolean swallowTyped = false;
 
     /** The button of an ignored mouse press until its release. */
     private int swallowedButton = MouseEvent.NOBUTTON;
+
+    /**
+     * The window binding whose press was ignored while the panel lacked the
+     * focus, and the time of its latest press: its auto-repeat is dropped
+     * silently (one log line per press, not per repeat) until its release
+     * binding or {@link ClassicTypeAhead#REPEAT_GAP_MS} without a repeat.
+     */
+    private String swallowedBinding = null;
+    private long swallowedBindingAt = 0L;
 
     /** Tests: whether the gate swallowed the last key or mouse press. */
     boolean typedAheadSwallowedLast = false;
@@ -853,6 +883,7 @@ final class ClassicMainMenuPanel extends JPanel {
                     introSkipKey = -1;
                     swallowedKeys.clear();
                     swallowTyped = false;
+                    swallowedButton = MouseEvent.NOBUTTON;
                 }
             });
     }
@@ -896,18 +927,51 @@ final class ClassicMainMenuPanel extends JPanel {
      * @return True to ignore it.
      */
     boolean typedAhead(long when) {
+        return typedAhead(when, NO_KEY);
+    }
+
+    /**
+     * Whether a press made at {@code when} was made before the player could
+     * have seen the current screen (see the rule above {@link #REACTION_MS}
+     * and the shared rules of {@link ClassicTypeAhead}: a strange event time
+     * is not gated, a clock that stepped back resets the bookkeeping, the
+     * burst rule holds only shortly after the screen came or for a queued
+     * press).
+     *
+     * @param when The press's {@code InputEvent.getWhen}.
+     * @param key The key code, {@code -100 - button} for a mouse press, or
+     *     {@link #NO_KEY} (on the NAME page only the same key continues a
+     *     burst, so a fast-typed name is not swallowed).
+     * @return True to ignore it.
+     */
+    boolean typedAhead(long when, int key) {
         switch (this.mode) {
-        case INTRO:                       // any input may end the intro
+        case INTRO:                       // the intro has its own stage rule
         case PASSIVE: case BUSY: case STARTING:   // input ignored anyway
             return false;
         default:
             break;
         }
         if (!isShowing() && !this.gateOffScreen) return false;   // headless
-        if (when < this.lastIgnoredAt + BURST_GAP_MS) return true;
+        final long now = this.clock.getAsLong();
+        if (ClassicTypeAhead.strangeTime(now, when)) {
+            forgetTimes(now);
+            return false;
+        }
+        if (ClassicTypeAhead.clockWentBack(now, Math.max(this.shownAt, this.changedAt),
+                                           this.lastIgnoredAt)) {
+            forgetTimes(now);
+        }
         noteScreen();
         final ClassicNewWorldChain.Step st = currentStep();
-        if (this.mode != this.shownMode || st != this.shownStep) {   // not painted yet
+        final boolean painted = this.mode == this.shownMode && st == this.shownStep;
+        final long seenAt = (painted) ? this.shownAt : this.changedAt;
+        this.lastWasBurst = when < this.lastIgnoredAt + BURST_GAP_MS
+            && ClassicTypeAhead.burstMayHold(now, when, seenAt)
+            && !(this.mode == Mode.NEW_WORLD && st == ClassicNewWorldChain.Step.NAME
+                 && key != this.lastIgnoredKey);
+        if (this.lastWasBurst) return true;
+        if (!painted) {
             // (the proposal measured the grace on the clock of the dispatch;
             // on the press's own time a press queued behind a long block is
             // still caught)
@@ -917,10 +981,25 @@ final class ClassicMainMenuPanel extends JPanel {
             ? TITLE_SETTLE_MS : REACTION_MS);
     }
 
-    /** One INFO line per ignored press or click. */
-    private void logIgnored(String what, long when) {
-        final boolean burst = when < this.lastIgnoredAt + BURST_GAP_MS;
+    /**
+     * The clock stepped back or an event time was strange: the current
+     * screen counts as seen long enough and the last ignored press is
+     * forgotten, so the next press counts ({@link ClassicTypeAhead}).
+     */
+    private void forgetTimes(long now) {
+        final long seen = now - ClassicTypeAhead.BURST_WINDOW_MS;
+        this.shownAt = seen;
+        this.changedAt = seen;
+        this.titleAfterSkip = false;
+        this.lastIgnoredAt = Long.MIN_VALUE / 2;
+        this.lastIgnoredKey = NO_KEY;
+    }
+
+    /** One INFO line per ignored press or click (after {@link #typedAhead} said so). */
+    private void logIgnored(String what, long when, int key) {
+        final boolean burst = this.lastWasBurst;
         this.lastIgnoredAt = when;
+        this.lastIgnoredKey = key;
         this.typedAheadSwallowedLast = true;
         final ClassicNewWorldChain.Step st = currentStep();
         final String screen;
@@ -957,20 +1036,28 @@ final class ClassicMainMenuPanel extends JPanel {
         switch (e.getID()) {
         case KeyEvent.KEY_PRESSED:
             this.typedAheadSwallowedLast = false;
-            if (this.swallowedKeys.contains(k)) {      // its auto-repeat
-                this.typedAheadSwallowedLast = true;
-                this.swallowTyped = true;
-                e.consume();
-                return;
+            final Long last = this.swallowedKeys.get(k);
+            if (last != null) {
+                if (ClassicTypeAhead.repeatOf(last, e.getWhen())) {   // its auto-repeat
+                    this.swallowedKeys.put(k, e.getWhen());
+                    this.typedAheadSwallowedLast = true;
+                    this.swallowTyped = true;
+                    e.consume();
+                    return;
+                }
+                // Its release was lost (a NumLock quirk, a window change):
+                // this is a new press, judged as any other (part T's play
+                // review, P3).
+                this.swallowedKeys.remove(k);
             }
             this.swallowTyped = false;
             if (k != this.introSkipKey
                 && !(e.isAltDown() || e.isControlDown() || e.isMetaDown()
                      || isModifierKey(k))
-                && typedAhead(e.getWhen())) {
-                this.swallowedKeys.add(k);
+                && typedAhead(e.getWhen(), k)) {
+                this.swallowedKeys.put(k, e.getWhen());
                 this.swallowTyped = true;
-                logIgnored("key " + KeyEvent.getKeyText(k) + " (" + k + ")", e.getWhen());
+                logIgnored("key " + KeyEvent.getKeyText(k) + " (" + k + ")", e.getWhen(), k);
                 e.consume();
                 return;
             }
@@ -983,7 +1070,7 @@ final class ClassicMainMenuPanel extends JPanel {
             }
             break;
         case KeyEvent.KEY_RELEASED:
-            if (this.swallowedKeys.remove(k)) {
+            if (this.swallowedKeys.remove(k) != null) {
                 this.heldKeys.remove(k);
                 e.consume();
                 return;
@@ -995,15 +1082,23 @@ final class ClassicMainMenuPanel extends JPanel {
         super.processKeyEvent(e);
     }
 
-    /** The gate for mouse presses (see {@link #typedAhead}); a gated press's release does nothing. */
+    /**
+     * The gate for mouse presses (see {@link #typedAhead}); a gated press's
+     * release does nothing.  A press that passes forgets an earlier gated
+     * press whose release never came (part T's play review, P4: else the
+     * deliberate click's release was eaten).
+     */
     @Override
     protected void processMouseEvent(MouseEvent e) {
-        if (e.getID() == MouseEvent.MOUSE_PRESSED) this.typedAheadSwallowedLast = false;
-        if (e.getID() == MouseEvent.MOUSE_PRESSED && typedAhead(e.getWhen())) {
-            this.swallowedButton = e.getButton();
-            logIgnored("click", e.getWhen());
-            e.consume();
-            return;
+        if (e.getID() == MouseEvent.MOUSE_PRESSED) {
+            this.typedAheadSwallowedLast = false;
+            if (typedAhead(e.getWhen(), -100 - e.getButton())) {
+                this.swallowedButton = e.getButton();
+                logIgnored("click", e.getWhen(), -100 - e.getButton());
+                e.consume();
+                return;
+            }
+            this.swallowedButton = MouseEvent.NOBUTTON;
         }
         if (e.getID() == MouseEvent.MOUSE_RELEASED
             && this.swallowedButton != MouseEvent.NOBUTTON
@@ -1035,6 +1130,7 @@ final class ClassicMainMenuPanel extends JPanel {
         }
         this.mode = m;
         if (m != Mode.TITLE) this.titleAfterSkip = false;
+        this.swallowedButton = MouseEvent.NOBUTTON;   // its release may never come (P4)
         noteScreen();
         if (isLive()) this.frozenFrame = null;
         updatePointerShape();
@@ -1141,6 +1237,17 @@ final class ClassicMainMenuPanel extends JPanel {
         showTitle(null);
     }
 
+    /** Tests: drive the intro's stages with a player that is not running. */
+    void useIntroPlayer(ClassicIntroPlayer p) {
+        if (this.mode == Mode.INTRO) this.introPlayer = p;
+    }
+
+    /** @return Whether the running intro has shown its chart (tests, the live agent). */
+    boolean introChartSeen() {
+        final ClassicIntroPlayer p = this.introPlayer;
+        return p != null && p.chartSeen();
+    }
+
     /** Stop the intro's drawing for good (any mode change away from INTRO). */
     private void stopIntroPlayer() {
         if (this.introPlayer != null) {
@@ -1150,8 +1257,39 @@ final class ClassicMainMenuPanel extends JPanel {
     }
 
     /**
-     * A key press during the intro: any fresh press skips to the title and
-     * is used up by it.  Left alone, as in the departure: chords with Alt,
+     * A fresh press during the intro ends its current stage only, as the
+     * original (clip 040 with keylog 2026-10-15_095711; Roger 2026-10-15:
+     * every key or click skips one part of the Vorspann): in the emblem
+     * stage the chart comes, in the chart the title menu
+     * ({@link ClassicIntroPlayer#pressed}; a press made before the chart
+     * was on screen is ignored).  Without a running player (tests, no
+     * intro thread) there is one stage: the title.  EDT.
+     *
+     * @param when The press's {@code InputEvent.getWhen}.
+     * @param what The input, for the log.
+     */
+    private void skipIntroStage(long when, String what) {
+        final ClassicIntroPlayer p = this.introPlayer;
+        final ClassicIntroPlayer.Skip s = (p == null) ? ClassicIntroPlayer.Skip.FINISH
+            : p.pressed(when);
+        switch (s) {
+        case TO_CHART:
+            logger.info("Classic intro: " + what + " ended the emblem after "
+                + p.elapsedMs() + " ms; the chart comes");
+            break;
+        case IGNORED:
+            logger.info("Classic intro: " + what + " made before the chart was shown"
+                + " -- ignored (typed ahead)");
+            break;
+        default:
+            finishIntro(true);
+            break;
+        }
+    }
+
+    /**
+     * A key press during the intro: any fresh press ends the intro's
+     * current stage ({@link #skipIntroStage}) and is used up by it.  Left alone, as in the departure: chords with Alt,
      * Ctrl or Meta (Alt+Enter full screen and Alt+F4 quit keep their
      * meaning) and bare modifiers.  The skipping key is remembered
      * ({@link #introSkipKey}) so its auto-repeat and typed character are
@@ -1166,7 +1304,7 @@ final class ClassicMainMenuPanel extends JPanel {
         e.consume();
         if (repeat || isModifierKey(e.getKeyCode())) return;
         this.introSkipKey = e.getKeyCode();
-        finishIntro(true);
+        skipIntroStage(e.getWhen(), "key " + KeyEvent.getKeyText(e.getKeyCode()));
     }
 
     /**
@@ -1568,7 +1706,10 @@ final class ClassicMainMenuPanel extends JPanel {
      */
     private void bind(InputMap im, ActionMap am, String name,
                       Runnable r, int... keys) {
-        for (int k : keys) im.put(KeyStroke.getKeyStroke(k, 0), name);
+        for (int k : keys) {
+            im.put(KeyStroke.getKeyStroke(k, 0), name);
+            im.put(KeyStroke.getKeyStroke(k, 0, true), name + RELEASE);
+        }
         am.put(name, new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
@@ -1577,13 +1718,48 @@ final class ClassicMainMenuPanel extends JPanel {
                         || ClassicMainMenuPanel.this.mode == Mode.DEPARTURE) return;
                     // T1: while the panel is not the focus owner the key
                     // comes here without processKeyEvent's gate.
-                    if (e != null && typedAhead(e.getWhen())) {
-                        logIgnored("key binding " + name, e.getWhen());
-                        return;
-                    }
+                    if (e != null && bindingTypedAhead(name, e.getWhen())) return;
                     r.run();
                 }
             });
+        am.put(name + RELEASE, new AbstractAction() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    if (name.equals(ClassicMainMenuPanel.this.swallowedBinding)) {
+                        ClassicMainMenuPanel.this.swallowedBinding = null;
+                    }
+                }
+            });
+    }
+
+    /** The suffix of a binding's release action (see {@link #swallowedBinding}). */
+    private static final String RELEASE = ".release";
+
+    /**
+     * The gate of the window bindings' path (the panel is not the focus
+     * owner, so {@link #processKeyEvent} never saw the press): the press
+     * of a binding is judged by {@link #typedAhead}; while an ignored
+     * binding's key is held its auto-repeat is dropped silently, without a
+     * log line and without keeping a burst alive (part T's regression
+     * review, F2: 61 log lines for a key held 2 s).
+     *
+     * @param name The binding.
+     * @param when The press's time.
+     * @return True to ignore it.
+     */
+    boolean bindingTypedAhead(String name, long when) {
+        if (name.equals(this.swallowedBinding)) {
+            if (ClassicTypeAhead.repeatOf(this.swallowedBindingAt, when)) {
+                this.swallowedBindingAt = when;
+                return true;
+            }
+            this.swallowedBinding = null;      // its release was lost
+        }
+        if (!typedAhead(when)) return false;
+        this.swallowedBinding = name;
+        this.swallowedBindingAt = when;
+        logIgnored("key binding " + name, when, NO_KEY);
+        return true;
     }
 
     /** Move the bar by {@code delta}, clamped (no wrap). */
@@ -2225,7 +2401,7 @@ final class ClassicMainMenuPanel extends JPanel {
             if (e.getButton() == MouseEvent.BUTTON1
                 || e.getButton() == MouseEvent.BUTTON3) {
                 this.introClickSeries = true;
-                finishIntro(true);
+                skipIntroStage(e.getWhen(), "click");
             }
             break;
         case NEW_WORLD:
@@ -2236,8 +2412,8 @@ final class ClassicMainMenuPanel extends JPanel {
             // on England), so double-clicking the highlighted card would
             // confirm England too; on the pages it would skip the audience.
             // Only a press that changed the screen makes the rest of its
-            // click series inert, so double-clicking a card that is not yet
-            // selected still selects and then confirms it.
+            // click series inert (a click on a card only selects it since
+            // Roger 2026-10-15; only the footer confirms).
             if (e.getClickCount() > 1 && this.chainPressChangedScreen) break;
             if (e.getButton() == MouseEvent.BUTTON1
                 || e.getButton() == MouseEvent.BUTTON3) {

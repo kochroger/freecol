@@ -188,25 +188,380 @@ public class ClassicMenuTypeAheadTest extends FreeColTestCase {
         assertEquals(Mode.NEW_WORLD, p.mode());
     }
 
-    /** §5.2b: Enters every 300 ms after the paint are all ignored; a pause, then one works. */
+    /**
+     * §5.2b and the fixer's P2: Enters every 300 ms in the first
+     * BURST_WINDOW_MS after the paint are all ignored, and so are queued
+     * ones (dispatched late) after it; but live mashing on a title that has
+     * been up longer is served (a child hammering Enter: the bar's choice
+     * opens).
+     */
     public void testMashingStaysOnTheTitle() {
         final long t0 = now[0];
         final ClassicMainMenuPanel p = skippedIntro(KeyEvent.VK_ENTER, t0);
         now[0] += 50;
         p.screenPainted();
         final long paint = now[0];
-        for (long d = 300; d <= 3000; d += 300) {
+        long d = 300;
+        for (; d < ClassicTypeAhead.BURST_WINDOW_MS; d += 300) {
             now[0] = paint + d;
-            assertTrue("Enter at +" + d, key(p, KeyEvent.VK_ENTER, paint + d));
+            assertTrue("Enter at +" + d, key(p, KeyEvent.VK_DOWN, paint + d));
         }
         assertEquals(Mode.TITLE, p.mode());
-        // Arrows in the burst do not move the bar either.
-        now[0] = paint + 3200;
-        assertTrue(key(p, KeyEvent.VK_DOWN, paint + 3200));
+        assertEquals("arrows in the burst do not move the bar",
+                     ClassicMainMenuPanel.ITEM_NEW_WORLD, p.selectedItem());
+        // After the window: presses queued behind a block (dispatched 150 ms
+        // late) still continue the burst.
+        for (; d < 2700; d += 300) {
+            now[0] = paint + d + 150;
+            assertTrue("queued Down at +" + d, key(p, KeyEvent.VK_DOWN, paint + d));
+        }
         assertEquals(ClassicMainMenuPanel.ITEM_NEW_WORLD, p.selectedItem());
-        now[0] = paint + 3700;
-        assertFalse(key(p, KeyEvent.VK_DOWN, paint + 3700));
+        // Live mashing, 300 ms after the last ignored one: served.
+        now[0] = paint + d;
+        assertFalse("live Down at +" + d, key(p, KeyEvent.VK_DOWN, paint + d));
         assertEquals(ClassicMainMenuPanel.ITEM_AMERICA, p.selectedItem());
+        d += 300;
+        now[0] = paint + d;
+        assertFalse(key(p, KeyEvent.VK_UP, paint + d));
+        assertEquals(ClassicMainMenuPanel.ITEM_NEW_WORLD, p.selectedItem());
+        if (!havePack()) return;
+        d += 300;
+        now[0] = paint + d;
+        assertFalse(key(p, KeyEvent.VK_ENTER, paint + d));
+        assertEquals(Mode.NEW_WORLD, p.mode());
+    }
+
+    /**
+     * Roger 2026-10-15: on the choice screens Enter always goes on with
+     * the barred (default) choice, so Enter after Enter at a human pace
+     * gives «Neue Welt», the first difficulty and England -- the burst
+     * rule must not stop that (it holds only shortly after a screen came).
+     */
+    public void testEntersAtHumanPaceWalkTheDefaults() throws Exception {
+        if (!havePack()) return;
+        final Throwable[] failure = new Throwable[1];
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+            try {
+                final ClassicMainMenuPanel p = panel();
+                p.showTitle(null);
+                p.screenPainted();
+                long t = now[0];
+                // 700 ms per press, each screen painted 30 ms after it came.
+                for (Step expect : new Step[] { Step.DIFFICULTY, Step.NATION, Step.NAME }) {
+                    t += 700;
+                    now[0] = t;
+                    assertFalse(key(p, KeyEvent.VK_ENTER, t));
+                    assertEquals(Mode.NEW_WORLD, p.mode());
+                    assertEquals(expect, p.chainView().step);
+                    now[0] = t + 30;
+                    p.screenPainted();
+                }
+                assertEquals(0, p.chainView().diffSel);
+                assertEquals("England", 0, p.chainView().nationSel);
+            } catch (Throwable x) {
+                failure[0] = x;
+            }
+        });
+        if (failure[0] instanceof Error) throw (Error) failure[0];
+        if (failure[0] instanceof Exception) throw (Exception) failure[0];
+    }
+
+    /**
+     * The fixer's P1 / F3: the wall clock stepping back 30 s while the
+     * title is up does not make it deaf (the next press counts), and a
+     * strange event time (a minute off) is not gated.
+     */
+    public void testTheClockSteppingBack() {
+        final long t0 = now[0];
+        final ClassicMainMenuPanel p = panel();
+        p.showTitle(null);
+        now[0] = t0 + 100;
+        p.screenPainted();
+        now[0] = t0 + 2000;
+        assertFalse(key(p, KeyEvent.VK_DOWN, t0 + 2000));
+        assertEquals(ClassicMainMenuPanel.ITEM_AMERICA, p.selectedItem());
+        // Windows' time sync: 30 s back.
+        now[0] = t0 + 2000 - 30000;
+        assertFalse("not deaf", key(p, KeyEvent.VK_UP, now[0]));
+        assertEquals(ClassicMainMenuPanel.ITEM_NEW_WORLD, p.selectedItem());
+        // The same after an ignored press made just before the jump.
+        final ClassicMainMenuPanel q = panel();
+        now[0] = t0 + 50000;
+        q.showTitle(null);
+        q.screenPainted();
+        assertTrue(key(q, KeyEvent.VK_DOWN, now[0] + 50));
+        now[0] -= 20000;
+        assertFalse(key(q, KeyEvent.VK_DOWN, now[0]));
+        assertEquals(ClassicMainMenuPanel.ITEM_AMERICA, q.selectedItem());
+        // A strange time: not gated.
+        final ClassicMainMenuPanel r = panel();
+        r.showTitle(null);
+        assertFalse(r.typedAhead(0L));
+        assertFalse(r.typedAhead(now[0] + 120000L));
+    }
+
+    /**
+     * The fixer's P3: a swallowed key whose release never came (Windows'
+     * NumLock quirk: NUMPAD2 released as DOWN) does not swallow the next
+     * deliberate press of that key; its real repeats are still swallowed.
+     */
+    public void testALostReleaseDoesNotSwallowTheNextPress() {
+        final long t0 = now[0];
+        final ClassicMainMenuPanel p = panel();
+        p.showTitle(null);
+        now[0] = t0 + 50;
+        p.screenPainted();
+        final KeyEvent d = new KeyEvent(p, KeyEvent.KEY_PRESSED, t0 + 80, 0,
+                                        KeyEvent.VK_NUMPAD2, KeyEvent.CHAR_UNDEFINED);
+        p.processKeyEvent(d);
+        assertTrue(d.isConsumed());
+        // Its release arrives as DOWN: NUMPAD2 stays "held".
+        p.processKeyEvent(new KeyEvent(p, KeyEvent.KEY_RELEASED, t0 + 150, 0,
+                                       KeyEvent.VK_DOWN, KeyEvent.CHAR_UNDEFINED));
+        // A minute later, deliberately: a new press.
+        now[0] = t0 + 60000;
+        assertFalse(key(p, KeyEvent.VK_NUMPAD2, now[0]));
+        assertEquals(ClassicMainMenuPanel.ITEM_AMERICA, p.selectedItem());
+        // The window-binding path (the panel without the focus): a held
+        // key's repeats give one log line, not one per repeat, and its
+        // release ends them.
+        final List<String> lines = captureLog();
+        try {
+            final ClassicMainMenuPanel q = panel();
+            q.showTitle(null);
+            final long s = now[0];
+            for (int i = 0; i < 61; i++) binding(q, KeyEvent.VK_DOWN, s + 33 * i);
+            assertEquals(lines.toString(), 1, lines.size());
+            assertEquals(ClassicMainMenuPanel.ITEM_NEW_WORLD, q.selectedItem());
+            releaseBinding(q, KeyEvent.VK_DOWN);
+            now[0] = s + 3500;
+            q.screenPainted();
+            now[0] = s + 4000;
+            binding(q, KeyEvent.VK_DOWN, now[0]);
+            assertEquals(ClassicMainMenuPanel.ITEM_AMERICA, q.selectedItem());
+        } finally {
+            releaseLog();
+        }
+    }
+
+    /** The fixer's P4: a gated press whose release was lost does not eat the next click. */
+    public void testALostMouseReleaseDoesNotEatTheNextClick() {
+        if (!havePack()) return;
+        final long t0 = now[0];
+        final ClassicMainMenuPanel p = panel();
+        p.showTitle(null);
+        final int[] at = titleRow(ClassicMainMenuPanel.ITEM_AMERICA);
+        now[0] = t0 + 300;
+        p.processMouseEvent(new MouseEvent(p, MouseEvent.MOUSE_PRESSED, t0 + 10,
+            InputEvent.BUTTON1_DOWN_MASK, at[0], at[1], 1, false, MouseEvent.BUTTON1));
+        assertTrue(p.typedAheadSwallowedLast);     // its release never comes
+        now[0] = t0 + 1000;
+        p.screenPainted();
+        now[0] = t0 + 3000;
+        click(p, at[0], at[1], MouseEvent.BUTTON1, now[0]);
+        assertEquals("the first deliberate click works", Mode.NOTICE, p.mode());
+    }
+
+    /**
+     * The fixer's F4: on the NAME page a fast-typed name is not swallowed:
+     * only the very same key continues an ignored burst there.
+     */
+    public void testAFastTypedName() throws Exception {
+        if (!havePack()) return;
+        final Throwable[] failure = new Throwable[1];
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+            try {
+                final ClassicMainMenuPanel p = panel();
+                p.showTitle(null);
+                p.screenPainted();
+                long t = now[0];
+                for (int i = 0; i < 3; i++) {     // NEUE WELT, Entdecker, England
+                    t += 700;
+                    now[0] = t;
+                    key(p, KeyEvent.VK_ENTER, t);
+                    now[0] = t + 30;
+                    p.screenPainted();
+                }
+                assertEquals(Step.NAME, p.chainView().step);
+                final long paint = t + 30;
+                // L too soon (ignored), then e, v, i 120 ms apart; then the
+                // L held: its repeat would continue, an L pressed again in
+                // the gap too.
+                now[0] = paint + 100;
+                assertTrue(key(p, KeyEvent.VK_L, paint + 100));
+                final int[] codes = { KeyEvent.VK_E, KeyEvent.VK_V, KeyEvent.VK_I };
+                long w = paint + 220;
+                for (int c : codes) {
+                    now[0] = w;
+                    assertFalse(KeyEvent.getKeyText(c), key(p, c, w));
+                    w += 120;
+                }
+                assertEquals("evi", p.chainView().name);
+            } catch (Throwable x) {
+                failure[0] = x;
+            }
+        });
+        if (failure[0] instanceof Error) throw (Error) failure[0];
+        if (failure[0] instanceof Exception) throw (Exception) failure[0];
+    }
+
+    // The intro, one stage per press (the fixer; clip 040 + keylog
+    // 2026-10-15_095711; Roger 2026-10-15)
+
+    /** A panel in INTRO with a player that is not running (the test drives its stages). */
+    private ClassicMainMenuPanel introWithPlayer(ClassicIntroPlayer[] out) {
+        final ClassicMainMenuPanel p = panel();
+        p.enterIntro();
+        final ClassicIntroPlayer ip = new ClassicIntroPlayer(p, System.nanoTime(), null,
+                                                             new ArrayList<>());
+        ip.clock = () -> now[0];
+        p.useIntroPlayer(ip);
+        out[0] = ip;
+        return p;
+    }
+
+    /**
+     * One press ends one stage: the emblem, then the chart; presses made
+     * before the chart was on screen (a burst queued during the start's
+     * block) are ignored; then the title waits as in T1.  Every skipping
+     * input does it (Enter, Space, keypad Enter, a click).
+     */
+    public void testTheIntroSkipsOneStagePerPress() {
+        final int[][] inputs = { { KeyEvent.VK_ENTER }, { KeyEvent.VK_SPACE },
+                                 { -1 } };
+        for (int[] in : inputs) {
+            now[0] += 10000;
+            final long t0 = now[0];
+            final ClassicIntroPlayer[] ip = new ClassicIntroPlayer[1];
+            final ClassicMainMenuPanel p = introWithPlayer(ip);
+            final int code = in[0];
+            now[0] = t0 + 2600;                  // dispatched after the block
+            press(p, code, t0);
+            assertEquals("the emblem ends, the chart comes", Mode.INTRO, p.mode());
+            // The rest of the burst: made before the chart was on screen.
+            press(p, code, t0 + 300);
+            press(p, code, t0 + 600);
+            assertEquals(Mode.INTRO, p.mode());
+            ip[0].chartShown(t0 + 2900);
+            now[0] = t0 + 2950;
+            press(p, code, t0 + 2950);          // too soon after the chart came
+            assertEquals(Mode.INTRO, p.mode());
+            now[0] = t0 + 4000;
+            press(p, code, t0 + 4000);
+            assertEquals("the chart ends: the title", Mode.TITLE, p.mode());
+            // The title waits (T1's settle) for a press after it was shown.
+            now[0] = t0 + 4050;
+            p.screenPainted();
+            assertTrue(key(p, KeyEvent.VK_ENTER, t0 + 4300));
+            assertEquals(Mode.TITLE, p.mode());
+        }
+        // Keypad Enter is Enter in Java (VK_ENTER, KEY_LOCATION_NUMPAD).
+        now[0] += 10000;
+        final ClassicIntroPlayer[] ip = new ClassicIntroPlayer[1];
+        final ClassicMainMenuPanel p = introWithPlayer(ip);
+        final KeyEvent kp = new KeyEvent(p, KeyEvent.KEY_PRESSED, now[0], 0,
+            KeyEvent.VK_ENTER, '\n', KeyEvent.KEY_LOCATION_NUMPAD);
+        p.processKeyEvent(kp);
+        assertTrue(kp.isConsumed());
+        assertEquals(Mode.INTRO, p.mode());
+        assertTrue(ip[0].timeline().hasChart());
+    }
+
+    /** A press in the chart that comes by itself (no emblem skip) ends the intro. */
+    public void testThePressInTheChartEndsTheIntro() {
+        final ClassicIntroPlayer[] ip = new ClassicIntroPlayer[1];
+        final ClassicMainMenuPanel p = introWithPlayer(ip);
+        ip[0].chartShown(now[0]);
+        now[0] += 5000;
+        press(p, KeyEvent.VK_ENTER, now[0]);
+        assertEquals(Mode.TITLE, p.mode());
+        // Without the chart's material the emblem is the only stage.
+        final ClassicIntroPlayer[] iq = new ClassicIntroPlayer[1];
+        final ClassicMainMenuPanel q = introWithPlayer(iq);
+        iq[0].timeline().setHasChart(false);
+        press(q, KeyEvent.VK_ENTER, now[0]);
+        assertEquals(Mode.TITLE, q.mode());
+        // A clock that stepped back behind the chart's picture: not deaf.
+        final ClassicIntroPlayer[] ir = new ClassicIntroPlayer[1];
+        final ClassicMainMenuPanel r = introWithPlayer(ir);
+        ir[0].chartShown(now[0] + 30000);
+        press(r, KeyEvent.VK_ENTER, now[0]);
+        assertEquals(Mode.TITLE, r.mode());
+    }
+
+    /**
+     * The real render thread: after the emblem's skip it jumps to the
+     * chart (its first picture comes within a second), a second press
+     * ends the intro.  Needs the pack's opening material.
+     */
+    public void testTheRenderThreadJumpsToTheChart() throws Exception {
+        final ClassicPackFiles pf = ClassicPackFiles.runtime();
+        if (pf == null || !pf.hasOpening()) return;
+        final ClassicMainMenuPanel[] pp = new ClassicMainMenuPanel[1];
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+                pp[0] = panel();
+                pp[0].clock = System::currentTimeMillis;
+                pp[0].enterIntro();
+                pp[0].startIntro(System.nanoTime());
+            });
+        final ClassicMainMenuPanel p = pp[0];
+        Thread.sleep(1500);                      // the chart's material loads
+        javax.swing.SwingUtilities.invokeAndWait(() ->
+            press(p, KeyEvent.VK_ENTER, System.currentTimeMillis()));
+        final long end = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < end && !p.introChartSeen()) Thread.sleep(20);
+        assertTrue("the chart came", p.introChartSeen());
+        assertEquals(Mode.INTRO, p.mode());
+        Thread.sleep(400);
+        javax.swing.SwingUtilities.invokeAndWait(() ->
+            press(p, KeyEvent.VK_ENTER, System.currentTimeMillis()));
+        assertEquals(Mode.TITLE, p.mode());
+    }
+
+    /** A key (code >= 0, with its release) or a left click (code -1) at {@code when}. */
+    private static void press(ClassicMainMenuPanel p, int code, long when) {
+        if (code < 0) {
+            click(p, 160, 100, MouseEvent.BUTTON1, when);
+        } else {
+            key(p, code, when);
+        }
+    }
+
+    /** The menu's window binding release for a key (the release binding). */
+    private static void releaseBinding(ClassicMainMenuPanel p, int code) {
+        final Object name = p.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+            .get(KeyStroke.getKeyStroke(code, 0, true));
+        assertNotNull(name);
+        p.getActionMap().get(name).actionPerformed(new ActionEvent(p,
+            ActionEvent.ACTION_PERFORMED, name.toString(), now0(), 0));
+    }
+
+    private static long now0() {
+        return System.currentTimeMillis();
+    }
+
+    private java.util.logging.Handler logHandler = null;
+
+    /** Collect the menu's "ignored" INFO lines. */
+    private List<String> captureLog() {
+        final List<String> lines = new ArrayList<>();
+        this.logHandler = new java.util.logging.Handler() {
+                @Override public void publish(java.util.logging.LogRecord r) {
+                    if (r.getMessage() != null && r.getMessage().contains("ignored")) {
+                        lines.add(r.getMessage());
+                    }
+                }
+                @Override public void flush() {}
+                @Override public void close() {}
+            };
+        java.util.logging.Logger.getLogger(ClassicMainMenuPanel.class.getName())
+            .addHandler(this.logHandler);
+        return lines;
+    }
+
+    private void releaseLog() {
+        java.util.logging.Logger.getLogger(ClassicMainMenuPanel.class.getName())
+            .removeHandler(this.logHandler);
     }
 
     /**
@@ -367,12 +722,12 @@ public class ClassicMenuTypeAheadTest extends FreeColTestCase {
         p.processKeyEvent(d);
         assertTrue(d.isConsumed());
         for (int i = 1; i <= 5; i++) {
-            final KeyEvent r = new KeyEvent(p, KeyEvent.KEY_PRESSED, t0 + 2000 + 40 * i, 0,
+            final KeyEvent r = new KeyEvent(p, KeyEvent.KEY_PRESSED, t0 + 80 + 40 * i, 0,
                                             KeyEvent.VK_DOWN, KeyEvent.CHAR_UNDEFINED);
             p.processKeyEvent(r);
             assertTrue(r.isConsumed());
         }
-        final KeyEvent u = new KeyEvent(p, KeyEvent.KEY_RELEASED, t0 + 2300, 0,
+        final KeyEvent u = new KeyEvent(p, KeyEvent.KEY_RELEASED, t0 + 300, 0,
                                         KeyEvent.VK_DOWN, KeyEvent.CHAR_UNDEFINED);
         p.processKeyEvent(u);
         assertTrue(u.isConsumed());
