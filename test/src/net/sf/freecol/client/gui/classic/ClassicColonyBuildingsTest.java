@@ -542,6 +542,49 @@ public class ClassicColonyBuildingsTest extends FreeColTestCase {
             List.of(u[1], u[0]), List.of(u[3], u[1])));
     }
 
+    /**
+     * The remembered figure rows keep no old game (the S review's leak
+     * probe: two colonies of game A, then one of game B, and A stayed
+     * reachable through the rows): another game's rows are dropped at the
+     * next paint, and the game view's teardown forgets them, as the
+     * carriers' holds.
+     */
+    public void testTheFigureRowsKeepNoOldGame() throws Exception {
+        ClassicColonyPanel.forgetFigureOrders();
+        final State a = base1539();
+        a.in("freeColonist", "townHall");
+        a.finish();
+        new ClassicColonyPanel(client(a.game, a.owner), library(), a.colony, null, null,
+                               ClassicSlide.SYSTEM, false).canvas();
+        // A second colony of game A, as its row is remembered (a colony id
+        // game B does not have: ids repeat between test games).
+        final Field orders = ClassicColonyPanel.class.getDeclaredField("figureOrders");
+        orders.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        final Map<String, Object[]> rows = (Map<String, Object[]>) orders.get(null);
+        rows.put("colony:99999", new Object[] { a.game, 1, new ArrayList<Unit>() });
+        assertEquals("game A's two colonies", 2, ClassicColonyPanel.rememberedFigureOrders());
+        final State b = base1539();
+        b.in("freeColonist", "townHall");
+        b.finish();
+        assertNotSame(a.game, b.game);
+        new ClassicColonyPanel(client(b.game, b.owner), library(), b.colony, null, null,
+                               ClassicSlide.SYSTEM, false).canvas();
+        assertEquals("game B's only", 1, ClassicColonyPanel.rememberedFigureOrders());
+        // The teardown of the game view forgets the rows and the holds.
+        final Unit ship = new ServerUnit(b.game, b.colony.getTile(), b.owner,
+                                         classic().getUnitType("model.unit.merchantman"));
+        ship.addGoods(classic().getGoodsType("model.goods.sugar"), 100);
+        ClassicColonyPort.holds(ship);
+        assertEquals(1, ClassicColonyPort.remembered());
+        final java.lang.reflect.Method teardown
+            = ClassicGUI.class.getDeclaredMethod("teardownInGame");
+        teardown.setAccessible(true);
+        teardown.invoke(new ClassicGUI(null));
+        assertEquals(0, ClassicColonyPanel.rememberedFigureOrders());
+        assertEquals(0, ClassicColonyPort.remembered());
+    }
+
 
     // A test colony
 
@@ -1011,6 +1054,137 @@ public class ClassicColonyBuildingsTest extends FreeColTestCase {
         p.clickAt(100, 12);                    // where the plate was: the Rathaus now
         assertEquals(1, lists[0]);
         ClassicColonyPanel.setLastMode(ClassicColonyRight.Mode.HOUSE);
+    }
+
+    /**
+     * The slot drawn first wins where two rectangles overlap, for the hover
+     * label and a press's work target (V dago 01-interact §2.2: at (170,72),
+     * in M2 and in the harbour W, «Waffenarsenal» of M2, #4835 → #4840,
+     * #5604; the S review's must-fix: the topmost W took 630 of the M2
+     * sprite's 670 opaque pixels, so a building in M2 could neither be named
+     * nor targeted).  Provisorische Kolonie's layout puts the Zimmerei in M2
+     * (as a quarter of all colonies, Founding.of).
+     */
+    public void testTheSlotDrawnFirstWins() throws Exception {
+        final Slot m2 = slot("M2"), w = slot("W");
+        // Every point of the building area: the first slot in the draw
+        // order whose rectangle holds it; M2 ∩ W is M2's.
+        int overlap = 0;
+        for (int y = 8; y < 128; y++) {
+            for (int x = 0; x < 199; x++) {
+                int first = -1;
+                for (Slot sl : ClassicColonyLayout.SLOTS) {
+                    if (sl.bounds().contains(x, y)) {
+                        first = sl.index;
+                        break;
+                    }
+                }
+                assertEquals("(" + x + "," + y + ")", first, ClassicColonyPanel.slotAt(x, y));
+                if (m2.bounds().contains(x, y) && w.bounds().contains(x, y)) {
+                    overlap++;
+                    assertEquals(m2.index, ClassicColonyPanel.slotAt(x, y));
+                }
+            }
+        }
+        assertEquals("M2 ∩ W: x 128-171, y 55-74", 44 * 20, overlap);
+        assertEquals("dago's hotspot", m2.index, ClassicColonyPanel.slotAt(170, 72));
+        assertEquals("W outside M2", w.index, ClassicColonyPanel.slotAt(160, 84));
+        assertEquals("W right of M2", w.index, ClassicColonyPanel.slotAt(173, 72));
+
+        // A colony with the Sägewerk in M2 and the Hafenanlagen in W.
+        final State s = base1539();
+        final Unit worker = s.in("freeColonist", "townHall");
+        s.finish();
+        // The real controller's work() on our turn, its server call recorded.
+        final List<Object[]> work = new ArrayList<>();
+        final FreeColClient fcc = client(s.game, s.owner);
+        fcc.changeClientState(true);
+        s.game.setCurrentPlayer(s.owner);
+        final net.sf.freecol.common.networking.ServerAPI server
+            = new net.sf.freecol.common.networking.ServerAPI() {
+                    @Override
+                    public net.sf.freecol.common.networking.Connection connect(String name,
+                        String host, int port) {
+                        return null;
+                    }
+
+                    @Override
+                    public boolean disconnect() {
+                        return true;
+                    }
+
+                    @Override
+                    public net.sf.freecol.common.networking.Connection reconnect() {
+                        return null;
+                    }
+
+                    @Override
+                    public net.sf.freecol.common.networking.Connection getConnection() {
+                        return null;
+                    }
+
+                    @Override
+                    public boolean work(Unit unit,
+                                        net.sf.freecol.common.model.WorkLocation wl) {
+                        work.add(new Object[] { unit, wl });
+                        return false;      // nothing moves: only the call counts
+                    }
+                };
+        for (String[] field : new String[][] { { "serverAPI" }, { "inGameController" } }) {
+            final Field f = FreeColClient.class.getDeclaredField(field[0]);
+            f.setAccessible(true);
+            f.set(fcc, (field[0].equals("serverAPI")) ? server
+                  : new net.sf.freecol.client.control.InGameController(fcc));
+        }
+        ClassicColonyPanel.forgetFigureOrders();
+        final ClassicColonyPanel p = new ClassicColonyPanel(fcc, library(), s.colony, null,
+            null, ClassicSlide.SYSTEM, false);
+        p.setFounding(PROV);
+        p.canvas();
+        final ClassicColonyBuildings.Placed mill = p.area().slots.get(m2.index);
+        final ClassicColonyBuildings.Placed docks = p.area().slots.get(w.index);
+        assertEquals("the Sägewerk in M2", 36, mill.frame);
+        assertNotNull(mill.target);
+        assertNull("the harbour has no workplaces", docks.target);
+        // Every opaque pixel of M2's sprite finds M2 (the review: 630 of 670 found W).
+        final ClassicColonyBuildings.Assets a = ClassicColonyBuildings.Assets.load(
+            ClassicPackFiles.runtime());
+        final BufferedImage sprite = (ClassicPackFiles.runtime() == null) ? null
+            : a.building(mill.frame);
+        if (sprite != null) {
+            int opaque = 0, other = 0;
+            for (int y = 0; y < sprite.getHeight(); y++) {
+                for (int x = 0; x < sprite.getWidth(); x++) {
+                    if ((sprite.getRGB(x, y) >>> 24) < 128) continue;
+                    opaque++;
+                    if (ClassicColonyPanel.slotAt(m2.x + x, m2.y + y) != m2.index) other++;
+                }
+            }
+            System.err.println(getName() + ": M2's sprite " + opaque + " opaque px, "
+                               + other + " found another slot");
+            assertTrue(opaque > 600);
+            assertEquals(0, other);
+        }
+        // The hover over the Sägewerk where W's rectangle lies too: its own name.
+        p.hoverAt(143, 63);
+        p.canvas();
+        assertEquals(m2.index, p.hovered());
+        assertEquals(mill.label, p.area().slots.get(p.hovered()).label);
+        p.hoverAt(160, 84);
+        assertEquals("the harbour's own place", w.index, p.hovered());
+        p.hoverAt(-1, -1);
+        // A press there with a colonist selected moves him into the Sägewerk.
+        p.select(worker);
+        p.clickAt(143, 63);
+        assertEquals(1, work.size());
+        assertSame(worker, work.get(0)[0]);
+        assertSame(mill.target, work.get(0)[1]);
+        assertNull("the selection is used", p.selected());
+        // A press on the harbour's own place: no target, the selection stays.
+        p.select(worker);
+        p.clickAt(160, 84);
+        assertEquals(1, work.size());
+        assertSame(worker, p.selected());
     }
 
 

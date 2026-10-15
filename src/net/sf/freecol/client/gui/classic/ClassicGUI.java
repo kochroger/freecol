@@ -1390,6 +1390,10 @@ public class ClassicGUI extends GUI {
         this.voyages.clear();
         this.answeredNations.clear();
         this.frontedUnits.clear();
+        // The colony screen's remembered rows and holds hold their game:
+        // none outlives it (S final fixer, the review's leak probe).
+        ClassicColonyPanel.forgetFigureOrders();
+        ClassicColonyPort.forgetOrders();
         if (this.menuStrip != null) this.menuStrip.setBand(null);
         // FreeCol's goto batch again for whatever comes next (W5f), and
         // no held letter or road left over.

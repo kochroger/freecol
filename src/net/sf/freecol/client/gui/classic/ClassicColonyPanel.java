@@ -739,17 +739,21 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * The slot of the building area under a point: the topmost (the last
-     * drawn) whose sprite rectangle holds it (the slots are fixed, so this
-     * needs no paint; I: the rectangles, clip008: a label does not depend
-     * on where in its sprite the pointer is).
+     * The slot of the building area under a point: the first in the draw
+     * order (the one drawn underneath) whose sprite rectangle holds it, for
+     * the hover label and a press's work target alike (V dago
+     * 01-interact §2.2: in the one overlap, M2 inside the harbour W's
+     * rectangle, M2 wins, «Waffenarsenal» not «Werft» at (170,72), #4835 →
+     * #4840, #5604; the slots are fixed, so this needs no paint;
+     * rectangles, not pixels, dago §2.2; clip008: a label does not depend on
+     * where in its sprite the pointer is).
      *
      * @param vx The x.
      * @param vy The y.
      * @return Its index in {@link ClassicColonyLayout#SLOTS}, or -1.
      */
     static int slotAt(int vx, int vy) {
-        for (int i = ClassicColonyLayout.SLOTS.length - 1; i >= 0; i--) {
+        for (int i = 0; i < ClassicColonyLayout.SLOTS.length; i++) {
             if (ClassicColonyLayout.SLOTS[i].bounds().contains(vx, vy)) return i;
         }
         return -1;
@@ -801,6 +805,11 @@ final class ClassicColonyPanel extends JPanel {
             this.hoveredTile = tile;
             repaint();
         }
+    }
+
+    /** @return The hovered slot's index in {@link ClassicColonyLayout#SLOTS} (tests), or -1. */
+    int hovered() {
+        return this.hovered;
     }
 
     private void close() {
@@ -1559,6 +1568,14 @@ final class ClassicColonyPanel extends JPanel {
         final Game game = this.colony.getGame();
         final int turn = (game == null || game.getTurn() == null) ? -1
             : game.getTurn().getNumber();
+        // Another game's rows are dropped, so no old game is kept (as
+        // ClassicColonyPort's holds' order).
+        for (Object[] e : figureOrders.values()) {
+            if (e[0] != game) {
+                figureOrders.clear();
+                break;
+            }
+        }
         final Object[] was = figureOrders.get(this.colony.getId());
         final List<Unit> order = (was != null && was[0] == game && (Integer) was[1] == turn)
             ? ClassicColonyBuildings.keepOrder((List<Unit>) was[2], byJob) : byJob;
@@ -1566,9 +1583,17 @@ final class ClassicColonyPanel extends JPanel {
         return order;
     }
 
-    /** Forget the figure rows' orders (tests: each frame's state is a fresh visit). */
+    /**
+     * Forget the figure rows' orders (the game view's teardown; tests: each
+     * frame's state is a fresh visit).
+     */
     static void forgetFigureOrders() {
         figureOrders.clear();
+    }
+
+    /** @return How many colonies' figure rows are remembered (tests: one game's only). */
+    static int rememberedFigureOrders() {
+        return figureOrders.size();
     }
 
     /**

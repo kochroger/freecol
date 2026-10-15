@@ -156,8 +156,11 @@ final class ClassicColonyPort {
     }
 
     /**
-     * The carrier the panel shows: the first carrier on the colony's tile
-     * (I: two at once never seen; as Europe's box 3, the first).
+     * The carrier the panel shows: the first ship on the colony's tile,
+     * else the first wagon train (I: two carriers at once never seen; a
+     * ship before a wagon train so a docked ship is never hidden by a
+     * wagon train that came first, which stays in «Vorhandene Einheiten»;
+     * among ships as Europe's box 3, the first; a question for Roger).
      *
      * @param colony The colony.
      * @return It, or null.
@@ -165,8 +168,13 @@ final class ClassicColonyPort {
     static Unit carrier(Colony colony) {
         final Tile t = colony.getTile();
         if (t == null) return null;
-        for (Unit u : t.getUnitList()) if (isCarrier(u)) return u;
-        return null;
+        Unit wagon = null;
+        for (Unit u : t.getUnitList()) {
+            if (!isCarrier(u)) continue;
+            if (u.isNaval()) return u;
+            if (wagon == null) wagon = u;
+        }
+        return wagon;
     }
 
     /**
@@ -251,7 +259,7 @@ final class ClassicColonyPort {
         return ORDERS.size();
     }
 
-    /** Forget the carriers' orders (tests). */
+    /** Forget the carriers' orders (the game view's teardown, tests). */
     static void forgetOrders() {
         ORDERS.clear();
         ordersGame = null;

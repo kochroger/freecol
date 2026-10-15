@@ -182,10 +182,13 @@ public class ClassicColonyPortTest extends FreeColTestCase {
     }
 
     /**
-     * Which carrier the panel shows: the tile's first ship or wagon train
-     * (I: two at once never seen); none: «Keine Schiffe im Hafen»; a
-     * wagon train is a carrier (V #118448); not the artillery or a person;
-     * the wagon train stands in the port, not at the figure row's end.
+     * Which carrier the panel shows: the tile's first ship, else its first
+     * wagon train (I: two at once never seen; a ship before a wagon train,
+     * the S final fixer's interim so a docked ship is never hidden, a
+     * question for Roger); none: «Keine Schiffe im Hafen»; a wagon train is
+     * a carrier (V #118448); not the artillery or a person; the wagon train
+     * stands in the port, not at the figure row's end, and with a ship in
+     * the port in «Vorhandene Einheiten» only.
      */
     public void testTheCarrier() throws Exception {
         final State s = ClassicColonyBuildingsTest.base1539();
@@ -194,24 +197,41 @@ public class ClassicColonyPortTest extends FreeColTestCase {
         s.outside("artillery", null);
         assertNull(ClassicColonyPort.carrier(s.colony));
         final Unit wagon = carrier(s, "wagonTrain");
+        assertSame("a wagon train alone", wagon, ClassicColonyPort.carrier(s.colony));
         final Unit ship = carrier(s, "merchantman");
-        assertSame("the first", wagon, ClassicColonyPort.carrier(s.colony));
+        assertSame("a ship before a wagon train that came first", ship,
+                   ClassicColonyPort.carrier(s.colony));
         assertTrue(ClassicColonyPort.isCarrier(ship));
+        assertTrue(ClassicColonyPort.isCarrier(wagon));
         assertFalse(ClassicColonyPort.isCarrier(s.colony.getUnitList().get(0)));
         final ClassicColonyPanel p = ClassicColonyBuildingsTest.panel(s,
             ClassicColonyBuildingsTest.BASE);
         p.canvas();
-        assertSame(wagon, p.port().carrier);
+        assertSame(ship, p.port().carrier);
+        assertTrue(p.port().naval());
+        assertEquals("Einladen: Handelsschiff", p.port().caption);
+        assertTrue("the wagon train listed", ClassicColonyRight.listed(s.colony, null)
+                   .contains(wagon));
+        assertFalse("no ship listed", ClassicColonyRight.listed(s.colony, null)
+                    .contains(ship));
         for (ClassicColonyBuildings.Figure f : p.rowFigures()) {
             assertNotSame("no wagon train in the figure row", wagon, f.unit);
             assertNotSame(ship, f.unit);
         }
         assertEquals("the artillery not in the row (M4.7: the musket panel's)", 1,
                      p.rowFigures().size());
-        wagon.setLocation(null);
+        // A second ship: the first ship stays (two ships: a question for Roger).
+        final Unit caravel = carrier(s, "caravel");
+        assertSame(ship, ClassicColonyPort.carrier(s.colony));
+        caravel.setLocation(null);
+        ship.setLocation(null);
         p.canvas();
-        assertSame(ship, p.port().carrier);
-        assertTrue(p.port().naval());
+        assertSame("the wagon train when no ship is in port", wagon, p.port().carrier);
+        assertFalse(p.port().naval());
+        assertEquals("Einladen: Wagenzug", p.port().caption);
+        for (ClassicColonyBuildings.Figure f : p.rowFigures()) {
+            assertNotSame("no wagon train in the figure row", wagon, f.unit);
+        }
     }
 
     /**

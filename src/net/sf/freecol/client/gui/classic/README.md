@@ -3534,7 +3534,9 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   frame x − 3…x + w, y + 1…y + 16; the units outside (the persons on the colony
   tile, by their figure's job) on the fortification slot at 163 − ceil(11n/2) +
   11i, y 111, with their role's sprite (the soldier 102). **Hover label:** the
-  slot under the pointer (the topmost sprite rectangle), NAMES.TXT's name
+  slot under the pointer (the first in the draw order whose sprite rectangle
+  holds it, for the label and a press's work target alike: M2 wins over the
+  harbour W in their overlap, V dago 01-interact §2.2), NAMES.TXT's name
   («Hafenanlagen», «Sägewerk», «Haus des Gerbers»), «Bäume» on a placeholder,
   « (Außerhalb der Kolonie)» on the fence (a leading blank: its box from x 110,
   V clip 020 ×5 and clip008 ×2) or «Festung (Außerhalb der Kolonie)», at the
@@ -3589,7 +3591,9 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
     ICONS.SS.123 at (2,132) and «p% (n)» white at (15,133) when the colony has
     members, the crown ICONS.SS.124 at (104,132) and its «p% (n)» ending at x 104
     when it has Tories; «(n)» the members rounded, (p·pop + 50) div 100 (V clip 020
-    ×12, «1% (0)», «99% (1)»; FreeCol's own count floors); the percentage is
+    ×12, «1% (0)», «99% (1)»; FreeCol's own count floors), the Tories' the rest,
+    population − members, so the two add up (every frame seen fits; I: a half,
+    15 % of 10, never seen); the percentage is
     FreeCol's (its rules use it; the original rounds it up, see the S4 report). The
     flag's three canton pixels are palette indices 122/123 of the water's cycle (the
     only cycling pixels of ICONS.SS), so the flag is drawn from the pack's index
@@ -3616,7 +3620,8 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   - **Port** (M4.6, `ClassicColonyPort`): the caption in ink 57 at floor((328 −
     w)/2), «Keine Schiffe im Hafen» or «Einladen: Handelsschiff» (LABELS `@MISC` 26 /
     38 and the NAMES `@UNIT` name; it starts at x 121, over the panel's edge);
-    the tile's first carrier, a ship or a **wagon train** (V: it counts; it no longer
+    the tile's first ship, else its first **wagon train** (V: it counts; I: a ship
+    before a wagon train that came first, two carriers at once never seen; it no longer
     stands at the figure row's end), drawn as the map draws a unit (`ClassicHud`'s
     box icon: its 2-px black shadow, its flag in the owner's colour with the order
     letter) in its 16×16 cell at (130,146), a wagon train at (130,147) (V), in an

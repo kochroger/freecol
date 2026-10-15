@@ -95,7 +95,11 @@ final class ClassicColonyBand {
             this.sol = Math.max(0, Math.min(100, sol));
             this.tory = 100 - this.sol;
             this.rebels = ClassicColonyLayout.memberCount(this.sol, population);
-            this.tories = ClassicColonyLayout.memberCount(this.tory, population);
+            // The Tories the rest, so the two counts add up to the
+            // colonists (V: every frame seen fits, 11/89 % of 5 -> 1 + 4,
+            // 24/76 % of 8 -> 2 + 6, dago 34/66 % of 14 -> 5 + 9; I: a half,
+            // 15 % of 10, never seen; rounded on both sides it gave 2 + 9).
+            this.tories = Math.max(0, Math.max(0, population) - this.rebels);
             this.fishUsed = Math.max(0, fishUsed);
             this.cornUsed = Math.max(0, cornUsed);
             this.stored = Math.max(0, stored);

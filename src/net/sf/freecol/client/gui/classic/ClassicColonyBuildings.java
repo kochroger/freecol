@@ -503,16 +503,18 @@ final class ClassicColonyBuildings {
         }
 
         /**
-         * The slot under a point: the topmost (the last drawn) whose sprite
-         * rectangle holds it (I: the rectangles, clip008: the label does
-         * not depend on where in the sprite the pointer is).
+         * The slot under a point: the first in the draw order (the one
+         * drawn underneath) whose sprite rectangle holds it, as {@link
+         * ClassicColonyPanel#slotAt} (V dago 01-interact §2.2: M2 wins in
+         * its overlap with the harbour W; clip008: the label does not
+         * depend on where in the sprite the pointer is).
          *
          * @param x The x.
          * @param y The y.
          * @return Its index in {@link #slots}, or -1.
          */
         int slotAt(int x, int y) {
-            for (int i = this.slots.size() - 1; i >= 0; i--) {
+            for (int i = 0; i < this.slots.size(); i++) {
                 if (this.slots.get(i).slot.bounds().contains(x, y)) return i;
             }
             return -1;

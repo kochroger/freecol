@@ -89,6 +89,27 @@ public class ClassicColonyBandTest extends FreeColTestCase {
             assertEquals(c[0] + "% of " + c[1], c[2],
                          ClassicColonyLayout.memberCount(c[0], c[1]));
         }
+        // The Tories are the rest, so the two counts add up to the
+        // colonists (every pair above fits; the S review: rounded on both
+        // sides 36 of 1980 cases gave one colonist too many, 15 % of 10 ->
+        // 2 + 9); where no half occurs that is the rounded Tory share.
+        final int[] widths = { 8, 8, 8, 8 };
+        for (int pop = 0; pop <= 20; pop++) {
+            for (int sol = 0; sol <= 100; sol++) {
+                final ClassicColonyBand.Model m
+                    = new ClassicColonyBand.Model(sol, pop, 0, 0, 0, 0, 0, 0, widths);
+                assertEquals(sol + "% of " + pop, pop, m.rebels + m.tories);
+                assertEquals(ClassicColonyLayout.memberCount(sol, pop), m.rebels);
+                if ((sol * pop) % 100 != 50) {
+                    assertEquals(sol + "% of " + pop,
+                                 ClassicColonyLayout.memberCount(100 - sol, pop), m.tories);
+                }
+            }
+        }
+        final ClassicColonyBand.Model half
+            = new ClassicColonyBand.Model(15, 10, 0, 0, 0, 0, 0, 0, widths);
+        assertEquals(2, half.rebels);
+        assertEquals("15% (2) and 85% (8)", 8, half.tories);
         assertEquals("FreeCol's own count floors (11 % of 5)", 0,
                      Colony.calculateRebelCount(5, 11));
         assertEquals("11% (1)", ClassicColonyLayout.memberText(11, 1));

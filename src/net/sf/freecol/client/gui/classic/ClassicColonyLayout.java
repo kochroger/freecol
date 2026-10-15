@@ -910,11 +910,13 @@ final class ClassicColonyLayout {
     static final int ICON_SOL = 123, ICON_TORY = 124;
 
     /**
-     * The count «(n)» of an SoL or Tory percentage: the members rounded,
-     * (percent * population + 50) div 100 (V: 11 % of 5 -&gt; 1, 14 % of 4
-     * -&gt; 1, 24 % of 8 -&gt; 2, 89 % of 5 -&gt; 4, 86 % of 4 -&gt; 3, 76 % of 8
-     * -&gt; 6; dago 34 % of 14 -&gt; 5, 66 % -&gt; 9; I: a half rounds up, never
-     * seen).  FreeCol's own count rounds down (11 % of 5 -&gt; 0).
+     * The count «(n)» of the SoL percentage: the members rounded, (percent
+     * * population + 50) div 100 (V: 11 % of 5 -&gt; 1, 14 % of 4 -&gt; 1, 24 %
+     * of 8 -&gt; 2, 89 % of 5 -&gt; 4, 86 % of 4 -&gt; 3, 76 % of 8 -&gt; 6; dago
+     * 34 % of 14 -&gt; 5, 66 % -&gt; 9; I: a half rounds up, never seen).  The
+     * Tories' count is the rest, population - this ({@link
+     * ClassicColonyBand.Model}; equal to this formula wherever no half
+     * occurs).  FreeCol's own count rounds down (11 % of 5 -&gt; 0).
      *
      * @param percent The percentage, 0-100.
      * @param population The colonists.
