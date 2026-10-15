@@ -1008,8 +1008,8 @@ public class ClassicColonyBuildingsTest extends FreeColTestCase {
     /**
      * The presses on the building area: a worker's figure selects him, a
      * figure on the fence selects that unit (CHANGED by part U, M4.8: his
-     * job menu comes with the click, without the boxes here none), the
-     * build list opens from ÄNDERN in the hammer panel (M4.7: the
+     * job menu comes with the click, without the boxes here none), ÄNDERN
+     * in the hammer panel no longer opens a screen (part V: the build list is a box; M4.7: the
      * construction plate is gone, the first slice's press anywhere on the
      * right panel too).
      */
@@ -1052,10 +1052,10 @@ public class ClassicColonyBuildingsTest extends FreeColTestCase {
         assertEquals(0, lists[0]);
         p.setMode(ClassicColonyRight.Mode.HAMMER);
         p.canvas();
-        p.clickAt(280, 142);                   // ÄNDERN (M4.7; the list's look, M4.10)
-        assertEquals(1, lists[0]);
+        p.clickAt(280, 142);                   // ÄNDERN (M4.7; part V: its list is a box, no screen)
+        assertEquals("never the old build-list screen", 0, lists[0]);
         p.clickAt(100, 12);                    // where the plate was: the Rathaus now
-        assertEquals(1, lists[0]);
+        assertEquals(0, lists[0]);
         ClassicColonyPanel.setLastMode(ClassicColonyRight.Mode.HOUSE);
     }
 

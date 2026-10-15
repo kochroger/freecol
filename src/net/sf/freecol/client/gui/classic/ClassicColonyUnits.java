@@ -187,10 +187,32 @@ final class ClassicColonyUnits {
                                              List<Option> shown,
                                              ClassicAdvisorBox.UnitIcon icon,
                                              String title) {
+        if (shown == null) return null;
+        final List<Integer> rows = new ArrayList<>(shown.size());
+        for (Option o : shown) rows.add(o.ordinal());
+        return request(t, u, OPTIONS_SECTION, Option.NOTHING.ordinal(), rows, icon, title);
+    }
+
+    /**
+     * @COLONYUNIT with the given rows of a GAME.TXT row section.
+     *
+     * @param t The original texts, or null.
+     * @param u The unit.
+     * @param section The rows' section ({@code @UNITOPTIONS}, {@code @SHIPOPTIONS}).
+     * @param last The section's last row index (its «Keine Veränderungen.»).
+     * @param shown The section's rows offered, in order.
+     * @param icon The unit's icon in the box, or null.
+     * @param title The stopgap's window title.
+     * @return The box, or null without the texts.
+     */
+    private static ClassicAdvisorBox.Request request(ClassicText t, Unit u, String section,
+                                                     int last, List<Integer> shown,
+                                                     ClassicAdvisorBox.UnitIcon icon,
+                                                     String title) {
         final ClassicText.Message head = (t == null) ? null : t.message(UNIT_SECTION);
-        final ClassicText.Message rows = (t == null) ? null : t.message(OPTIONS_SECTION);
+        final ClassicText.Message rows = (t == null) ? null : t.message(section);
         if (u == null || head == null || head.text.isEmpty() || head.width == null
-            || rows == null || rows.text.size() <= Option.NOTHING.ordinal()
+            || rows == null || rows.text.size() <= last
             || shown == null || shown.isEmpty()) return null;
         final Map<String, String> values = new HashMap<>();
         values.put("STRING0", unitName(t, u));
@@ -198,11 +220,82 @@ final class ClassicColonyUnits {
         final List<String> lines = new ArrayList<>(head.text.size());
         for (String s : head.text) lines.add(ClassicText.substitute(s, values));
         final List<String> labels = new ArrayList<>(shown.size());
-        for (Option o : shown) labels.add(rows.text.get(o.ordinal()).trim());
+        for (int o : shown) labels.add(rows.text.get(o).trim());
         return ClassicAdvisorBox.Request.builder(UNIT_SECTION).gameText(lines)
             .width(head.width).rows(labels).defaultRow(0)
             .cancelRow(labels.size() - 1).unitIcon(icon)
             .stopgap(title, null).build();
+    }
+
+
+    // A carrier in the colony's port (clip 040)
+
+    /** GAME.TXT's rows of a carrier's box. */
+    static final String SHIP_SECTION = "SHIPOPTIONS";
+
+    /**
+     * The rows of {@code @SHIPOPTIONS}, in its order (GAME.TXT:1734-1739):
+     * «Nach vorne bewegen.», «Befehle aufheben.», «Wache.», «Im Hafen ankern
+     * ("Befestigen").», «Alle Waren entladen.», «Keine Veränderungen.».
+     */
+    enum CarrierOption { FRONT, CLEAR, SENTRY, ANCHOR, UNLOAD, NOTHING }
+
+    /**
+     * The rows a carrier's box offers (V clip 040, {@code
+     * 10-port-carriers.md} §1.5, 5 boxes: #50 654, #69 235, #72 028,
+     * #51 100, #51 450): «Nach vorne bewegen.» only when it is not in front,
+     * «Befehle aufheben.» only with orders (I: never seen), «Wache.»
+     * always, «Im Hafen ankern» only for a ship, «Alle Waren entladen.»
+     * only with goods aboard, «Keine Veränderungen.» always.
+     *
+     * @param u The carrier.
+     * @param front Whether it is in front (slot 0).
+     * @return The rows, «Keine Veränderungen.» last.
+     */
+    static List<CarrierOption> carrierOptions(Unit u, boolean front) {
+        final List<CarrierOption> out = new ArrayList<>();
+        if (!front) out.add(CarrierOption.FRONT);
+        if (u != null && hasOrders(u)) out.add(CarrierOption.CLEAR);
+        out.add(CarrierOption.SENTRY);
+        if (u != null && u.isNaval()) out.add(CarrierOption.ANCHOR);
+        if (u != null && u.hasGoodsCargo()) out.add(CarrierOption.UNLOAD);
+        out.add(CarrierOption.NOTHING);
+        return out;
+    }
+
+    /**
+     * A carrier's box (V clip 040 #50 654): «Optionen für  (Galeone):» (no
+     * expert part: two spaces), its rows, the carrier's icon at box + (5,6)
+     * (its sprite at (38,78)), w 258, x 31, h = 24 + 8·rows centred on y
+     * 100, the bar on row 1, Escape «Keine Veränderungen.».
+     *
+     * @param t The original texts, or null.
+     * @param u The carrier.
+     * @param shown The rows offered ({@link #carrierOptions}).
+     * @param icon Its icon, or null.
+     * @param title The stopgap's window title.
+     * @return The box, or null without the texts.
+     */
+    static ClassicAdvisorBox.Request carrierRequest(ClassicText t, Unit u,
+                                                    List<CarrierOption> shown,
+                                                    ClassicAdvisorBox.UnitIcon icon,
+                                                    String title) {
+        if (shown == null) return null;
+        final List<Integer> rows = new ArrayList<>(shown.size());
+        for (CarrierOption o : shown) rows.add(o.ordinal());
+        return request(t, u, SHIP_SECTION, CarrierOption.NOTHING.ordinal(), rows, icon, title);
+    }
+
+    /**
+     * What an answer of a carrier's box takes.
+     *
+     * @param shown The rows offered.
+     * @param answer The row the box returned (-1: closed with none).
+     * @return The option; «Keine Veränderungen.» for no row.
+     */
+    static CarrierOption carrierChosen(List<CarrierOption> shown, int answer) {
+        return (shown == null || answer < 0 || answer >= shown.size())
+            ? CarrierOption.NOTHING : shown.get(answer);
     }
 
     /**

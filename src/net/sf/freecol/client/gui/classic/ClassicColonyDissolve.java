@@ -143,6 +143,19 @@ final class ClassicColonyDissolve {
         return true;
     }
 
+    /**
+     * The old picture's pixels still showing a time after the screen was
+     * complete (the screen paints its new picture, then these over it from
+     * the old one; part V's dissolve on the hosted screen).
+     *
+     * @param sinceCompleteMs Milliseconds since the screen was complete.
+     * @return Their indices (y * 320 + x), the next to be revealed first.
+     */
+    int[] pending(double sinceCompleteMs) {
+        final int n = Math.max(0, Math.min(this.order.length, due(sinceCompleteMs)));
+        return java.util.Arrays.copyOfRange(this.order, n, this.order.length);
+    }
+
     /** @return Whether the new picture is complete. */
     boolean complete() {
         return this.revealed >= this.order.length;

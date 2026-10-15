@@ -1967,7 +1967,7 @@ and units at sea or in Europe never count as movable. Now as the original:
 
 ### The screens in the main window (`ClassicScreenStack`; master plan M4.0, part Q)
 
-As in the original, the colony screen, its build list and the Europe screen replace the map in the one
+As in the original, the colony screen and the Europe screen replace the map in the one
 320x200 picture (V clip 020 #2260, #24106 -> #24111, #28207 -> #28238; the manual l.83). Until part P
 each was a `JFrame` of its own, and about 15 places kept those windows in order (raising, minimizing,
 the owner of popups, re-framing on Alt+Enter, the focus); most bugs with Europe "behind the map" or
@@ -1983,8 +1983,8 @@ the owner of popups, re-framing on Alt+Enter, the focus); most bugs with Europe 
   on the HUD's grid and the recorder's.
 - **Stack rules.** One colony or one Europe at a time: the newer replaces the older (decision H5; the
   new one goes on first, the older goes from under it, so the map never shows in between; a box still
-  up on the older answers "dismissed"). The build list only over its colony; a colony's pop takes its
-  build list with it; the build list's pop shows the colony again. A pop of the top shows the next one
+  up on the older answers "dismissed"). The build list is a wood box on its colony since part V (M4.10), not a
+  screen of the stack (the stack still has its kind BUILD_LIST). A pop of the top shows the next one
   down or the map in the same paint (`paintImmediately`, E1: 1-2 frames). The game view's teardown pops
   everything.
 - **Keys.** The map's and the strip's window-wide keys are skipped while they are hidden. The HUD key
@@ -3521,7 +3521,8 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   black row 7; the season from NAMES.TXT `@SEASONS` (spring before 1600, as the HUD),
   «Gold:» from LABELS `@CTITLE`, the coin as FONTTINY's '$'. A **notice** (M4.0
   target 6, `ClassicColonyNotice`: gold ink 149 at floor((320 − w)/2), held during a
-  goods drag, 138 frames after a result) takes its place; its texts come with M4.9.
+  goods drag, 138 frames after a result) takes its place: the goods notices (M4.9). A click on the
+  colony's name opens @RENAMECOLONY (part V).
 - **Chrome** (M4.1): the building area's ground PARCH.SS.000 tiled from (0,0)
   (x 0–198, y 8–127), the black column x 199, the wood panel x 200–319 with the 3×3
   map's black frame x 223–296 × y 31–104, `COLONY.PIK` at (0,128) unscaled with its
@@ -3571,8 +3572,8 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   large slots, the harbour and the trees. The pack's index 12 (#FF5555, 10 pixels
   of BUILDING.SS) is drawn in the game palette's #FF0000. The first slice's
   black construction plate is gone (the original shows the build only in its
-  hammer panel); ÄNDERN in the hammer panel opens the build list (M4.7; the
-  list's look is M4.10).
+  hammer panel); ÄNDERN in the hammer panel opens the build list (M4.7; its
+  wood list box since part V, M4.10).
 - **3×3 colony map** (right; M4.4, `ClassicColonyTiles`, every number in
   `ClassicColonyLayout`) — the colony's nine tiles in the original's 24×24 cells
   at (224 + 24c, 32 + 24r) inside the black frame on the wood panel (M4.1). Each
@@ -3680,8 +3681,8 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
     not fit one scale k = 2, 4 … with each part's count label at (first + 2, y + 2), a crossed
     part's number red (ink 12; V dago #1000: «34», red «14», «5», «32» …). **Musket:**
     «Vorhandene Einheiten» (LABELS `@CMISC` 1, ink 57 at floor((514 − w)/2)), the tile's land
-    units that are not in the colony (the persons outside, the artillery, a treasure, a wagon train;
-    no ship) in 16×16 cells at (213 + 18i, 158), drawn as the map draws them (the shadow, the flag,
+    units that are not in the colony (the persons outside, the artillery, a treasure; no wagon train,
+    no ship: V clip 040) in 16×16 cells at (213 + 18i, 158), drawn as the map draws them (the shadow, the flag,
     the letter dark for F and S as on the map: V clip 019, the artillery's F #AA4900, the fortifying
     dragoon's black), the selected one (the first at the opening, V) in its 18×18 frame, green,
     white under the white cursor in its on half (V #366 / #388); a press on a unit selects it,
@@ -3695,14 +3696,14 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
     floor(j·S/128), S = floor(10240/(q − 1)) + 1, I), a row's count at (214, y + 1) below pitch 2,
     «(Benötigt n Werkzeuge)» (LABELS «Benötigt», NAMES's tools) at glyph top 170 over the rows'
     last pixel row, white while the stock is short, grey when it suffices. ÄNDERN opens the build
-    list (the first slice's until M4.10), KAUFEN brings only the cursor (M4.10: @BUYME0 /
+    list and KAUFEN its box (part V, M4.10: see "Carriers, goods and building"; @BUYME0 /
     @BUYME1). The recorder logs `colony-right` (the panel, the cursor's place) and `colony-mode`;
     `colony-open` names the mode. And the original's
     16-box **warehouse** row (M4.1): ICONS.SS.(22 + i) at (19i + 10 − floor(w/2),
     181), the amount at glyph top 194 and x = 19i + 1 + floor((20 − 4d)/2), its last
     two digits in ink 61 and higher ones in ink 148, no capacity mark, the selected
     good's box framed green (ink 10). The selection is global (it carries to the
-    next colony and visit) and stays on food until goods are dragged (M4.9). «Abb»
+    next colony and visit) and moves with a press on a goods cell (M4.9). «Abb»
     white over the red **"E"** at (306,179). The E and **Escape** close the screen.
 - **The kit** (M4.0): one blink for the cursors (`ClassicBlink`, 23 frames, armed
   while the screen is shown, stopped during a drag; a toggle repaints only if a
@@ -3772,70 +3773,63 @@ screen renders (buildings, the filled 3×3 grid with the colony centred, the
 `COLONY.PIK` band with SoL/port/production/warehouse), hover shows building names,
 Escape closes it. 0 SEVERE.
 
-### The build queue (`ClassicBuildQueuePanel`) — the first hard blocker, closed
+### Carriers, goods and building (`ClassicColonyPort`, `ClassicColonyGoods`, `ClassicColonyBuild`; build spec M4.9, M4.10, part V)
 
-*Since M4.2 the construction indicator described below is gone (the original
-shows the build only in its hammer panel); since M4.7 ÄNDERN in the right panel's
-hammer mode opens the list (its original look is M4.10).*
+*The first slice's `ClassicBuildQueuePanel` (a build-list screen of its own, FreeCol's order and icons)
+is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its wood list box.*
 
-Until this slice, `GUI.showBuildQueuePanel(Colony)` returned `null` unconditionally (an unoverridden
-no-op): a colony could accumulate hammers/tools but the player had no way to ever tell it what to
-build — not "rough," a genuine dead end for actually playing a game to a finish.
-
-**The seam.** `ClassicGUI.showBuildQueuePanel` hosts `ClassicBuildQueuePanel` over its colony screen in the
-main window (M4.0: only over a hosted colony; the colony is hidden under it and shows again with the
-keys at its close; guarded `SwingUtilities.invokeLater` as every other classic screen; until part P a
-window of its own placed over the colony window). **Reached by clicking the
-construction indicator** — a new dark, gold-bordered band at the top of the buildings pane (above the
-first building row, which shifted down `CONSTR_H` to make room) showing the colony's current build
-target's icon, name and the goods still needed, or a "nothing being built" caption — mirroring
-FreeCol's own `ConstructionPanel`, whose click likewise opens `showBuildQueuePanel` (same seam, same
-click target, just reused rather than invented). ⚠️ The construction band **must paint after**
-`paintBuildings`, not before: `paintBuildings` unconditionally re-fills the *entire* ground rectangle
-(`fillTiled` over `AREA_Y..BAND_Y`) as its first step, which silently erases anything drawn earlier in
-that region — this bit the first cut of this slice (the band was invisible) before the paint order was
-swapped in `paintComponent`.
-
-**The picker itself is deliberately not FreeCol's `BuildQueuePanel`.** That panel is a
-drag-reorderable multi-item queue (MigLayout lists, `TransferHandler` drag-and-drop) — a modern
-convenience the 1994 original never had. The original offered a simple list of what is *currently*
-buildable and you picked one thing at a time, so `ClassicBuildQueuePanel` mirrors that instead: every
-`BuildableType` (building or buildable unit — wagons/artillery/ships are buildable too) the colony can
-legally build **right now** — `Colony.canBuild(BuildableType)` alone is sufficient filtering, since it
-already excludes buildings already built/mid-upgrade, population/ability/limit shortfalls and
-non-coastal mismatches, the same checks FreeCol's own panel runs by hand — listed with its icon
-(`ImageLibrary.getSmallBuildableTypeImageWithWithSize`, the same lookup FreeCol's own row renderer
-uses), name and remaining required goods (`Colony.getRequiredGoods`, icon+amount tags, right-aligned).
-The colony's current pick is highlighted green; **clicking a row calls
-`InGameController.setBuildQueue(colony, List.of(picked))` — replacing the queue with that one item —
-and closes the screen**, exactly like choosing from the original's build menu. No reference screenshot
-of the original's actual build-selection screen has surfaced (checked `screenshots/`), so the plain
-list-over-a-dark-plate look is a considered placeholder in the same gold/green palette as the other
-screens, not a faithfulness claim — an open item for the expert, like the popup metrics.
-
-**The refresh gap this surfaced.** `InGameController.setBuildQueue`'s `updateGUI` only refreshes the
-map controls and menu bar (`gui.updateMapControls()` / `gui.updateMenuBar()`) — it never calls
-`GUI.refresh()`. Left alone, the colony screen behind the build-queue window would keep showing the
-*old* construction indicator after a pick until some unrelated event (ending the turn, reopening the
-screen) forced a repaint. So `showBuildQueuePanel`'s close callback also calls the same `repaintInfo()`
-every other model-change hook uses — and, since the colony screen was never wired into that hook at
-all before now (only the info panel and Europe screen were), this slice adds a `colonyPanel` field
-and a `refresh()` method to `ClassicColonyPanel`, mirroring the Europe screen's existing
-`europePanel.refresh()`, so the colony screen now also repaints on the general `refresh()`/
-`refreshTile()`/`changeView*` path, not just after a build pick.
-
-**Verified live (2026-07-24):** founded a colony, opened the build queue from the construction band —
-the list rendered real hammers/tools costs (`Schmiede 64🔨/20🔧`, `Lagerhaus 80🔨`, …) with **Anlegestelle**
-(Docks, the colony's real default pick) highlighted; picked **Lagerhaus** — the band updated to
-"Lagerhaus" immediately on close (confirming the refresh fix, not just the underlying `setBuildQueue`
-call); reopened and picked **Schmiede** — updated live again. 0 SEVERE throughout.
-
-**Follow-ups (later slices, need the expert's sign-off):** validate/correct the
-`BUILDING.SS` frame map; the original's fixed building ground-slots (vs. our
-flow layout); per-nation building/flag tints; a reference shot for the
-build-selection screen's actual look (Q-worthy, see above). Loading cargo and
-caption localization are both closed — see "Cargo & set sail" and "Caption
-localization" below.
+- **Several carriers in port** (clip 040, `port-landlocked-analysis/10-port-carriers.md`): the carriers
+  on the colony tile, ships and wagon trains alike, in the **port order** — the newest arrival in front
+  (the first look at a port: the tile's last unit first), «Nach vorne bewegen.» puts one in front, one
+  that leaves is taken out, the rest keep their order (`ClassicColonyPort.carriers`, `front`; EDT memory
+  per colony, dropped with the game). The first four full size at x 130 + 18i (a ship one pixel higher
+  outside slot 0), the rest as 4×4 **tiny icons** at (123 + 5k, 139) (pixel (i, j) = the sprite's
+  (4i + 1, 4j + 1) where opaque and not black). One is **selected**: the front one at every opening (not
+  remembered); its frame (full size or the tiny 5×6), its caption «Einladen: <Typ>» and its six holds.
+  A press on a carrier that is not selected selects it; a click on the selected one opens its box
+  «Optionen für  (Galeone):» (`@COLONYUNIT` + `@SHIPOPTIONS`, `ClassicColonyUnits.carrierOptions`):
+  «Nach vorne bewegen.» unless in front, «Befehle aufheben.» with orders (I), «Wache.», «Im Hafen ankern
+  ("Befestigen").» for a ship, «Alle Waren entladen.» with cargo, «Keine Veränderungen.»; w 258, x 31,
+  h = 24 + 8·rows centred, the carrier's icon at box + (5,6), the bar on row 1. «Vorhandene Einheiten»
+  lists neither ships nor wagon trains (the S interim's «the first ship, else the wagon train» and its
+  wagon-train @COLONYUNIT are gone).
+- **Goods** (M4.9, clip 020 visits 2, 9, 21, 25; clip 040 §1.6): a press on a warehouse cell selects
+  the good (global; its frame yellow ink 14, green 17 frames later) and holds «Einladen <Ware>» in the
+  top line; a press on a hold of the selected carrier «Ausladen <Ware>». The first motion drags the
+  goods icon (the arrow hidden, the carrier's frame white). A warehouse good dropped on the holds loads
+  the selected carrier, dropped on another carrier (full size or tiny) that one, the selection staying;
+  a hold dropped on any warehouse cell unloads it; anything else moves nothing and shows nothing.
+  Without Shift a hold's worth (the whole hold; min(stock, 100, what the carrier takes)); with Shift
+  `@HOWMUCH1` / `@HOWMUCH2` 27 frames after the drop, the field's **preset the maximum** (Europe's
+  @HOWMUCH5 keeps «100»). The result «<n> <Ware> bewegt nach <Typ | Kolonie>» 2 frames after the drop
+  (1 after a box), for 138 frames or until the next press; the hold and the warehouse number 8 frames
+  after the drop (`freeze`). Through `InGameController.loadCargo` / `unloadCargo`. Recorder:
+  `colony-goods`, `colony-howmuch`, `colony-carrier`.
+- **Building** (M4.10): KAUFEN and ÄNDERN are inverted while held, act on the release. ÄNDERN's **build
+  list** 6 frames later: a wood list box «Objekt zum Bauen wählen», «(Keine Produktion)», the buildings
+  in NAMES order, then Artillerie, Wagenzug and the ships (no colonists), upper case with a small «ä»,
+  «(n Hämmer)(m Werkzeuge)» n = max(0, cost − stored), w = max(name + cost) + 26, the current build
+  yellow under the bar, «(F1 für Hilfe)»; a pick sets a queue of one (`setBuildQueue`). **KAUFEN**:
+  `@BUYME0` with MSS5 when the treasury is short, else `@BUYME1` («Na, dann nicht.» the bar and
+  Escape, «Trotzdem abschließen.» pays through `payForBuilding`); the price is the colony's, in levi
+  13 per missing hammer and the tools at the market's ask (game option `originalBuildPrice`, R1).
+- **The completed build** (levi game option `originalBuildCompletion`, R4): a building finished with
+  nothing else queued is recorded by the server (`Colony.classicBuilt` and its turn, in the save) and
+  stays the current build — the hammer panel keeps its name and its «(Benötigt …)» line, the list shows
+  «NAME (ABGESCHLOSSEN)» in its NAMES place, yellow, with the bar; no turn warns that nothing is built;
+  the player's next choice clears it. A finished unit is built again (FreeCol's queue of one unit).
+  The first opening in the completion's turn (I until M4.11 builds @BUILT's «Zur Kolonie zoomen.»)
+  opens in hammer mode with ÄNDERN blinking until the next press and dissolves the new building in: the
+  old picture of its slot (`ClassicColonyBuildings.before`) 19 frames, then 55 frames of the woodcuts'
+  dissolve (`colony-dissolve`); the Rathaus' bells and the band row change at once (the original
+  dissolves them too).
+- **Renaming**: a click on the colony's name in the top line opens `@RENAMECOLONY` with the name
+  preset (at most 23 characters); Enter renames it through the server (`colony-rename`).
+- **Tests**: `ClassicColonyCarriersTest` (the port of 8 clip 040 frames and its 5 boxes, @HOWMUCH1 and
+  @RENAMECOLONY 0 px), `ClassicColonyGoodsTest` (words, boxes, notices and the cell frame over clip 020
+  0 px; loads and unloads with the real controller and server), `ClassicColonyBuildTest` (R1, R4 on the
+  server, the three lists with «(ABGESCHLOSSEN)» and @BUYME0 over clip 020 0 px, ÄNDERN and KAUFEN on
+  the screen, the dissolve's two pictures against #57671/#57768 and #105689/#105790 0 px).
 
 ### Moving colonists (`ClassicColonyMoves`, `ClassicColonyJobs`; build spec M4.8, part U)
 

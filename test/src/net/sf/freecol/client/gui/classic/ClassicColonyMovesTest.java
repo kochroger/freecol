@@ -516,6 +516,17 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         return over(gold, gold.frame(frame), l, bar, wood, tiny);
     }
 
+    /**
+     * {@link #over} on a frame of any clip, for the other colony tests
+     * (part V: the build list, the carriers' and the amount boxes).
+     *
+     * @return {compared, off, off on the arrow, off on the first row's rectangle}.
+     */
+    static int[] overFrame(ClassicColonyGolden gold, BufferedImage f, ClassicAdvisorBox.Layout l,
+                           int bar, BufferedImage wood, ClassicFont tiny) throws Exception {
+        return over(gold, f, l, bar, wood, tiny);
+    }
+
     /** {@link #over} on a frame of any clip. */
     private static int[] over(ClassicColonyGolden gold, BufferedImage f, ClassicAdvisorBox.Layout l,
                               int bar, BufferedImage wood, ClassicFont tiny) throws Exception {

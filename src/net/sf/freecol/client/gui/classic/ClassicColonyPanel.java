@@ -93,7 +93,7 @@ import net.sf.freecol.common.model.Unit;
  *   right the original's right panel (M4.7, {@link ClassicColonyRight}):
  *   the three mode buttons and the house rows, «Vorhandene Einheiten» or
  *   the hammer panel with KAUFEN and ÄNDERN (which opens the build list,
- *   the first slice's until M4.10), and the original's 16-box
+ *   a wood list box since M4.10), and the original's 16-box
  *   <b>warehouse</b> row along the bottom (M4.1: icons, numbers in their
  *   inks, the selected good's green frame) with «Abb» over the exit.</li>
  * </ul>
@@ -121,9 +121,25 @@ import net.sf.freecol.common.model.Unit;
  * colony with the warehouse's goods; the last colonist leaving asks
  * @ABANDON (@ABANDON2 for the only colony) with the bar on «Niemals!»,
  * whose «Ja» gives up the colony at once, the screen closing 31 frames
- * later with no input meanwhile.  Goods, KAUFEN and the build list remain
- * later steps (M4.9, M4.10); Escape or a click on the exit closes the
- * screen.
+ * later with no input meanwhile.
+ *
+ * <p><b>Carriers and goods</b> (M4.9, {@link ClassicColonyPort},
+ * {@link ClassicColonyGoods}; clip 040): a press on a carrier in port that
+ * is not selected selects it, a click on the selected one opens its box
+ * «Optionen für  (Galeone):» ({@link ClassicColonyUnits#carrierOptions}).
+ * A good is dragged from its warehouse cell onto the holds (the selected
+ * carrier) or onto another carrier, or from a hold onto the warehouse:
+ * «Einladen/Ausladen &lt;Ware&gt;» in the top line meanwhile, a hold's
+ * worth moved, with Shift @HOWMUCH1/@HOWMUCH2 with the maximum preset,
+ * «&lt;n&gt; &lt;Ware&gt; bewegt nach …» 2 frames after the drop, the hold
+ * and the number 8 frames after it.
+ *
+ * <p><b>Building</b> (M4.10, {@link ClassicColonyBuild}): ÄNDERN's release
+ * opens the build list, a wood list box; KAUFEN's @BUYME0 / @BUYME1; a
+ * completed building stays the current build «(ABGESCHLOSSEN)»; the first
+ * opening after a completion dissolves the new building in and blinks
+ * ÄNDERN.  A click on the colony's name in the top line renames it
+ * (@RENAMECOLONY).  Escape or a click on the exit closes the screen.
  */
 final class ClassicColonyPanel extends JPanel {
 
@@ -328,8 +344,8 @@ final class ClassicColonyPanel extends JPanel {
     /**
      * {@link #tileCursor} on the hammer panel's KAUFEN or ÄNDERN (M4.7
      * target 5: the button inverted in the blink's on half; V #105806 on,
-     * #105829 off: after a building's @BUILT zoom, M4.11; a press on the
-     * button brings it, I as dago §3's press).
+     * #105829 off: after a building's completion, M4.10, until the next
+     * press; dago-colony2 #2349: a held press shows the button inverted).
      */
     static final int CURSOR_BUY = -4, CURSOR_CHANGE = -5;
 
@@ -458,6 +474,65 @@ final class ClassicColonyPanel extends JPanel {
      */
     private BufferedImage leavingStill = null;
 
+    /**
+     * The selected carrier in port (M4.6, M4.9; its frame, caption and
+     * holds), or null for the front one: the front one at every opening
+     * (V clip 040, 17 openings; not remembered).
+     */
+    private Unit selectedCarrier = null;
+
+    /** A press on a carrier: the carrier, and whether it was the selected one. */
+    private Unit pressedCarrier = null;
+    private boolean pressedCarrierWasSelected = false;
+
+    /**
+     * A goods drag's good (M4.9), from the warehouse ({@link #goodsHold}
+     * -1) or from the selected carrier's hold {@link #goodsHold}, or null.
+     */
+    private GoodsType goodsType = null;
+    private int goodsHold = -1, goodsHoldAmount = 0;
+    private Unit goodsCarrier = null;
+
+    /** When a warehouse cell was pressed (its frame yellow for 17 frames), or 0. */
+    private long boxPressedAt = 0L;
+
+    /**
+     * The warehouse's amounts and the port as they were before a goods
+     * transfer, shown until its redraw 8 frames after the drop (M4.9), or
+     * null.
+     */
+    private int[] frozenAmounts = null;
+    private ClassicColonyPort.Model frozenPort = null;
+
+    /** KAUFEN or ÄNDERN pressed and held ({@link #CURSOR_BUY}, {@link #CURSOR_CHANGE}), or 0. */
+    private int pressedButton = 0;
+
+    /** Whether a press is on the colony's name in the top line (its rename, on the release). */
+    private boolean pressedName = false;
+
+    /**
+     * The completion dissolve running (M4.10 target 4), its old picture
+     * and its start (the clock's nanoseconds, the screen complete), or null.
+     */
+    private ClassicColonyDissolve dissolve = null;
+    private int[] dissolveFrom = null;
+    private long dissolveStart = 0L;
+
+    /** The dissolve's frames (a repaint per frame of the original), or null. */
+    private javax.swing.Timer dissolveTimer = null;
+
+    /** Whether the right panel's ÄNDERN blinks for a completion (until the next press). */
+    private boolean completionBlink = false;
+
+    /** While painting the old picture of a completion: the building just finished, or null. */
+    private net.sf.freecol.common.model.BuildingType paintBefore = null;
+
+    /**
+     * The completions shown ("colony id@turn"): the dissolve and the
+     * ÄNDERN blink come at the first opening after it only (EDT).
+     */
+    private static final java.util.Set<String> shownCompletions = new java.util.HashSet<>();
+
     /** Counts the pointer's moves and presses: a {@link #hoverLater} made before one is void. */
     private int hoverSeq = 0;
 
@@ -534,7 +609,8 @@ final class ClassicColonyPanel extends JPanel {
                         result = gesture.release();
                         if (result == ClassicDragGesture.Result.DROP) dragEnded();
                     }
-                    releaseAt(canvasX(e.getX()), canvasY(e.getY()), result);
+                    // Shift at the drop: a goods drag's amount box (M4.9).
+                    releaseAt(canvasX(e.getX()), canvasY(e.getY()), result, e.isShiftDown());
                 }
             });
         addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
@@ -591,7 +667,7 @@ final class ClassicColonyPanel extends JPanel {
         this.gesture.press(vx, vy, this.originX + vx * s, this.originY + vy * s,
                            canDragAt(vx, vy));
         pressAt(vx, vy);
-        releaseAt(vx, vy, this.gesture.release());
+        releaseAt(vx, vy, this.gesture.release(), false);
     }
 
     /**
@@ -622,19 +698,58 @@ final class ClassicColonyPanel extends JPanel {
      * @param vx The x.
      * @param vy The y.
      * @param result What the gesture was.
+     * @param shift Whether Shift is held (a goods drop's amount box).
      */
-    private void releaseAt(int vx, int vy, ClassicDragGesture.Result result) {
+    private void releaseAt(int vx, int vy, ClassicDragGesture.Result result, boolean shift) {
         final Unit u = this.pressedUnit;
         final ClassicColonyMoves.Place from = this.pressedPlace;
         final boolean wasSelected = this.pressedWasSelected;
         final int tile = this.pressedTile, slot = this.pressedSlot;
+        final GoodsType goods = this.goodsType;
+        final Unit carrier = this.pressedCarrier;
+        final int button = this.pressedButton;
+        final boolean name = this.pressedName;
         this.pressedUnit = null;
         this.pressedPlace = ClassicColonyMoves.Place.NONE;
         this.pressedTile = this.pressedSlot = -1;
+        this.pressedCarrier = null;
+        this.pressedButton = 0;
+        this.pressedName = false;
         if (this.leaving) {
             this.pressedUnit = null;
             this.modePressed = false;
             this.pressedBand = null;
+            this.goodsType = null;
+            return;
+        }
+        if (goods != null) {
+            goodsReleased(goods, vx, vy, result, shift);
+            return;
+        }
+        if (carrier != null) {
+            if (result == ClassicDragGesture.Result.CLICK && this.pressedCarrierWasSelected
+                && this.port != null && this.port.carrierAt(vx, vy) == carrier) {
+                carrierOptions(carrier);
+            }
+            repaint();
+            return;
+        }
+        if (button != 0) {
+            repaint();
+            final Rectangle box = (button == CURSOR_BUY) ? ClassicColonyLayout.BUY_BOX
+                : ClassicColonyLayout.CHANGE_BOX;
+            if (result == ClassicDragGesture.Result.CLICK && box.contains(vx, vy)
+                && this.mode == ClassicColonyRight.Mode.HAMMER) {
+                if (button == CURSOR_BUY) {
+                    buy();
+                } else {
+                    openBuildList(ClassicColonyGoods.ms(ClassicColonyBuild.LIST_FRAMES));
+                }
+            }
+            return;
+        }
+        if (name) {
+            if (result == ClassicDragGesture.Result.CLICK && nameAt(vx, vy)) rename();
             return;
         }
         if (u != null) {
@@ -742,6 +857,17 @@ final class ClassicColonyPanel extends JPanel {
         // mode buttons, the right panel, the exit, the colonists (the
         // review of part U, regression F1, play L2).
         if (this.leaving) return;
+        // The next press ends a result's notice early (V clip 040 #67 183
+        // -> #67 230: 47 frames instead of 138).
+        if (this.notice.until() != Long.MAX_VALUE && this.notice.at(this.clock.now()) != null) {
+            this.notice.clear();
+        }
+        // The ÄNDERN blink of a completion runs until the next press
+        // (V clip 020 visit 10; I: the cursor then on the selected figure).
+        if (this.completionBlink) {
+            this.completionBlink = false;
+            if (tileCursor == CURSOR_CHANGE) tileCursor = CURSOR_OFF_TILES;
+        }
         // The right panel's mode buttons (M4.7): the pressed look at once,
         // the panel at the release.
         final int button = ClassicColonyLayout.modeAt(vx, vy);
@@ -753,6 +879,12 @@ final class ClassicColonyPanel extends JPanel {
         }
         if (pressRight(vx, vy)) return;
         if (vx >= WARE_W && vy >= WARE_Y) { close(); return; }
+        // The colony's name in the top line: its rename on the release
+        // (V clip 040 #48 939: a click at (97,4)).
+        if (nameAt(vx, vy)) {
+            this.pressedName = true;
+            return;
+        }
         // The white cursor goes to a pressed tile (its worker's or an
         // empty one: dago §3, playthrough-1 #75221), off the tiles to
         // another pressed colonist (M4.4; the original's keys move it too,
@@ -760,18 +892,20 @@ final class ClassicColonyPanel extends JPanel {
         final int tile = ClassicColonyLayout.tileAt(vx, vy);
         if (tile >= 0 && this.tiles.cell(tile) != null) tileCursor = tile;
 
-        // The carrier in port (M4.6): the press brings the cursor (dago §3:
-        // the press moves it); a wagon train's box on the release, as from
-        // the figure row's end where it stood until the port showed it.
-        final Rectangle carrier = (this.port == null) ? null : this.port.frame();
-        if (carrier != null && carrier.contains(vx, vy)) {
+        // A carrier in port (M4.6, clip 040 §1.4): the press brings the
+        // cursor (dago §3: the press moves it) and selects the carrier; a
+        // click on the one selected already opens its box on the release.
+        final Unit carrier = (this.port == null) ? null : this.port.carrierAt(vx, vy);
+        if (carrier != null) {
+            this.pressedCarrier = carrier;
+            this.pressedCarrierWasSelected = carrier == this.port.carrier;
+            this.selectedCarrier = carrier;
             tileCursor = CURSOR_CARRIER;
-            if (!this.port.carrier.isNaval() && this.units != null) {
-                this.pressedBand = this.port.carrier;
-            }
             repaint();
             return;
         }
+        // A good: a hold of the selected carrier, a warehouse cell (M4.9).
+        if (pressGoods(vx, vy)) return;
 
         // A colonist in a building, on a tile or at the fence (M4.8): the
         // press freezes the blink and his hover label goes (dago §0.1,
@@ -939,10 +1073,9 @@ final class ClassicColonyPanel extends JPanel {
      * of «Vorhandene Einheiten» is selected, the white cursor goes to it and
      * its @COLONYUNIT box comes on the release (clip 019 #916: the frame
      * white on the press, the box 43 frames later; I: on the release; M2
-     * had it on the band's units); in the hammer panel a press on KAUFEN or
-     * ÄNDERN brings the cursor (I, as dago §3's press), ÄNDERN opens the
-     * build list (the first slice's until M4.10), KAUFEN does nothing yet
-     * (M4.10: @BUYME0 / @BUYME1); the house panel takes no press.
+     * had it on the band's units); in the hammer panel KAUFEN or ÄNDERN
+     * is inverted while held (dago-colony2 #2349), its release opens
+     * @BUYME0 / @BUYME1 or the build list (M4.10); the house panel takes no press.
      *
      * @param vx The x.
      * @param vy The y.
@@ -967,13 +1100,16 @@ final class ClassicColonyPanel extends JPanel {
             return true;
         }
         case HAMMER:
+            // KAUFEN and ÄNDERN: inverted while held, the box or the list
+            // on the release (V dago-colony2 #2349 press inverted, #2360
+            // release, the list +6 frames; the 3x3 cursor keeps its place
+            // and stops blinking while the list is up; I for KAUFEN's look).
             if (ClassicColonyLayout.BUY_BOX.contains(vx, vy)) {
-                tileCursor = CURSOR_BUY;
+                this.pressedButton = CURSOR_BUY;
                 repaint();
             } else if (ClassicColonyLayout.CHANGE_BOX.contains(vx, vy)) {
-                tileCursor = CURSOR_CHANGE;
+                this.pressedButton = CURSOR_CHANGE;
                 repaint();
-                this.freeColClient.getGUI().showBuildQueuePanel(this.colony);
             }
             return true;
         default:
@@ -1678,6 +1814,545 @@ final class ClassicColonyPanel extends JPanel {
     }
 
 
+    // Goods between the warehouse and a carrier (M4.9)
+
+    /**
+     * A press on a good (M4.9, {@link ClassicColonyGoods}): a warehouse
+     * cell selects its good (global; its frame yellow, green 17 frames
+     * later) and holds «Einladen &lt;Ware&gt;»; a hold of the selected
+     * carrier with goods holds «Ausladen &lt;Ware&gt;»; the hover label
+     * goes.  The drag starts on the first motion; a release without one
+     * ends the notice (V clip 040 #77 000-#77 002: a 2-frame flash).
+     *
+     * @param vx The x.
+     * @param vy The y.
+     * @return Whether the press was on a good.
+     */
+    private boolean pressGoods(int vx, int vy) {
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final int k = ClassicColonyLayout.holdAt(vx, vy);
+        if (k >= 0 && this.port != null && this.port.carrier != null
+            && k < this.port.holds.size()) {
+            final ClassicColonyPort.Hold h = this.port.holds.get(k);
+            if (h.goods == null || h.amount <= 0) return false;
+            this.goodsType = h.goods;
+            this.goodsHold = k;
+            this.goodsHoldAmount = h.amount;
+            this.goodsCarrier = this.port.carrier;
+            hideHover();
+            holdNotice(ClassicColonyGoods.dragNotice(t, false, h.goods));
+            return true;
+        }
+        final int box = (vx < WARE_W) ? ClassicColonyLayout.warehouseBoxAt(vx, vy) : -1;
+        final GoodsType gt = warehouseGood(box);
+        if (gt == null) return false;
+        selectWarehouseGood(box);
+        this.boxPressedAt = this.clock.now();
+        this.later.run((int) Math.round(ClassicColonyGoods.ms(ClassicColonyGoods.YELLOW_FRAMES)),
+                       this::repaint);
+        hideHover();
+        if (this.colony.getGoodsCount(gt) <= 0) {
+            repaint();
+            return true;
+        }
+        this.goodsType = gt;
+        this.goodsHold = -1;
+        this.goodsCarrier = null;
+        holdNotice(ClassicColonyGoods.dragNotice(t, true, gt));
+        return true;
+    }
+
+    /**
+     * The release of a goods press (M4.9, class comment of
+     * {@link ClassicColonyGoods}): a drop of a warehouse good on the holds
+     * (the selected carrier) or on a carrier's sprite or tiny icon (that
+     * one, the selection stays) loads it; a drop of a hold on any
+     * warehouse cell unloads it; anything else moves nothing and shows
+     * nothing.
+     *
+     * @param gt The good.
+     * @param vx The release's x.
+     * @param vy Its y.
+     * @param result The gesture.
+     * @param shift Whether Shift is held (the amount box).
+     */
+    private void goodsReleased(GoodsType gt, int vx, int vy, ClassicDragGesture.Result result,
+                               boolean shift) {
+        final boolean fromHold = this.goodsHold >= 0;
+        final Unit from = this.goodsCarrier;
+        final int holdAmount = this.goodsHoldAmount;
+        this.goodsType = null;
+        this.goodsHold = -1;
+        this.goodsCarrier = null;
+        if (result != ClassicDragGesture.Result.DROP) {
+            clearNotice();
+            return;
+        }
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (!fromHold) {
+            Unit to = (this.port == null) ? null : this.port.carrierAt(vx, vy);
+            if (to == null && ClassicColonyLayout.holdAt(vx, vy) >= 0 && this.port != null) {
+                to = this.port.carrier;
+            }
+            if (to == null) {
+                ClassicFrameRecorder.event("colony-goods", "load " + gt.getSuffix() + " nowhere");
+                clearNotice();
+                return;
+            }
+            final int max = ClassicColonyGoods.loadMax(this.colony.getGoodsCount(gt),
+                                                       to.getLoadableAmount(gt));
+            final int n = (shift) ? askAmount(t, true, gt, to, max) : max;
+            if (n <= 0) {
+                ClassicFrameRecorder.event("colony-goods", "load 0 " + gt.getSuffix() + " "
+                    + to.getType().getSuffix() + ((max <= 0) ? " full" : ""));
+                clearNotice();
+                return;
+            }
+            freeze();
+            final boolean ok = igc().loadCargo(new net.sf.freecol.common.model.Goods(
+                this.colony.getGame(), this.colony, gt, n), to);
+            transferred(ok, "load", n, gt, to,
+                ClassicColonyGoods.movedNotice(t, n, gt, ClassicColonyPort.typeName(t, to)),
+                shift);
+            return;
+        }
+        if (vx >= WARE_W || ClassicColonyLayout.warehouseBoxAt(vx, vy) < 0 || from == null) {
+            ClassicFrameRecorder.event("colony-goods", "unload " + gt.getSuffix() + " nowhere");
+            clearNotice();
+            return;
+        }
+        final int max = Math.min(holdAmount, from.getGoodsCount(gt));
+        final int n = (shift) ? askAmount(t, false, gt, from, max) : max;
+        if (n <= 0) {
+            ClassicFrameRecorder.event("colony-goods", "unload 0 " + gt.getSuffix() + " "
+                + from.getType().getSuffix());
+            clearNotice();
+            return;
+        }
+        freeze();
+        final boolean ok = igc().unloadCargo(new net.sf.freecol.common.model.Goods(
+            this.colony.getGame(), from, gt, n), false);
+        transferred(ok, "unload", n, gt, from,
+            ClassicColonyGoods.movedNotice(t, n, gt, this.colony.getName()), shift);
+    }
+
+    /**
+     * The amount box of a Shift drop (@HOWMUCH1 / @HOWMUCH2, the maximum
+     * preset, 26/27 frames after the drop); the drag's notice stays while
+     * it is open.
+     *
+     * @return The amount taken, or 0 (Escape, no box).
+     */
+    private int askAmount(ClassicText t, boolean load, GoodsType gt, Unit carrier, int max) {
+        if (max <= 0) return 0;
+        final ClassicAdvisorBox.Request r = ClassicColonyGoods.howMuch(t, load, gt,
+            ClassicColonyPort.typeName(t, carrier), this.colony.getName(), max);
+        if (r == null) return 0;
+        ask(r);
+        final int n = r.field.amount();
+        ClassicFrameRecorder.event("colony-howmuch", ((load) ? "load " : "unload ")
+            + gt.getSuffix() + " max=" + max + " took=" + n);
+        return Math.max(0, n);
+    }
+
+    /**
+     * The warehouse's numbers and the port as they are now stay on the
+     * screen until the transfer's redraw (8 frames after the drop, V
+     * #10114 -&gt; #10122).
+     */
+    private void freeze() {
+        this.frozenAmounts = ClassicColonyChrome.amounts(this.colony);
+        this.frozenPort = this.port;
+        final int[] mine = this.frozenAmounts;
+        this.later.run((int) Math.round(ClassicColonyGoods.ms(ClassicColonyGoods.REDRAW_FRAMES)),
+            () -> {
+                if (this.frozenAmounts == mine) {
+                    this.frozenAmounts = null;
+                    this.frozenPort = null;
+                }
+                repaint();
+            });
+    }
+
+    /**
+     * After a transfer: the recorder's event and, if it moved, the result
+     * notice (2 frames after a drop, 1 after an amount box); a refused one
+     * ends the drag's notice and shows the screen as it is.
+     */
+    private void transferred(boolean ok, String what, int n, GoodsType gt, Unit carrier,
+                             String notice, boolean shift) {
+        ClassicFrameRecorder.event("colony-goods", what + " " + n + " " + gt.getSuffix() + " "
+            + carrier.getType().getSuffix() + ((ok) ? "" : " refused")
+            + " warehouse=" + this.colony.getGoodsCount(gt)
+            + " aboard=" + carrier.getGoodsCount(gt));
+        if (!ok) {
+            this.frozenAmounts = null;
+            this.frozenPort = null;
+            clearNotice();
+            return;
+        }
+        this.later.run((int) Math.round(ClassicColonyGoods.ms((shift)
+            ? ClassicColonyGoods.AFTER_BOX_FRAMES : ClassicColonyGoods.NOTICE_FRAMES)),
+            () -> showNotice(notice));
+        recordStill("goods " + what);
+    }
+
+    /** @return Whether a goods press or drag runs (tests). */
+    boolean goodsPressed() {
+        return this.goodsType != null;
+    }
+
+    /** @return The port as the screen shows it now: until a transfer's redraw, the old one (tests). */
+    ClassicColonyPort.Model portShown() {
+        return (this.frozenPort != null) ? this.frozenPort : this.port;
+    }
+
+    /** @return The warehouse's numbers as the screen shows them now (tests). */
+    int[] amountsShown() {
+        return (this.frozenAmounts != null) ? this.frozenAmounts.clone()
+            : ClassicColonyChrome.amounts(this.colony);
+    }
+
+    /** @return The selected carrier in port (tests), or null. */
+    Unit selectedCarrier() {
+        return (this.port == null) ? null : this.port.carrier;
+    }
+
+
+    // A carrier's box (clip 040)
+
+    /**
+     * A click on the selected carrier (V clip 040 §1.5): its box
+     * «Optionen für  (&lt;Typ&gt;):» with the rows of {@code @SHIPOPTIONS}
+     * it offers ({@link ClassicColonyUnits#carrierOptions}), the bar on
+     * row 1, 5 frames after the release (I: the clip's 25-60 frames after
+     * the press are a click's).  «Nach vorne bewegen.» puts it in front,
+     * selected (V ×4); «Keine Veränderungen.» and Escape change nothing
+     * (V); «Befehle aufheben.», «Wache.», «Im Hafen ankern» and «Alle
+     * Waren entladen.» are FreeCol's clear orders, sentry, fortify and
+     * unload into the colony (I: not seen).
+     *
+     * @param c The carrier.
+     */
+    private void carrierOptions(Unit c) {
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final List<Unit> order = ClassicColonyPort.carriers(this.colony);
+        final boolean front = !order.isEmpty() && order.get(0) == c;
+        final List<ClassicColonyUnits.CarrierOption> shown
+            = ClassicColonyUnits.carrierOptions(c, front);
+        final ClassicAdvisorBox.UnitIcon icon = carrierIcon(this.buildingArt, t, c);
+        final ClassicAdvisorBox.Request r = ClassicColonyUnits.carrierRequest(t, c, shown, icon,
+            this.colony.getName());
+        if (r == null) {
+            ClassicFrameRecorder.event("colony-carrier", c.getId() + " no texts");
+            return;
+        }
+        final int answer = ask(ClassicAdvisorBox.Request.builder(r.id)
+            .gameText(r.paragraphs.get(0)).width(r.width).rows(r.rows).defaultRow(0)
+            .cancelRow(r.rows.size() - 1).unitIcon(icon)
+            .openDelay(ClassicColonyMoves.ms(ClassicColonyMoves.J2_FRAMES))
+            .stopgap(this.colony.getName(), null).build());
+        final ClassicColonyUnits.CarrierOption o = ClassicColonyUnits.carrierChosen(shown, answer);
+        final InGameController igc = igc();
+        boolean done = true;
+        switch (o) {
+        case FRONT:
+            ClassicColonyPort.front(this.colony, c);
+            this.selectedCarrier = c;
+            break;
+        case CLEAR:
+            done = igc.clearOrders(c);
+            break;
+        case SENTRY:
+            done = igc.changeState(c, Unit.UnitState.SENTRY);
+            break;
+        case ANCHOR:
+            done = igc.changeState(c, Unit.UnitState.FORTIFYING);
+            break;
+        case UNLOAD:
+            for (net.sf.freecol.common.model.Goods g
+                     : new ArrayList<>(c.getCompactGoodsList())) {
+                if (!igc.unloadCargo(g, false)) done = false;
+            }
+            break;
+        default:
+            break;
+        }
+        ClassicFrameRecorder.event("colony-carrier", c.getId() + " rows=" + shown + " chosen="
+            + answer + " " + o + ((done) ? "" : " refused") + " state=" + c.getState()
+            + " port=" + ClassicColonyPort.carriers(this.colony).indexOf(c));
+        refresh();
+        recordStill("carrier " + c.getId());
+    }
+
+
+    /**
+     * A carrier's icon in its box: its sprite as the port draws it (the
+     * pack's ICONS.SS), its owner's flag and its order letter (V clip 040
+     * #50 654: the galleon at (38,78)).
+     *
+     * @param a The sprites.
+     * @param t The pack's texts, or null.
+     * @param c The carrier.
+     * @return The icon.
+     */
+    static ClassicAdvisorBox.UnitIcon carrierIcon(ClassicColonyBuildings.Assets a, ClassicText t,
+                                                  Unit c) {
+        final BufferedImage s = (a == null) ? null
+            : a.image(ClassicColonyBuildings.figureKey(a, c, true));
+        return new ClassicAdvisorBox.UnitIcon(s, ClassicHud.nationRgb(c.getOwner()),
+            ClassicHud.orderLetter(t, ClassicUnitCycle.ordersRowShown(c)), ClassicHud.unitRow(c));
+    }
+
+
+    // Building (M4.10)
+
+    /**
+     * ÄNDERN's build list (M4.10 target 1, {@link ClassicColonyBuild}): the
+     * wood list box with the bar on the current build; a pick of another
+     * build sets it ({@code InGameController.setBuildQueue}, one build as
+     * the original has: a finished unit is then built again); the
+     * completed building's row and Escape change nothing.
+     *
+     * @param delayMs When the list comes after now.
+     */
+    void openBuildList(double delayMs) {
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicText t = ClassicText.load(pack);
+        final List<ClassicColonyBuild.Row> rows = ClassicColonyBuild.rows(this.colony, t);
+        final ClassicAdvisorBox.Request r = ClassicColonyBuild.request(t,
+            (pack == null) ? null : pack.font(ClassicFont.TINY), rows, delayMs);
+        final int answer = ask(r);
+        if (answer < 0 || answer >= rows.size()) {
+            ClassicFrameRecorder.event("colony-build", this.colony.getName() + " none");
+            refresh();
+            return;
+        }
+        final ClassicColonyBuild.Row row = rows.get(answer);
+        final net.sf.freecol.common.model.BuildableType now = this.colony.getCurrentlyBuilding();
+        boolean done = true;
+        if (!row.done && !(row.type != null && row.type == now)
+            && !(row.type == null && now == null && ClassicColonyBuild.completed(this.colony) == null)) {
+            final List<net.sf.freecol.common.model.BuildableType> queue = new ArrayList<>();
+            if (row.type != null) queue.add(row.type);
+            done = igc().setBuildQueue(this.colony, queue);
+        }
+        ClassicFrameRecorder.event("colony-build", this.colony.getName() + " "
+            + ((row.type == null) ? "none" : row.type.getSuffix()) + ((row.done) ? " done" : "")
+            + ((done) ? "" : " refused") + " now="
+            + ((ClassicColonyBuild.current(this.colony) == null) ? "-"
+               : ClassicColonyBuild.current(this.colony).getSuffix()));
+        refresh();
+    }
+
+    /**
+     * KAUFEN (M4.10 target 3): @BUYME0 when the treasury is short of the
+     * price, else @BUYME1, whose «Trotzdem abschließen.» pays it
+     * ({@code payForBuilding}: the goods bought, the build complete at the
+     * turn's end); nothing to buy (no build, the completed building, all
+     * there): nothing (I).
+     */
+    void buy() {
+        final int price = ClassicColonyBuild.price(this.colony);
+        final Player owner = this.colony.getOwner();
+        final int gold = (owner == null) ? 0 : owner.getGold();
+        if (price < 0) {
+            ClassicFrameRecorder.event("colony-buy", this.colony.getName() + " nothing");
+            return;
+        }
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final ClassicAdvisorBox.Request r = ClassicColonyBuild.buyRequest(t,
+            ClassicColonyRight.buildName(t, this.colony.getCurrentlyBuilding()), price, gold);
+        final int answer = ask(r);
+        boolean paid = false;
+        if (gold >= price && answer == ClassicColonyBuild.BUY_YES) {
+            paid = this.freeColClient.askServer().payForBuilding(this.colony)
+                && this.colony.getPriceForBuilding() == 0;
+        }
+        ClassicFrameRecorder.event("colony-buy", price + " " + gold + " "
+            + ((r == null) ? "-" : r.id) + " answer=" + answer + ((paid) ? " paid" : "")
+            + " gold=" + ((owner == null) ? 0 : owner.getGold()));
+        refresh();
+    }
+
+
+    // Renaming (clip 040 #48 939)
+
+    /**
+     * Whether a point is on the colony's name in the top line (its words
+     * «&lt;Name&gt;.» from the line's start; V clip 040 #48 939: a click at
+     * (97,4) on «Cotton Town»).
+     *
+     * @param vx The x.
+     * @param vy The y.
+     * @return True if so.
+     */
+    boolean nameAt(int vx, int vy) {
+        if (vy < 0 || vy > 6 || this.notice.at(this.clock.now()) != null) return false;
+        final String line = topLine();
+        final int x0 = ClassicColonyLayout.topLineX(ClassicColonyChrome.textWidth(this.chrome, line));
+        final int w = ClassicColonyChrome.textWidth(this.chrome, this.colony.getName() + ".");
+        return vx >= x0 && vx < x0 + w;
+    }
+
+    /**
+     * @RENAMECOLONY (V clip 040 #48 939, #49 813): «Wie soll diese Kolonie
+     * jetzt heißen?» «Name:», the field preset with the colony's name,
+     * selected, at most 23 characters (V #49 476: the 24th key ignored);
+     * box (71,82,178,37), no portrait.  Enter renames it (a name another
+     * colony has, or an empty one: no change, I); Escape keeps it.
+     */
+    void rename() {
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final String old = this.colony.getName();
+        final ClassicAdvisorBox.Request r = renameRequest(t, old);
+        if (r == null) return;
+        ask(r);
+        final String name = r.field.answer();
+        final Player owner = this.colony.getOwner();
+        boolean done = false;
+        if (r.field.taken() && name != null && !name.isEmpty() && !name.equals(old)
+            && (owner == null || owner.getSettlementByName(name) == null)) {
+            done = this.freeColClient.askServer().rename(this.colony, name);
+        }
+        ClassicFrameRecorder.event("colony-rename", old + " -> " + name
+            + ((done) ? "" : " unchanged"));
+        refresh();
+    }
+
+
+    /**
+     * The @RENAMECOLONY box (class comment of {@link #rename}): GAME.TXT's
+     * question and «Name:», @COLONY's width (172 + 6), no portrait, the
+     * name field with the colony's name.
+     *
+     * @param t The pack's texts, or null.
+     * @param name The colony's name.
+     * @return The box, or null without the text.
+     */
+    static ClassicAdvisorBox.Request renameRequest(ClassicText t, String name) {
+        final ClassicText.Message m = (t == null) ? null : t.message("RENAMECOLONY");
+        if (m == null || m.text.isEmpty() || m.options.isEmpty()) return null;
+        return ClassicAdvisorBox.Request.builder("RENAMECOLONY")
+            .gameText(m.text).width((m.width != null) ? m.width : ClassicFounding.COLONY_WIDTH)
+            .rows(m.options).portrait(ClassicAdvisorBox.Portrait.NONE).field(name)
+            .stopgap(name, null).build();
+    }
+
+
+    // The completion dissolve (M4.10 target 4)
+
+    /**
+     * Start the completion dissolve: the new picture painted, the old one
+     * (the new building's slot as it was, {@link ClassicColonyBuildings#before})
+     * shown over it until the dissolve reveals it, 19 frames after the
+     * screen is complete, in 55 frames (V clip 020 #57671 -&gt;
+     * #57690-#57744).  Only the building's slot dissolves; the Rathaus'
+     * bells and the band's row change at once (I: an Unsichtbarkeit).
+     *
+     * @param built The building finished.
+     */
+    void startDissolve(net.sf.freecol.common.model.BuildingType built) {
+        final int[] to = pixelsOf(canvas());
+        this.paintBefore = built;
+        final int[] from;
+        try {
+            from = pixelsOf(canvas());
+        } finally {
+            this.paintBefore = null;
+        }
+        // Paint the new picture again, so the hit places are the new area's.
+        canvas();
+        final Rectangle r = diffBounds(from, to);
+        if (r == null) return;
+        this.dissolve = new ClassicColonyDissolve(from, to, java.util.Collections.singletonList(r));
+        this.dissolveFrom = from;
+        this.dissolveStart = this.clock.now();
+        ClassicFrameRecorder.event("colony-dissolve", this.colony.getName() + " "
+            + built.getSuffix() + " " + this.dissolve.describe());
+        if (this.dissolveTimer == null) {
+            this.dissolveTimer = new javax.swing.Timer(
+                (int) Math.round(ClassicColonyLayout.FRAME_MS), e -> repaint());
+        }
+        this.dissolveTimer.start();
+        repaint();
+    }
+
+    /** @return A 320x200 picture's pixels, 0xRRGGBB, y * 320 + x. */
+    static int[] pixelsOf(BufferedImage img) {
+        final int[] p = img.getRGB(0, 0, VW, VH, null, 0, VW);
+        for (int i = 0; i < p.length; i++) p[i] &= 0xFFFFFF;
+        return p;
+    }
+
+    /**
+     * The bounds of the pixels two pictures differ in (the dissolve's
+     * rectangle: "the diff of old and new canvas", spec M4.10).
+     *
+     * @param a A picture's pixels.
+     * @param b The other's.
+     * @return The bounds, or null when they are equal.
+     */
+    static Rectangle diffBounds(int[] a, int[] b) {
+        int x0 = VW, y0 = VH, x1 = -1, y1 = -1;
+        for (int i = 0; i < a.length && i < b.length; i++) {
+            if (a[i] == b[i]) continue;
+            final int x = i % VW, y = i / VW;
+            x0 = Math.min(x0, x);
+            y0 = Math.min(y0, y);
+            x1 = Math.max(x1, x);
+            y1 = Math.max(y1, y);
+        }
+        return (x1 < 0) ? null : new Rectangle(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+    }
+
+    /** The dissolve is over: the new picture alone. */
+    private void stopDissolve() {
+        this.dissolve = null;
+        this.dissolveFrom = null;
+        if (this.dissolveTimer != null) this.dissolveTimer.stop();
+    }
+
+    /** @return The running dissolve (tests), or null. */
+    ClassicColonyDissolve dissolve() {
+        return this.dissolve;
+    }
+
+    /** A test's time into the dissolve (ms since the screen was complete), or -1. */
+    private double dissolveAt = -1.0;
+
+    /**
+     * The canvas at a time into the dissolve (tests: its old picture at 0,
+     * the new one after 19 + 55 frames).
+     *
+     * @param sinceMs Milliseconds since the screen was complete.
+     * @return The picture.
+     */
+    BufferedImage canvasAt(double sinceMs) {
+        final ClassicColonyDissolve d = this.dissolve;
+        final int[] from = this.dissolveFrom;
+        this.dissolveAt = sinceMs;
+        try {
+            return canvas();
+        } finally {
+            this.dissolveAt = -1.0;
+            // A test's look does not end the dissolve.
+            this.dissolve = d;
+            this.dissolveFrom = from;
+        }
+    }
+
+    /** @return Whether ÄNDERN blinks for a completion (tests). */
+    boolean completionBlink() {
+        return this.completionBlink;
+    }
+
+    /** Forget the completions shown (the game view's teardown, tests). */
+    static void forgetCompletions() {
+        shownCompletions.clear();
+    }
+
+
     // The screen kit (M4.0: blink, drag, notice, warehouse selection)
 
     /** @return The canvas x of a device x (the last paint's scale and origin). */
@@ -1700,8 +2375,36 @@ final class ClassicColonyPanel extends JPanel {
      * @return True for a colonist's figure.
      */
     private boolean canDragAt(int vx, int vy) {
-        return !this.leaving && ClassicColonyLayout.modeAt(vx, vy) < 0
-            && !ClassicColonyLayout.RIGHT_PANEL.contains(vx, vy) && hitAt(vx, vy) != null;
+        if (this.leaving || ClassicColonyLayout.modeAt(vx, vy) >= 0
+            || ClassicColonyLayout.RIGHT_PANEL.contains(vx, vy)) return false;
+        return hitAt(vx, vy) != null || goodsAt(vx, vy) != null;
+    }
+
+    /**
+     * The good a press at a point would drag (M4.9): a hold of the
+     * selected carrier with goods in it, or a warehouse cell with some of
+     * its good in stock.
+     *
+     * @param vx The x.
+     * @param vy The y.
+     * @return The good, or null.
+     */
+    private GoodsType goodsAt(int vx, int vy) {
+        final int k = ClassicColonyLayout.holdAt(vx, vy);
+        if (k >= 0 && this.port != null && this.port.carrier != null && k < this.port.holds.size()) {
+            final ClassicColonyPort.Hold h = this.port.holds.get(k);
+            return (h.goods != null && h.amount > 0) ? h.goods : null;
+        }
+        final int box = (vx < WARE_W) ? ClassicColonyLayout.warehouseBoxAt(vx, vy) : -1;
+        final GoodsType gt = warehouseGood(box);
+        return (gt != null && this.colony.getGoodsCount(gt) > 0) ? gt : null;
+    }
+
+    /** @return The good of a warehouse box, or null. */
+    private GoodsType warehouseGood(int box) {
+        if (box < 0 || box >= ClassicColonyLayout.WAREHOUSE_GOODS.length) return null;
+        final net.sf.freecol.common.model.Specification spec = this.colony.getSpecification();
+        return (spec == null) ? null : spec.getGoodsType(ClassicColonyLayout.WAREHOUSE_GOODS[box]);
     }
 
     /**
@@ -1724,7 +2427,20 @@ final class ClassicColonyPanel extends JPanel {
      * copy of its silhouette 2 px to its left; the source keeps its figure.
      */
     private void paintGhost(Graphics2D g) {
-        if (!this.gesture.dragging() || this.pressedKey == null || this.ghostX < 0) return;
+        if (!this.gesture.dragging() || this.ghostX < 0) return;
+        if (this.goodsType != null) {
+            // A good's ghost: its icon (the full colours) at the same
+            // place from the hotspot (V clip 020 #10058: the goods icon
+            // follows the pointer; I: its offset, as the colonists').
+            final int f = ClassicColonyPort.holdIcon(this.goodsType, true);
+            final BufferedImage icon = (f < 0) ? null : this.buildingArt.icon(f);
+            if (icon != null) {
+                g.drawImage(icon, this.ghostX + ClassicColonyMoves.GHOST_DX,
+                            this.ghostY + ClassicColonyMoves.GHOST_DY, null);
+            }
+            return;
+        }
+        if (this.pressedKey == null) return;
         final BufferedImage s = this.buildingArt.image(this.pressedKey);
         if (s == null) return;
         final int x = this.ghostX + ClassicColonyMoves.GHOST_DX;
@@ -1811,6 +2527,7 @@ final class ClassicColonyPanel extends JPanel {
         this.gesture.cancel();
         this.blink.close();
         if (this.noticeTimer != null) this.noticeTimer.stop();
+        if (this.dissolveTimer != null) this.dissolveTimer.stop();
     }
 
     /**
@@ -1893,7 +2610,7 @@ final class ClassicColonyPanel extends JPanel {
         if (this.gesture.dragging()) ghostTo(bx, by);
         final ClassicDragGesture.Result result = this.gesture.release();
         if (result == ClassicDragGesture.Result.DROP) dragEnded();
-        releaseAt(bx, by, result);
+        releaseAt(bx, by, result, shift);
     }
 
 
@@ -1957,9 +2674,34 @@ final class ClassicColonyPanel extends JPanel {
         paintBuildings(g);
         paintWorkTiles(g);
         paintBand(g);
-        // No hover label during a press on a colonist or a drag (dago §0.1).
-        if (this.pressedUnit == null && !this.gesture.dragging()) paintHover(g);
+        // No hover label during a press on a colonist or a good, or a drag
+        // (dago §0.1; clip 020 #10058: the label goes at the press).
+        if (this.pressedUnit == null && this.goodsType == null && !this.gesture.dragging()) {
+            paintHover(g);
+        }
         paintGhost(g);
+        paintDissolve(g);
+    }
+
+    /**
+     * The completion dissolve over the new picture (M4.10 target 4): the
+     * old picture's pixels still to come, in the dissolve's order.
+     */
+    private void paintDissolve(Graphics2D g) {
+        final ClassicColonyDissolve d = this.dissolve;
+        final int[] from = this.dissolveFrom;
+        if (d == null || from == null || this.paintBefore != null) return;
+        final double since = (this.dissolveAt >= 0.0) ? this.dissolveAt
+            : (this.clock.now() - this.dissolveStart) / 1_000_000.0;
+        final int[] pending = d.pending(since);
+        if (pending.length == 0) {
+            stopDissolve();
+            return;
+        }
+        for (int i : pending) {
+            g.setColor(new Color(from[i]));
+            g.fillRect(i % VW, i / VW, 1, 1);
+        }
     }
 
     /** @return The top line's words now ({@link ClassicColonyChrome#model}). */
@@ -2056,8 +2798,13 @@ final class ClassicColonyPanel extends JPanel {
         this.rowOrder = figureOrder();
         this.area = ClassicColonyBuildings.model(this.colony, text, this.buildingArt,
                                                  this.founding, outside, this.rowOrder);
-        this.buildingsDrawn = this.area.toString();
         keepLayout(this.area.layout);
+        // The completion dissolve's old picture: the new building's slot as
+        // it was (M4.10 target 4).
+        if (this.paintBefore != null) {
+            this.area = ClassicColonyBuildings.before(this.area, this.paintBefore);
+        }
+        this.buildingsDrawn = this.area.toString();
         final Graphics2D g = (Graphics2D) g0.create();
         final Rectangle r = ClassicColonyLayout.BUILDING_AREA;
         g.clipRect(r.x, r.y, r.width, r.height);
@@ -2155,6 +2902,11 @@ final class ClassicColonyPanel extends JPanel {
      */
     static void forgetSelections() {
         lastSelected.clear();
+    }
+
+    /** @return The colony shown. */
+    Colony colony() {
+        return this.colony;
     }
 
     /** @return The selected unit, or null (tests). */
@@ -2339,9 +3091,16 @@ final class ClassicColonyPanel extends JPanel {
         paintPopulation(g);
         paintPort(g);
         paintRight(g);
-        final int[] amounts = ClassicColonyChrome.amounts(this.colony);
+        // The numbers as they were until a transfer's redraw (M4.9: 8
+        // frames after the drop, with the hold's icon); the pressed cell's
+        // frame yellow for 17 frames, then green (V #10057, #10074).
+        final int[] amounts = (this.frozenAmounts != null) ? this.frozenAmounts
+            : ClassicColonyChrome.amounts(this.colony);
+        final boolean yellow = this.boxPressedAt != 0L && this.clock.now() - this.boxPressedAt
+            < Math.round(ClassicColonyGoods.ms(ClassicColonyGoods.YELLOW_FRAMES) * 1_000_000.0);
         ClassicColonyChrome.paintWarehouse(g, this.chrome, amounts,
-            ClassicColonyChrome.exported(this.colony), warehouseSelection);
+            ClassicColonyChrome.exported(this.colony), warehouseSelection,
+            (yellow) ? ClassicColonyLayout.INK_YELLOW : ClassicColonyLayout.INK_GREEN);
         ClassicColonyChrome.paintExitLabel(g, this.chrome);
         if (this.hoveredBox >= 0) {
             final net.sf.freecol.common.model.Specification spec
@@ -2541,17 +3300,19 @@ final class ClassicColonyPanel extends JPanel {
      */
     private void paintPort(Graphics2D g) {
         final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
-        this.port = ClassicColonyPort.model(this.colony, text);
-        final Unit carrier = this.port.carrier;
-        final boolean white = carrier != null && tileCursor == CURSOR_CARRIER && !blinkOff();
-        final String letter = (carrier == null) ? null
-            : ClassicHud.orderLetter(text, ClassicUnitCycle.ordersRowShown(carrier));
-        ClassicColonyPort.paint(g, this.chrome, this.buildingArt, this.tiny, letter,
-                                this.port, white);
-        if (carrier != null && !carrier.isNaval()) {
-            this.bandUnits.add(carrier);
-            this.bandBounds.add(this.port.frame());
-        }
+        this.port = ClassicColonyPort.model(this.colony, text, this.selectedCarrier);
+        // The holds as they were until a transfer's redraw (M4.9).
+        final ClassicColonyPort.Model shown = (this.frozenPort != null) ? this.frozenPort
+            : this.port;
+        final Unit carrier = shown.carrier;
+        // White under the cursor in the blink's on half, and during a
+        // goods drag (V clip 020 #10075: «the ship's frame white»).
+        final boolean goodsDrag = this.goodsType != null && this.gesture.dragging();
+        final boolean white = carrier != null
+            && (goodsDrag || (tileCursor == CURSOR_CARRIER && !blinkOff()));
+        ClassicColonyPort.paint(g, this.chrome, this.buildingArt, this.tiny,
+            u -> ClassicHud.orderLetter(text, ClassicUnitCycle.ordersRowShown(u)),
+            shown, white);
     }
 
     /** @return The port panel as last painted (tests). */
@@ -2614,9 +3375,16 @@ final class ClassicColonyPanel extends JPanel {
             || (cursor != ClassicColonyRight.Cursor.NONE
                 && cursor != ClassicColonyRight.Cursor.LIST
                 && this.mode == ClassicColonyRight.Mode.HAMMER);
-        final boolean on = blinks && !blinkOff();
+        boolean on = blinks && !blinkOff();
+        // KAUFEN or ÄNDERN held: inverted (dago-colony2 #2349).
+        ClassicColonyRight.Cursor drawn = cursor;
+        if (this.pressedButton != 0) {
+            drawn = (this.pressedButton == CURSOR_BUY) ? ClassicColonyRight.Cursor.BUY
+                : ClassicColonyRight.Cursor.CHANGE;
+            on = true;
+        }
         ClassicColonyRight.paint(g, this.chrome, this.buildingArt, this.tiny, this.right,
-                                 cursor, on, this.goodsTerrainNumbers);
+                                 drawn, on, this.goodsTerrainNumbers);
         for (ClassicColonyRight.Listed l : this.right.units) {
             this.bandUnits.add(l.unit);
             this.bandBounds.add(ClassicColonyLayout.unitListFrame(l.cell));
@@ -2649,9 +3417,28 @@ final class ClassicColonyPanel extends JPanel {
      * @param how How it was opened.
      */
     void opened(ClassicColonyRight.Opening how) {
+        // The first opening after a building's completion (levi rule R4's
+        // record of this turn) as the @BUILT zoom's (I until M4.11 builds
+        // the turn box's «Zur Kolonie zoomen.»: the original's dissolve and
+        // ÄNDERN blink are seen after the zoom only, V visits 10, 13, 20).
+        final net.sf.freecol.common.model.BuildingType done
+            = ClassicColonyBuild.completed(this.colony);
+        final String key = this.colony.getId() + "@" + this.colony.getClassicBuiltTurn();
+        if (how == ClassicColonyRight.Opening.OTHER
+            && ClassicColonyBuild.completedThisTurn(this.colony)
+            && !shownCompletions.contains(key)) {
+            how = ClassicColonyRight.Opening.BUILT_BUILDING;
+        }
         this.mode = this.buttonMode = ClassicColonyRight.modeAtOpening(how, lastMode);
         lastMode = this.mode;
-        if (how == ClassicColonyRight.Opening.BUILT_BUILDING) tileCursor = CURSOR_CHANGE;
+        if (how == ClassicColonyRight.Opening.BUILT_BUILDING) {
+            tileCursor = CURSOR_CHANGE;
+            this.completionBlink = true;
+            if (done != null) {
+                shownCompletions.add(key);
+                startDissolve(done);
+            }
+        }
         // Who is selected (M4.8 target 9): the founder at a founding, else
         // the one selected last here, else the row's first figure.
         final List<Unit> row = new ArrayList<>(figureOrder());

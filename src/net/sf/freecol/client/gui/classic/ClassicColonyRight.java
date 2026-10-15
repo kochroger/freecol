@@ -327,10 +327,12 @@ final class ClassicColonyRight {
      * The units «Vorhandene Einheiten» lists (dago §6.2, clip 019 §4): the
      * colony tile's land units that are not in the colony, the persons
      * outside (who also stand on the fence and in the figure row) and the
-     * rest (artillery, a treasure, a wagon train; V clip 019: the dragoon
-     * and 3 artillery, dago #6000: a colonist, the dragoon, 3 artillery; I:
-     * the wagon train, which the port shows too), in the screen's order
-     * (the units moved to the front first, M2); no ship (the port's; I).
+     * rest (artillery, a treasure; V clip 019: the dragoon and 3
+     * artillery, dago #6000: a colonist, the dragoon, 3 artillery), in the
+     * screen's order (the units moved to the front first, M2); neither a
+     * ship nor a wagon train, the port's (V clip 040 #85 396: a galleon in
+     * port, #87 800: 3 galleons and 3 wagon trains in port, the list only
+     * the 4 artillery).
      *
      * @param colony The colony.
      * @param order The screen's order of the units on the tile, or null
@@ -341,7 +343,9 @@ final class ClassicColonyRight {
         final Tile tile = colony.getTile();
         final List<Unit> standing = new ArrayList<>();
         if (tile == null) return standing;
-        for (Unit u : tile.getUnitList()) if (!u.isNaval()) standing.add(u);
+        for (Unit u : tile.getUnitList()) {
+            if (!u.isNaval() && !u.canCarryGoods()) standing.add(u);
+        }
         final List<Unit> out = new ArrayList<>((order == null) ? standing
                                                : order.apply(standing));
         out.retainAll(standing);
@@ -418,7 +422,9 @@ final class ClassicColonyRight {
      */
     static Hammer hammer(Colony colony, ClassicText t) {
         final Specification spec = colony.getSpecification();
-        final BuildableType build = colony.getCurrentlyBuilding();
+        // A completed building stays the current build (levi rule R4,
+        // M4.10: «Verlag» with its old «(Benötigt 20 Werkzeuge)», V #57768).
+        final BuildableType build = ClassicColonyBuild.current(colony);
         final GoodsType hammers = spec.getGoodsType("model.goods.hammers");
         final GoodsType toolsType = spec.getGoodsType("model.goods.tools");
         final int stored = (hammers == null) ? 0 : colony.getGoodsCount(hammers);

@@ -598,34 +598,24 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         assertFalse(edt(gui::screenHosted));
         assertTrue(edt(r::partsShown));
         assertEquals(1, r.shown);
-        // The build list only over its colony; its close shows the colony.
+        // The build list only over its colony (part V, M4.10: the
+        // original's wood list box on the colony screen's own layer, no
+        // screen of its own; the old ClassicBuildQueuePanel is gone).
         gui.showBuildQueuePanel(colony);
         flush();
         assertFalse(edt(gui::screenHosted));
         gui.showColonyPanel(colony, null);
         flush();
-        gui.showBuildQueuePanel(colony);
-        flush();
-        assertTrue(edt(() -> gui.hostedScreen() instanceof ClassicBuildQueuePanel));
+        final ClassicColonyPanel cp2 = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
+        if (boxes) {
+            gui.showBuildQueuePanel(colony);
+            awaitBusy(edt(gui::colonyBoxLayer));
+            assertSame("the colony stays the screen", cp2, edt(gui::hostedScreen));
+            assertEquals(1, edt(() -> gui.screens().slots().size()).intValue());
+        }
         assertTrue(edt(gui::colonyHosted));
-        final ClassicColonyPanel cp2 = edt(() -> {
-                final List<ClassicScreenStack.Slot> s = gui.screens().slots();
-                assertEquals(2, s.size());
-                assertSame(s.get(0).screen, s.get(1).parent);
-                return (ClassicColonyPanel) s.get(0).screen;
-            });
-        assertFalse(cp2.isVisible());
-        final JComponent list = edt(gui::hostedScreen);
-        edt(() -> {
-                list.getActionMap().get("classic_closeBuildQueue").actionPerformed(
-                    new ActionEvent(list, ActionEvent.ACTION_PERFORMED, "esc"));
-                return null;
-            });
-        assertSame(cp2, edt(gui::hostedScreen));
         assertTrue(cp2.isVisible());
-        // Europe over the colony with its build list takes both away.
-        gui.showBuildQueuePanel(colony);
-        flush();
+        // Europe over the colony with its build list up takes it away.
         gui.showEuropePanel();
         flush();
         assertEquals(1, edt(() -> gui.screens().slots().size()).intValue());

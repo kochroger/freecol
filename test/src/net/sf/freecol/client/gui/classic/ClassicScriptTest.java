@@ -251,21 +251,40 @@ public class ClassicScriptTest extends TestCase {
         assertEquals(150, c.x2);
         assertEquals(118, c.y2);
         assertBad("drag 1 2 3", "drag needs ax ay bx by");
-        assertBad("drag 1 2 3 4 shift", "drag needs ax ay bx by");
+        assertBad("drag 1 2 3 4 ctrl", "drag: only shift after ax ay bx by");
+        assertBad("drag 1 2 3 4 shift x", "drag needs ax ay bx by");
         assertBad("drag 1 2 320 4", "outside 0..319");
+        // Part V: «... shift» holds Shift (a goods drag's amount box).
+        assertTrue(parse("drag 1 2 3 4 shift").commands.get(0).value);
+        assertFalse(c.value);
         final FakeHost h = new FakeHost() {
                 @Override
                 public void drag(int ax, int ay, int bx, int by) {
                     this.calls.add("drag " + ax + "," + ay + "->" + bx + "," + by);
                 }
+
+                @Override
+                public void drag(int ax, int ay, int bx, int by, boolean shift)
+                    throws ClassicScriptDriver.ScriptException, InterruptedException {
+                    if (shift) {
+                        this.calls.add("drag " + ax + "," + ay + "->" + bx + "," + by + " shift");
+                    } else {
+                        drag(ax, ay, bx, by);
+                    }
+                }
             };
         File r = resultFile();
-        new ClassicScriptDriver(parse("drag 10 100 150 118", "quit"), h, r).run();
-        assertEquals(Arrays.asList("drag 10,100->150,118", "quit"), h.calls);
+        new ClassicScriptDriver(parse("drag 10 100 150 118", "drag 5 185 140 170 shift", "quit"),
+                                h, r).run();
+        assertEquals(Arrays.asList("drag 10,100->150,118", "drag 5,185->140,170 shift", "quit"),
+                     h.calls);
         assertEquals("ok", result(r));
         r = resultFile();
         new ClassicScriptDriver(parse("drag 1 2 3 4", "log never"), new FakeHost(), r).run();
         assertTrue(result(r), result(r).contains("no canvas to drag on"));
+        r = resultFile();
+        new ClassicScriptDriver(parse("drag 1 2 3 4 shift", "log never"), new FakeHost(), r).run();
+        assertTrue(result(r), result(r).contains("no shift drag here"));
     }
 
     /**

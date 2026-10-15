@@ -182,13 +182,16 @@ public class ClassicColonyPortTest extends FreeColTestCase {
     }
 
     /**
-     * Which carrier the panel shows: the tile's first ship, else its first
-     * wagon train (I: two at once never seen; a ship before a wagon train,
-     * the S final fixer's interim so a docked ship is never hidden, a
-     * question for Roger); none: «Keine Schiffe im Hafen»; a wagon train is
-     * a carrier (V #118448); not the artillery or a person; the wagon train
-     * stands in the port, not at the figure row's end, and with a ship in
-     * the port in «Vorhandene Einheiten» only.
+     * Which carriers the panel shows (part V, clip 040 §1.3, the S
+     * interim's "the first ship, else the first wagon train" replaced):
+     * the carriers on the tile in the port order, ships and wagon trains
+     * alike, the newest arrival in front (V #46 925, #52 642, #71 550,
+     * #76 135), «Nach vorne bewegen.» puts one in front (V #51 167), one
+     * that leaves is taken out and the rest keep their order (V #69 042);
+     * the front one selected (V 17 openings); none: «Keine Schiffe im
+     * Hafen»; a wagon train is a carrier (V #118448); not the artillery or
+     * a person; neither a ship nor a wagon train in the figure row or in
+     * «Vorhandene Einheiten» (V clip 040 #85 396, #87 800).
      */
     public void testTheCarrier() throws Exception {
         final State s = ClassicColonyBuildingsTest.base1539();
@@ -199,19 +202,20 @@ public class ClassicColonyPortTest extends FreeColTestCase {
         final Unit wagon = carrier(s, "wagonTrain");
         assertSame("a wagon train alone", wagon, ClassicColonyPort.carrier(s.colony));
         final Unit ship = carrier(s, "merchantman");
-        assertSame("a ship before a wagon train that came first", ship,
-                   ClassicColonyPort.carrier(s.colony));
+        assertEquals("the ship came last: in front (V #76 135)", List.of(ship, wagon),
+                     ClassicColonyPort.carriers(s.colony));
         assertTrue(ClassicColonyPort.isCarrier(ship));
         assertTrue(ClassicColonyPort.isCarrier(wagon));
         assertFalse(ClassicColonyPort.isCarrier(s.colony.getUnitList().get(0)));
         final ClassicColonyPanel p = ClassicColonyBuildingsTest.panel(s,
             ClassicColonyBuildingsTest.BASE);
         p.canvas();
-        assertSame(ship, p.port().carrier);
+        assertSame("the front one selected", ship, p.port().carrier);
+        assertEquals(List.of(ship, wagon), p.port().carriers);
         assertTrue(p.port().naval());
         assertEquals("Einladen: Handelsschiff", p.port().caption);
-        assertTrue("the wagon train listed", ClassicColonyRight.listed(s.colony, null)
-                   .contains(wagon));
+        assertFalse("no wagon train listed (clip 040)", ClassicColonyRight.listed(s.colony, null)
+                    .contains(wagon));
         assertFalse("no ship listed", ClassicColonyRight.listed(s.colony, null)
                     .contains(ship));
         for (ClassicColonyBuildings.Figure f : p.rowFigures()) {
@@ -220,34 +224,29 @@ public class ClassicColonyPortTest extends FreeColTestCase {
         }
         assertEquals("the artillery not in the row (M4.7: the musket panel's)", 1,
                      p.rowFigures().size());
-        // A second ship: the first ship stays (two ships: a question for Roger).
-        final Unit caravel = carrier(s, "caravel");
-        assertSame(ship, ClassicColonyPort.carrier(s.colony));
-        caravel.setLocation(null);
-        ship.setLocation(null);
+        // A wagon train arriving goes in front of the ship (V #52 642, #71 550:
+        // ships are not sorted first).
+        final Unit wagon2 = carrier(s, "wagonTrain");
+        assertEquals(List.of(wagon2, ship, wagon), ClassicColonyPort.carriers(s.colony));
+        // «Nach vorne bewegen.»: the wagon train in front, the rest keep theirs.
+        ClassicColonyPort.front(s.colony, wagon);
+        assertEquals(List.of(wagon, wagon2, ship), ClassicColonyPort.carriers(s.colony));
+        // One leaves: the rest keep their order (V #69 042).
+        wagon2.setLocation(null);
+        assertEquals(List.of(wagon, ship), ClassicColonyPort.carriers(s.colony));
         p.canvas();
-        assertSame("the wagon train when no ship is in port", wagon, p.port().carrier);
+        assertSame("the wagon train when it is in front", wagon, p.port().carrier);
         assertFalse(p.port().naval());
         assertEquals("Einladen: Wagenzug", p.port().caption);
-        for (ClassicColonyBuildings.Figure f : p.rowFigures()) {
-            assertNotSame("no wagon train in the figure row", wagon, f.unit);
-        }
+        ship.setLocation(null);
+        wagon.setLocation(null);
+        p.canvas();
+        assertNull(p.port().carrier);
+        assertEquals("Keine Schiffe im Hafen", p.port().caption);
     }
 
-    /**
-     * The white cursor on the carrier (V #120499 white, #120521 green, #2260
-     * green with the cursor on a tile): a press on the carrier brings it
-     * there; its frame white in the blink's on half, green in the off half
-     * and when the cursor is elsewhere; a press on a wagon train opens its
-     * box on the release (it was at the figure row's end until M4.6).
-     */
-    public void testTheCursorOnTheCarrier() throws Exception {
-        final State s = ClassicColonyBuildingsTest.base1539();
-        s.on("expertFarmer", Direction.NW, "grain");
-        s.finish();
-        final Unit wagon = carrier(s, "wagonTrain");
-        final List<Unit> boxes = new ArrayList<>();
-        ClassicColonyPanel.forgetFigureOrders();
+    /** A screen whose boxes are noted (their ids and rows), all dismissed. */
+    private static ClassicColonyPanel screen(State s, List<String> asked) throws Exception {
         final ClassicColonyPanel p = new ClassicColonyPanel(
             ClassicColonyBuildingsTest.client(s.game, s.owner),
             ClassicColonyBuildingsTest.library(), s.colony, null,
@@ -259,37 +258,76 @@ public class ClassicColonyPortTest extends FreeColTestCase {
 
                 @Override
                 public void options(Unit unit, boolean first) {
-                    boxes.add(unit);
+                    asked.add("options " + unit.getType().getSuffix());
+                }
+
+                @Override
+                public int ask(ClassicAdvisorBox.Request r) {
+                    asked.add(r.id + " " + java.util.Arrays.toString(r.plainRows()));
+                    return ClassicAdvisorBox.Bar.DISMISSED;
                 }
             }, ClassicSlide.SYSTEM, false);
         p.setFounding(ClassicColonyBuildingsTest.BASE);
+        return p;
+    }
+
+    /**
+     * Pressing a carrier (V clip 040 §1.4): the press brings the white
+     * cursor and selects it (frame, caption, holds: #50 594, #50 941); a
+     * click on the selected one, the front one at the opening too
+     * (#69 178), opens its box «Optionen für  (Wagenzug):» (#51 068) on
+     * the release; its frame white in the blink's on half, green in the
+     * off half and when the cursor is elsewhere; the selection is not
+     * remembered for the next screen (#61 104).
+     */
+    public void testTheCursorOnTheCarrier() throws Exception {
+        final State s = ClassicColonyBuildingsTest.base1539();
+        s.on("expertFarmer", Direction.NW, "grain");
+        s.finish();
+        final Unit wagon = carrier(s, "wagonTrain");
+        final Unit ship = carrier(s, "merchantman");
+        final List<String> asked = new ArrayList<>();
+        ClassicColonyPanel.forgetFigureOrders();
+        final ClassicColonyPanel p = screen(s, asked);
         final ClassicColonyChrome.Assets c = ClassicColonyChrome.Assets.load(
             ClassicPackFiles.runtime());
         final int green = c.rgb(ClassicColonyLayout.INK_GREEN);
         final int white = c.rgb(ClassicColonyLayout.INK_WHITE);
-        final Rectangle f = ClassicColonyLayout.carrierFrame(false);
+        // The ship in front (slot 0), the wagon train in slot 1.
+        final Rectangle f0 = ClassicColonyLayout.carrierFrame(true, 0);
+        final Rectangle f1 = ClassicColonyLayout.carrierFrame(false, 1);
         BufferedImage img = p.canvas();
-        assertEquals("green with the cursor on a tile", green, img.getRGB(f.x, f.y) & 0xFFFFFF);
-        p.clickAt(f.x + 5, f.y + 5);
+        assertSame(ship, p.port().carrier);
+        assertEquals("green with the cursor on a tile", green, img.getRGB(f0.x, f0.y) & 0xFFFFFF);
+        // The wagon train: a press selects it, no box.
+        p.clickAt(f1.x + 5, f1.y + 5);
         assertEquals(ClassicColonyPanel.CURSOR_CARRIER, ClassicColonyPanel.tileCursor());
-        assertEquals("its box on the release", List.of(wagon), boxes);
+        assertTrue(asked.toString(), asked.isEmpty());
         p.blinkPhase(false);
         img = p.canvas();
-        assertEquals("white, on half", white, img.getRGB(f.x, f.y) & 0xFFFFFF);
-        assertEquals(white, img.getRGB(f.x + 17, f.y + 17) & 0xFFFFFF);
+        assertSame(wagon, p.port().carrier);
+        assertEquals("Einladen: Wagenzug", p.port().caption);
+        assertEquals("white, on half", white, img.getRGB(f1.x, f1.y) & 0xFFFFFF);
+        assertEquals(white, img.getRGB(f1.x + 17, f1.y + 17) & 0xFFFFFF);
         p.blinkPhase(true);
         img = p.canvas();
-        assertEquals("green, off half", green, img.getRGB(f.x, f.y) & 0xFFFFFF);
-        // A press on a tile takes it there again (S3).
+        assertEquals("green, off half", green, img.getRGB(f1.x, f1.y) & 0xFFFFFF);
+        // A second click on it: its box (not in front: «Nach vorne bewegen.»).
+        p.clickAt(f1.x + 5, f1.y + 5);
+        assertEquals(asked.toString(), 1, asked.size());
+        if (ClassicText.load(ClassicPackFiles.runtime()) != null) {
+            assertEquals("COLONYUNIT [Nach vorne bewegen., Wache., Keine Veränderungen.]",
+                         asked.get(0));
+        }
+        // A press on a tile takes the cursor there again (S3).
         p.clickAt(230, 40);
         assertEquals(0, ClassicColonyPanel.tileCursor());
-        // A ship's press brings the cursor, no box.
-        wagon.setLocation(null);
-        carrier(s, "merchantman");
-        p.canvas();
-        p.clickAt(135, 150);
-        assertEquals(ClassicColonyPanel.CURSOR_CARRIER, ClassicColonyPanel.tileCursor());
-        assertEquals(1, boxes.size());
+        // A new screen: the front one selected again, its first click opens its box.
+        final ClassicColonyPanel q = screen(s, asked);
+        q.canvas();
+        assertSame("not remembered (V #61 104)", ship, q.port().carrier);
+        q.clickAt(f0.x + 5, f0.y + 5);
+        assertEquals(asked.toString(), 2, asked.size());
     }
 
 

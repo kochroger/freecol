@@ -396,8 +396,16 @@ final class ClassicTestHarness {
         @Override
         public void drag(int ax, int ay, int bx, int by)
             throws ClassicScriptDriver.ScriptException, InterruptedException {
+            drag(ax, ay, bx, by, false);
+        }
+
+        @Override
+        public void drag(int ax, int ay, int bx, int by, boolean shift)
+            throws ClassicScriptDriver.ScriptException, InterruptedException {
             final Component[] target = new Component[1];
-            final String what = ax + "," + ay + " -> " + bx + "," + by;
+            final String what = ax + "," + ay + " -> " + bx + "," + by + ((shift) ? " shift" : "");
+            // Shift held from the press to the release (part V).
+            final int sh = (shift) ? InputEvent.SHIFT_DOWN_MASK : 0;
             try {
                 SwingUtilities.invokeAndWait(() -> {
                         final ClassicHudPane pane = gui.currentHudPane();
@@ -412,7 +420,7 @@ final class ClassicTestHarness {
                         t.dispatchEvent(new MouseEvent(t, MouseEvent.MOUSE_MOVED, when, 0,
                             q.x, q.y, 0, false, MouseEvent.NOBUTTON));
                         t.dispatchEvent(new MouseEvent(t, MouseEvent.MOUSE_PRESSED, when,
-                            InputEvent.BUTTON1_DOWN_MASK, q.x, q.y, 1, false,
+                            InputEvent.BUTTON1_DOWN_MASK | sh, q.x, q.y, 1, false,
                             MouseEvent.BUTTON1));
                     });
             } catch (java.lang.reflect.InvocationTargetException e) {
@@ -441,12 +449,12 @@ final class ClassicTestHarness {
                             new Point(cv.x + x * s + s / 2, cv.y + y * s + s / 2), t);
                         final long when = System.currentTimeMillis();
                         if (up) {
-                            t.dispatchEvent(new MouseEvent(t, MouseEvent.MOUSE_RELEASED, when, 0,
+                            t.dispatchEvent(new MouseEvent(t, MouseEvent.MOUSE_RELEASED, when, sh,
                                 q.x, q.y, 1, false, MouseEvent.BUTTON1));
                             ClassicFrameRecorder.event("drag", what + " released");
                         } else {
                             t.dispatchEvent(new MouseEvent(t, MouseEvent.MOUSE_DRAGGED, when,
-                                InputEvent.BUTTON1_DOWN_MASK, q.x, q.y, 0, false,
+                                InputEvent.BUTTON1_DOWN_MASK | sh, q.x, q.y, 0, false,
                                 MouseEvent.NOBUTTON));
                         }
                     });

@@ -435,9 +435,10 @@ public class ClassicColonyRightTest extends FreeColTestCase {
 
     /**
      * «Vorhandene Einheiten»: the tile's land units not in the colony (the
-     * persons outside, the artillery, the wagon train; no ship), the
-     * screen's order, the first selected; the map's letter inks (F of a
-     * fortified unit dark, of a fortifying one black: V clip 019).
+     * persons outside, the artillery; neither a ship nor a wagon train: V
+     * clip 040 #85 396, #87 800), the screen's order, the first selected;
+     * the map's letter inks (F of a fortified unit dark, of a fortifying
+     * one black: V clip 019).
      */
     public void testTheUnitsModel() throws Exception {
         final State s = ClassicColonyBuildingsTest.base1539();
@@ -451,8 +452,9 @@ public class ClassicColonyRightTest extends FreeColTestCase {
         art.setState(Unit.UnitState.FORTIFYING);
         art.setState(Unit.UnitState.FORTIFIED);
         final List<Unit> listed = ClassicColonyRight.listed(s.colony, null);
-        assertEquals(List.of(d, art, wagon), listed);
+        assertEquals(List.of(d, art), listed);
         assertFalse(listed.contains(ship));
+        assertFalse("the wagon train is the port's (clip 040)", listed.contains(wagon));
         final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
         final ClassicColonyRight.Model m = ClassicColonyRight.model(s.colony, t,
             ClassicColonyBuildings.Assets.load(ClassicPackFiles.runtime()), Mode.MUSKET,
@@ -500,10 +502,19 @@ public class ClassicColonyRightTest extends FreeColTestCase {
                 public void options(Unit unit, boolean first) {
                     boxes.add(unit);
                 }
+
+                @Override
+                public int ask(ClassicAdvisorBox.Request r) {
+                    ASKED.add(r.id);
+                    return ClassicAdvisorBox.Bar.DISMISSED;
+                }
             }, ClassicSlide.SYSTEM, false);
         p.setFounding(ClassicColonyBuildingsTest.BASE);
         return p;
     }
+
+    /** The boxes a {@link #screen} asked (their ids), all dismissed. */
+    private static final List<String> ASKED = new ArrayList<>();
 
     /**
      * The mode buttons: a press shows the pressed button at once and the
@@ -550,9 +561,11 @@ public class ClassicColonyRightTest extends FreeColTestCase {
 
     /**
      * The panels' presses: a listed unit's press selects it and brings the
-     * cursor, its box on the release (M2's, now the list's); ÄNDERN opens
-     * the build list (the first slice's until M4.10), KAUFEN not (M4.10);
-     * the house panel takes none; the figure row holds no artillery.
+     * cursor, its box on the release (M2's, now the list's); KAUFEN asks
+     * its box and ÄNDERN the build list (part V, M4.10: wood boxes on the
+     * colony screen, never the old build-list screen), the cursor staying
+     * where it is (dago-colony2: the 3x3 cursor keeps its place); the house
+     * panel takes none; the figure row holds no artillery.
      */
     public void testThePresses() throws Exception {
         final State s = ClassicColonyBuildingsTest.base1539();
@@ -580,12 +593,15 @@ public class ClassicColonyRightTest extends FreeColTestCase {
         assertSame(art, p.right().selected);
         p.setMode(Mode.HAMMER);
         p.canvas();
+        ASKED.clear();
         p.clickAt(230, 142);                       // KAUFEN
         assertEquals(0, lists[0]);
-        assertEquals(ClassicColonyPanel.CURSOR_BUY, ClassicColonyPanel.tileCursor());
+        assertEquals("the cursor stays", ClassicColonyPanel.CURSOR_LIST,
+                     ClassicColonyPanel.tileCursor());
         p.clickAt(280, 142);                       // ÄNDERN
-        assertEquals(1, lists[0]);
-        assertEquals(ClassicColonyPanel.CURSOR_CHANGE, ClassicColonyPanel.tileCursor());
+        assertEquals("never the old build-list screen", 0, lists[0]);
+        assertEquals("the build list box", "buildlist", ASKED.get(ASKED.size() - 1));
+        assertEquals(ClassicColonyPanel.CURSOR_LIST, ClassicColonyPanel.tileCursor());
         assertEquals(1, boxes.size());
     }
 

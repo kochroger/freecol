@@ -62,6 +62,7 @@ import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.common.model.WorkLocation;
 import net.sf.freecol.common.networking.ChangeSet;
 import net.sf.freecol.common.networking.ChangeSet.See;
+import net.sf.freecol.common.option.GameOptions;
 import net.sf.freecol.common.util.LogBuilder;
 
 
@@ -141,6 +142,21 @@ public class ServerColony extends Colony implements TurnTaker {
         buildables.addAll(spec.getUnitTypesWithoutAbility(Ability.PERSON));
         return any(buildables, bt -> canBuild(bt)
             && any(bt.getRequiredGoods(), AbstractGoods.matches(goodsType)));
+    }
+
+    /**
+     * Whether the original's completed build holds
+     * ({@code GameOptions.ORIGINAL_BUILD_COMPLETION}, levi rule R4).
+     *
+     * @return True if so; false for rules without the option.
+     */
+    private boolean originalBuildCompletion() {
+        try {
+            return getSpecification()
+                .getBoolean(GameOptions.ORIGINAL_BUILD_COMPLETION);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /**
@@ -636,7 +652,10 @@ public class ServerColony extends Colony implements TurnTaker {
         // production probably means we forgot to reset the build
         // queue.  Thus, if hammers are being produced it is worth
         // warning about, but not if producing tools.
+        // Not while the original's completed build is the current one
+        // (levi rule R4): the player has not chosen anything else yet.
         if (any(queues, BuildQueue::isEmpty)
+            && !(getClassicBuilt() != null && originalBuildCompletion())
             && any(spec.getGoodsTypeList(), g ->
                 (g.isBuildingMaterial()
                     && !g.isRawMaterial()
@@ -809,6 +828,7 @@ public class ServerColony extends Colony implements TurnTaker {
         // built item from its build queue.
         if (!built.isEmpty()) {
             for (BuildQueue<? extends BuildableType> queue : built) {
+                final BuildableType done = queue.getCurrentlyBuilding();
                 switch (queue.getCompletionAction()) {
                 case SHUFFLE:
                     if (queue.size() > 1) {
@@ -829,6 +849,15 @@ public class ServerColony extends Colony implements TurnTaker {
                     break;
                 }
                 csNextBuildable(queue, cs);
+                // The original's completed build (levi rule R4, part V): a
+                // building finished with nothing else queued stays the
+                // current build, "(ABGESCHLOSSEN)", until the player
+                // chooses another (clip 020 #113, #159, #229).
+                if (queue == buildQueue && done instanceof BuildingType
+                    && queue.isEmpty() && !owner.isAI()
+                    && originalBuildCompletion()) {
+                    setClassicBuilt(done.getId(), getGame().getTurn().getNumber());
+                }
             }
             tileDirty = true;
         }

@@ -195,6 +195,24 @@ final class ClassicScriptDriver {
         }
 
         /**
+         * {@link #drag(int, int, int, int)} with Shift held from the press
+         * to the release (part V: a goods drag's amount box).
+         *
+         * @param ax The press x.
+         * @param ay The press y.
+         * @param bx The release x.
+         * @param by The release y.
+         * @param shift Whether Shift is held.
+         * @exception ScriptException if nothing is there.
+         * @exception InterruptedException if interrupted.
+         */
+        default void drag(int ax, int ay, int bx, int by, boolean shift)
+            throws ScriptException, InterruptedException {
+            if (shift) throw new ScriptException("no shift drag here");
+            drag(ax, ay, bx, by);
+        }
+
+        /**
          * Click the left button on a map tile as the map shows it now
          * ({@link ClassicScriptDriver#tileCanvasPoint}).
          *
@@ -353,7 +371,7 @@ final class ClassicScriptDriver {
             Thread.sleep(KEY_HOLD_MS);
             break;
         case DRAG:
-            this.host.drag((int)c.number, c.y, c.x2, c.y2);
+            this.host.drag((int)c.number, c.y, c.x2, c.y2, c.value);
             break;
         case TILE_CLICK:
             this.host.tileClick((int)c.number, c.y);

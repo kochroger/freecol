@@ -118,6 +118,28 @@ public class GameOptions {
     public static final String ORIGINAL_DROP_JOBS
         = "model.option.originalDropJobs";
 
+    /**
+     * The original's price for finishing a build at once (part V, build
+     * spec M4.10 rule R1; clip 020 #94078: 494 for 38 missing hammers,
+     * dago-colony2: 1248 for 96): 13 per missing hammer, the missing
+     * tools at the market's ask.  FreeCol prices a hammer at the goods
+     * type's price (20) and adds 10 percent to the tools.  On in the
+     * "levi" rules (and a levi save from before the rule).
+     */
+    public static final String ORIGINAL_BUILD_PRICE
+        = "model.option.originalBuildPrice";
+
+    /**
+     * The original's completed build (part V, build spec M4.10 rule R4;
+     * clip 020 #113, #159, #229): a building finished while nothing else
+     * is queued stays the colony's current build, "(ABGESCHLOSSEN)", until
+     * the player chooses another, and no turn warns that nothing is being
+     * built.  FreeCol drops it from the queue.  On in the "levi" rules
+     * (and a levi save from before the rule).
+     */
+    public static final String ORIGINAL_BUILD_COMPLETION
+        = "model.option.originalBuildCompletion";
+
     /** Do missionaries provide extra benefits. */
     public static final String ENHANCED_MISSIONARIES
         = "model.option.enhancedMissionaries";

@@ -3111,6 +3111,15 @@ public final class Specification implements OptionContainer {
         ret |= checkOp(GameOptions.ORIGINAL_DROP_JOBS,
                        GameOptions.GAMEOPTIONS_COLONY,
                        originalDropJobsDefault(getId()), BooleanOption.class);
+        // The original's build price and completed build (levi, part V):
+        // without them FreeCol's price and queue; a levi save from before
+        // the rules gets the levi rules' values.
+        ret |= checkOp(GameOptions.ORIGINAL_BUILD_PRICE,
+                       GameOptions.GAMEOPTIONS_COLONY,
+                       originalBuildDefault(getId()), BooleanOption.class);
+        ret |= checkOp(GameOptions.ORIGINAL_BUILD_COMPLETION,
+                       GameOptions.GAMEOPTIONS_COLONY,
+                       originalBuildDefault(getId()), BooleanOption.class);
         ret |= checkOp(GameOptions.REVENGE_MODE,
                        GameOptions.GAMEOPTIONS_VICTORY_CONDITIONS,
                        Boolean.TRUE, BooleanOption.class);
@@ -3176,6 +3185,20 @@ public final class Specification implements OptionContainer {
      * @return The value.
      */
     static Boolean originalDropJobsDefault(String specId) {
+        return "levi".equals(specId);
+    }
+
+    /**
+     * The value {@code GameOptions.ORIGINAL_BUILD_PRICE} and
+     * {@code GameOptions.ORIGINAL_BUILD_COMPLETION} get in rules or a save
+     * that lack them ({@link #fixGameOptions}): on for the "levi" rules (a
+     * game of Roger's begun before part V builds as the original does),
+     * off for any other.
+     *
+     * @param specId The specification's id.
+     * @return The value.
+     */
+    static Boolean originalBuildDefault(String specId) {
         return "levi".equals(specId);
     }
 

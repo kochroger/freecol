@@ -65,7 +65,8 @@ import javax.swing.KeyStroke;
  *       moved to b in 24 steps of 20 ms with the button held, the release
  *       at b, real AWT events to the component under the press (the
  *       colony screen's colonists; its places painted first, a minimized
- *       run's screen never painted).</li>
+ *       run's screen never painted); {@code ... shift} with Shift held from
+ *       the press to the release (part V: a goods drag's amount box).</li>
  *   <li>{@code tclick <x> <y>}: a left click on map tile (x, y) as the
  *       map shows it now: the canvas point at its cell's centre in the
  *       15x12 view (a unit in the Spielzugende mode, J2); an error if the
@@ -251,12 +252,17 @@ final class ClassicScript {
         }
         case "drag": {
             final String[] p = rest.split("\\s+");
-            if (p.length != 4) throw new IllegalArgumentException(cmd + " needs ax ay bx by");
+            if (p.length < 4 || p.length > 5) {
+                throw new IllegalArgumentException(cmd + " needs ax ay bx by");
+            }
+            if (p.length == 5 && !"shift".equalsIgnoreCase(p[4])) {
+                throw new IllegalArgumentException(cmd + ": only shift after ax ay bx by");
+            }
             final int ax = integer(p[0], ClassicFrameRecorder.W);
             final int ay = integer(p[1], ClassicFrameRecorder.H);
             final int bx = integer(p[2], ClassicFrameRecorder.W);
             final int by = integer(p[3], ClassicFrameRecorder.H);
-            return new Command(Op.DRAG, n, s, ax, ay, null, null, false, bx, by);
+            return new Command(Op.DRAG, n, s, ax, ay, null, null, p.length == 5, bx, by);
         }
         case "tclick": {
             final String[] xy = rest.split("\\s+");

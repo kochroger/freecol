@@ -168,6 +168,20 @@ public class Colony extends Settlement implements TradeLocation {
      */
     protected volatile String classicSlots = null;
 
+    /**
+     * The original's completed build (levi rule R4,
+     * {@code GameOptions.ORIGINAL_BUILD_COMPLETION}; build spec M4.10, clip
+     * 020 #113, #159, #229): the building type the colony finished while
+     * nothing else was queued, which stays its current build
+     * "(ABGESCHLOSSEN)" until the player chooses another; its id, set by
+     * the server at the completion, cleared by a new build queue.  Null
+     * without one.
+     */
+    protected volatile String classicBuilt = null;
+
+    /** The turn {@link #classicBuilt} was completed in (the dissolve's), or -1. */
+    protected volatile int classicBuiltTurn = -1;
+
     // Do not serialize below.
 
     /** Contains information about production and consumption. */
@@ -460,6 +474,36 @@ public class Colony extends Settlement implements TradeLocation {
      */
     public void setClassicSlots(String classicSlots) {
         this.classicSlots = classicSlots;
+    }
+
+    /**
+     * Get the original's completed build (levi rule R4): the building type
+     * finished while nothing else was queued, kept as the current build.
+     *
+     * @return Its id, or null.
+     */
+    public String getClassicBuilt() {
+        return this.classicBuilt;
+    }
+
+    /**
+     * Get the turn the completed build was finished in.
+     *
+     * @return The turn's number, or -1.
+     */
+    public int getClassicBuiltTurn() {
+        return this.classicBuiltTurn;
+    }
+
+    /**
+     * Set the original's completed build (levi rule R4).
+     *
+     * @param id The building type's id, or null to clear it.
+     * @param turn The turn it was finished in (ignored for null).
+     */
+    public void setClassicBuilt(String id, int turn) {
+        this.classicBuilt = id;
+        this.classicBuiltTurn = (id == null) ? -1 : turn;
     }
 
     /**
@@ -1175,11 +1219,39 @@ public class Colony extends Settlement implements TradeLocation {
      */
     public int priceGoodsForBuilding(List<AbstractGoods> required) {
         final Market market = getOwner().getMarket();
+        // The original's price (levi rule R1, build spec M4.10): 13 per
+        // missing hammer (clip 020 #94078: 494 = 13 x 38; dago-colony2:
+        // 1248 = 13 x 96), the tools at the market's ask (I: not seen).
+        final boolean original = originalBuildPrice();
         // FIXME: magic number!
         return sum(required,
                 ag -> (ag.getType().isStorable())
-                        ? (market.getBidPrice(ag.getType(), ag.getAmount()) * 110)/100
-                        : ag.getType().getPrice() * ag.getAmount());
+                        ? ((original) ? market.getBidPrice(ag.getType(), ag.getAmount())
+                           : (market.getBidPrice(ag.getType(), ag.getAmount()) * 110)/100)
+                        : ((original) ? ORIGINAL_HAMMER_PRICE : ag.getType().getPrice())
+                            * ag.getAmount());
+    }
+
+    /**
+     * The original's price of a missing hammer (levi rule R1, build spec
+     * M4.10; V clip 020 #94078 and dago-colony2, both 13).
+     */
+    public static final int ORIGINAL_HAMMER_PRICE = 13;
+
+    /**
+     * Whether the original's build price holds
+     * ({@code GameOptions.ORIGINAL_BUILD_PRICE}, levi).
+     *
+     * @return True if so; false for rules without the option.
+     */
+    private boolean originalBuildPrice() {
+        final Specification spec = getSpecification();
+        try {
+            return spec != null
+                && spec.getBoolean(GameOptions.ORIGINAL_BUILD_PRICE);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /**
@@ -3095,6 +3167,9 @@ public class Colony extends Settlement implements TradeLocation {
         // The classic layout: an update without it (another player's
         // view, a server copy that never had it) keeps ours.
         if (o.getClassicSlots() != null) this.classicSlots = o.getClassicSlots();
+        // The completed build is the server's: copied as it is.
+        this.classicBuilt = o.getClassicBuilt();
+        this.classicBuiltTurn = o.getClassicBuiltTurn();
 
         for (WorkLocation wl : getAllWorkLocationsList()) wl.setColony(this);
 
@@ -3106,6 +3181,8 @@ public class Colony extends Settlement implements TradeLocation {
     // Serialization
 
     private static final String BUILD_QUEUE_TAG = "buildQueueItem";
+    private static final String CLASSIC_BUILT_TAG = "classicBuilt";
+    private static final String CLASSIC_BUILT_TURN_TAG = "classicBuiltTurn";
     private static final String CLASSIC_SLOTS_TAG = "classicSlots";
     private static final String ESTABLISHED_TAG = "established";
     private static final String IMMIGRATION_TAG = "immigration";
@@ -3152,6 +3229,11 @@ public class Colony extends Settlement implements TradeLocation {
 
             if (classicSlots != null && !classicSlots.isEmpty()) {
                 xw.writeAttribute(CLASSIC_SLOTS_TAG, classicSlots);
+            }
+
+            if (classicBuilt != null && !classicBuilt.isEmpty()) {
+                xw.writeAttribute(CLASSIC_BUILT_TAG, classicBuilt);
+                xw.writeAttribute(CLASSIC_BUILT_TURN_TAG, classicBuiltTurn);
             }
 
         } else {
@@ -3239,6 +3321,10 @@ public class Colony extends Settlement implements TradeLocation {
         displayUnitCount = xr.getAttribute(UNIT_COUNT_TAG, -1);
 
         classicSlots = xr.getAttribute(CLASSIC_SLOTS_TAG, (String)null);
+
+        classicBuilt = xr.getAttribute(CLASSIC_BUILT_TAG, (String)null);
+
+        classicBuiltTurn = xr.getAttribute(CLASSIC_BUILT_TURN_TAG, -1);
     }
 
     /**

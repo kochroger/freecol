@@ -213,12 +213,6 @@ public class ClassicGUI extends GUI {
             : this.imageLibrary.getScaledUnitImage(u);
     }
 
-    /**
-     * The build-queue screen, hosted over its colony screen while one is
-     * open (see {@link #showBuildQueuePanel}), else null.
-     */
-    private ClassicBuildQueuePanel buildQueuePanel;
-
     /** The in-game canvas (strip, map, panel), while a game is shown. */
     private ClassicHudPane hudPane;
 
@@ -1372,7 +1366,6 @@ public class ClassicGUI extends GUI {
         if (this.boxLayer != null) this.boxLayer.dispose();
         this.boxLayer = null;
         closeColonyPanel("teardown");
-        closeBuildQueuePanel("teardown");
         closeEuropePanel("teardown");
         if (this.screens != null) this.screens.popAll("teardown");
         this.screens = null;
@@ -1405,6 +1398,7 @@ public class ClassicGUI extends GUI {
         ClassicColonyPanel.forgetFigureOrders();
         ClassicColonyPanel.forgetSelections();
         ClassicColonyPort.forgetOrders();
+        ClassicColonyPanel.forgetCompletions();
         if (this.menuStrip != null) this.menuStrip.setBand(null);
         // FreeCol's goto batch again for whatever comes next (W5f), and
         // no held letter or road left over.
@@ -4457,13 +4451,12 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * Take the colony screen away if one is up, the build list over it
-     * first; a box still up on it answers "dismissed" (no change).
+     * Take the colony screen away if one is up (its build list is a box
+     * on it); a box still up on it answers "dismissed" (no change).
      *
      * @param why Why (for the recorder).
      */
     private void closeColonyPanel(String why) {
-        closeBuildQueuePanel(why);
         final ClassicColonyPanel p = this.colonyPanel;
         final ClassicAdvisorLayer boxes = this.colonyBoxes;
         this.colonyPanel = null;
@@ -4477,67 +4470,25 @@ public class ClassicGUI extends GUI {
     /**
      * {@inheritDoc}
      *
-     * Phase 2: the classic <b>build-queue</b> screen — {@link
-     * ClassicBuildQueuePanel}, a single-selection "what shall we build next"
-     * list mirroring the original 1994 game's build menu (not FreeCol's own
-     * drag-reorderable multi-item queue). Reached by clicking the colony
-     * screen's construction indicator ({@link ClassicColonyPanel}, top-left of
-     * the buildings pane).
-     *
-     * <p>Hosted over its colony screen in the main window (M4.0; decision
-     * H6: the original's wood list box over the colony comes in M4.11), the
-     * colony hidden under it; never without the colony screen.  Its close
-     * shows the colony again with the keys.  Only one build-queue screen is
-     * up at a time; guarded so a failure degrades to a log line rather than
-     * breaking the colony screen under it.
+     * The original's build list (build spec M4.10, part V): ÄNDERN's wood
+     * list box over the colony screen ({@link ClassicColonyPanel#openBuildList},
+     * {@link ClassicColonyBuild}), never a screen of its own; without a
+     * colony screen of that colony up, nothing (the list belongs over it).
      */
     @Override
     public FreeColPanel showBuildQueuePanel(Colony colony) {
         if (colony == null) return null;
         SwingUtilities.invokeLater(() -> {
-            try {
-                closeBuildQueuePanel("replaced");
-                if (this.screens == null || !colonyHosted()) {
-                    // The build list belongs over its colony screen only.
-                    ClassicFrameRecorder.event("screen-refused", "buildlist "
-                        + colony.getName() + ": no colony screen");
-                    logger.info("ClassicGUI: no colony screen for the build list of "
-                        + colony.getId() + ".");
-                    return;
-                }
-                final ClassicBuildQueuePanel[] self = { null };
-                // InGameController.setBuildQueue does not itself call
-                // GUI.refresh() (its updateGUI only refreshes the map controls
-                // and menu bar), so the colony screen under this one would
-                // otherwise keep showing the old construction indicator after
-                // a pick; repaint it whenever this screen closes.
-                final ClassicBuildQueuePanel p = new ClassicBuildQueuePanel(
-                    getFreeColClient(), this.imageLibrary, colony, () -> {
-                        if (this.buildQueuePanel == self[0]) closeBuildQueuePanel("player");
-                        repaintInfo();
-                    });
-                self[0] = p;
-                this.buildQueuePanel = p;
-                this.screens.push(ClassicScreenStack.Kind.BUILD_LIST, p, null,
-                                  colony.getName(), this.colonyPanel);
-            } catch (Exception e) {
-                logger.log(Level.WARNING, "ClassicGUI: could not show build "
-                    + "queue for " + colony.getId(), e);
+            final ClassicColonyPanel p = this.colonyPanel;
+            if (p == null || !colonyHosted() || p.colony() != colony) {
+                // The build list belongs over its colony screen only.
+                ClassicFrameRecorder.event("screen-refused", "buildlist "
+                    + colony.getName() + ": no colony screen");
+                return;
             }
+            p.openBuildList(0.0);
         });
         return null;
-    }
-
-    /**
-     * Take the build-queue screen away if one is up: its colony shows
-     * again, with the keys.
-     *
-     * @param why Why (for the recorder).
-     */
-    private void closeBuildQueuePanel(String why) {
-        final ClassicBuildQueuePanel p = this.buildQueuePanel;
-        this.buildQueuePanel = null;
-        if (p != null && this.screens != null) this.screens.pop(p, why);
     }
 
     /**

@@ -48,6 +48,12 @@
       <!-- The Classic UI's colony picture: each building family's slot
            ("RATHAUS=L1 ZIMMEREI=M4 ...", M4.2). -->
       <xs:attribute name="classicSlots" type="xs:string" use="optional"/>
+      <!-- The original's completed build (levi rule R4, part V, M4.10):
+           the building type finished while nothing else was queued, and
+           its turn. -->
+      <xs:attribute name="classicBuilt" type="xs:string" use="optional"/>
+      <xs:attribute name="classicBuiltTurn" type="xs:int" use="optional"
+                    default="-1"/>
       <xs:attribute name="currentlyBuilding" type="xs:string" use="optional"/>
       <xs:attribute name="established" type="xs:int" use="optional"
                     default="1"/>

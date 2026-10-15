@@ -848,6 +848,65 @@ final class ClassicColonyBuildings {
         return new Model(out, format(where));
     }
 
+    /**
+     * The building area as it was before a building was completed (the
+     * completion dissolve's old picture, build spec M4.10 target 4; V clip
+     * 020 #57671: the tree before the Verlag, #73443: the Haus des Schmieds
+     * before the Schmiede, #105689: the tree before the Lagerhaus): the
+     * slot of the new building shows its old level's sprite (an upgrade,
+     * its workers and row kept) or the class's placeholder (a new family:
+     * no workers, no row, as a new building has); the Lagerhaus' slot its
+     * other family's sprite, the expansion's «2» gone.
+     *
+     * @param m The building area now.
+     * @param built The building type just completed.
+     * @return The area before it, or {@code m} when no slot shows it.
+     */
+    static Model before(Model m, BuildingType built) {
+        if (m == null || built == null) return m;
+        final String id = shortId(built.getId());
+        final Integer frame = frameOf(id);
+        final List<Placed> out = new ArrayList<>(m.slots.size());
+        boolean changed = false;
+        for (Placed p : m.slots) {
+            Placed q = p;
+            if (!changed && !p.placeholder) {
+                if ("warehouseExpansion".equals(id) && p.expansion) {
+                    q = new Placed(p.slot, p.frame, false, p.label, p.labelY, p.target, false,
+                                   p.row, p.rowIcon, p.figures);
+                } else if ("warehouse".equals(id) && (p.frame == 15
+                           || p.frame == FRAME_STORE_STABLES)) {
+                    q = (p.frame == FRAME_STORE_STABLES)
+                        ? new Placed(p.slot, FRAME_STABLES, false, p.label, p.labelY, p.target,
+                                     false, p.row, p.rowIcon, p.figures)
+                        : placeholderOf(p);
+                } else if (("stables".equals(id) || "country".equals(id))
+                           && (p.frame == FRAME_STABLES || p.frame == FRAME_STORE_STABLES)) {
+                    q = (p.frame == FRAME_STORE_STABLES)
+                        ? new Placed(p.slot, 15, false, p.label, p.labelY, p.target,
+                                     p.expansion, p.row, p.rowIcon, p.figures)
+                        : placeholderOf(p);
+                } else if (frame != null && p.frame == frame
+                           && p.slot.cls != SlotClass.FENCE) {
+                    final BuildingType from = built.getUpgradesFrom();
+                    final Integer old = (from == null) ? null : frameOf(from.getId());
+                    q = (old == null) ? placeholderOf(p)
+                        : new Placed(p.slot, old, false, p.label, p.labelY, p.target,
+                                     p.expansion, p.row, p.rowIcon, p.figures);
+                }
+            }
+            changed |= q != p;
+            out.add(q);
+        }
+        return (changed) ? new Model(out, m.layout) : m;
+    }
+
+    /** A slot showing its class's placeholder: no building, no workers, no row. */
+    private static Placed placeholderOf(Placed p) {
+        return new Placed(p.slot, p.slot.cls.placeholder, true, p.label, p.labelY, null,
+                          false, null, -1, new ArrayList<>());
+    }
+
     /** A unit's place in a list, the end when it is not in it. */
     private static int rank(List<Unit> order, Unit u) {
         final int i = order.indexOf(u);

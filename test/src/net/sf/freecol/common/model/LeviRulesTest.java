@@ -67,6 +67,8 @@ public class LeviRulesTest extends FreeColTestCase {
         CHANGED.put(GameOptions.FORTIFY_DECLARES_WAR, Boolean.TRUE);       // the original's (B3)
         CHANGED.put(GameOptions.EUROPE_ARRIVAL_DOCKS, Boolean.TRUE);       // the original's (T3)
         CHANGED.put(GameOptions.ORIGINAL_DROP_JOBS, Boolean.TRUE);         // the original's (U, R2/R3)
+        CHANGED.put(GameOptions.ORIGINAL_BUILD_PRICE, Boolean.TRUE);       // the original's (V, R1)
+        CHANGED.put(GameOptions.ORIGINAL_BUILD_COMPLETION, Boolean.TRUE);  // the original's (V, R4)
         CHANGED.put(GameOptions.CANCEL_KEEPS_MOVE, Boolean.TRUE);          // house rules
         CHANGED.put(GameOptions.REVENGE_MODE, Boolean.FALSE);
         CHANGED.put(GameOptions.LAST_COLONY_DEFEAT, Boolean.TRUE);
@@ -366,6 +368,31 @@ public class LeviRulesTest extends FreeColTestCase {
         assertTrue(Specification.originalDropJobsDefault(LEVI));
         assertFalse(Specification.originalDropJobsDefault("classic"));
         assertFalse(Specification.originalDropJobsDefault("freecol"));
+    }
+
+    /**
+     * The original's build price and completed build (part V, M4.10 R1 and
+     * R4): on in levi, off in classic and freecol (which get the options
+     * from Specification.fixGameOptions), a levi save from before the
+     * rules gets them; in the colony group, with their names.  The rules'
+     * effects: {@code ClassicColonyBuildTest}.
+     */
+    public void testOriginalBuildRules() {
+        for (String id : new String[] { GameOptions.ORIGINAL_BUILD_PRICE,
+                                        GameOptions.ORIGINAL_BUILD_COMPLETION }) {
+            assertTrue(id, spec(LEVI).getBoolean(id));
+            assertFalse(id, spec("classic").getBoolean(id));
+            assertFalse(id, spec("freecol").getBoolean(id));
+            assertNotNull(id, spec(LEVI).getOptionGroup(GameOptions.GAMEOPTIONS_COLONY)
+                          .getOption(id));
+        }
+        assertEquals("Buying a build: the original price",
+                     Messages.getName(GameOptions.ORIGINAL_BUILD_PRICE));
+        assertEquals("Finished buildings stay the current build",
+                     Messages.getName(GameOptions.ORIGINAL_BUILD_COMPLETION));
+        assertTrue(Specification.originalBuildDefault(LEVI));
+        assertFalse(Specification.originalBuildDefault("classic"));
+        assertFalse(Specification.originalBuildDefault("freecol"));
     }
 
     /**

@@ -1156,6 +1156,84 @@ final class ClassicColonyLayout {
         return new Rectangle(c.x - 1, c.y - 1, c.width + 2, c.height + 2);
     }
 
+    /**
+     * The port's full-size carriers: at most four in a row, 18 px apart
+     * (V clip 040 #46 948, #52 700, #61 150: a fifth would leave the
+     * port; the rest are tiny icons, {@link #tinyIcon}).
+     */
+    static final int FULL_CARRIERS = 4, CARRIER_PITCH = 18;
+
+    /**
+     * Slot i's 16x16 cell (V clip 040, {@code 10-port-carriers.md} §1.2): x
+     * 130 + 18i; a ship's y 146 in slot 0 and 145 in slots 1-3 (V every
+     * frame: the galleon ICONS.SS.007 at (150,145) #61 150, dy -1 for every
+     * non-front ship; I: why), a wagon train's 147 in every slot.
+     *
+     * @param naval Whether the carrier is a ship.
+     * @param i The slot, 0-3.
+     * @return The cell.
+     */
+    static Rectangle carrierCell(boolean naval, int i) {
+        final int y = (naval) ? SHIP_Y - ((i >= 1) ? 1 : 0) : WAGON_Y;
+        return new Rectangle(CARRIER_X + CARRIER_PITCH * i, y, 16, 16);
+    }
+
+    /**
+     * Slot i's 18x18 frame (V clip 040: ship (129,145)-(146,162) in slot 0,
+     * (147,144)-(164,161) in slot 1 #62 060; wagon train (129 + 18i,
+     * 146)-(146 + 18i, 163), #52 642, #50 941, #66 399).
+     *
+     * @param naval Whether the carrier is a ship.
+     * @param i The slot, 0-3.
+     * @return The frame.
+     */
+    static Rectangle carrierFrame(boolean naval, int i) {
+        final Rectangle c = carrierCell(naval, i);
+        return new Rectangle(c.x - 1, c.y - 1, c.width + 2, c.height + 2);
+    }
+
+    /** The tiny icons' first x, pitch and y (V clip 040: (123 + 5k, 139)). */
+    static final int TINY_X = 123, TINY_PITCH = 5, TINY_Y = 139, TINY_SIZE = 4;
+
+    /**
+     * The 5th, 6th ... carrier's tiny icon k (k = 0 for the 5th): 4x4 at
+     * (123 + 5k, 139) (V clip 040 #52 642 k 0, #61 150 k 0 and 1, 0 px;
+     * I for k 2 on: x 133 as the pitch gives).
+     *
+     * @param k The tiny icon.
+     * @return Its 4x4 rectangle.
+     */
+    static Rectangle tinyIcon(int k) {
+        return new Rectangle(TINY_X + TINY_PITCH * k, TINY_Y, TINY_SIZE, TINY_SIZE);
+    }
+
+    /**
+     * A selected tiny icon's 1-px frame, 5x6 at (123 + 5k, 138) over the
+     * icon's left column (V clip 040 #52 909 white, #53 000 green, #67 090
+     * k 1, #67 299 k 0).
+     *
+     * @param k The tiny icon.
+     * @return The frame.
+     */
+    static Rectangle tinyFrame(int k) {
+        return new Rectangle(TINY_X + TINY_PITCH * k, TINY_Y - 1, 5, 6);
+    }
+
+    /**
+     * The hold under a point (the goods' drags, M4.9): hold k's box x 127 +
+     * 12k ... 138 + 12k, y 164-177 (its icon at y 165, the PIK's box y
+     * 165-176; I: the press area one pixel round it).
+     *
+     * @param x The x.
+     * @param y The y.
+     * @return The hold, 0-5, or -1.
+     */
+    static int holdAt(int x, int y) {
+        if (y < HOLD_Y - 1 || y > HOLD_Y + 12 || x < 127) return -1;
+        final int k = (x - 127) / HOLD_PITCH;
+        return (k >= 0 && k < HOLDS) ? k : -1;
+    }
+
     /** The six holds: the icons' y 165, pitch 12. */
     static final int HOLDS = 6, HOLD_Y = 165, HOLD_PITCH = 12;
 

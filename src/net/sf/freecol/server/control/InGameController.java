@@ -3689,6 +3689,9 @@ public final class InGameController extends Controller {
                                    List<BuildableType> queue) {
         BuildableType current = colony.getCurrentlyBuilding();
         colony.setBuildQueue(queue);
+        // The player chose: the original's completed build is no longer
+        // the current one (levi rule R4, part V).
+        colony.setClassicBuilt(null, -1);
         if (getGame().getSpecification()
             .getBoolean(GameOptions.CLEAR_HAMMERS_ON_CONSTRUCTION_SWITCH)
             && current != null && current != colony.getCurrentlyBuilding()) {

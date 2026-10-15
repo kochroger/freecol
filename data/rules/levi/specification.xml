@@ -387,6 +387,22 @@
              FreeCol (classic, freecol): the colony chooses the work. -->
         <booleanOption id="model.option.originalDropJobs"
                        defaultValue="true"/>
+        <!-- The original's price for KAUFEN on the colony screen (part V,
+             build spec M4.10 R1; clip 020 #94078: 494 = 13 x 38 missing
+             hammers, dago-colony2: 1248 = 13 x 96): 13 per missing
+             hammer, the missing tools at the market's ask (I).  FreeCol
+             (classic, freecol): 20 per hammer, the tools 10 % dearer. -->
+        <booleanOption id="model.option.originalBuildPrice"
+                       defaultValue="true"/>
+        <!-- The original's completed build (part V, build spec M4.10 R4;
+             clip 020 #113, #159, #229): a building finished while nothing
+             else is queued stays the current build, «(ABGESCHLOSSEN)»,
+             until the player chooses another; no turn warns that nothing
+             is built meanwhile.  A finished unit is built again (FreeCol
+             already does that with one unit queued).  FreeCol (classic,
+             freecol): the finished building leaves the queue. -->
+        <booleanOption id="model.option.originalBuildCompletion"
+                       defaultValue="true"/>
         <!-- Row 8: capture units under repair when a colony is
              captured. -->
         <booleanOption id="model.option.captureUnitsUnderRepair"

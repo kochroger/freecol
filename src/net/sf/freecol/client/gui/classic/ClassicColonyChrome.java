@@ -467,6 +467,24 @@ final class ClassicColonyChrome {
      */
     static void paintWarehouse(Graphics2D g, Assets a, int[] amounts, boolean[] exported,
                                int selected) {
+        paintWarehouse(g, a, amounts, exported, selected, ClassicColonyLayout.INK_GREEN);
+    }
+
+    /**
+     * {@link #paintWarehouse(Graphics2D, Assets, int[], boolean[], int)}
+     * with the selected box's frame in an ink: green, or yellow (ink 14)
+     * for 17 frames after a press on it (M4.9; V clip 020 png #10057
+     * yellow, #10074 green).
+     *
+     * @param g The canvas.
+     * @param a The assets.
+     * @param amounts The amounts.
+     * @param exported The exported goods.
+     * @param selected The selected box.
+     * @param frameInk Its frame's ink.
+     */
+    static void paintWarehouse(Graphics2D g, Assets a, int[] amounts, boolean[] exported,
+                               int selected, int frameInk) {
         for (int i = 0; i < ClassicColonyLayout.WAREHOUSE_BOXES; i++) {
             final BufferedImage icon = a.goods[i];
             if (icon != null) {
@@ -485,7 +503,7 @@ final class ClassicColonyChrome {
         }
         if (selected >= 0 && selected < ClassicColonyLayout.WAREHOUSE_BOXES) {
             final Rectangle b = ClassicColonyLayout.warehouseBox(selected);
-            g.setColor(new Color(a.rgb(ClassicColonyLayout.INK_GREEN)));
+            g.setColor(new Color(a.rgb(frameInk)));
             g.fillRect(b.x, b.y, b.width, 1);
             g.fillRect(b.x, b.y + b.height - 1, b.width, 1);
             g.fillRect(b.x, b.y, 1, b.height);
