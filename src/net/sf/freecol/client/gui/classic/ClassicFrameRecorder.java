@@ -147,7 +147,9 @@ import javax.swing.JComponent;
  * {@code colony-carrier ... docked}, {@code colony-exit},
  * {@code colony-pedia}, {@code pedia}, {@code pedia-missing},
  * {@code colony-food-short}, and {@code view-jump report} before a colony's
- * first report);
+ * first report; fixer A after part X: {@code colony-pedia right terrain|skill},
+ * {@code pedia skill|building}, {@code box-closing <id>} (a page's close
+ * lag), {@code colony-goods unload-all}, {@code screen-failed <kind>});
  * the map's index hint is off meanwhile.  Not in the copy:
  * the first scene (the frame's glass pane) and the Swing popups
  * ({@link ClassicDialog} and the other JDialogs), whose opening and closing

@@ -654,6 +654,48 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
     }
 
     /**
+     * F1 or a right-click in the build list (fixer A after part X, the
+     * colony review's must 4: V clip 046 #71516-#71721): a building's row
+     * shows its Colonopedia page 29 frames after the list went, the build
+     * stays, the list comes again 7 frames after the page with its bar on
+     * the current build; a unit's row (the wagon train) and «(Keine
+     * Produktion)» have no help.
+     */
+    public void testTheBuildListsPage() throws Exception {
+        final Scene s = scene(true);
+        final Specification spec = spec();
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t == null) return;
+        final BuildingType press = building(spec, "printingPress");
+        s.colony.setBuildQueue(List.<BuildableType>of(press));
+        final List<ClassicColonyBuild.Row> rows = ClassicColonyBuild.rows(s.colony, t);
+        int mill = -1, wagon = -1;
+        for (int i = 0; i < rows.size(); i++) {
+            if (rows.get(i).type == building(spec, "lumberMill")) mill = i;
+            if (rows.get(i).type instanceof UnitType) wagon = i;
+        }
+        assertTrue(mill > 0);
+        assertTrue(wagon > 0);
+        assertFalse(ClassicColonyBuild.hasPage(rows.get(wagon)));
+        assertFalse(ClassicColonyBuild.hasPage(rows.get(0)));
+        assertTrue(ClassicColonyBuild.hasPage(rows.get(mill)));
+        s.boxes.answers.add(new ClassicColonyServerScene.Boxes.Help(mill));
+        ClassicColonyServerScene.click(s.panel, 280, 142);      // ÄNDERN
+        assertEquals(List.of(building(spec, "lumberMill")), s.boxes.pages);
+        assertEquals(ClassicColonyMoves.ms(29), s.boxes.pageDelays.get(0), 1e-9);
+        final ClassicAdvisorBox.Request first = s.boxes.asked.get(s.boxes.asked.size() - 2);
+        final ClassicAdvisorBox.Request again = s.boxes.last();
+        assertEquals("buildlist", first.id);
+        assertEquals("buildlist", again.id);
+        assertEquals("the bar on the current build", first.defaultRow, again.defaultRow);
+        assertEquals(ClassicColonyMoves.ms(7), again.chainMs, 1e-9);
+        assertNotNull(again.help);
+        assertFalse(again.help.covers(wagon));
+        assertSame("the build stays", press, s.colony.getCurrentlyBuilding());
+        assertTrue(s.api.log.toString(), s.api.log.isEmpty());
+    }
+
+    /**
      * KAUFEN through the real controller and server (part X): the price
      * the server takes is the original's.  046 #119741's Verlag with 24
      * hammers and no tools: 484 = 13 x 28 + 6 x 20, the gold drops by
@@ -824,7 +866,9 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         assertFalse(p.completionBlink());
         p.blinkPhase(true);
         assertTrue("ÄNDERN normal", same(on2, ClassicColonyPanel.pixelsOf(p.canvas()), change));
-        // A second opening: neither.
+        // A second opening, by a click in that turn: no dissolve, ÄNDERN
+        // blinks (fixer A after part X: V clip 049 #33109 -> #33133; I that
+        // a second opening blinks too), in the mode the last visit ended in.
         final ClassicColonyPanel q = new ClassicColonyPanel(
             ClassicColonyServerScene.client(s.game, s.dutch, s.api),
             ClassicColonyBuildingsTest.library(), s.colony, null, s.boxes, ClassicSlide.SYSTEM,
@@ -832,7 +876,7 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         q.setMode(ClassicColonyRight.Mode.HOUSE);
         q.opened(ClassicColonyRight.Opening.OTHER);
         assertNull(q.dissolve());
-        assertFalse(q.completionBlink());
+        assertTrue(q.completionBlink());
         assertEquals(ClassicColonyRight.Mode.HOUSE, q.mode());
     }
 
@@ -1095,15 +1139,18 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         s.panel.opened(ClassicColonyRight.Opening.FOUNDING);
         assertNull(s.panel.dissolve());
         assertFalse(s.panel.completionBlink());
-        // An opening from the map in that turn: neither (part W: only the
-        // zoom row of @BUILT dissolves and blinks; I, not seen).
+        // An opening from the map in that turn: no dissolve, but ÄNDERN
+        // blinks (fixer A after part X: V clip 049 #33109 the new sprite at
+        // once, #33133 the first blink).
+        assertTrue(ClassicColonyBuild.completedThisTurn(s.colony));
         s.panel.opened(ClassicColonyRight.Opening.OTHER);
         assertNull(s.panel.dissolve());
-        assertFalse(s.panel.completionBlink());
+        assertTrue(s.panel.completionBlink());
         // The next turn: neither.
         s.game.setTurn(new net.sf.freecol.common.model.Turn(
             s.game.getTurn().getNumber() + 1));
         assertFalse(completedThisTurn(s.colony));
+        assertFalse(ClassicColonyBuild.completedThisTurn(s.colony));
         assertSame("still the current build", press, ClassicColonyBuild.current(s.colony));
         s.panel.opened(ClassicColonyRight.Opening.OTHER);
         assertNull(s.panel.dissolve());
@@ -1236,7 +1283,8 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
      * The zoom's dissolve in every game (regression L11 of part V, now
      * part W: the trigger is «Zur Kolonie zoomen.»): two games whose colony
      * (the same id) finishes a building in the same turn each dissolve it
-     * at the zoom; an opening from the map in that turn does not (I).
+     * at the zoom; an opening from the map in that turn does not, it only
+     * blinks ÄNDERN (fixer A after part X, V clip 049 #33109).
      */
     public void testTheZoomDissolvesInEveryGame() throws Exception {
         String id = null;
@@ -1252,7 +1300,8 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
             id = s.colony.getId();
             s.panel.opened(ClassicColonyRight.Opening.OTHER);
             assertNull("a click's opening, game " + k, s.panel.dissolve());
-            assertFalse(s.panel.completionBlink());
+            // Its blink (fixer A after part X: V clip 049 #33109, #33133).
+            assertTrue(s.panel.completionBlink());
             s.panel.opened(ClassicColonyRight.Opening.BUILT_BUILDING, press, null);
             assertNotNull("the zoom, game " + k, s.panel.dissolve());
             assertTrue(s.panel.completionBlink());

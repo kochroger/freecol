@@ -1633,13 +1633,20 @@ final class ClassicColonyLayout {
 
     /**
      * The offsets of the hammer rows seen (spec §0.1 decision 1, the L
-     * Checker's table): q 10 (Wagenzug, #130584), 13 (Verlag, #9921), 20
-     * (Lagerhaus, #93990), 30 (Druckerei #134173, dago's Fort), 48
-     * (Artillerie, dago Base #6400: measured in S5, not the spec's formula).
+     * Checker's table): q 10 (Wagenzug, #130584), 13 (Verlag, #9921), 16
+     * (the 64-hammer builds, clip 046 #87489), 20 (Lagerhaus, #93990), 30
+     * (Druckerei #134173, dago's Fort), 48 (Artillerie, dago Base #6400:
+     * measured in S5, not the spec's formula).  q 40 (160 hammers) stays
+     * the formula's (I: clip 048 #95899-#95962 fit no simple row).
      */
     private static final int[][] HAMMER_TABLE = {
         { 10, 0, 9, 18, 27, 36, 45, 54, 63, 72, 81 },
         { 13, 0, 6, 13, 20, 26, 33, 40, 46, 53, 60, 66, 73, 80 },
+        // q 16 (64 hammers: Einpfählung, Schulhaus, Weberei ...; fixer A
+        // after part X, V clip 046 #87483/#87489 two rows of 16 and 14 at
+        // 0 px: floor(j·688/128); the formula below put j 8, 11, 14 one
+        // pixel left).
+        { 16, 0, 5, 10, 16, 21, 26, 32, 37, 43, 48, 53, 59, 64, 69, 75, 80 },
         { 20, 0, 4, 8, 12, 17, 21, 25, 29, 34, 38, 42, 46, 51, 55, 59, 63, 68, 72, 76, 80 },
         { 30, 0, 2, 5, 8, 11, 13, 16, 19, 22, 24, 27, 30, 33, 35, 38, 41, 44, 47, 49, 52,
           55, 58, 60, 63, 66, 69, 71, 74, 77, 80 },

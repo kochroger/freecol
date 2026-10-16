@@ -85,6 +85,15 @@ final class ClassicColonyGoods {
     /** The hold's icon and the warehouse's number after the drop: 8 frames (V #10114 -&gt; #10122). */
     static final int REDRAW_FRAMES = 8;
 
+    /**
+     * «Alle Waren entladen.» (fixer A after part X, V clip 050 #33922):
+     * the hold empties 8 frames after the box's close (#33930), the
+     * warehouse's number 9 (#33931); the selected carrier's blink starts
+     * its phase 10 frames after the close, its first toggle 33 (#33955).
+     */
+    static final int UNLOAD_ALL_HOLD_FRAMES = 8, UNLOAD_ALL_STORE_FRAMES = 9,
+        UNLOAD_ALL_BLINK_FRAMES = 10;
+
     /** The warehouse cell's yellow frame before it turns green: 17 frames (V png #10057 -&gt; #10074). */
     static final int YELLOW_FRAMES = 17;
 

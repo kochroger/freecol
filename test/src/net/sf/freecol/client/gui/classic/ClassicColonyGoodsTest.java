@@ -572,14 +572,41 @@ public class ClassicColonyGoodsTest extends FreeColTestCase {
         assertTrue(s.boxes.lastRows(),
                    s.boxes.lastRows().startsWith("COLONYUNIT [Befehle aufheben., Wache."));
         assertEquals(Unit.UnitState.SENTRY, ship.getState());
-        // «Alle Waren entladen.»: every good into the colony.
+        // «Alle Waren entladen.»: every good into the colony; no other box,
+        // the result in the top line at once (fixer A after part X: V clip
+        // 050 #33922 «40 Werkzeuge bewegt nach Base»), the hold redrawn 8
+        // frames later, the warehouse 9, the ship still selected with the
+        // white cursor on it, its blink's first toggle 33 frames on.
         final int before = s.boxes.asked.size();
+        final int[] storeBefore = s.panel.amountsShown();
+        s.laterMs.clear();
+        s.later.clear();
         s.boxes.answers.add(3);                 // after «Befehle aufheben.», «Wache.», «ankern»
         ClassicColonyServerScene.click(s.panel, f0[0], f0[1]);
         assertEquals(before + 1, s.boxes.asked.size());
         assertFalse(s.api.log.toString(), ship.hasGoodsCargo());
         assertEquals(30, s.colony.getGoodsCount(goods("ore")));
         assertEquals(120, s.colony.getGoodsCount(goods("rum")));
+        final String notice = s.panel.noticeShown();
+        assertNotNull(notice);
+        assertTrue(notice, notice.equals(ClassicColonyGoods.movedNotice(t, 30, goods("ore"),
+                       s.colony.getName()))
+                   || notice.equals(ClassicColonyGoods.movedNotice(t, 120, goods("rum"),
+                       s.colony.getName())));
+        assertTrue(s.laterMs.toString(), s.laterMs.contains(
+            (int) Math.round(ClassicColonyGoods.ms(8))));
+        assertTrue(s.laterMs.toString(), s.laterMs.contains(
+            (int) Math.round(ClassicColonyGoods.ms(9))));
+        assertTrue("the warehouse as before until its redraw",
+                   java.util.Arrays.equals(storeBefore, s.panel.amountsShown()));
+        assertSame("the hold as before until its redraw", goods("ore"),
+                   s.panel.portShown().holds.get(0).goods);
+        assertSame(ship, s.panel.selectedCarrier());
+        assertEquals(ClassicColonyPanel.CURSOR_CARRIER, ClassicColonyPanel.tileCursor());
+        s.runLater();
+        assertFalse(java.util.Arrays.equals(storeBefore, s.panel.amountsShown()));
+        assertNull("the holds empty", s.panel.portShown().holds.get(0).goods);
+        assertSame(ship, s.panel.selectedCarrier());
         // The wagon train: select, then its box; «Nach vorne bewegen.» (#51 167).
         ClassicColonyServerScene.click(s.panel, f1[0], f1[1]);
         assertSame(wagon, s.panel.selectedCarrier());

@@ -291,7 +291,9 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
             s.finish();
             s.colony.addGoods(muskets, 50);
             s.colony.addGoods(tools, 10);
-            final String roles = " | Siedler | Pionier~( | Soldat*( | Späher~( | Dragoner~(";
+            // «Dragoner» yellow for an Erfahrene Soldaten (playthrough 4,
+            // ClassicColonyJobs.yellowFor), drawn grey here: no horses.
+            final String roles = " | Siedler | Pionier~( | Soldat*( | Späher~( | Dragoner*~(";
             out.add(new Case("#16", ClassicColonyJobs.menu(t, s.colony, u,
                     ClassicColonyJobs.Kind.FENCE_DROP, 1),
                 "Beruf wählen für Erfahrene Soldaten(Staatsmann): | Staatsmann^" + roles,
@@ -690,11 +692,50 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         @Override
         public void options(Unit unit, boolean first) {}
 
+        /**
+         * The row F1 (a {@link ClassicAdvisorBox.Bar#HELP} answer) is
+         * pressed on: the bar's default row, or this one when set (the bar
+         * moved there first, fixer A after part X).
+         */
+        int helpOn = -1;
+
         @Override
         public int ask(ClassicAdvisorBox.Request r) {
             this.asked.add(r);
-            return (this.answers.isEmpty()) ? ClassicAdvisorBox.Bar.DISMISSED
+            final int a = (this.answers.isEmpty()) ? ClassicAdvisorBox.Bar.DISMISSED
                 : this.answers.poll();
+            if (a == ClassicAdvisorBox.Bar.HELP && r.help != null) {
+                // As the real bar: the hook is told the barred row.
+                r.help.help((this.helpOn >= 0) ? this.helpOn : r.defaultRow);
+                this.helpOn = -1;
+            }
+            return a;
+        }
+
+        /** The skill pages asked (their NAMES @JOB rows) and their delays (ms). */
+        final List<Integer> skills = new ArrayList<>();
+        final List<Double> delays = new ArrayList<>();
+
+        /** The building pages asked. */
+        final List<net.sf.freecol.common.model.BuildingType> buildings = new ArrayList<>();
+
+        @Override
+        public void skillPage(int job, double delayMs) {
+            this.skills.add(job);
+            this.delays.add(delayMs);
+        }
+
+        @Override
+        public void buildingPage(net.sf.freecol.common.model.BuildingType type,
+                                 double delayMs) {
+            this.buildings.add(type);
+            this.delays.add(delayMs);
+        }
+
+        @Override
+        public void terrainPage(Tile tile, double delayMs) {
+            this.pages.add(tile);
+            this.delays.add(delayMs);
         }
 
         /** @return The last box's rows, plain. */
@@ -1347,8 +1388,10 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
     /**
      * A pioneer at the fence picks «Pionier» again (the review of part U,
      * play M1): the count from the warehouse and what he carries; his own
-     * count changes nothing; another count gives his tools back first, so
-     * no tool is lost or made.
+     * count is his own row, the word alone (fixer A after part X: the
+     * original's own role row, clip 048 #80466; I for the pioneer) and
+     * changes nothing; another count gives his tools back first, so no
+     * tool is lost or made.
      */
     public void testAPioneerAtTheFenceKeepsHisTools() throws Exception {
         final ClassicText t = texts();
@@ -1362,7 +1405,7 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         p.changeRole(pioneer, 5);                       // 100 tools carried
         s.colony.invalidateCache();
         assertEquals(0, s.colony.getGoodsCount(tools));
-        pickPioneer(s, t, p, "(100 Werkzeuge)");
+        pickPioneer(s, t, p, null);                 // his own row, the word alone
         assertEquals(s.api.log.toString(), 5, p.getRoleCount());
         assertEquals("nothing lost", 0, s.colony.getGoodsCount(tools));
         p.changeRole(pioneer, 1);                       // 20 carried, 100 stored
@@ -1749,6 +1792,89 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
      * click's roles, the bar on Soldat, no cell there): the boxes drawn
      * over the frames with the clip's numbers, 0 px off but the arrow.
      */
+    /**
+     * The role rows as Roger's playthrough 4 shows them (fixer A after part
+     * X, the colony review's must 3): a unit's own role is the word alone,
+     * never grey (clip 048 #80466 and #90785 «{Soldat}», #160461 «Späher»),
+     * «Dragoner» is yellow for an Erfahrene Soldaten (#3136, #80466) and
+     * grey where the warehouse cannot equip it (#90785: the grey wins); each
+     * box drawn over its frame at 0 px apart from the original arrow (J1
+     * #3136 with the clip's first row «Fischer», his work there).
+     */
+    public void testTheRoleRowsOverPlaythrough4() throws Exception {
+        final ClassicText t = texts();
+        if (t == null) return;
+        final ClassicColonyBuildingsTest.State s = ClassicColonyBuildingsTest.base1539();
+        final Unit vet = s.in("veteranSoldier", "carpenterHouse");
+        s.finish();
+        final Unit sold = s.outside("veteranSoldier", "soldier");
+        final Unit scout = s.outside("freeColonist", "scout");
+        s.colony.removeGoods(tools);
+        s.colony.removeGoods(muskets);
+        s.colony.removeGoods(horses);
+        s.colony.addGoods(tools, 10);
+        s.colony.addGoods(horses, 50);
+        final ClassicColonyJobs.Menu m80466 = ClassicColonyJobs.menu(t, s.colony, sold,
+            ClassicColonyJobs.Kind.OUTSIDE, 2);
+        assertEquals("Beruf wählen für Erfahrene Soldaten: | (Weitere) | Siedler"
+            + " | Pionier~( | Soldat*^ | Späher( | Dragoner*(", shape(m80466));
+        final ClassicColonyJobs.Menu m160461 = ClassicColonyJobs.menu(t, s.colony, scout,
+            ClassicColonyJobs.Kind.OUTSIDE, 2);
+        assertEquals("Beruf wählen für Freie Siedler(Späher): | (Weitere) | Siedler"
+            + " | Pionier~( | Soldat~( | Späher^ | Dragoner~(", shape(m160461));
+        s.colony.addGoods(muskets, 50);
+        final ClassicColonyJobs.Menu m3136 = ClassicColonyJobs.menu(t, s.colony, vet,
+            ClassicColonyJobs.Kind.FENCE_DROP, 1);
+        assertEquals("Beruf wählen für Erfahrene Soldaten(Schreiner): | Schreiner^ | Siedler"
+            + " | Pionier~( | Soldat*( | Späher( | Dragoner*(", shape(m3136));
+        s.colony.removeGoods(horses);
+        final ClassicColonyJobs.Menu m90785 = ClassicColonyJobs.menu(t, s.colony, sold,
+            ClassicColonyJobs.Kind.OUTSIDE, 2);
+        assertEquals("Beruf wählen für Erfahrene Soldaten: | (Weitere) | Siedler"
+            + " | Pionier~( | Soldat*^ | Späher~( | Dragoner*~(", shape(m90785));
+        // The pick of his own row changes nothing.
+        assertEquals(sold.getRoleCount(), m90785.rows.get(m90785.bar).count);
+        final ClassicColonyGolden gold = ClassicColonyGolden.open(getName());
+        if (gold == null) return;
+        final java.io.File dir = new java.io.File(System.getProperty(
+            ClassicTerrainGoldenTest.CLIPS_PROPERTY), "fixer-a-analysis/c048");
+        if (!dir.isDirectory()) {
+            System.err.println(getName() + ": golden check skipped, no clip 048 frames");
+            return;
+        }
+        final ClassicFont tiny = gold.pack.font(ClassicFont.TINY);
+        final BufferedImage wood = gold.pack.image(ClassicMenuBar.WOOD_KEY);
+        final Object[][] cases = {
+            { m80466, null, null, 80466 }, { m90785, null, null, 90785 },
+            { m160461, null, null, 160461 },
+            { m3136, "Beruf wählen für Erfahrene Soldaten(Fischer):", "Fischer", 3136 },
+        };
+        final StringBuilder out = new StringBuilder();
+        int bad = 0;
+        for (Object[] c : cases) {
+            final ClassicColonyJobs.Menu m0 = (ClassicColonyJobs.Menu) c[0];
+            final List<ClassicColonyJobs.Row> rows = new ArrayList<>(m0.rows);
+            if (c[2] != null) {
+                final ClassicColonyJobs.Row r = rows.get(0);
+                rows.set(0, new ClassicColonyJobs.Row(r.pick, r.job, (String) c[2], null,
+                                                      false, false, 0));
+            }
+            final ClassicColonyJobs.Menu m = new ClassicColonyJobs.Menu(m0.kind, m0.page,
+                (c[1] == null) ? m0.title : (String) c[1], rows, m0.bar);
+            final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(
+                ClassicColonyJobs.request(t, m, 0.0, -1.0), tiny, null);
+            assertEquals("#" + c[3], new Rectangle(62, 61, 196, 78), l.box);
+            final BufferedImage frame = javax.imageio.ImageIO.read(
+                ClassicTerrainGoldenTest.frameFile(dir, (Integer) c[3]));
+            final int[] got = over(gold, frame, l, m.bar, wood, tiny);
+            out.append(" #").append(c[3]).append(' ').append(got[0]).append('/')
+                .append(got[1]).append(" arrow ").append(got[2]);
+            bad += got[1];
+        }
+        System.out.println(getName() + ":" + out);
+        assertEquals("pixels off:" + out, 0, bad);
+    }
+
     public void testTheFenceMenusOverClip042() throws Exception {
         final ClassicText t = texts();
         if (t == null) return;
@@ -1976,9 +2102,116 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
     }
 
     /**
-     * F1 (part W, M4.11 target 4; V clip 020 #76921, #78325: the page of the
-     * white cursor's tile): the white cursor's tile, else the selected
-     * colonist's work tile, else none.
+     * The white cursor left on a carrier (a press on one in another colony,
+     * a docking) goes to the centre in a colony without a carrier in port
+     * (fixer A after part X, the colony review's later item: it stood
+     * nowhere); with one in port it stays on it.
+     */
+    public void testTheCarrierCursorInAColonyWithoutOne() throws Exception {
+        final Scene s = scene(2, true);
+        ClassicColonyPanel.setTileCursor(ClassicColonyPanel.CURSOR_CARRIER);
+        s.panel.opened(ClassicColonyRight.Opening.OTHER);
+        assertEquals(ClassicColonyLayout.CENTRE_TILE, ClassicColonyPanel.tileCursor());
+        new ServerUnit(s.game, s.colony.getTile(), s.dutch,
+                       spec().getUnitType("model.unit.wagonTrain"));
+        ClassicColonyPanel.setTileCursor(ClassicColonyPanel.CURSOR_CARRIER);
+        s.panel.opened(ClassicColonyRight.Opening.OTHER);
+        assertEquals(ClassicColonyPanel.CURSOR_CARRIER, ClassicColonyPanel.tileCursor());
+    }
+
+    /** A click of another button than the left (BUTTON2, BUTTON3) at a canvas point. */
+    private static void clickWith(ClassicColonyPanel p, int vx, int vy, int button) {
+        final int mask = (button == MouseEvent.BUTTON3) ? InputEvent.BUTTON3_DOWN_MASK
+            : InputEvent.BUTTON2_DOWN_MASK;
+        p.dispatchEvent(new MouseEvent(p, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                                       mask, vx * 3 + 1, vy * 3 + 1, 1, false, button));
+        p.dispatchEvent(new MouseEvent(p, MouseEvent.MOUSE_RELEASED, System.currentTimeMillis(),
+                                       0, vx * 3 + 1, vy * 3 + 1, 1, false, button));
+        paint(p);
+    }
+
+    /**
+     * The right-click (fixer A after part X, the colony review's must 4
+     * and its later item: V clip 049 with the keylog): on a field of the
+     * 3x3 map the white cursor goes there at the press and the release
+     * asks its terrain page 22 frames after the press (#4175 -&gt; #4198);
+     * on a colonist his type's skill page (#11762 «Siedler» for a free
+     * colonist with tools at the fence); the right and the middle button
+     * never act as the left: no exit on «Abb», no mode switch, no
+     * selection, no menu.
+     */
+    public void testTheRightClick() throws Exception {
+        final Scene s = scene(2, true);
+        final List<Unit> all = s.colony.getUnitList();
+        all.get(0).setLocation(tileOf(s.colony, Direction.N));
+        all.get(1).setLocation(building(s.colony, "carpenterHouse"));
+        final Unit pioneer = new ServerUnit(s.game, s.colony.getTile(), s.dutch,
+            spec().getUnitType("model.unit.freeColonist"), spec().getRole("model.role.pioneer"));
+        s.colony.invalidateCache();
+        paint(s.panel);
+        ClassicColonyPanel.setTileCursor(ClassicColonyLayout.CENTRE_TILE);
+        s.panel.select(all.get(1));
+        paint(s.panel);
+        final Rectangle ne = ClassicColonyLayout.tileCell(2);
+        clickWith(s.panel, ne.x + 12, ne.y + 12, MouseEvent.BUTTON3);
+        assertEquals(2, ClassicColonyPanel.tileCursor());
+        assertEquals(List.of(s.colony.getTile().getNeighbourOrNull(Direction.NE)),
+                     s.boxes.pages);
+        final double d = s.boxes.delays.get(0);
+        assertTrue("22 frames after the press: " + d,
+                   d > 0.0 && d <= ClassicColonyMoves.ms(22) + 1e-9);
+        assertSame("the selection stays", all.get(1), s.panel.selected());
+        // The building worker and the pioneer at the fence: their types' pages.
+        final int[] b = at(s.panel, all.get(1));
+        clickWith(s.panel, b[0], b[1], MouseEvent.BUTTON3);
+        final int[] f = at(s.panel, pioneer);
+        clickWith(s.panel, f[0], f[1], MouseEvent.BUTTON3);
+        assertEquals(List.of(ClassicColonyLayout.JOB_COLONIST, ClassicColonyLayout.JOB_COLONIST),
+                     s.boxes.skills);
+        assertSame("a right-click selects nobody", all.get(1), s.panel.selected());
+        assertTrue("no menu", s.boxes.asked.isEmpty());
+        // «Abb» and the mode buttons: nothing, with the right or the middle button.
+        final ClassicColonyRight.Mode mode = s.panel.mode();
+        final Rectangle exit = ClassicColonyLayout.EXIT;
+        for (int button : new int[] { MouseEvent.BUTTON3, MouseEvent.BUTTON2 }) {
+            clickWith(s.panel, exit.x + exit.width / 2, exit.y + exit.height / 2, button);
+            for (int m = 0; m < 3; m++) {
+                final Rectangle mb = ClassicColonyLayout.modeCell(m);
+                clickWith(s.panel, mb.x + mb.width / 2, mb.y + mb.height / 2, button);
+            }
+        }
+        assertFalse(s.panel.leaving());
+        assertTrue(s.events.toString(), s.events.isEmpty());
+        assertSame(mode, s.panel.mode());
+        assertEquals(2, s.boxes.skills.size());
+        assertEquals(1, s.boxes.pages.size());
+        // The middle button on a field asks nothing and leaves the cursor.
+        final Rectangle sw = ClassicColonyLayout.tileCell(6);
+        clickWith(s.panel, sw.x + 12, sw.y + 12, MouseEvent.BUTTON2);
+        assertEquals(2, ClassicColonyPanel.tileCursor());
+        assertEquals(1, s.boxes.pages.size());
+        // A right press on a field released on another: nothing (I).
+        final MouseEvent press = new MouseEvent(s.panel, MouseEvent.MOUSE_PRESSED,
+            System.currentTimeMillis(), InputEvent.BUTTON3_DOWN_MASK, sw.x * 3 + 30,
+            sw.y * 3 + 30, 1, false, MouseEvent.BUTTON3);
+        s.panel.dispatchEvent(press);
+        s.panel.dispatchEvent(new MouseEvent(s.panel, MouseEvent.MOUSE_RELEASED,
+            System.currentTimeMillis(), 0, ne.x * 3 + 30, ne.y * 3 + 30, 1, false,
+            MouseEvent.BUTTON3));
+        assertEquals("the cursor went at the press", 6, ClassicColonyPanel.tileCursor());
+        assertEquals(1, s.boxes.pages.size());
+    }
+
+    /**
+     * F1 (part W, M4.11 target 4; fixer A after part X): the white
+     * cursor's tile's terrain page (V clip 020 #76921, #78325); with the
+     * cursor on the selected colonist's figure his type's skill page (V
+     * clip 052 #16124 «Soldat» for an Erfahrene Soldaten), 22 frames after
+     * the key; nothing with the cursor on a carrier.  In the job menu the
+     * skill page of the job under the bar (V clip 049 #3106, clip 052
+     * #15108 «Tabakpflanzer» with the bar moved there), then the same menu
+     * again with its bar on its default row, 7 frames after the page (V
+     * clip 052 #15840), his work unchanged.
      */
     public void testF1AsksTheCursorsTile() throws Exception {
         final Scene s = scene(2, true);
@@ -1992,31 +2225,53 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         action(s.panel, "classic_colonyPedia");
         assertEquals(List.of(s.colony.getTile().getNeighbourOrNull(Direction.NE)),
                      s.boxes.pages);
+        assertEquals(ClassicColonyMoves.ms(22), s.boxes.delays.get(0), 1e-9);
         ClassicColonyPanel.setTileCursor(ClassicColonyPanel.CURSOR_OFF_TILES);
         s.panel.select(all.get(0));
         action(s.panel, "classic_colonyPedia");
-        assertSame(all.get(0).getWorkTile(), s.boxes.pages.get(1));
+        final int type0 = ClassicColonyPanel.typePage(all.get(0));
+        assertTrue(type0 >= 0);
+        assertEquals(List.of(type0), s.boxes.skills);
+        assertEquals("no work tile's page any more", 1, s.boxes.pages.size());
         s.panel.select(all.get(1));
+        ClassicColonyPanel.setTileCursor(ClassicColonyPanel.CURSOR_OFF_TILES);
         action(s.panel, "classic_colonyPedia");
-        assertEquals("a building worker, the cursor off the tiles: none", 2,
-                     s.boxes.pages.size());
+        assertEquals(List.of(type0, ClassicColonyPanel.typePage(all.get(1))), s.boxes.skills);
+        ClassicColonyPanel.setTileCursor(ClassicColonyPanel.CURSOR_CARRIER);
+        action(s.panel, "classic_colonyPedia");
+        assertEquals("the cursor on a carrier: none", 2, s.boxes.skills.size());
+        assertEquals(1, s.boxes.pages.size());
         assertFalse(s.panel.leaving());
-        // F1 in the tile worker's job menu (J2, «(F1 für Hilfe)»): the menu
-        // goes, his tile's page comes, his work stays (I).
+        // F1 in the tile worker's job menu (J2, «(F1 für Hilfe)») with the
+        // bar moved to «Tabakpflanzer»: the menu goes, that job's skill page
+        // comes, then the same menu again, his work stays.
         paint(s.panel);
         final Unit worker = all.get(0);
         final Object work = worker.getWorkType();
         final int[] w = at(s.panel, worker);
         click(s.panel, w[0], w[1]);     // select
+        final ClassicText t = texts();
         final int boxes = s.boxes.asked.size();
+        if (t != null) {
+            s.boxes.helpOn = ClassicColonyJobs.menu(t, s.colony, worker,
+                ClassicColonyJobs.Kind.WORKER, 1).rowOf(ClassicColonyJobs.Pick.JOB, 2);
+            assertTrue(s.boxes.helpOn >= 0);
+        }
         s.boxes.answers.add(ClassicAdvisorBox.Bar.HELP);
-        click(s.panel, w[0], w[1]);     // J2
-        assertEquals(boxes + 1, s.boxes.asked.size());
+        click(s.panel, w[0], w[1]);     // J2, F1, J2 again (Escape)
         final ClassicAdvisorBox.Request j2 = s.boxes.asked.get(boxes);
         assertTrue(j2.id, j2.id.startsWith("jobs "));
         assertNotNull("F1 answers", j2.help);
-        assertEquals(3, s.boxes.pages.size());
-        assertSame(worker.getWorkTile(), s.boxes.pages.get(2));
+        if (t != null) {
+            assertEquals(boxes + 2, s.boxes.asked.size());
+            assertEquals("the job under the bar", Integer.valueOf(2),
+                         s.boxes.skills.get(s.boxes.skills.size() - 1));
+            final ClassicAdvisorBox.Request again = s.boxes.asked.get(boxes + 1);
+            assertEquals(j2.id, again.id);
+            assertEquals("the bar on its default row", j2.defaultRow, again.defaultRow);
+            assertEquals(ClassicColonyMoves.ms(7), again.chainMs, 1e-9);
+        }
+        assertEquals(1, s.boxes.pages.size());
         assertSame(work, worker.getWorkType());
         assertFalse(s.panel.leaving());
         // L and U stay unmapped on the screen (build spec M4.12).

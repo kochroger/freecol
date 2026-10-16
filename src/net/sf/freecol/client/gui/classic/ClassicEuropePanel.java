@@ -98,7 +98,7 @@ import net.sf.freecol.common.model.UnitType;
  *       seen, question 1; since part T3 an arriving ship's colonists
  *       stand on the dock, Roger's screenshot 2026-10-14 shows the
  *       original's holds with goods only, so a colonist is in the holds
- *       only after a drag from the dock or with FreeCol's rules), then the
+ *       only with FreeCol's rules or from an older save), then the
  *       goods, one hold per 100 (an icon,
  *       grey below 100, V clip008 §2.5), crates on the holds the ship does
  *       not have, six crates without a ship.</li>
@@ -122,9 +122,13 @@ import net.sf.freecol.common.model.UnitType;
  *   <li>a hold of goods dropped anywhere on the market row sells it, with
  *       Shift {@code @HOWMUCH5};</li>
  *   <li>a colonist's hold dropped on the docks puts him on the dock
- *       (FreeCol's {@code leaveShip}); a colonist of the dock dropped on a
- *       ship or its holds boards it ({@code boardShip}; I, question 2);
- *       colonists marked "S" board by themselves when the ship sails;</li>
+ *       (FreeCol's {@code leaveShip}); a colonist of the dock is not
+ *       dragged at all: no ghost, the arrow stays, he stays on the dock
+ *       (V Roger's playthrough 4, clip 046 #106147-#106486: three drags of
+ *       «Holl. Siedler (Krimineller)» onto the docked merchantman, beside
+ *       it, on the ship and on its edge, the holds unchanged; T's question
+ *       2 answered); colonists marked "S" board by themselves when the
+ *       ship sails;</li>
  *   <li>a click on a ship in port selects it, a click on the selected ship
  *       opens {@code @EUROPESHIPCLICK} (clip 020 #27512), a click on a
  *       colonist of the dock {@code @EUROPEARM} ({@link
@@ -927,8 +931,13 @@ final class ClassicEuropePanel extends JPanel {
         switch (h.kind) {
         case SHIP:
             return !underRepair(h.unit);
-        case DOCK: case MARKET:
+        case MARKET:
             return true;
+        case DOCK:
+            // A colonist of the dock is never dragged: he boards only by the
+            // dock's "S" queue when a ship sails (V clip 046 #106147-#106486,
+            // class comment).
+            return false;
         case SAILING:
             return h.unit != null && h.unit.getDestination() instanceof Europe;
         case HOLD:
@@ -1073,27 +1082,8 @@ final class ClassicEuropePanel extends JPanel {
                     + " " + result + " state=" + src.hold.unit.getState());
             }
             break;
-        case DOCK: {
-            final Unit ship = (dst.kind == Kind.SHIP) ? dst.unit
-                : (dst.kind == Kind.HOLD && dst.unit != null) ? dst.unit : null;
-            if (underRepair(ship)) {
-                result = "under repair";
-            } else if (ship != null && !ship.canAdd(src.unit)) {
-                // No room (or no carrier): nothing, before the server's
-                // refusal would bring FreeCol's «Der Server kann das nicht
-                // ausführen.» (the review of part N, play lens; I: no clip
-                // shows the original's answer, a market drop on a full
-                // ship does nothing as well, ClassicTrade.hold).
-                result = "no room";
-            } else if (ship != null) {
-                result = (igc().boardShip(src.unit, ship)) ? "aboard" : "refused";
-                if (src.unit.getLocation() == ship) this.selectedShip = ship;
-                ClassicFrameRecorder.event("europe-board", src.unit.getId() + " -> "
-                    + ship.getId() + " " + result + " state=" + src.unit.getState());
-            }
-            break;
-        }
         default:
+            // A colonist of the dock is never dragged ({@link #draggable}).
             break;
         }
         ClassicFrameRecorder.event("europe-drag", src + " -> " + dst

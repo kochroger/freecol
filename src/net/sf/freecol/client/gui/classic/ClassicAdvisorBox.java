@@ -417,7 +417,9 @@ final class ClassicAdvisorBox {
     /**
      * What F1 does in a list box ({@link Request#help}, build spec D2): the
      * box closes with {@link Bar#HELP}, and its caller shows the help of
-     * the barred row and may ask the box again.
+     * the barred row and may ask the box again.  A right-click on a row
+     * asks the same (fixer A after part X: V clip 046 #71516 -&gt; #71579,
+     * the build list's «SÄGEWERK»; {@link Bar#rightPress}).
      */
     interface Help {
 
@@ -428,6 +430,17 @@ final class ClassicAdvisorBox {
          * @param row The barred row (0-based).
          */
         void help(int row);
+
+        /**
+         * Whether a row has a help (F1 on another row is any other key, a
+         * right-click on it does nothing): all by default.
+         *
+         * @param row The row (0-based).
+         * @return True if so.
+         */
+        default boolean covers(int row) {
+            return true;
+        }
     }
 
     /** What a checkbox box's row does when it flips ({@link Request#toggles}). */
@@ -710,6 +723,15 @@ final class ClassicAdvisorBox {
         final double closeAfterMs;
 
         /**
+         * How long the box stays after the key or click that answered it
+         * (ms), input ignored meanwhile, or 0 for the usual close in the
+         * same paint: the Colonopedia's pages over the colony screen go
+         * 14-19 frames after the key (fixer A after part X: V clip 052
+         * Enter -&gt; #15833, -&gt; #16334; clip 049 -&gt; #3821, #4742).
+         */
+        final double closeLagMs;
+
+        /**
          * When the box should be on screen, on the box layer's clock, or 0
          * for no such time: the landing box comes the original's time after
          * the move key (build spec W8b); a portrait palette goes in
@@ -821,6 +843,7 @@ final class ClassicAdvisorBox {
             this.toggles = (this.checks == null) ? null : b.toggles;
             this.openDelayMs = Math.max(0.0, b.openDelayMs);
             this.closeAfterMs = (n == 0) ? Math.max(0.0, b.closeAfterMs) : 0.0;
+            this.closeLagMs = Math.max(0.0, b.closeLagMs);
             this.showAtNanos = b.showAtNanos;
             this.rowIndent = b.rowIndent;
             this.footer = (b.footer == null || b.footer.isEmpty()) ? null : b.footer;
@@ -958,6 +981,7 @@ final class ClassicAdvisorBox {
         private Toggles toggles = null;
         private double openDelayMs = 0.0;
         private double closeAfterMs = 0.0;
+        private double closeLagMs = 0.0;
         private long showAtNanos = 0L;
         private int rowIndent = ClassicMenuBox.ROW_INDENT;
         private String footer = null;
@@ -1205,6 +1229,15 @@ final class ClassicAdvisorBox {
          */
         Builder closeAfter(double ms) {
             this.closeAfterMs = ms;
+            return this;
+        }
+
+        /**
+         * @param ms The box stays this long after the input that answered
+         *     it ({@link Request#closeLagMs}).
+         */
+        Builder closeLag(double ms) {
+            this.closeLagMs = ms;
             return this;
         }
 
@@ -2168,9 +2201,57 @@ final class ClassicAdvisorBox {
          * @return The answer.
          */
         int help() {
-            if (this.request.help == null || this.row < 0) return otherKey();
+            if (this.request.help == null || this.row < 0
+                || !this.request.help.covers(this.row)) return otherKey();
             this.request.help.help(this.row);
             return HELP;
+        }
+
+        /** The row a right press is on, waiting for its release, or {@link #NO_PRESS}. */
+        private int rightPressed = NO_PRESS;
+
+        /**
+         * A right (or middle) press (fixer A after part X): it never takes
+         * a row.  In a box with a help hook, on a row that has a help, the
+         * bar goes there (V clip 046 #71516: the build list's bar on
+         * «SÄGEWERK» at the right press); a notice remembers it, to close
+         * on its release as on any click; elsewhere nothing.
+         *
+         * @param hitRow The row under the press, or -1.
+         * @param inBox Whether the press is on the box.
+         * @param right Whether it is the right button (the middle one asks
+         *     no help).
+         */
+        void rightPress(int hitRow, boolean inBox, boolean right) {
+            this.rightPressed = NO_PRESS;
+            if (this.request.isNotice()) {
+                this.rightPressed = PRESS_TEXT;
+                return;
+            }
+            if (right && hitRow >= 0 && this.request.help != null
+                && this.request.help.covers(hitRow) && this.text == null
+                && this.checks == null) {
+                this.row = hitRow;
+                this.rightPressed = hitRow;
+            }
+        }
+
+        /**
+         * The release of a right (or middle) press: on the row it was
+         * pressed on, its help ({@link #help}; V clip 046: the list closes
+         * at the release #71550, the page #71579); a notice closes as on
+         * any click; else nothing ({@link #OPEN}).
+         *
+         * @param hitRow The row under the release, or -1.
+         * @return The answer, or {@link #OPEN}.
+         */
+        int rightRelease(int hitRow) {
+            final int p = this.rightPressed;
+            this.rightPressed = NO_PRESS;
+            if (p == NO_PRESS) return OPEN;
+            if (this.request.isNotice()) return 0;
+            if (p >= 0 && hitRow == p) return help();
+            return OPEN;
         }
 
         /** @return Any other key: dismisses a notice, nothing in a question. */

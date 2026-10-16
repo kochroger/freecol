@@ -308,11 +308,22 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
         assertSame(ClassicAdvisorBox.Portrait.COLONIST, q.portrait);
         assertEquals(0.0, q.closeAfterMs);
         assertEquals("Kolonie Base produziert Verlag.", q.plainText().trim());
-        final ClassicAdvisorBox.Request f = ClassicColonyReports.request(t, r, false, "t");
+        // A row-less @BUILT waits for a key or a click (fixer A after part
+        // X: clip 049 #48095-#48191 closed by a click's release, clip 050
+        // #30483-#30585 by Enter), 5 frames after the zoom's box.
+        final ClassicAdvisorBox.Request b = ClassicColonyReports.request(t, r, false, "t");
+        assertEquals(0, b.rows.size());
+        assertTrue(b.isNotice());
+        assertEquals("no timed close", 0.0, b.closeAfterMs);
+        assertEquals(ClassicColonyLayout.frames(5), b.chainMs, 1e-9);
+        // A new load's row-less box closes by itself.
+        final ClassicColonyReports.Report cr = ClassicColonyReports.of(t,
+            cargo(base, 0, goods("rum"), 200, 103), game);
+        final ClassicAdvisorBox.Request f = ClassicColonyReports.request(t, cr, false, "t");
         assertEquals(0, f.rows.size());
         // Its time from its words: 31 + 0.44 per character (I, the four
         // seen: 58 characters 60 frames, 63 52, 64 63, 194 117).
-        final int chars = "Kolonie Base produziert Verlag.".length();
+        final int chars = f.plainText().trim().length();
         assertEquals(ClassicColonyLayout.frames(31 + Math.round(0.44 * chars)),
                      f.closeAfterMs, 1e-9);
         assertEquals(57, ClassicColonyReports.flashFrames(58));

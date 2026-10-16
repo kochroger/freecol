@@ -118,8 +118,9 @@ save plays on as it was (R1b re-applies the rules on load, later).
   would board them again), a treasure train (nothing cashes it in on arrival, as in FreeCol;
   an open point). A unit
   already in port before the rule (an older save) stays aboard until it
-  leaves; a colonist dragged from the dock onto a ship is still drawn in its
-  holds (I). Classic and freecol: off; a levi save from before the rule gets
+  leaves; a colonist of the dock is never dragged onto a ship (fixer A after
+  part X, V clip 046 #106147-#106486: nothing happens, he boards by the "S"
+  queue). Classic and freecol: off; a levi save from before the rule gets
   it on (`Specification.europeArrivalDocksDefault`).
   (`ServerUnitTest.testArrivalInEuropePutsThePassengersOnTheDock`,
   `LeviRulesTest.testEuropeArrivalDocks`,
@@ -3608,7 +3609,8 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   the red prohibition sign **ICONS.SS.064** at the tile's corner (V clip 020
   #48712, #50260, playthrough-1 #75026); the totem ICONS.SS.108 at tile + (8,4) on
   native land the player would have to buy (none after Peter Minuit); an enemy at
-  war on his tile with his flag at + (4,4) (part M2); the selected colonist's
+  war on his tile with his flag at + (4,4) (part M2); a tile another colony works framed red
+  (ink 12, each cell its own frame; fixer A after part X, V clip 048 #86873); the selected colonist's
   tile framed green (ink 10) and the white cursor (ink 15) over it in its blink's
   on half. All the tiles' terrain is drawn first, then each tile's overlays in
   their order, then the frames. **The cursor** is global, as the warehouse's
@@ -3616,7 +3618,10 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   across colonies), on the centre at first; a press on a tile or its worker
   brings it there, a press on another colonist takes it off the tiles onto his
   figure in the band (M4.5), a press on the carrier in port onto the carrier
-  (M4.6; the keys that move it come with M4.8). **Hover label:**
+  (M4.6; the keys that move it come with M4.8); left on a carrier, it goes to the
+  centre in a colony with none in port (fixer A after part X, I: it stood
+  nowhere). A right press on a tile brings it there too (the Colonopedia, part
+  «Into and out of the colony»). **Hover label:**
   the tile's terrain as the map's panel names it and its extras joined by '/'
   («Tropen- Wald», «Hügellandschaft/Straße», «Sumpfland/Straße/Gepflügt»), its box
   at tile x + 12 − (w + 1)/2, the tile's y, not clamped (dago §3.5). FreeCol's
@@ -3702,8 +3707,9 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
     2, 3) in their boxes x 216-244 and 270-298, y 138-146 (top and left ink 57, bottom and right
     48, the word white at box + (3, 2); under the cursor inverted: inside white, the word black,
     top and left 48, bottom and right 57, V #105810 / #105830), the stored hammers in rows of
-    cost / 4 at y 147 + 6r, icon j at 212 + the offset table (q 10, 13, 20, 30, 48 measured; else
-    floor(j·S/128), S = floor(10240/(q − 1)) + 1, I), a row's count at (214, y + 1) below pitch 2,
+    cost / 4 at y 147 + 6r, icon j at 212 + the offset table (q 10, 13, 16, 20, 30, 48 measured, q 16 by fixer A after
+    part X from clip 046 #87483; else floor(j·S/128), S = floor(10240/(q − 1)) + 1, I: q 40 fits no simple
+    row in clip 048 #95899), a row's count at (214, y + 1) below pitch 2,
     «(Benötigt n Werkzeuge)» (LABELS «Benötigt», NAMES's tools) at glyph top 170 over the rows'
     last pixel row, white while the stock is short, grey when it suffices. ÄNDERN opens the build
     list and KAUFEN its box (part V, M4.10: see "Carriers, goods and building"; @BUYME0 /
@@ -3818,6 +3824,12 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   (1 after a box), for 138 frames or until the next press; the hold and the warehouse number 8 frames
   after the drop (`freeze`; a press meanwhile takes the holds as shown). Through `InGameController.loadCargo` / `unloadCargo`. Recorder:
   `colony-goods`, `colony-howmuch`, `colony-carrier`.
+- **«Alle Waren entladen.»** in the carrier's box (fixer A after part X, V clip 050 #33922: the
+  merchantman's 40 tools into Base): no other box; at the box's close the top line «40 Werkzeuge bewegt
+  nach Base» in gold for 138 frames; the holds empty 8 frames later, the warehouse's numbers 9; the
+  carrier stays selected, its frame white until 33 frames after the close, then green and white every
+  23 (`ClassicColonyPanel.unloadAll`). Several goods: the notice names the first (I); a boycott or a
+  full warehouse not seen (FreeCol's `unloadCargo`).
 - **Building** (M4.10): KAUFEN and ÄNDERN are inverted while held, act on the release. ÄNDERN's **build
   list** 6 frames later: a wood list box «Objekt zum Bauen wählen», «(Keine Produktion)», the buildings
   in NAMES order, then Artillerie, Wagenzug and the ships (no colonists), upper case with a small «ä»,
@@ -3856,7 +3868,11 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   (`colony-dissolve`; V clip 020 #57671 → #57768). Meanwhile nothing blinks; 24 frames after the
   dissolve's last frame ÄNDERN starts blinking in anti-phase with the white cursor, which stays on the
   selected colonist's tile or figure, until the next press (V #57768, #105806; the Lagerhaus' first
-  toggle came after 46 frames, I).
+  toggle came after 46 frames, I). A **click on the map** in the completion's turn (after «Runde
+  fortsetzen.»; fixer A after part X, V clip 049 #33109 → #33133): no dissolve, the new building there
+  at once, but ÄNDERN blinks in anti-phase with the white cursor from the blink's first toggle (24
+  frames), every 23, in the mode the last visit ended in (`ClassicColonyBuild.completedThisTurn`; I: a
+  second opening in that turn blinks too).
 - **Renaming**: a click on the colony's name in the top line opens `@RENAMECOLONY` with the name
   preset (at most 23 characters); Enter renames it through the server (`colony-rename`).
 - **Tests**: `ClassicColonyCarriersTest` (the port of 8 clip 040 frames and its 5 boxes, @HOWMUCH1 and
@@ -3895,7 +3911,11 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   the view had been on Base since #116540). «Zur Kolonie zoomen.»: the same colony's other reports come
   as boxes without rows that close by themselves after a time from their words — 31 + 0.44 frames per
   character (I: the line through 63, 52, 60 and 117 frames for 64, 63, 58 and 194 characters, clip 040
-  #85 061 – #85 184, clip 048 #128660, #135687), the next 7 frames after the last close — then its
+  #85 061 – #85 184, clip 048 #128660, #135687), the next 7 frames after the last close; a row-less
+  @BUILT waits for a key or a click instead, 5 frames after the zoom's box (fixer A after part X, the
+  keylogged clips: 049 «Kolonie Base produziert Druckerei.» #48095 – #48191 closed by a click's
+  release, 050 «… Ställe.» #30483 – #30585 by Enter; the timed rule would have closed them after 46
+  and 45 frames; I for the other kinds, kept timed) — then its
   screen 23 frames after the last box closed (V 20 to 28; `colony-zoom`), in the mode of spec §0.1
   decision 8: a building's @BUILT in hammer mode with the dissolve and ÄNDERN's blink (the only way to
   them now), @NEEDTOOLS in hammer mode, @ORE and @SPOIL in the house mode (V 048 #5690 → #5884/#5887
@@ -3928,10 +3948,10 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   the press). A box's Escape does not exit. A hand-over that any colony screen held (the docked ship's;
   also a colonist who walked in with his last move, which FreeCol opens too) comes 500 ms after the
   player's close (V clip008 #32928 → #32963, seen once). Recorder `colony-exit`.
-- **F1** (and F1 in the job menu J2, «(F1 für Hilfe)»; the key is I, the pages came 143 and 103 frames
-  after a J2 closed, V clip 020 #76921, #78325): the Colonopedia page of the white cursor's tile, else
-  the selected colonist's work tile (`colony-pedia`, `pedia`), until a key or a click; the screen again
-  after it. `ClassicPedia.terrainPage` over WOODPANL.PIK: the headers, the picture — three by three
+- **F1** (V clip 020 #76921, #78325; clip 052 #16124): the Colonopedia page of the white cursor's
+  tile; with the cursor on the selected colonist's figure his type's skill page (below); nothing with it
+  elsewhere (`colony-pedia`, `pedia`), 22 frames after the key, until a key or a click, which closes it
+  16 frames later; the screen again after it. `ClassicPedia.terrainPage` over WOODPANL.PIK: the headers, the picture — three by three
   cells of the type composed as the map composes them, with a river, a road and the type's resource
   (`ClassicTileArt.pediaFrames`: the same on every page, an illustration) — framed at (9,23); a row
   per tile work the type yields a free colonist (the figure `ICONS.SS.(81 + job)`, «Farmer: 3» gold, the
@@ -3943,9 +3963,39 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   forests are seen; the other types follow the same rules (I); FreeCol's great river (a water type the
   original lacks; FreeCol's generators put none on the map) shows the ocean's page. **Not built**
   (the manual's colony key card and p.22): «Load most valuable cargo L», «Unload cargo U» (L and U do
-  nothing), the right click = Colonopedia on a unit, a building, a good or the build list (Roger used
-  it in clip 046: the «Sägewerk» page #71579, the «Felle» page in Europe #106993; on our screen a
-  right press acts as a left one), F1 for a building, a good or a unit (only the terrain pages exist).
+  nothing), the pages of a good (the «Felle» page in Europe, clip 046 #106993), of a unit type
+  («Art der Einheit»: the build list's unit rows, the carriers) and the right click in Europe.
+- **The Colonopedia from the colony screen** (fixer A after part X; V Roger's clips 046, 049 and 052,
+  049 and 052 with the keylog): **F1 in a job menu** (and a right-click on its row): the menu goes at
+  the key, the skill page of the job under the bar 22 frames later (049 #3106 «Pelzjäger», 052 #15108
+  «Tabakpflanzer» with the bar moved there from row 1), the same menu again 7 frames after the page
+  with its bar on its default row (052 #15840); on «(SPEZIALFÄHIGKEIT LÖSCHEN)» and «(Weitere)» his
+  type's page (I). **The right button**: on a field of the 3x3 map the white cursor goes there at the
+  press, the field's terrain page 22 frames after the press (049 #4175 → #4198); on a colonist (a
+  building, the fence, the band's row, «Vorhandene Einheiten») his hover label goes and his type's
+  skill page comes (049 #11762 «Siedler» for a free colonist with tools; 28 frames there, I: 22
+  built); a release elsewhere nothing (I). **In the build list** F1 or a right-click on a building's
+  row: the bar there at the press, the list gone at the release, the building's page 29 frames later,
+  the list again 7 frames after the page, its bar on the current build, the build unchanged (046
+  #71516 → #71550 → #71579 → #71721); the unit rows and «(Keine Produktion)» have none (I). The
+  right and middle buttons never act as the left one: in a wood box they never take a row (a list's
+  help aside, `ClassicAdvisorBox.Bar.rightPress`), on the screen they never press, drag, select,
+  switch a mode or leave (the review of part W, L7; the colony review's must 4). Every page goes 16
+  frames after its key (052: 14-17; `ClassicAdvisorBox.Request.closeLagMs`, input ignored meanwhile).
+  The **skill page** (`ClassicPedia.skillPage`, PEDIA `@JOBk`, k the NAMES `@JOB` row: a unit's type
+  row, a menu row's job): the headers «(<Beruf>: Fähigkeiten der Kolonisten)»; the work's figure
+  `ICONS.SS.(81 + k)` at (10,33), the expert's NAMES name gold 14 px right of it (glyph tops 39), for
+  a work 0-17 the good's icon 24 px after the name at y 35 and its NAMES `@CARGO` word 16 px after a
+  warehouse good's icon (14 after the others'); the entry from y 56. The **building page**
+  (`ClassicPedia.buildingPage`, PEDIA `@BUILDINGk`): «(<Name>: Koloniegebäude)»; the BUILDING.SS
+  frame at (10,33), its name 3 px after it (glyph tops 43), the expert's figure at y 37 and name, the
+  good's icon at y 39 and word, «Voraussetzung: <the level before>» green at (10,67), the entry from
+  y 90 (the Sägewerk seen; the other types, those without a level before or a work: I). The pages'
+  **wrap** (`ClassicPedia.measure`): the drawn width plus one for each ö, ü and ß, a line fits at most
+  the width (049 #3111 breaks «… erfahren und so», 299 px with ö and ü; 052 #16124 «… werden
+  schließlich», 300 with ß; 020 #78325 keeps «… für den Abbau», 299 with ü; clip008 #48645 keeps
+  «… wodurch der», 300 with ä). 0 px: 049 #3111, #11775, 052 #15108, #16124, 046 #71579, and still
+  the father and terrain pages.
 - **Docking** (M4.12, clip008 `01-shipcolony.md`; game option `model.option.dockingEndsMoves`, on in
   levi: a human player's ship that enters its colony has no moves left, R5): FreeCol's controller then
   asks for the colony screen (a keyboard move or a goto's arrival), and `ClassicGUI.shipDocks` shows
@@ -3972,9 +4022,13 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   frames, five pages 0 px, a page for every tile type), `ClassicScreenStackTest`
   (`testTheZoomAndTheDocking`, `testALaterDockingShowsTheBandOnly`,
   `testTheDockedScreensCloseRunsTheHandOverFromIt`, `testTheZoomsScreenCloseLetsTheReportsGoOn`,
-  `testATipInTheExitIsDroppedNotMarked`, on a real turn flow), `ClassicColonyMovesTest` (the exit's
-  time and blink, F1, @TUTORIAL16 by a drop and by a job menu), `ClassicAdvisorLayerTest
-  .testABoxThatClosesByItself`, `ClassicTurnFlowTest.testAScreenClosedRunsAHeldTurnStartAtOnce`,
+  `testATipInTheExitIsDroppedNotMarked`, on a real turn flow; `testAPaintFailureLeavesNoScreen`),
+  `ClassicColonyMovesTest` (the exit's time and blink, F1 and its skill pages, the right click, the
+  role rows of playthrough 4 over four 048 frames 0 px, the carrier's cursor, @TUTORIAL16 by a drop
+  and by a job menu), `ClassicPediaPagesTest` (the skill and building pages, 5 frames 0 px),
+  `ClassicAdvisorLayerTest.testABoxThatClosesByItself`, `testTheRightButtonNeverTakesARow`,
+  `testACloseLag`, `ClassicColonyBuildTest.testTheBuildListsPage`,
+  `ClassicTurnFlowTest.testAScreenClosedRunsAHeldTurnStartAtOnce`,
   `ClassicVoyagesTest.testBandEnd`, `ServerColonyTest.testOriginalNeedTools` /
   `testOriginalCargoReady` / `testOriginalStoreAndQueueWarnings`, `ServerUnitTest.testDockingEndsMoves`,
   `LeviRulesTest.testOriginalFlowRules`.
@@ -4050,8 +4104,16 @@ seen on the frames, I = our choice where no clip shows it.
   too, V clip 042 #3512), then the roles. Right column: «a/b Ware» for a tile
   worker's tile works (a his tile, b the best of his and the free tiles),
   else «n Ware» (FreeCol's potential production). Yellow: the expert's own
-  work or role. The bar: on his work where the page lists it, else row 1.
-  Escape and a click outside: no change.
+  work or role, for an Erfahrene Soldaten «Dragoner» too, grey wins (fixer A
+  after part X: V clip 048 #3136, #80466, #148557 yellow, #14404, #90785,
+  #117227 grey). A unit's own role (at the fence) is the word alone, never
+  grey, its pick no change (V 048 #80466, #90785 «Soldat», #160461
+  «Späher»; a pioneer whom the warehouse could give another count keeps
+  that row, I). The bar: on his work where the page lists it, else row 1.
+  Escape and a click outside: no change. **F1** (or a right-click on a row)
+  shows the skill page of the job under the bar, the menu again 7 frames
+  after the page with its bar on its default row (below, «The Colonopedia
+  from the colony screen»).
 - **Picks**: a tile's work for a tile worker on the same tile (no move, V
   #48712), for anyone else onto the best free tile, the colony's own before a
   native's (V #4690, #20760; I for the order); a building's work into it; a
@@ -4335,8 +4397,9 @@ click-to-select idiom of the two subsections above is replaced (`ClassicEuropePa
   `@HOWMUCH4`, preset "100" over any "(0-max)", Roger 2026-10-09; Enter on it buys the rest of the
   hold); hold of goods → anywhere on the market row: sold (Shift: `@HOWMUCH5`, preset "100" over
   any "(0-max)", V clip 020 #24920; Enter on it sells the hold); a colonist's hold → the docks:
-  `leaveShip`; a dock colonist → a ship or a hold: `boardShip`, nothing when he does not fit
-  (`canAdd`; before, the server's refusal brought «Der Server kann das nicht ausführen.»). Clicks:
+  `leaveShip`; a dock colonist is not dragged at all, no ghost, the arrow stays (fixer A after part
+  X: V Roger's clip 046 #106147-#106486, three drags onto the docked merchantman did nothing; N1's
+  `boardShip` on such a drop is gone, T's question 2 answered). Clicks:
   the selected ship →
   `@EUROPESHIPCLICK` (four rows: Nach vorne bewegen / Segel setzen / Alle Waren entladen / Keine
   Veränderungen); a dock colonist → `@EUROPEARM` (the "S" on or off, muskets / tools / horses bought

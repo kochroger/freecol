@@ -206,7 +206,40 @@ final class ClassicColonyServerScene {
                 r.field.take((String) a);
                 return 0;
             }
+            if (a instanceof Help) {
+                // F1 or a right-click on a row (fixer A after part X): as
+                // the real bar, only on a row with a help.
+                final int row = ((Help) a).row;
+                if (r.help == null || !r.help.covers(row)) return ClassicAdvisorBox.Bar.OPEN;
+                r.help.help(row);
+                return ClassicAdvisorBox.Bar.HELP;
+            }
             return (a instanceof Integer) ? (Integer) a : ClassicAdvisorBox.Bar.DISMISSED;
+        }
+
+        /** An answer: F1 or a right-click on a row. */
+        static final class Help {
+            final int row;
+
+            Help(int row) {
+                this.row = row;
+            }
+        }
+
+        /** The Colonopedia pages asked (fixer A after part X): their types or rows, and delays. */
+        final List<Object> pages = new ArrayList<>();
+        final List<Double> pageDelays = new ArrayList<>();
+
+        @Override
+        public void buildingPage(net.sf.freecol.common.model.BuildingType type, double delayMs) {
+            this.pages.add(type);
+            this.pageDelays.add(delayMs);
+        }
+
+        @Override
+        public void skillPage(int job, double delayMs) {
+            this.pages.add(job);
+            this.pageDelays.add(delayMs);
         }
 
         /** @return The last box. */

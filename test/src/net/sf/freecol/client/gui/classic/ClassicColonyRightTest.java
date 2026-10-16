@@ -197,7 +197,17 @@ public class ClassicColonyRightTest extends FreeColTestCase {
             if (j * 218 / 128 != j * 82 / 48) off++;
         }
         assertEquals("the spec's formula: 6 one off", 6, off);
-        assertEquals("q 16 (I): S 683", 15 * 683 / 128, ClassicColonyLayout.hammerOffset(16, 15));
+        // q 16 measured (fixer A after part X, V clip 046 #87489): floor(j·688/128),
+        // three icons one right of the old formula's S 683.
+        final int[] q16 = { 0, 5, 10, 16, 21, 26, 32, 37, 43, 48, 53, 59, 64, 69, 75, 80 };
+        int moved = 0;
+        for (int j = 0; j < 16; j++) {
+            assertEquals("q 16, j " + j, q16[j], ClassicColonyLayout.hammerOffset(16, j));
+            assertEquals(j * 688 / 128, q16[j]);
+            if (j * 683 / 128 != q16[j]) moved++;
+        }
+        assertEquals(3, moved);
+        assertEquals("q 40 (I): S 263", 14 * 263 / 128, ClassicColonyLayout.hammerOffset(40, 14));
         assertFalse(ClassicColonyLayout.hammerLabelled(30));
         assertFalse(ClassicColonyLayout.hammerLabelled(13));
         assertTrue(ClassicColonyLayout.hammerLabelled(48));
@@ -206,6 +216,59 @@ public class ClassicColonyRightTest extends FreeColTestCase {
         assertEquals(0, ClassicColonyLayout.hammerRowCount(36, 13, 3));
         assertEquals(6, ClassicColonyLayout.hammerRowCount(36, 10, 3));
         assertEquals(2, ClassicColonyLayout.hammerRowCount(42, 20, 2));
+    }
+
+    /**
+     * The 64-hammer rows over clip 046 #87483 (fixer A after part X, the
+     * colony review's later item): 30 hammers of a 64-hammer build, a row
+     * of 16 and one of 14 icons, every pixel the icons draw as the frame
+     * (the old formula put three icons of each row one pixel left).
+     */
+    public void testThe64HammerRowsOverTheClip() throws Exception {
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        final File f = (clips == null) ? null
+            : new File(clips, "fixer-a-analysis/c046/frame_087483.png");
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final BufferedImage icon = (pack == null) ? null
+            : pack.image(ClassicPackFiles.ssKey("ICONS.SS.054"));
+        if (f == null || !f.isFile() || icon == null) {
+            System.err.println(getName() + ": skipped, no clip frame or pack");
+            return;
+        }
+        final BufferedImage frame = javax.imageio.ImageIO.read(f);
+        int drawn = 0, off = 0;
+        for (int r = 0; r < 2; r++) {
+            final int n = ClassicColonyLayout.hammerRowCount(30, 16, r);
+            assertEquals((r == 0) ? 16 : 14, n);
+            // The icons of a row in their order, the later over the earlier.
+            final int[][] top = new int[320][200];
+            final boolean[][] hit = new boolean[320][200];
+            for (int j = 0; j < n; j++) {
+                final int x0 = ClassicColonyLayout.HAMMER_X + ClassicColonyLayout.hammerOffset(16, j);
+                final int y0 = ClassicColonyLayout.HAMMER_Y + r * ClassicColonyLayout.HAMMER_ROW_DY;
+                for (int y = 0; y < icon.getHeight(); y++) {
+                    for (int x = 0; x < icon.getWidth(); x++) {
+                        final int c = icon.getRGB(x, y);
+                        if ((c >>> 24) < 128) continue;
+                        top[x0 + x][y0 + y] = c & 0xFFFFFF;
+                        hit[x0 + x][y0 + y] = true;
+                    }
+                }
+            }
+            for (int x = 0; x < 320; x++) {
+                for (int y = 0; y < 200; y++) {
+                    if (!hit[x][y]) continue;
+                    // The second row is drawn over the first's lower part.
+                    if (r == 0 && y >= ClassicColonyLayout.HAMMER_Y
+                        + ClassicColonyLayout.HAMMER_ROW_DY) continue;
+                    drawn++;
+                    if (top[x][y] != (frame.getRGB(x, y) & 0xFFFFFF)) off++;
+                }
+            }
+        }
+        System.out.println(getName() + ": " + drawn + " icon pixels, " + off + " off");
+        assertTrue(drawn > 300);
+        assertEquals(0, off);
     }
 
     /**

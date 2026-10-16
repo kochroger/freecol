@@ -1220,6 +1220,45 @@ public class ClassicScreenStackTest extends FreeColTestCase {
      * #30021) with the ship selected and the white cursor on it (V
      * #30022), the band gone with it.
      */
+    /**
+     * A failure in the colony screen's push paint (fixer A after part X,
+     * the colony review's later item): the opening answers false and the
+     * screen leaves the stack, the map shows again, the next opening works.
+     */
+    public void testAPaintFailureLeavesNoScreen() throws Exception {
+        final FakeClock clock = new FakeClock();
+        final Game game = getStandardGame();
+        game.changeMap(getTestMap(true));
+        final Colony colony = createStandardColony(2);
+        final HostGUI gui = new HostGUI(game, colony.getOwner(), clock);
+        final Rig rig = gui.host();
+        // The push's paint fails (fixer A after part X, the colony review's
+        // later item: the screen stayed up, nobody could close it).
+        final int[] paints = { 0 };
+        rig.inFullPaint = () -> {
+            if (paints[0]++ == 0) throw new IllegalStateException("a paint failure");
+        };
+        final boolean[] up = new boolean[1];
+        edt(() -> {
+                up[0] = gui.openColonyScreen(colony, null, ClassicColonyRight.Opening.OTHER,
+                                             null, false);
+                return null;
+            });
+        assertFalse(up[0]);
+        rig.inFullPaint = null;
+        assertFalse(edt(gui::screenHosted));
+        assertTrue("no screen on the stack", edt(() -> rig.stack.slots().isEmpty()));
+        assertTrue("the map is back", edt(rig::partsShown));
+        // The next opening works.
+        edt(() -> {
+                up[0] = gui.openColonyScreen(colony, null, ClassicColonyRight.Opening.OTHER,
+                                             null, false);
+                return null;
+            });
+        assertTrue(up[0]);
+        assertTrue(edt(gui::screenHosted));
+    }
+
     public void testTheZoomAndTheDocking() throws Exception {
         final FakeClock clock = new FakeClock();
         final Game game = getStandardGame();

@@ -979,6 +979,141 @@ public class ClassicAdvisorLayerTest extends TestCase {
         assertEquals(14.27, ClassicAdvisorLayer.FRAME_MS, 0.01);
     }
 
+    /** A press or release of another button than the left (BUTTON2, BUTTON3). */
+    private void mouseWith(int id, int x, int y, int button) throws Exception {
+        final long when = System.currentTimeMillis() + 5;
+        final int mask = (id != MouseEvent.MOUSE_PRESSED) ? 0
+            : (button == MouseEvent.BUTTON3) ? MouseEvent.BUTTON3_DOWN_MASK
+            : MouseEvent.BUTTON2_DOWN_MASK;
+        edt(() -> {
+                final MouseEvent e = new MouseEvent(this.layer, id, when, mask, x, y, 1,
+                                                    false, button);
+                if (id == MouseEvent.MOUSE_PRESSED) this.layer.onPress(e);
+                else this.layer.onRelease(e);
+                return null;
+            });
+    }
+
+    /**
+     * The right and middle buttons never take a row (fixer A after part X,
+     * the colony review's must 4: V clip 046's right-click in the build
+     * list opened the Colonopedia and kept the build): in a box without a
+     * help nothing happens, the bar stays; in a list with a help a right
+     * press puts the bar on the row (#71516) and its release on that row
+     * asks its help (the hook told the row, the box closed with HELP);
+     * a row without a help ({@link ClassicAdvisorBox.Help#covers}) takes
+     * neither the bar nor the help, nor F1; a notice goes on a right-click
+     * as on any click.
+     */
+    public void testTheRightButtonNeverTakesARow() throws Exception {
+        final Answer a = ask(question("q"));
+        flush();
+        final ClassicAdvisorBox.Layout l = edt(() -> this.layer.currentLayout());
+        final java.awt.Rectangle row1 = l.barRect(1);
+        for (int button : new int[] { MouseEvent.BUTTON3, MouseEvent.BUTTON2 }) {
+            mouseWith(MouseEvent.MOUSE_PRESSED, row1.x + 10, row1.y + 2, button);
+            mouseWith(MouseEvent.MOUSE_RELEASED, row1.x + 10, row1.y + 2, button);
+            mouseWith(MouseEvent.MOUSE_PRESSED, 2, 2, button);          // outside
+            mouseWith(MouseEvent.MOUSE_RELEASED, 2, 2, button);
+        }
+        assertTrue("no row taken", up());
+        assertFalse(a.isDone());
+        assertEquals("the bar unmoved", 0, bar());
+        key(KeyEvent.VK_ESCAPE);
+        assertEquals(2, a.get());
+        // A list with a help on rows 0 and 2.
+        this.clock.advanceMs(1000);
+        final int[] told = { -1 };
+        final ClassicAdvisorBox.Request list = ClassicAdvisorBox.Request.builder("list")
+            .freeColText("a a").rows("a", "a a", "a a a").noCancelRow()
+            .help(new ClassicAdvisorBox.Help() {
+                    @Override
+                    public void help(int row) {
+                        told[0] = row;
+                    }
+
+                    @Override
+                    public boolean covers(int row) {
+                        return row != 1;
+                    }
+                }).build();
+        final Answer b = ask(list);
+        flush();
+        final ClassicAdvisorBox.Layout lb = edt(() -> this.layer.currentLayout());
+        final java.awt.Rectangle r1 = lb.barRect(1), r2 = lb.barRect(2);
+        mouseWith(MouseEvent.MOUSE_PRESSED, r1.x + 10, r1.y + 2, MouseEvent.BUTTON3);
+        assertEquals("no help on row 1: the bar stays", 0, bar());
+        mouseWith(MouseEvent.MOUSE_RELEASED, r1.x + 10, r1.y + 2, MouseEvent.BUTTON3);
+        assertTrue(up());
+        key(KeyEvent.VK_DOWN);
+        key(KeyEvent.VK_F1);                       // row 1 has no help: nothing
+        assertTrue(up());
+        mouseWith(MouseEvent.MOUSE_PRESSED, r2.x + 10, r2.y + 2, MouseEvent.BUTTON3);
+        assertEquals("the bar on the right press (046 #71516)", 2, bar());
+        assertFalse(b.isDone());
+        mouseWith(MouseEvent.MOUSE_RELEASED, r2.x + 10, r2.y + 2, MouseEvent.BUTTON3);
+        assertEquals(ClassicAdvisorBox.Bar.HELP, b.get());
+        assertEquals(2, told[0]);
+        // A right press released on another row: nothing.
+        this.clock.advanceMs(1000);
+        told[0] = -1;
+        final Answer c = ask(list);
+        flush();
+        mouseWith(MouseEvent.MOUSE_PRESSED, r2.x + 10, r2.y + 2, MouseEvent.BUTTON3);
+        mouseWith(MouseEvent.MOUSE_RELEASED, r1.x + 10, r1.y + 2, MouseEvent.BUTTON3);
+        assertTrue(up());
+        assertEquals(-1, told[0]);
+        key(KeyEvent.VK_ENTER);
+        assertEquals(2, c.get());
+        // A notice: any button closes it.
+        this.clock.advanceMs(1000);
+        final Answer n = ask(ClassicAdvisorBox.Request.builder("n").freeColText("a a").build());
+        flush();
+        mouseWith(MouseEvent.MOUSE_PRESSED, 100, 100, MouseEvent.BUTTON3);
+        mouseWith(MouseEvent.MOUSE_RELEASED, 100, 100, MouseEvent.BUTTON3);
+        assertEquals(0, n.get());
+    }
+
+    /**
+     * A box with a close lag (fixer A after part X: the Colonopedia's pages
+     * over the colony screen go 14-19 frames after their key, V clip 052):
+     * it stays that long after its answer, keys and clicks meanwhile do
+     * nothing, then it goes with the answer; the next box after it as
+     * usual.
+     */
+    public void testACloseLag() throws Exception {
+        final java.awt.image.BufferedImage pic = new java.awt.image.BufferedImage(320,
+            200, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        final Answer p = ask(ClassicAdvisorBox.Request.builder("page")
+            .freeColText("x").picture(pic).closeLag(100.0).build());
+        flush();
+        assertTrue(up());
+        key(KeyEvent.VK_ENTER);
+        assertTrue("still up after its key", up());
+        assertFalse(p.isDone());
+        this.clock.advanceMs(50.0);
+        key(KeyEvent.VK_ESCAPE);                    // nothing meanwhile
+        mouse(MouseEvent.MOUSE_PRESSED, 5, 5);
+        mouse(MouseEvent.MOUSE_RELEASED, 5, 5);
+        runTimer();
+        assertTrue(up());
+        this.clock.advanceMs(49.9);
+        runTimer();
+        assertTrue("not before its lag", up());
+        this.clock.advanceMs(0.2);
+        runTimer();
+        assertFalse(up());
+        assertEquals(0, p.get());
+        // A box without a lag goes in the key's paint.
+        this.clock.advanceMs(ClassicAdvisorLayer.CHAIN_MS);
+        final Answer q = ask(ClassicAdvisorBox.Request.builder("page")
+            .freeColText("x").picture(pic).build());
+        flush();
+        key(KeyEvent.VK_ENTER);
+        assertFalse(up());
+        assertEquals(0, q.get());
+    }
+
     /**
      * A list box with an F1 hook (build spec D2, the father box D8a): F1
      * tells the hook the barred row and closes the box with HELP; Escape

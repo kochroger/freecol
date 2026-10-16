@@ -84,7 +84,10 @@ import net.sf.freecol.common.model.UnitType;
  * make in that building (FreeCol's potential production: its numbers,
  * not the original's, where the two differ).  The fisherman's good is
  * «Nahrungsmittel» (#13).  <b>Yellow</b>: the expert's own work or role
- * with its cell (#13 Holzfäller, #16 Soldat, #77 Späher).  <b>The
+ * with its cell (#13 Holzfäller, #16 Soldat, #77 Späher), for an Erfahrene
+ * Soldaten «Dragoner» too ({@link #yellowFor}); grey wins.  <b>His own
+ * role</b> (a unit at the fence): the word alone, no cell, never grey
+ * (playthrough 4, {@link #roleRow}).  <b>The
  * bar</b>: on his work where the page lists it, else on row 1 (#13, #96,
  * #253, #254; dago-colony2: «(Weitere)» on page 2, his job not there).
  */
@@ -640,6 +643,18 @@ final class ClassicColonyJobs {
             final int n = pioneerTools(c.getGoodsCount(tools) + carried(u, tools));
             count = Math.max(1, Math.min(role.getMaximumCount(), n / Math.max(1, per)));
         }
+        final boolean own = role == u.getRole() && !role.isDefaultRole();
+        if (own && count == u.getRoleCount()) {
+            // His own role as he has it: the word alone, never grey, its
+            // pick no change (V playthrough 4: clip 048 #80466 and #90785
+            // «{Soldat}» on an Erfahrene Soldaten's «(Weitere)» page,
+            // #160461 «Späher» on a Freie Siedler's; the fence's role menu,
+            // clip 042 #15119 «Soldat», clip 043 #7048 «Pionier»).  A
+            // pioneer whom the warehouse could give another count keeps
+            // the row with that count (the review of part U, play M1; I:
+            // not seen).
+            return new Row(Pick.ROLE, job, label, null, yellow, false, u.getRoleCount());
+        }
         final StringBuilder cell = new StringBuilder();
         for (AbstractGoods ag : role.getRequiredGoodsList(count)) {
             if (cell.length() > 0) cell.append(' ');
@@ -647,7 +662,7 @@ final class ClassicColonyJobs {
                 .append(cargoName(t, ag.getType())).append(')');
         }
         boolean grey = false;
-        if (role == u.getRole()) {
+        if (own) {
             // The same role with another count: what it needs beyond what
             // he carries (FreeCol's getGoodsDifference gives nothing for
             // the same role).
@@ -664,6 +679,24 @@ final class ClassicColonyJobs {
         }
         return new Row(Pick.ROLE, job, label, (cell.length() == 0) ? null : cell.toString(),
                        yellow, grey, count);
+    }
+
+    /**
+     * Whether a role or work row is drawn yellow for a unit: the expert's
+     * own ({@link #expertJob}; V clip 020 #13 Holzfäller, #16 Soldat, #77
+     * Späher), and for an Erfahrene Soldaten the «Dragoner» row too (V
+     * playthrough 4: clip 048 #3136, #80466, #148557, #160742 «{Dragoner}»,
+     * grey where the warehouse cannot equip it, #14404, #90785, #117227: the
+     * grey wins, {@link ClassicAdvisorBox}'s painter; I: a Kampferprobte
+     * Späher's «Dragoner» not seen, built green).
+     *
+     * @param expert The unit's {@link #expertJob}, or -1.
+     * @param job The row's NAMES {@code @JOB} index.
+     * @return True if yellow.
+     */
+    static boolean yellowFor(int expert, int job) {
+        return job == expert || (expert == ClassicColonyLayout.JOB_SOLDIER
+                                 && job == ClassicColonyLayout.JOB_DRAGOON);
     }
 
     /**
@@ -755,7 +788,7 @@ final class ClassicColonyJobs {
             rows.add(new Row(Pick.STAY, now, (w == null) ? "?" : w, null, false, false, 0));
             for (int j = ClassicColonyLayout.JOB_COLONIST;
                  j <= ClassicColonyLayout.JOB_MISSIONARY; j++) {
-                final Row r = roleRow(t, c, u, j, j == expert);
+                final Row r = roleRow(t, c, u, j, yellowFor(expert, j));
                 if (r != null) rows.add(r);
             }
             return new Menu(kind, 1, title(t, u, kind), rows, 0);
@@ -767,7 +800,7 @@ final class ClassicColonyJobs {
             int bar = 0;
             for (int j = ClassicColonyLayout.JOB_COLONIST;
                  j <= ClassicColonyLayout.JOB_MISSIONARY; j++) {
-                final Row r = roleRow(t, c, u, j, j == expert);
+                final Row r = roleRow(t, c, u, j, yellowFor(expert, j));
                 if (r == null) continue;
                 if (j == now) {
                     bar = rows.size();
@@ -794,7 +827,7 @@ final class ClassicColonyJobs {
             for (int j : rest) rows.add(workRow(t, c, u, j, expert));
             for (int j = ClassicColonyLayout.JOB_COLONIST;
                  j <= ClassicColonyLayout.JOB_MISSIONARY; j++) {
-                final Row r = roleRow(t, c, u, j, j == expert);
+                final Row r = roleRow(t, c, u, j, yellowFor(expert, j));
                 if (r != null) rows.add(r);
             }
         }
@@ -833,6 +866,24 @@ final class ClassicColonyJobs {
      */
     static ClassicAdvisorBox.Request request(ClassicText t, Menu m, double openDelayMs,
                                              double chainMs) {
+        return request(t, m, openDelayMs, chainMs, null);
+    }
+
+    /**
+     * {@link #request(ClassicText, Menu, double, double)}, telling F1's
+     * (or a right-click's) row: the screen shows that row's skill page
+     * (fixer A after part X, {@code ClassicColonyPanel.jobMenu}).
+     *
+     * @param t The texts.
+     * @param m The menu.
+     * @param openDelayMs When it comes after it is asked.
+     * @param chainMs The least time after the box before, or negative.
+     * @param helpRow Told the row of F1, or null.
+     * @return The request, or null.
+     */
+    static ClassicAdvisorBox.Request request(ClassicText t, Menu m, double openDelayMs,
+                                             double chainMs,
+                                             java.util.function.IntConsumer helpRow) {
         if (t == null || m == null) return null;
         final List<String> labels = new ArrayList<>();
         final List<String> cells = new ArrayList<>();
@@ -850,9 +901,9 @@ final class ClassicColonyJobs {
             .rowIndent(ClassicMenuBox.LIST_INDENT).current(yellow).disabled(grey)
             .footer(t.misc(ClassicFathers.MISC_F1_HELP)).defaultRow(m.bar)
             .noCancelRow().openDelay(openDelayMs).chain(chainMs)
-            // F1 closes the menu for the tile's Colonopedia page (part W,
-            // ClassicColonyPanel.jobMenu).
-            .help(row -> { })
+            // F1 closes the menu for the barred row's skill page (fixer A
+            // after part X, ClassicColonyPanel.jobMenu).
+            .help(row -> { if (helpRow != null) helpRow.accept(row); })
             .stopgap(m.title, null).list().build();
     }
 }

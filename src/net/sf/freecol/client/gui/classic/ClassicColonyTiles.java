@@ -59,7 +59,8 @@ import static net.sf.freecol.client.gui.classic.ClassicColonyBuildings.Figure;
  * production rows (the centre's food at y + 1 and its other good at y + 14),
  * the workers at tile + (14,6) with their black shadows, the red
  * prohibition sign over the good of a worker who makes nothing, the totem
- * on native land, an enemy at war on his tile, the selected colonist's
+ * on native land, an enemy at war on his tile, the red frame of a tile
+ * another colony works (fixer A after part X), the selected colonist's
  * green frame, the blinking white cursor, the tile's hover label.
  *
  * <p>A pure model ({@link #model}) of what is drawn, then one painter
@@ -68,7 +69,8 @@ import static net.sf.freecol.client.gui.classic.ClassicColonyBuildings.Figure;
  * rows, #2260; the worker after his row, dago; the centre's second row
  * over the tile below, #2260 y 80): the nine tiles' art, then per tile in
  * their order the totem, the rows with their count labels, the sign, the
- * worker, the enemy; then the green frame and over it the white cursor.
+ * worker, the enemy; then the red frames, the green frame and over it the
+ * white cursor.
  */
 final class ClassicColonyTiles {
 
@@ -125,8 +127,22 @@ final class ClassicColonyTiles {
         /** The hover label. */
         final String label;
 
+        /**
+         * Whether another colony works it (its owning settlement): the
+         * original frames it red (fixer A after part X, the colony review's
+         * later item: V clip 048 #86873, Guadelupe's SW, S and SE tiles
+         * next to the French Montreal; I the cause).
+         */
+        final boolean taken;
+
         Cell(int index, Tile tile, ColonyTile colonyTile, List<TileRow> rows, int zero,
              Figure worker, boolean totem, Unit occupier, String label) {
+            this(index, tile, colonyTile, rows, zero, worker, totem, occupier, label, false);
+        }
+
+        Cell(int index, Tile tile, ColonyTile colonyTile, List<TileRow> rows, int zero,
+             Figure worker, boolean totem, Unit occupier, String label, boolean taken) {
+            this.taken = taken;
             this.index = index;
             this.tile = tile;
             this.colonyTile = colonyTile;
@@ -157,6 +173,7 @@ final class ClassicColonyTiles {
             if (this.worker != null) sb.append(" fig ").append(this.worker);
             if (this.totem) sb.append(" totem");
             if (this.occupier != null) sb.append(" enemy");
+            if (this.taken) sb.append(" taken");
             return sb.toString();
         }
     }
@@ -326,7 +343,23 @@ final class ClassicColonyTiles {
         }
         final boolean totem = i != ClassicColonyLayout.CENTRE_TILE && nativeLand(colony, t);
         return new Cell(i, t, ct, rows, zero, worker, totem, occupier(t, colony.getOwner()),
-                        label(text, t));
+                        label(text, t),
+                        i != ClassicColonyLayout.CENTRE_TILE && takenByAnother(colony, t));
+    }
+
+    /**
+     * Whether a tile belongs to another colony (ours or a foreign one: its
+     * owning settlement), which frames it red (V clip 048 #86873; I: a
+     * native settlement's land shows the totem instead).
+     *
+     * @param colony The colony.
+     * @param t The tile, or null.
+     * @return True if so.
+     */
+    static boolean takenByAnother(Colony colony, Tile t) {
+        final net.sf.freecol.common.model.Settlement s = (t == null) ? null
+            : t.getOwningSettlement();
+        return s instanceof Colony && s != colony;
     }
 
     /** The goods a work place makes now, those of an amount above 0. */
@@ -760,6 +793,15 @@ final class ClassicColonyTiles {
                 }
             } finally {
                 gg.dispose();
+            }
+        }
+        // A tile another colony works: red (ink 12) on its own border (V
+        // clip 048 #86873: x 224-247, y 80-103 and its neighbours, each
+        // cell its own frame), under the green and the white.
+        for (int i = 0; i < ClassicColonyLayout.TILE_COUNT; i++) {
+            final Cell cell = m.cell(i);
+            if (cell != null && cell.taken) {
+                frame(g, ClassicColonyLayout.tileCell(i), c.rgb(ClassicColonyLayout.INK_RED));
             }
         }
         // The selected colonist's tile green (ink 10), the cursor white (ink

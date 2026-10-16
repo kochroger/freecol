@@ -35,6 +35,7 @@ import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import net.sf.freecol.common.model.BuildingType;
 import net.sf.freecol.common.model.FreeColObject;
 import net.sf.freecol.common.model.GoodsType;
 import net.sf.freecol.common.model.Modifier;
@@ -70,7 +71,8 @@ import static net.sf.freecol.common.util.CollectionUtils.toList;
  *       {@code x = (322 - w) div 2};</li>
  *   <li>the entry at {@code x0 = (321 - @width) div 2}: its first line (the
  *       title, without its {@code ^}) at y 36, then its text reflowed
- *       greedily at {@code 320 - 2 x0}, 7 px apart; {@code ^} ends a
+ *       greedily at {@code 320 - 2 x0} by the page's measure
+ *       ({@link #measure}: ö, ü and ß one wider), 7 px apart; {@code ^} ends a
  *       paragraph and leaves one blank line (a run of them counts once);
  *       {@code {..}} is gold and carries over line ends; {@code %%} is a
  *       {@code %}, {@code $} FONTTINY's coin; {@code @SMALLFONT} draws the
@@ -666,6 +668,299 @@ final class ClassicPedia {
         return w + ": " + ((d >= 0) ? "+" : "") + d + "%";
     }
 
+    // The skill page and the building page (fixer A after part X: F1 and
+    // the right-click on the colony screen, F1 in the job menu, the
+    // right-click in the build list)
+
+    /** PEDIA.TXT {@code @PEDIA}: «Fähigkeiten der Kolonisten» and «Koloniegebäude». */
+    static final int CATEGORY_SKILLS = 3, CATEGORY_BUILDINGS = 4;
+
+    /**
+     * A page on the colony screen comes 22 frames after F1 or the right
+     * press (V clip 049 #3084 -&gt; #3106 the job menu gone at F1, #4175
+     * -&gt; #4198 the white cursor on the field; clip 052 #15087 -&gt;
+     * #15108, F1 #16102 -&gt; #16124; I: 28 after the right press on a
+     * unit, #11734 -&gt; #11762).
+     */
+    static final int PAGE_FRAMES = 22;
+
+    /**
+     * The build list's page 29 frames after the release that closed the
+     * list (V clip 046 #71550 -&gt; #71579, the list's right-click; F1 there
+     * not seen, I).
+     */
+    static final int LIST_PAGE_FRAMES = 29;
+
+    /**
+     * A page goes 16 frames after its key or click (V clip 052: Enter
+     * -&gt; #15833 14-17, -&gt; #16334 14-17; clip 049 -&gt; #3821, #4742
+     * 18-19 by its coarser keylog).
+     */
+    static final int PAGE_CLOSE_FRAMES = 16;
+
+    /**
+     * The job menu or the build list again 7 frames after its page went
+     * (V clip 049 #3821 -&gt; #3828, clip 052 #15833 -&gt; #15840, clip 046
+     * #71714 -&gt; #71721), the bar on its default row.
+     */
+    static final int AGAIN_FRAMES = 7;
+
+    /** LABELS {@code @MISC} 187: «Voraussetzung». */
+    static final int MISC_REQUIRES = 187;
+
+    /**
+     * The skill page's row (V 0 px: clip 049 #3111 Pelzjäger, #11775
+     * Siedler; clip 052 #15108 Tabakpflanzer, #16124 Soldat): the work's
+     * figure {@code ICONS.SS.(81 + job)} at (10, 33), the expert's name 14
+     * px right of it with its glyph tops at 39; the good's icon 24 px
+     * after the name at y 35, its word after the icon; the entry's title
+     * at 56.
+     */
+    static final int SKILL_FIGURE_X = 10, SKILL_FIGURE_Y = 33, SKILL_TITLE_TOP = 56;
+
+    /**
+     * The building page's row (V 0 px: clip 046 #71579 «Sägewerk»): the
+     * building's {@code BUILDING.SS} frame at (10, 33), its name 3 px after
+     * it with glyph tops at 43; the expert's figure 24 px after the name at
+     * y 37, his name 14 px right of it; the good's icon 24 px after his
+     * name at y 39, its word after the icon; «Voraussetzung: Zimmerei» at
+     * x 10, glyph tops 67; the entry's title at 90.
+     */
+    static final int BUILDING_SPRITE_X = 10, BUILDING_SPRITE_Y = 33, BUILDING_NAME_DX = 3,
+        BUILDING_FIGURE_Y = 37, BUILDING_REQUIRES_TOP = 67, BUILDING_TITLE_TOP = 90;
+
+    /**
+     * The row's gaps: a figure's name 14 px right of the figure; the next
+     * picture 24 px after a name; a good's word 16 px right of a warehouse
+     * good's icon ({@code ICONS.SS.022-037}: V furs, tobacco), 14 px of
+     * the others' (V the hammers' {@code ICONS.SS.054}; I for crosses and
+     * bells); the icon 2 px under the figure's top, the words 6 px.
+     */
+    static final int FIGURE_TEXT_DX = 14, NEXT_DX = 24, GOODS_TEXT_DX = 16,
+        OTHER_TEXT_DX = 14, ICON_DY = 2, TEXT_DY = 6;
+
+    /** The last work figure of {@code ICONS.SS} (81 + 26, the criminal's). */
+    static final int LAST_JOB_FIGURE = 26;
+
+    /**
+     * The Colonopedia's page of a colonist's skill (NAMES {@code @JOB} row
+     * {@code job}, PEDIA {@code @JOBk}; V clip 049 #3106 F1 in the job menu
+     * on «Pelzjäger», #11762 a right-click on a free colonist at the fence,
+     * clip 052 #15108 F1 on «Tabakpflanzer», #16124 F1 with an Erfahrene
+     * Soldaten selected), over {@code WOODPANL.PIK}: the two header lines
+     * as the father page's, the second "(<i>NAMES @JOB word</i>:
+     * Fähigkeiten der Kolonisten)"; the row ({@link #SKILL_FIGURE_X}): the
+     * work's figure, the expert's name (NAMES {@code @JOB} column 2, gold),
+     * for a work 0-17 the good's icon and its NAMES {@code @CARGO} word
+     * (gold); the entry as the father page's body, its title at
+     * {@link #SKILL_TITLE_TOP}.  The figure of the convert (row 27) and the
+     * icons of the fisherman (fish 057), the carpenter, the preacher and
+     * the statesman are not seen (I).
+     *
+     * @param pedia The Colonopedia.
+     * @param text The original's other texts.
+     * @param tiny FONTTINY.
+     * @param wood {@code WOODPANL.PIK}, or null (then black).
+     * @param job The NAMES {@code @JOB} row, 0-27.
+     * @param spec The rules (the goods), or null (then no good).
+     * @param sprites A pack sprite by its name ("ICONS.SS.085"), or null.
+     * @return The 320x200 picture, or null without its texts.
+     */
+    static BufferedImage skillPage(ClassicPedia pedia, ClassicText text, ClassicFont tiny,
+            BufferedImage wood, int job, Specification spec,
+            Function<String, BufferedImage> sprites) {
+        if (pedia == null || text == null || tiny == null || job < 0) return null;
+        final Entry e = pedia.entry("JOB" + job);
+        final String word = ClassicColonyJobs.jobWord(text, job, 0);
+        final String expert = ClassicColonyJobs.jobWord(text, job, 1);
+        if (e == null || e.lines.isEmpty() || word == null || expert == null) return null;
+        final BufferedImage img = header(pedia, text, tiny, wood, word, CATEGORY_SKILLS);
+        if (img == null) return null;
+        final Graphics2D g = img.createGraphics();
+        try {
+            final int[] ink = ClassicFont.colours(INK), gold = ClassicFont.colours(GOLD);
+            if (job <= LAST_JOB_FIGURE) {
+                drawSprite(g, sprites, String.format("ICONS.SS.%03d", ICON_JOB_BASE + job),
+                           SKILL_FIGURE_X, SKILL_FIGURE_Y);
+            }
+            final int nx = SKILL_FIGURE_X + FIGURE_TEXT_DX;
+            tiny.draw(g, expert, nx, SKILL_FIGURE_Y + TEXT_DY, gold);
+            goods(g, tiny, text, spec, sprites, ClassicColonyLayout.jobGoods(job),
+                  nx + tiny.stringWidth(expert) + NEXT_DX, SKILL_FIGURE_Y, gold);
+            final int x0 = (321 - e.width) / 2;
+            for (Line l : body(e, tiny, SKILL_TITLE_TOP)) {
+                tiny.drawMarked(g, l.text, x0, l.top, ink, gold);
+            }
+        } finally {
+            g.dispose();
+        }
+        return img;
+    }
+
+    /**
+     * The Colonopedia's page of a building type (PEDIA {@code @BUILDINGk},
+     * k its NAMES {@code @BUILDING} row; V clip 046 #71579 «(Sägewerk:
+     * Koloniegebäude)», a right-click on «SÄGEWERK» in the build list):
+     * the header lines, the second "(<i>name</i>: Koloniegebäude)"; the row
+     * ({@link #BUILDING_SPRITE_X}): the building's sprite and name (gold),
+     * for a building with a work 9-18 its expert's figure and name, for a
+     * work 9-17 the good's icon and word; «Voraussetzung: <i>the level
+     * before</i>» (LABELS {@code @MISC} 187, green) where the type
+     * upgrades another; the entry under it.  Only the Sägewerk is seen:
+     * the other types follow the same rules (I), the entry's place too
+     * where nothing is required (I).
+     *
+     * @param pedia The Colonopedia.
+     * @param text The original's other texts.
+     * @param tiny FONTTINY.
+     * @param wood {@code WOODPANL.PIK}, or null (then black).
+     * @param type The building type.
+     * @param building A {@code BUILDING.SS} frame by its number, or null.
+     * @param sprites A pack sprite by its name ("ICONS.SS.094"), or null.
+     * @return The 320x200 picture, or null without its texts or a row.
+     */
+    static BufferedImage buildingPage(ClassicPedia pedia, ClassicText text, ClassicFont tiny,
+            BufferedImage wood, BuildingType type, Function<Integer, BufferedImage> building,
+            Function<String, BufferedImage> sprites) {
+        if (pedia == null || text == null || tiny == null || type == null) return null;
+        final int row = buildingRow(type);
+        final Entry e = (row < 0) ? null : pedia.entry("BUILDING" + row);
+        final String name = ClassicColonyRight.buildName(text, type);
+        if (e == null || e.lines.isEmpty() || name == null) return null;
+        final BufferedImage img = header(pedia, text, tiny, wood, name, CATEGORY_BUILDINGS);
+        if (img == null) return null;
+        final Graphics2D g = img.createGraphics();
+        try {
+            final int[] ink = ClassicFont.colours(INK), gold = ClassicFont.colours(GOLD);
+            final Integer frame = buildingFrame(type);
+            final BufferedImage s = (frame == null || building == null) ? null
+                : building.apply(frame);
+            int x = BUILDING_SPRITE_X;
+            if (s != null) {
+                g.drawImage(s, BUILDING_SPRITE_X, BUILDING_SPRITE_Y, null);
+                x += s.getWidth() + BUILDING_NAME_DX;
+            }
+            final int top = BUILDING_FIGURE_Y + TEXT_DY;
+            tiny.draw(g, name, x, top, gold);
+            x += tiny.stringWidth(name) + NEXT_DX;
+            final int job = buildingJob(type);
+            final String expert = (job < 0) ? null : ClassicColonyJobs.jobWord(text, job, 1);
+            if (expert != null) {
+                drawSprite(g, sprites, String.format("ICONS.SS.%03d", ICON_JOB_BASE + job),
+                           x, BUILDING_FIGURE_Y);
+                x += FIGURE_TEXT_DX;
+                tiny.draw(g, expert, x, top, gold);
+                goods(g, tiny, text, type.getSpecification(), sprites,
+                      ClassicColonyLayout.jobGoods(job), x + tiny.stringWidth(expert) + NEXT_DX,
+                      BUILDING_FIGURE_Y, gold);
+            }
+            final BuildingType before = type.getUpgradesFrom();
+            final String requires = text.misc(MISC_REQUIRES);
+            if (before != null && requires != null) {
+                tiny.draw(g, requires.trim() + ": " + ClassicColonyRight.buildName(text, before),
+                          BUILDING_SPRITE_X, BUILDING_REQUIRES_TOP, ink);
+            }
+            final int x0 = (321 - e.width) / 2;
+            for (Line l : body(e, tiny, BUILDING_TITLE_TOP)) {
+                tiny.drawMarked(g, l.text, x0, l.top, ink, gold);
+            }
+        } finally {
+            g.dispose();
+        }
+        return img;
+    }
+
+    /**
+     * A page's wood and its two header lines (as {@link #fatherPage}).
+     *
+     * @return The picture, or null without the texts.
+     */
+    private static BufferedImage header(ClassicPedia pedia, ClassicText text, ClassicFont tiny,
+                                        BufferedImage wood, String name, int categoryIndex) {
+        final String header = text.misc(MISC_HEADER);
+        final String category = pedia.category(categoryIndex);
+        if (header == null || category == null) return null;
+        final BufferedImage img = new BufferedImage(ClassicMenuBox.VW,
+            ClassicMenuBox.VH, BufferedImage.TYPE_INT_RGB);
+        final Graphics2D g = img.createGraphics();
+        try {
+            if (wood != null) g.drawImage(wood, 0, 0, null);
+            final int[] gold = ClassicFont.colours(GOLD);
+            final String h2 = "(" + name + ": " + category + ")";
+            tiny.draw(g, header, (322 - tiny.stringWidth(header)) / 2, HEADER1_TOP, gold);
+            tiny.draw(g, h2, (322 - tiny.stringWidth(h2)) / 2, HEADER2_TOP, gold);
+        } finally {
+            g.dispose();
+        }
+        return img;
+    }
+
+    /**
+     * A good's icon at (x, figure top + {@link #ICON_DY}) and its NAMES
+     * {@code @CARGO} word after it, gold; nothing without the good.
+     */
+    private static void goods(Graphics2D g, ClassicFont tiny, ClassicText text,
+                              Specification spec, Function<String, BufferedImage> sprites,
+                              String goodsId, int x, int figureTop, int[] gold) {
+        final GoodsType gt = (spec == null || goodsId == null) ? null
+            : spec.getGoodsType(goodsId);
+        final int icon = ClassicColonyLayout.goodsIcon(goodsId);
+        if (gt == null || icon < 0) return;
+        drawSprite(g, sprites, String.format("ICONS.SS.%03d", icon), x, figureTop + ICON_DY);
+        final boolean warehouse = icon >= ClassicColonyLayout.ICON_GOODS
+            && icon < ClassicColonyLayout.ICON_GOODS_GREY;
+        tiny.draw(g, ClassicColonyJobs.cargoName(text, gt),
+                  x + ((warehouse) ? GOODS_TEXT_DX : OTHER_TEXT_DX), figureTop + TEXT_DY, gold);
+    }
+
+    /**
+     * A building type's NAMES {@code @BUILDING} row, its PEDIA
+     * {@code @BUILDINGk} (as {@link ClassicColonyRight#buildName}: the
+     * sprite frame's row, the warehouse expansion 16, the stables 17).
+     *
+     * @param type The type, or null.
+     * @return The row, or -1 for a type the original lacks.
+     */
+    static int buildingRow(BuildingType type) {
+        if (type == null) return -1;
+        final String id = ClassicColonyBuildings.shortId(type.getId());
+        if ("warehouseExpansion".equals(id)) return ClassicColonyBuildings.NAMES_EXPANSION;
+        if ("stables".equals(id)) return ClassicColonyBuildings.NAMES_STABLES;
+        final Integer f = ClassicColonyBuildings.frameOf(id);
+        return (f == null) ? -1 : f;
+    }
+
+    /**
+     * The sprite of a building type's page: its own frame (the stables'
+     * alone, the expansion the Lagerhaus'; I), or null.
+     */
+    private static Integer buildingFrame(BuildingType type) {
+        return ClassicColonyBuildings.frameOf(type.getId());
+    }
+
+    /**
+     * The work of a building type as a NAMES {@code @JOB} row: the job of
+     * the good it makes (9-17), the teacher's for a school (18); -1 for a
+     * building without a work (the stockade, the docks; I).
+     *
+     * @param type The type.
+     * @return The row, or -1.
+     */
+    static int buildingJob(BuildingType type) {
+        if (type.hasAbility(net.sf.freecol.common.model.Ability.TEACH)) {
+            return ClassicColonyLayout.JOB_TEACHER;
+        }
+        for (net.sf.freecol.common.model.ProductionType pt : type.getAvailableProductionTypes(false)) {
+            for (net.sf.freecol.common.model.AbstractGoods ag : pt.getOutputList()) {
+                final int j = ClassicColonyLayout.jobOf(ag.getType().getId());
+                if (j > ClassicColonyLayout.JOB_FISHERMAN && j < ClassicColonyLayout.JOB_TEACHER) {
+                    return j;
+                }
+            }
+        }
+        return -1;
+    }
+
     /** One line of a page: its glyph top and its marked text. */
     static final class Line {
 
@@ -726,7 +1021,7 @@ final class ClassicPedia {
             String cur = "";
             for (String w : p.split(" +")) {
                 final String t = cur.isEmpty() ? w : cur + " " + w;
-                if (cur.isEmpty() || tiny.markedWidth(t) <= limit) {
+                if (cur.isEmpty() || measure(tiny, t) <= limit) {
                     cur = t;
                     continue;
                 }
@@ -742,6 +1037,30 @@ final class ClassicPedia {
             }
         }
         return out;
+    }
+
+    /**
+     * The page's wrap measure (fixer A after part X): the drawn width (the
+     * braces take no room) and one more for each 'ö', 'ü' and 'ß'; a line
+     * fits while it is at most the width.  The plain width alone
+     * contradicts the clips: clip 049 #3111 breaks «… erfahren und so»
+     * (299 px, an ö and an ü) before «so», clip 052 #16124 «… werden
+     * schließlich» (300, a ß) before «schließlich», while clip 020 #78325
+     * keeps «… für den Abbau» (299, an ü) and clip008 #48645 «{Mit Peter
+     * Stuyvesant … wodurch der» (300, an ä).  The capitals Ä, Ö, Ü are not
+     * seen in a line near the width (I: counted as drawn).
+     *
+     * @param tiny FONTTINY.
+     * @param marked A line, markup kept.
+     * @return Its measure.
+     */
+    static int measure(ClassicFont tiny, String marked) {
+        int extra = 0;
+        for (int i = 0; i < marked.length(); i++) {
+            final char c = marked.charAt(i);
+            if (c == 'ö' || c == 'ü' || c == 'ß') extra++;
+        }
+        return tiny.markedWidth(marked) + extra;
     }
 
     /** Whether the gold is on after a line that began with it {@code on}. */

@@ -462,6 +462,88 @@ public class ClassicColonyTilesTest extends FreeColTestCase {
     }
 
     /**
+     * A tile another colony works gets a red frame (fixer A after part X,
+     * the colony review's later item: V clip 048 #86873, Guadelupe's SW, S
+     * and SE tiles, each cell its own 1-px frame #FF0000, palette 12): the
+     * model marks it, the painter draws it on the tile's border under the
+     * green and the white frames; the colony's own, the centre and native
+     * land not.
+     */
+    public void testATileOfAnotherColonyIsFramedRed() {
+        final State s = base(1546);
+        s.on("expertFarmer", Direction.NW, "grain");
+        s.finish();
+        final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
+        final Tile sw = s.colony.getTile().getNeighbourOrNull(Direction.SW);
+        final Tile se = s.colony.getTile().getNeighbourOrNull(Direction.SE);
+        final Tile two = s.colony.getTile().getNeighbourOrNull(Direction.S)
+            .getNeighbourOrNull(Direction.S);
+        final Player french = s.game.getPlayerByNationId("model.nation.french");
+        final net.sf.freecol.common.model.Colony montreal
+            = new net.sf.freecol.server.model.ServerColony(s.game, french, "Montreal", two);
+        sw.changeOwnership(french, montreal);
+        se.changeOwnership(s.owner, montreal);
+        assertTrue(ClassicColonyTiles.takenByAnother(s.colony, sw));
+        assertTrue("a colony of ours too (I)", ClassicColonyTiles.takenByAnother(s.colony, se));
+        assertFalse(ClassicColonyTiles.takenByAnother(s.colony, s.colony.getTile()));
+        assertFalse(ClassicColonyTiles.takenByAnother(montreal, sw));
+        assertFalse(ClassicColonyTiles.takenByAnother(s.colony, null));
+        final ClassicColonyTiles.Model m = ClassicColonyTiles.model(s.colony, text, assets());
+        assertTrue(m.cell(6).taken);
+        assertTrue(m.cell(8).taken);
+        assertFalse(m.cell(7).taken);
+        assertFalse(m.cell(ClassicColonyLayout.CENTRE_TILE).taken);
+        assertTrue(m.toString().contains("taken"));
+        final ClassicColonyChrome.Assets chrome
+            = ClassicColonyChrome.Assets.load(ClassicPackFiles.runtime());
+        final BufferedImage img = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+        final Graphics2D g = img.createGraphics();
+        // The cursor white on SE: it wins over the red.
+        ClassicColonyTiles.paint(g, chrome, assets(), m, null, null, -1, 8, true);
+        g.dispose();
+        final int red = chrome.rgb(ClassicColonyLayout.INK_RED) & 0xFFFFFF;
+        final java.awt.Rectangle c6 = ClassicColonyLayout.tileCell(6);
+        assertEquals(new java.awt.Rectangle(224, 80, 24, 24), c6);
+        for (int x = c6.x; x < c6.x + c6.width; x++) {
+            assertEquals(red, img.getRGB(x, c6.y) & 0xFFFFFF);
+            assertEquals(red, img.getRGB(x, c6.y + c6.height - 1) & 0xFFFFFF);
+        }
+        for (int y = c6.y; y < c6.y + c6.height; y++) {
+            assertEquals(red, img.getRGB(c6.x, y) & 0xFFFFFF);
+            assertEquals(red, img.getRGB(c6.x + c6.width - 1, y) & 0xFFFFFF);
+        }
+        final java.awt.Rectangle c8 = ClassicColonyLayout.tileCell(8);
+        assertEquals(chrome.rgb(ClassicColonyLayout.INK_WHITE) & 0xFFFFFF,
+                     img.getRGB(c8.x + 5, c8.y) & 0xFFFFFF);
+        final java.awt.Rectangle c7 = ClassicColonyLayout.tileCell(7);
+        assertTrue(red != (img.getRGB(c7.x + 5, c7.y) & 0xFFFFFF));
+        // The clip's frame: the same red on the same borders (#86873).
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        final java.io.File f = (clips == null) ? null
+            : new java.io.File(clips, "fixer-a-analysis/c048/frame_086873.png");
+        if (f != null && f.isFile()) {
+            try {
+                final BufferedImage clip = javax.imageio.ImageIO.read(f);
+                for (int i = 6; i <= 8; i++) {
+                    final java.awt.Rectangle r = ClassicColonyLayout.tileCell(i);
+                    for (int x = r.x; x < r.x + r.width; x++) {
+                        assertEquals("cell " + i, red, clip.getRGB(x, r.y) & 0xFFFFFF);
+                        assertEquals("cell " + i, red,
+                                     clip.getRGB(x, r.y + r.height - 1) & 0xFFFFFF);
+                    }
+                    for (int y = r.y; y < r.y + r.height; y++) {
+                        assertEquals("cell " + i, red, clip.getRGB(r.x, y) & 0xFFFFFF);
+                        assertEquals("cell " + i, red,
+                                     clip.getRGB(r.x + r.width - 1, y) & 0xFFFFFF);
+                    }
+                }
+            } catch (java.io.IOException e) {
+                fail(e.toString());
+            }
+        }
+    }
+
+    /**
      * Part X: on the levi rules the screen's tile rows show the original's
      * numbers (the model's, ClassicColonyTiles.made): Base's centre
      * «Sumpfland/Straße/Gepflügt» 6 food + 3 sugar (V clip 020 #2260),

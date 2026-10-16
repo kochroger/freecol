@@ -144,6 +144,20 @@ final class ClassicColonyBuild {
     }
 
     /**
+     * Whether the colony's building was completed in this turn (levi rule
+     * R4's record of the turn): an opening by a click then blinks ÄNDERN
+     * (fixer A after part X, {@code ClassicColonyPanel.opened}).
+     *
+     * @param colony The colony.
+     * @return True if so.
+     */
+    static boolean completedThisTurn(Colony colony) {
+        return completed(colony) != null && colony.getGame() != null
+            && colony.getGame().getTurn() != null
+            && colony.getClassicBuiltTurn() == colony.getGame().getTurn().getNumber();
+    }
+
+    /**
      * The current build as the original shows it: the queue's first, else
      * the completed building ({@link #completed}).
      *
@@ -356,6 +370,28 @@ final class ClassicColonyBuild {
      */
     static ClassicAdvisorBox.Request request(ClassicText t, ClassicFont tiny, List<Row> rows,
                                             double delayMs) {
+        return request(t, tiny, rows, delayMs, -1.0, null);
+    }
+
+    /**
+     * {@link #request(ClassicText, ClassicFont, List, double)} with F1 and
+     * the right-click on a building's row (fixer A after part X: V clip 046
+     * #71516 -&gt; #71579, «SÄGEWERK»'s page; the build stays): the hook
+     * is told the row, the others' rows have no help (I: a unit's page is
+     * not built).
+     *
+     * @param t The pack's texts, or null.
+     * @param tiny FONTTINY, or null.
+     * @param rows The rows.
+     * @param delayMs When it comes after now.
+     * @param chainMs The least time after the box before (the page), or
+     *     negative for the usual.
+     * @param helpRow Told the row of F1 or the right-click, or null for no help.
+     * @return The box.
+     */
+    static ClassicAdvisorBox.Request request(ClassicText t, ClassicFont tiny, List<Row> rows,
+                                            double delayMs, double chainMs,
+                                            java.util.function.IntConsumer helpRow) {
         final String title = (t == null) ? null : t.label("CTITLE", CTITLE_PICK);
         final List<String> names = new ArrayList<>(), costs = new ArrayList<>();
         final boolean[] yellow = new boolean[rows.size()];
@@ -366,12 +402,38 @@ final class ClassicColonyBuild {
             yellow[i] = rows.get(i).current;
         }
         final String footer = (t == null) ? null : t.misc(ClassicFathers.MISC_F1_HELP);
-        return ClassicAdvisorBox.Request.builder("buildlist")
+        final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.Request.builder("buildlist")
             .freeColText((title == null) ? "Objekt zum Bauen wählen" : title.trim())
             .width(boxWidth(tiny, rows) - 6).rows(names).right(costs).current(yellow)
             .footer((footer == null) ? null : footer.trim()).defaultRow(barRow(rows))
-            .noCancelRow().openDelay(delayMs).list()
-            .stopgap("Objekt zum Bauen wählen", null).build();
+            .noCancelRow().openDelay(delayMs).chain(chainMs).list()
+            .stopgap("Objekt zum Bauen wählen", null);
+        if (helpRow != null) {
+            b.help(new ClassicAdvisorBox.Help() {
+                    @Override
+                    public void help(int row) {
+                        helpRow.accept(row);
+                    }
+
+                    @Override
+                    public boolean covers(int row) {
+                        return row >= 0 && row < rows.size() && hasPage(rows.get(row));
+                    }
+                });
+        }
+        return b.build();
+    }
+
+    /**
+     * Whether a row has a Colonopedia page: a building type of the
+     * original's ({@link ClassicPedia#buildingRow}).
+     *
+     * @param r The row.
+     * @return True if so.
+     */
+    static boolean hasPage(Row r) {
+        return r != null && r.type instanceof BuildingType
+            && ClassicPedia.buildingRow((BuildingType) r.type) >= 0;
     }
 
 

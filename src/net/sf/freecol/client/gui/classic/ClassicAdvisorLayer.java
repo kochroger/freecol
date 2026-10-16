@@ -100,7 +100,11 @@ import javax.swing.JComponent;
  * the other keys are taken only as fresh presses made while the box is on
  * screen: an auto-repeat of a key held from before, or a key pressed before
  * the box was drawn, does nothing.  The mouse:
- * {@link ClassicAdvisorBox.Bar}.  Recorder events: {@code box-palette},
+ * {@link ClassicAdvisorBox.Bar}; the right and middle buttons never take a
+ * row, a right-click on a list's row asks its help as F1 would
+ * ({@link ClassicAdvisorBox.Bar#rightPress}), a notice and a woodcut go on
+ * any button.  A box with a close lag stays that long after its answer
+ * ({@code box-closing}).  Recorder events: {@code box-palette},
  * {@code box-open}, {@code box-bar}, {@code box-toggle}, {@code box-close}.
  *
  * <p><b>Woodcuts</b> ({@link ClassicWoodcut}, master plan W9) come through
@@ -251,6 +255,9 @@ final class ClassicAdvisorLayer extends JComponent {
 
         /** A press on the finished woodcut, waiting for its release. */
         boolean pressed = false;
+
+        /** Answered, its close due after its close lag: input ignored. */
+        boolean closing = false;
 
         /** When a woodcut's map came back (or it was aborted after its black). */
         long endedAt = NOT_SHOWN;
@@ -912,7 +919,7 @@ final class ClassicAdvisorLayer extends JComponent {
     void onKey(KeyEvent e) {
         e.consume();
         final Pending p = this.current;
-        if (p == null || e.getID() != KeyEvent.KEY_PRESSED) return;
+        if (p == null || p.closing || e.getID() != KeyEvent.KEY_PRESSED) return;
         final int code = e.getKeyCode();
         if (isModifier(code) || e.isAltDown() || e.isControlDown()
             || e.isMetaDown() || e.isAltGraphDown()) return;
@@ -1029,19 +1036,27 @@ final class ClassicAdvisorLayer extends JComponent {
         e.consume();
         requestFocusInWindow();
         final Pending p = this.current;
-        if (p == null || predates(e.getWhen())) return;
+        if (p == null || p.closing || predates(e.getWhen())) return;
         final Point v = virtual(e.getPoint());
         if (p.woodcut != null) {
             // A press and its release anywhere in the window count as a
             // key, the letterbox border too (Roger: any click closes it;
-            // I-prep cycle.md 3C).
+            // I-prep cycle.md 3C), with any button.
             p.pressed = p.phase == Phase.HELD || p.phase == Phase.PAGE;
             return;
         }
         final int row = (v == null) ? -1 : p.layout.rowAt(v.x, v.y);
         final boolean in = v != null && p.layout.inBox(v.x, v.y);
         final int before = p.bar.row();
-        p.bar.press(row, in);
+        if (!javax.swing.SwingUtilities.isLeftMouseButton(e)) {
+            // The right (or middle) button never takes a row (fixer A after
+            // part X, the colony review's must 4: V clip 046's right-click
+            // in the build list opened the Colonopedia, the build stayed);
+            // a list with a help: its help on the release.
+            p.bar.rightPress(row, in, javax.swing.SwingUtilities.isRightMouseButton(e));
+        } else {
+            p.bar.press(row, in);
+        }
         if (p.bar.row() != before) barMoved(p);
     }
 
@@ -1053,7 +1068,7 @@ final class ClassicAdvisorLayer extends JComponent {
     void onRelease(MouseEvent e) {
         e.consume();
         final Pending p = this.current;
-        if (p == null) return;
+        if (p == null || p.closing) return;
         final Point v = virtual(e.getPoint());
         if (p.woodcut != null) {
             if (p.pressed && p.phase == Phase.HELD) woodcutClose(p);
@@ -1062,15 +1077,25 @@ final class ClassicAdvisorLayer extends JComponent {
         }
         final int row = (v == null) ? -1 : p.layout.rowAt(v.x, v.y);
         final boolean in = v != null && p.layout.inBox(v.x, v.y);
-        settle(p, p.bar.release(row, in));
+        settle(p, (javax.swing.SwingUtilities.isLeftMouseButton(e))
+            ? p.bar.release(row, in) : p.bar.rightRelease(row));
     }
 
     /**
      * After a key or a release: repaint a moved bar or a flipped checkbox,
-     * or close with the answer.
+     * or close with the answer (a box with a
+     * {@link ClassicAdvisorBox.Request#closeLagMs} that long later, input
+     * ignored meanwhile).
      */
     private void settle(Pending p, int answer) {
         if (answer != ClassicAdvisorBox.Bar.OPEN) {
+            final double lag = (p.request == null) ? 0.0 : p.request.closeLagMs;
+            if (lag > 0.0 && this.current == p) {
+                p.closing = true;
+                ClassicFrameRecorder.event("box-closing", p.request.id + " chosen=" + answer);
+                this.timer.schedule(this.clock.now() + nanos(lag), () -> finish(p, answer));
+                return;
+            }
             finish(p, answer);
             return;
         }

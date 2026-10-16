@@ -680,8 +680,12 @@ public class ClassicEuropePanelTest extends FreeColTestCase {
     /**
      * Colonists between ship and dock: the soldier's hold dropped on the
      * docks puts him on the dock (FreeCol's leaveShip; he keeps his "S");
-     * dropped from the dock on the ship he boards again; a drop elsewhere
-     * does nothing.
+     * a colonist of the dock is never dragged, as in the original (V
+     * Roger's playthrough 4, clip 046 #106147-#106486: three drags of a
+     * dock colonist onto the docked merchantman do nothing, no ghost):
+     * dropped on the ship, on an empty hold or elsewhere he stays on the
+     * dock and the arrow never hides; he boards by the dock's "S" queue
+     * when the ship sails.
      */
     public void testColonistsLeaveAndBoardByDragging() throws Exception {
         final Scene s = rogers1496();
@@ -693,15 +697,26 @@ public class ClassicEuropePanelTest extends FreeColTestCase {
         assertEquals(ClassicEuropePanel.Kind.DOCK, s.panel.hitAt(240, 145).kind);
         assertEquals("[freeColonist, empty, empty, empty, crate, crate]",
                      ClassicEuropePanel.holds(s.ship).toString());
+        final boolean[] hid = { false };
+        s.panel.addPropertyChangeListener(ClassicPointer.DRAGGING,
+            e -> hid[0] |= Boolean.TRUE.equals(e.getNewValue()));
         drag(s.panel, 240, 145, 100, 40, false);                 // nowhere
         assertSame(s.europe, s.soldierUnit.getLocation());
         drag(s.panel, 240, 145, 154, 154, false);                // onto the ship
-        assertSame(s.ship, s.soldierUnit.getLocation());
-        assertTrue(s.panel.dockUnits().isEmpty());
+        assertSame("nothing happens (clip 046 #106363)", s.europe,
+                   s.soldierUnit.getLocation());
+        assertEquals(List.of(s.soldierUnit), s.panel.dockUnits());
         drag(s.panel, 152, 170, 300, 170, false);                // the pioneer off
         assertSame(s.europe, s.pioneerUnit.getLocation());
+        assertTrue("a hold's colonist is dragged: the arrow hides", hid[0]);
+        hid[0] = false;
         drag(s.panel, 240, 145, 190, 170, false);                // onto an empty hold
-        assertSame(s.ship, s.pioneerUnit.getLocation());
+        assertSame(s.europe, s.pioneerUnit.getLocation());
+        assertSame(s.europe, s.soldierUnit.getLocation());
+        assertEquals("[empty, empty, empty, empty, crate, crate]",
+                     ClassicEuropePanel.holds(s.ship).toString());
+        assertFalse("no drag from the dock: the arrow stays", hid[0]);
+        assertFalse(s.panel.dragging());
     }
 
     /**
@@ -1014,11 +1029,12 @@ public class ClassicEuropePanelTest extends FreeColTestCase {
         assertEquals(0, s.ship.getGoodsCount(furs));
         assertEquals(gold, s.dutch.getGold());
         assertTrue("nothing went to the server: " + s.api.log, s.api.log.isEmpty());
-        // With room again he boards.
+        // With room again he still stays: a colonist of the dock is never
+        // dragged (V clip 046 #106147-#106486), he boards by the "S" queue.
         drag(s.panel, cx(ClassicEuropePanel.holdCell(holdOf(s.panel, tools))), 170,
              cx(ClassicEuropePanel.marketSlot(0)), 190, false);    // sell the tools
         drag(s.panel, cx(c), cy(c), 154, 154, false);
-        assertSame(s.ship, dock.getLocation());
+        assertSame(s.europe, dock.getLocation());
     }
 
     /**

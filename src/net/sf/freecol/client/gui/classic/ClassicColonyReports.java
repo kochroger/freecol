@@ -102,7 +102,9 @@ import net.sf.freecol.common.model.UnitType;
  * ({@link Report#opening}).  The same colony's other reports of the turn
  * come first as boxes without rows that close by themselves after a time
  * that grows with their words ({@link #flashFrames}; V clip 040 #85 061 -
- * #85 184, clip 048 #128660, #135687), the other colonies' after the
+ * #85 184, clip 048 #128660, #135687), a @BUILT among them waits for a
+ * key or a click (V the keylogged clips 049 #48095, 050 #30483; fixer A
+ * after part X), the other colonies' after the
  * screen closed (V 048 #115205 -&gt; #115237: Base's screen closed, the
  * map on Silver City, its @DEPLETION).  A new load's report brings
  * @TUTORIAL6 after its box whatever row closed it, a zoom's screen after
@@ -165,8 +167,9 @@ final class ClassicColonyReports {
     static final int JUMP_FRAMES = 9;
 
     /**
-     * A report without rows after a zoom stays for a time that grows with
-     * its text and closes by itself: {@link #FLASH_BASE_FRAMES} +
+     * A report without rows after a zoom (not a @BUILT: that one waits for
+     * a key or a click, {@link #BUILT_GAP_FRAMES}) stays for a time that
+     * grows with its text and closes by itself: {@link #FLASH_BASE_FRAMES} +
      * {@link #FLASH_FRAMES_PER_CHAR} per character of its words
      * ({@link #flashFrames}; the least-squares line through the four seen,
      * I: clip 040 «Eine neue Ladung {Baumwolle} …» 64 characters #85 061
@@ -183,6 +186,13 @@ final class ClassicColonyReports {
 
     /** The next report without rows after one closed: 7 frames (V clip 040 #85 125 -&gt; #85 132). */
     static final int FLASH_GAP_FRAMES = 7;
+
+    /**
+     * A row-less @BUILT after the zoom's box: 5 frames (V clip 049 #48090
+     * -&gt; #48095, clip 050 #30478 -&gt; #30483); it waits for a key or a
+     * click ({@link #request(ClassicText, Report, boolean, String, long)}).
+     */
+    static final int BUILT_GAP_FRAMES = 5;
 
     /** NAMES.TXT {@code @CARGO} goods with a GAME.TXT report that their input ran out. */
     private static final Map<String, String> RAN_OUT_SECTIONS = new HashMap<>();
@@ -425,7 +435,9 @@ final class ClassicColonyReports {
      * Escape on row 1 (I).  Without (after a zoom, V clip 040 #85 061:
      * (42,116,236,30), #85 132: (42,119,236,24); clip 048 #135687:
      * (42,110,236,42)): no bar, it closes by itself after
-     * {@link #flashFrames} of its words.
+     * {@link #flashFrames} of its words; a row-less @BUILT waits for a key
+     * or a click instead (V clips 049, 050 with the keylog,
+     * {@link #BUILT_GAP_FRAMES}).
      *
      * @param t The pack's texts, or null.
      * @param r The report.
@@ -465,6 +477,17 @@ final class ClassicColonyReports {
                 .defaultRow(ROW_CONTINUE).cancelRow(ROW_CONTINUE);
             if (showAt != 0L) b.showAt(showAt);
             return b.stopgap(title, null).build();
+        }
+        if (r.kind == Kind.BUILT) {
+            // A row-less @BUILT waits for a key or a click, as any notice
+            // (fixer A after part X, the keylogged clips: 049 «Kolonie Base
+            // produziert Druckerei.» #48095-#48191 closed by the click's
+            // release, 97 frames; 050 «Kolonie Base produziert Ställe.»
+            // #30483-#30585 closed by Enter, 102 frames; the timed model
+            // below would have closed them after 46 and 45), 5 frames after
+            // the zoom's box (049 #48090 -> #48095, 050 #30478 -> #30483).
+            return b.chain(ClassicColonyMoves.ms(BUILT_GAP_FRAMES)).stopgap(title, null)
+                .build();
         }
         // 7 frames after the box before (the zoom's or the last of these),
         // not the boxes' usual 200 ms (V clip 040 #85 054 -> #85 061,

@@ -143,10 +143,19 @@ import net.sf.freecol.common.model.Unit;
  *
  * <p><b>In and out</b> (M4.11, M4.12, part W): Escape's release or a
  * click on the exit closes the screen, the map {@link
- * ClassicColonyMoves#EXIT_MAP_FRAMES} frames later ({@link #exit}); F1 (on
- * the screen and in the job menu) asks the Colonopedia page of the
- * cursor's tile ({@link #pedia}); a ship's docking opens the screen with
- * the ship selected.
+ * ClassicColonyMoves#EXIT_MAP_FRAMES} frames later ({@link #exit}); F1 asks
+ * the Colonopedia page of the cursor's tile, with the cursor on the
+ * selected colonist his type's skill page ({@link #pedia}); a ship's
+ * docking opens the screen with the ship selected.
+ *
+ * <p><b>The Colonopedia from the screen</b> (fixer A after part X, V clips
+ * 046, 049, 052 with the keylog): F1 in a job menu shows the skill page of
+ * the job under the bar, then the menu again ({@link #jobMenu}); F1 or a
+ * right-click on a building's row of the build list its building page,
+ * then the list again ({@link #openBuildList}); a right-click on a field
+ * its terrain page, on a colonist his type's skill page
+ * ({@link #rightPressAt}).  Only the left button presses, drags and
+ * clicks; the right one never acts as it, the middle one does nothing.
  */
 final class ClassicColonyPanel extends JPanel {
 
@@ -217,6 +226,39 @@ final class ClassicColonyPanel extends JPanel {
          *     colonist's).
          */
         default void terrainPage(net.sf.freecol.common.model.Tile tile) {}
+
+        /**
+         * {@link #terrainPage(net.sf.freecol.common.model.Tile)} a time
+         * after now (F1, the right-click: {@link ClassicPedia#PAGE_FRAMES}).
+         *
+         * @param tile The tile.
+         * @param delayMs When the page comes after now.
+         */
+        default void terrainPage(net.sf.freecol.common.model.Tile tile, double delayMs) {
+            terrainPage(tile);
+        }
+
+        /**
+         * The Colonopedia's skill page of a NAMES {@code @JOB} row over
+         * the screen (fixer A after part X: F1 in the job menu, F1 with a
+         * colonist selected, a right-click on a unit); returns when the
+         * page is closed.
+         *
+         * @param job The row.
+         * @param delayMs When the page comes after now.
+         */
+        default void skillPage(int job, double delayMs) {}
+
+        /**
+         * The Colonopedia's page of a building type over the screen (fixer
+         * A after part X: F1 or a right-click in the build list); returns
+         * when the page is closed.
+         *
+         * @param type The building type.
+         * @param delayMs When the page comes after now.
+         */
+        default void buildingPage(net.sf.freecol.common.model.BuildingType type,
+                                  double delayMs) {}
     }
 
     /** The units' box, or null (then a click only selects, as before). */
@@ -644,20 +686,29 @@ final class ClassicColonyPanel extends JPanel {
         addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent e) {
+                    // Only the left button presses, drags and clicks; the
+                    // right one asks the Colonopedia ({@link #rightPressAt}),
+                    // the middle one does nothing (fixer A after part X: the
+                    // colony review's later item, a right-click on «Abb»
+                    // left the colony).
                     if (SwingUtilities.isLeftMouseButton(e)) {
                         final int vx = canvasX(e.getX()), vy = canvasY(e.getY());
                         gesture.press(vx, vy, e.getX(), e.getY(), canDragAt(vx, vy));
+                        onClick(e);
+                    } else if (SwingUtilities.isRightMouseButton(e)) {
+                        rightPressAt(canvasX(e.getX()), canvasY(e.getY()));
                     }
-                    onClick(e);
                 }
 
                 @Override
                 public void mouseReleased(MouseEvent e) {
-                    ClassicDragGesture.Result result = ClassicDragGesture.Result.NONE;
-                    if (SwingUtilities.isLeftMouseButton(e)) {
-                        result = gesture.release();
-                        if (result == ClassicDragGesture.Result.DROP) dragEnded();
+                    if (SwingUtilities.isRightMouseButton(e)) {
+                        rightReleaseAt(canvasX(e.getX()), canvasY(e.getY()));
+                        return;
                     }
+                    if (!SwingUtilities.isLeftMouseButton(e)) return;
+                    final ClassicDragGesture.Result result = gesture.release();
+                    if (result == ClassicDragGesture.Result.DROP) dragEnded();
                     // Shift at the drop: a goods drag's amount box (M4.9).
                     releaseAt(canvasX(e.getX()), canvasY(e.getY()), result, e.isShiftDown());
                 }
@@ -1072,6 +1123,143 @@ final class ClassicColonyPanel extends JPanel {
                 repaint();
             }
         }
+    }
+
+    /** A right press (fixer A after part X): on a tile of the 3x3 map (0-8), or -1. */
+    private int rightTile = -1;
+
+    /** A right press on a colonist or a unit, or null. */
+    private Unit rightUnit = null;
+
+    /** When the right press came (the clock's nanoseconds). */
+    private long rightAt = 0L;
+
+    /**
+     * A right press (fixer A after part X, the colony review's must 4; V
+     * clip 049 with the keylog): on a tile of the 3x3 map the white cursor
+     * goes there at once (#4175, the S field) and the release asks the
+     * tile's terrain page (a tile worker's tile too: I); on a colonist (in
+     * a building, at the fence, in the band's figure row) or a unit of
+     * «Vorhandene Einheiten» his hover label goes (#11734)
+     * and the release asks the page of his type («Siedler: Fähigkeiten der
+     * Kolonisten» for a free colonist with tools at the fence, #11762).
+     * Nothing else: the right button never presses, drags, selects or
+     * leaves (the review of part W, L7: it acted as a left press).
+     *
+     * @param vx The x.
+     * @param vy The y.
+     */
+    void rightPressAt(int vx, int vy) {
+        this.rightTile = -1;
+        this.rightUnit = null;
+        if (this.leaving || this.asking || this.units == null
+            || this.pressedUnit != null || this.goodsType != null
+            || this.gesture.dragging()) return;
+        final int tile = ClassicColonyLayout.tileAt(vx, vy);
+        final ClassicColonyTiles.Cell cell = (tile < 0) ? null : this.tiles.cell(tile);
+        if (cell != null && cell.tile != null) {
+            tileCursor = tile;
+            this.rightTile = tile;
+            this.rightAt = this.clock.now();
+            hideHover();
+            repaint();
+            return;
+        }
+        final Unit u = unitAt(vx, vy);
+        if (u == null || typePage(u) < 0) return;
+        this.rightUnit = u;
+        this.rightAt = this.clock.now();
+        hideHover();
+        repaint();
+    }
+
+    /**
+     * The release of a right press on the same tile or unit: its
+     * Colonopedia page {@link ClassicPedia#PAGE_FRAMES} after the press
+     * (V clip 049: #4175 -&gt; #4198 23 frames, #5102; the unit's #11734
+     * -&gt; #11762, I: 28 there), over the screen until a key or a click;
+     * a release elsewhere does nothing (I).
+     *
+     * @param vx The x.
+     * @param vy The y.
+     */
+    void rightReleaseAt(int vx, int vy) {
+        final int tile = this.rightTile;
+        final Unit u = this.rightUnit;
+        this.rightTile = -1;
+        this.rightUnit = null;
+        if (this.leaving || this.asking || this.units == null) return;
+        final double delay = Math.max(0.0, ClassicColonyMoves.ms(ClassicPedia.PAGE_FRAMES)
+            - (this.clock.now() - this.rightAt) / 1e6);
+        if (tile >= 0) {
+            final ClassicColonyTiles.Cell cell = this.tiles.cell(tile);
+            if (ClassicColonyLayout.tileAt(vx, vy) != tile || cell == null || cell.tile == null) {
+                return;
+            }
+            showPage(() -> this.units.terrainPage(cell.tile, delay), "right terrain "
+                     + cell.tile.getId());
+        } else if (u != null && unitAt(vx, vy) == u) {
+            final int job = typePage(u);
+            showPage(() -> this.units.skillPage(job, delay), "right skill " + job + " "
+                     + u.getId());
+        }
+    }
+
+    /**
+     * The colonist or unit at a point, for the right-click: a figure in a
+     * building, on a tile or at the fence ({@link #hitAt}), of the band's
+     * figure row, a unit of «Vorhandene Einheiten».
+     *
+     * @param vx The x.
+     * @param vy The y.
+     * @return The unit, or null.
+     */
+    private Unit unitAt(int vx, int vy) {
+        final Hit h = hitAt(vx, vy);
+        if (h != null) return h.unit;
+        final int f = ClassicColonyMoves.pick(boundsOf(this.figures), vx, vy);
+        if (f >= 0) return this.figures.get(f).unit;
+        final int b = bandAt(vx, vy);
+        return (b >= 0) ? this.bandUnits.get(b) : null;
+    }
+
+    /**
+     * The skill page of a unit's type (fixer A after part X: V clip 049
+     * #11762 a free colonist with tools: «Siedler», clip 052 #16124 an
+     * Erfahrene Soldaten: «Soldat»): his type's NAMES {@code @JOB} row,
+     * -1 for a type the original lacks.
+     *
+     * @param u The unit.
+     * @return The row, or -1.
+     */
+    static int typePage(Unit u) {
+        return (u == null || u.isDisposed()) ? -1
+            : ClassicHud.jobRow(ClassicColonyBuildings.shortId(u.getType().getId()));
+    }
+
+    /**
+     * A Colonopedia page over this screen ({@link Units#terrainPage},
+     * {@link Units#skillPage}, {@link Units#buildingPage}): no drag, no
+     * blink, no input while it is up; the screen again after it.
+     *
+     * @param page Shows it, returns when it is closed.
+     * @param what For the recorder.
+     */
+    private void showPage(Runnable page, String what) {
+        ClassicFrameRecorder.event("colony-pedia", this.colony.getName() + " " + what);
+        this.gesture.cancel();
+        this.blink.stop();
+        this.asking = true;
+        try {
+            page.run();
+        } finally {
+            this.asking = false;
+            if (isDisplayable()) {
+                this.blinkOff = false;
+                this.blink.arm();
+            }
+        }
+        repaint();
     }
 
     /** No hover label until the pointer moves or {@link #hoverLater} brings it. */
@@ -1562,34 +1750,33 @@ final class ClassicColonyPanel extends JPanel {
      * F1 (build spec M4.11 target 4; the manual's key card: "Get
      * information about the selected item . . . [F1]"): the Colonopedia's
      * page of the white cursor's tile (V clip 020 #76921, #78325: the
-     * cursor colonist's tile, not the arrow's), else of the selected
-     * colonist's work tile (I), over the screen until a key or a click;
-     * the screen again after it (V #77167).  Nothing without a tile (I).
+     * cursor colonist's tile, not the arrow's), with the cursor on the
+     * selected colonist's figure his type's skill page (fixer A after part
+     * X: V clip 052 #16124 «(Soldat: Fähigkeiten der Kolonisten)», an
+     * Erfahrene Soldaten selected; W's work tile there was I),
+     * {@link ClassicPedia#PAGE_FRAMES} after the key, over the screen until
+     * a key or a click; the screen again after it (V #77167).  Nothing with
+     * the cursor elsewhere (a carrier, a button: I).
      */
     void pedia() {
         if (this.leaving || this.asking || this.units == null) return;
+        final double delay = ClassicColonyMoves.ms(ClassicPedia.PAGE_FRAMES);
         final net.sf.freecol.common.model.Tile t = pediaTile();
-        ClassicFrameRecorder.event("colony-pedia", this.colony.getName() + " "
-            + ((t == null) ? "none" : t.getId()));
-        if (t == null) return;
-        this.gesture.cancel();
-        this.blink.stop();
-        this.asking = true;
-        try {
-            this.units.terrainPage(t);
-        } finally {
-            this.asking = false;
-            if (isDisplayable()) {
-                this.blinkOff = false;
-                this.blink.arm();
-            }
+        if (t != null) {
+            showPage(() -> this.units.terrainPage(t, delay), "terrain " + t.getId());
+            return;
         }
-        repaint();
+        final Unit u = pediaUnit();
+        final int job = typePage(u);
+        if (job >= 0) {
+            showPage(() -> this.units.skillPage(job, delay), "skill " + job + " " + u.getId());
+            return;
+        }
+        ClassicFrameRecorder.event("colony-pedia", this.colony.getName() + " none");
     }
 
     /**
-     * The tile F1 is about: the white cursor's (on the 3x3 map), else the
-     * selected colonist's work tile, else null.
+     * The tile F1 is about: the white cursor's (on the 3x3 map), else null.
      *
      * @return The tile, or null.
      */
@@ -1598,8 +1785,18 @@ final class ClassicColonyPanel extends JPanel {
             final ClassicColonyTiles.Cell c = this.tiles.cell(tileCursor);
             if (c != null && c.tile != null) return c.tile;
         }
+        return null;
+    }
+
+    /**
+     * The colonist F1 is about: the selected one while the white cursor
+     * stands on his figure ({@link #CURSOR_OFF_TILES}), else null.
+     *
+     * @return The unit, or null.
+     */
+    Unit pediaUnit() {
         final Unit u = this.selectedUnit;
-        return (u == null || u.isDisposed()) ? null : u.getWorkTile();
+        return (tileCursor != CURSOR_OFF_TILES || u == null || u.isDisposed()) ? null : u;
     }
 
     /**
@@ -1638,22 +1835,34 @@ final class ClassicColonyPanel extends JPanel {
         final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
         int page = 1;
         double delay = delayMs, chain = -1.0;
-        for (int guard = 0; guard < 16; guard++) {
+        for (int guard = 0; guard < 1000; guard++) {
             final ClassicColonyJobs.Menu m = ClassicColonyJobs.menu(t, this.colony, u, kind, page);
             if (m == null) {
                 ClassicFrameRecorder.event("colony-job", u.getId() + " no texts");
                 return;
             }
-            final int answer = ask(ClassicColonyJobs.request(t, m, delay, chain));
+            final int[] helpRow = { -1 };
+            final int answer = ask(ClassicColonyJobs.request(t, m, delay, chain,
+                                                             r -> helpRow[0] = r));
             if (answer == ClassicAdvisorBox.Bar.HELP) {
-                // F1, as the footer says: the menu goes, the Colonopedia
-                // page of the cursor's tile comes (part W; V clip 020: the
-                // pages 143 and 103 frames after a J2 closed, #76921,
-                // #78325; the key unseen: I).
+                // F1 (or a right-click on a row), as the footer says: the
+                // menu goes, the skill page of the job under the bar comes
+                // (fixer A after part X: V clip 049 #3106 «Pelzjäger», clip
+                // 052 #15108 «Tabakpflanzer» with the bar moved there, the
+                // menu gone at the key, the page 21-22 frames later); after
+                // it the same menu again, its bar on its default row (V 052
+                // #15840, 049 #3828: 7 frames after the page went).
+                final int job = helpJob(m, helpRow[0], u);
                 ClassicFrameRecorder.event("colony-job", u.getId() + " " + kind + " " + page
-                    + " help");
-                pedia();
-                return;
+                    + " help " + job);
+                if (job >= 0 && this.units != null) {
+                    showPage(() -> this.units.skillPage(job,
+                        ClassicColonyMoves.ms(ClassicPedia.PAGE_FRAMES)), "skill " + job);
+                }
+                if (this.leaving || this.colony.isDisposed() || u.isDisposed()) return;
+                delay = 0.0;
+                chain = ClassicColonyMoves.ms(ClassicPedia.AGAIN_FRAMES);
+                continue;
             }
             if (answer < 0 || answer >= m.rows.size()) {
                 ClassicFrameRecorder.event("colony-job", u.getId() + " " + kind + " " + page
@@ -1674,6 +1883,25 @@ final class ClassicColonyPanel extends JPanel {
             pick(u, kind, row);
             return;
         }
+    }
+
+    /**
+     * The skill page F1 shows from a job menu's row: the row's work or
+     * role (V clip 052: «Tabakpflanzer» under the bar, an Erfahrene
+     * Soldaten's menu, the entry «MEISTER-TABAKPFLANZER»); on
+     * «(SPEZIALFÄHIGKEIT LÖSCHEN)» and «(Weitere)» his type's (I: not
+     * seen).
+     *
+     * @param m The menu.
+     * @param row The barred row, or -1.
+     * @param u The colonist.
+     * @return The NAMES {@code @JOB} row, or -1.
+     */
+    static int helpJob(ClassicColonyJobs.Menu m, int row, Unit u) {
+        if (m != null && row >= 0 && row < m.rows.size() && m.rows.get(row).job >= 0) {
+            return m.rows.get(row).job;
+        }
+        return typePage(u);
     }
 
     /**
@@ -2188,6 +2416,34 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
+     * {@link #freeze()} with the port's and the warehouse's redraws at
+     * their own times (frames after now; «Alle Waren entladen.»: the hold
+     * 8, the warehouse 9, V clip 050 #33922 -&gt; #33930, #33931).
+     *
+     * @param portFrames The port's redraw.
+     * @param storeFrames The warehouse's redraw.
+     */
+    private void freeze(int portFrames, int storeFrames) {
+        this.frozenAmounts = ClassicColonyChrome.amounts(this.colony);
+        this.frozenPort = this.port;
+        final int[] mine = this.frozenAmounts;
+        final ClassicColonyPort.Model minePort = this.frozenPort;
+        this.later.run((int) Math.round(ClassicColonyGoods.ms(portFrames)), () -> {
+                if (this.frozenPort == minePort && this.frozenAmounts == mine) {
+                    this.frozenPort = null;
+                }
+                repaint();
+            });
+        this.later.run((int) Math.round(ClassicColonyGoods.ms(storeFrames)), () -> {
+                if (this.frozenAmounts == mine) {
+                    this.frozenAmounts = null;
+                    this.frozenPort = null;
+                }
+                repaint();
+            });
+    }
+
+    /**
      * After a transfer: the recorder's event and, if it moved, the result
      * notice (2 frames after a drop, 1 after an amount box); a refused one
      * ends the drag's notice and shows the screen as it is.
@@ -2246,9 +2502,9 @@ final class ClassicColonyPanel extends JPanel {
      * row 1, 5 frames after the release (I: the clip's 25-60 frames after
      * the press are a click's).  «Nach vorne bewegen.» puts it in front,
      * selected (V ×4); «Keine Veränderungen.» and Escape change nothing
-     * (V); «Befehle aufheben.», «Wache.», «Im Hafen ankern» and «Alle
-     * Waren entladen.» are FreeCol's clear orders, sentry, fortify and
-     * unload into the colony (I: not seen).
+     * (V); «Befehle aufheben.», «Wache.» and «Im Hafen ankern» are
+     * FreeCol's clear orders, sentry and fortify (I: not seen); «Alle Waren
+     * entladen.» as {@link #unloadAll}.
      *
      * @param c The carrier.
      */
@@ -2288,10 +2544,7 @@ final class ClassicColonyPanel extends JPanel {
             done = igc.changeState(c, Unit.UnitState.FORTIFYING);
             break;
         case UNLOAD:
-            for (net.sf.freecol.common.model.Goods g
-                     : new ArrayList<>(c.getCompactGoodsList())) {
-                if (!igc.unloadCargo(g, false)) done = false;
-            }
+            done = unloadAll(t, c);
             break;
         default:
             break;
@@ -2303,6 +2556,58 @@ final class ClassicColonyPanel extends JPanel {
         recordStill("carrier " + c.getId());
     }
 
+
+    /**
+     * «Alle Waren entladen.» in a colony's port (fixer A after part X: V
+     * clip 050 #33922, the merchantman's 40 tools into Base): no box, the
+     * top line «40 Werkzeuge bewegt nach Base» in gold at once (the box's
+     * close), for 138 frames; the hold empties 8 frames later, the
+     * warehouse's number 9; the carrier stays selected, its frame white
+     * until 33 frames after the close, then green and white every 23 (V
+     * #33955, #33978).  Every good goes ashore (FreeCol's
+     * {@code unloadCargo}); with several goods the notice names the first
+     * (I: not seen; nor a boycott or a full warehouse).
+     *
+     * @param t The pack's texts, or null.
+     * @param c The carrier.
+     * @return True if every good went ashore.
+     */
+    private boolean unloadAll(ClassicText t, Unit c) {
+        final List<net.sf.freecol.common.model.Goods> cargo
+            = new ArrayList<>(c.getCompactGoodsList());
+        if (cargo.isEmpty()) return true;
+        freeze(ClassicColonyGoods.UNLOAD_ALL_HOLD_FRAMES, ClassicColonyGoods.UNLOAD_ALL_STORE_FRAMES);
+        final InGameController igc = igc();
+        boolean done = true;
+        String notice = null;
+        for (net.sf.freecol.common.model.Goods g : cargo) {
+            final int n = g.getAmount();
+            final GoodsType gt = g.getType();
+            if (!igc.unloadCargo(g, false)) {
+                done = false;
+                continue;
+            }
+            if (notice == null) {
+                notice = ClassicColonyGoods.movedNotice(t, n, gt, this.colony.getName());
+            }
+            ClassicFrameRecorder.event("colony-goods", "unload-all " + n + " " + gt.getSuffix()
+                + " " + c.getType().getSuffix() + " warehouse=" + this.colony.getGoodsCount(gt));
+        }
+        if (notice == null) {
+            this.frozenAmounts = null;
+            this.frozenPort = null;
+        } else {
+            showNotice(notice);
+        }
+        this.selectedCarrier = c;
+        tileCursor = CURSOR_CARRIER;
+        if (isDisplayable()) {
+            this.blinkOff = false;
+            this.blink.armFrom(this.clock.now() + Math.round(ClassicColonyGoods.ms(
+                ClassicColonyGoods.UNLOAD_ALL_BLINK_FRAMES) * 1_000_000.0));
+        }
+        return done;
+    }
 
     /**
      * A carrier's icon in its box: its sprite as the port draws it (the
@@ -2337,10 +2642,34 @@ final class ClassicColonyPanel extends JPanel {
     void openBuildList(double delayMs) {
         final ClassicPackFiles pack = ClassicPackFiles.runtime();
         final ClassicText t = ClassicText.load(pack);
-        final List<ClassicColonyBuild.Row> rows = ClassicColonyBuild.rows(this.colony, t);
-        final ClassicAdvisorBox.Request r = ClassicColonyBuild.request(t,
-            (pack == null) ? null : pack.font(ClassicFont.TINY), rows, delayMs);
-        final int answer = ask(r);
+        double delay = delayMs, chain = -1.0;
+        List<ClassicColonyBuild.Row> rows = null;
+        int answer = ClassicAdvisorBox.Bar.DISMISSED;
+        for (int round = 0; round < 1000; round++) {
+            rows = ClassicColonyBuild.rows(this.colony, t);
+            final int[] helpRow = { -1 };
+            answer = ask(ClassicColonyBuild.request(t,
+                (pack == null) ? null : pack.font(ClassicFont.TINY), rows, delay, chain,
+                r -> helpRow[0] = r));
+            if (answer != ClassicAdvisorBox.Bar.HELP) break;
+            // F1 or a right-click on a building's row (fixer A after part
+            // X, the colony review's must 4: V clip 046 #71516 the bar on
+            // «SÄGEWERK» at the right press, the list gone at the release
+            // #71550, the page #71579, the list again #71721 with its bar
+            // on the current build): the page, the build unchanged.
+            final ClassicColonyBuild.Row hr = (helpRow[0] < 0 || helpRow[0] >= rows.size())
+                ? null : rows.get(helpRow[0]);
+            if (hr != null && ClassicColonyBuild.hasPage(hr) && this.units != null) {
+                final net.sf.freecol.common.model.BuildingType bt
+                    = (net.sf.freecol.common.model.BuildingType) hr.type;
+                showPage(() -> this.units.buildingPage(bt,
+                    ClassicColonyMoves.ms(ClassicPedia.LIST_PAGE_FRAMES)),
+                    "building " + bt.getSuffix());
+            }
+            if (this.leaving || this.colony.isDisposed()) return;
+            delay = 0.0;
+            chain = ClassicColonyMoves.ms(ClassicPedia.AGAIN_FRAMES);
+        }
         if (answer < 0 || answer >= rows.size()) {
             ClassicFrameRecorder.event("colony-build", this.colony.getName() + " none");
             refresh();
@@ -3755,11 +4084,14 @@ final class ClassicColonyPanel extends JPanel {
      * ({@link ClassicColonyRight#modeAtOpening}, spec §0.1 decision 8).
      * «Zur Kolonie zoomen.» of a building's @BUILT: the hammer panel, the
      * dissolve of the new building and ÄNDERN blinking against the white
-     * cursor, which stays where it stood (V clip 020 visits 10, 13, 20); any
-     * other opening neither (part W: the trigger is the zoom row, M4.11; I
-     * for an opening by a click in the completion's turn, not seen).  A
-     * ship's docking: that ship selected, the white cursor on it (V clip008
-     * #30022).
+     * cursor, which stays where it stood (V clip 020 visits 10, 13, 20).  A
+     * click on the map in the completion's turn (after «Runde
+     * fortsetzen.»): no dissolve, the new building there at once, but
+     * ÄNDERN blinks against the white cursor, its first light 24 frames
+     * after the screen, then every 23 (fixer A after part X: V clip 049
+     * #33109 -&gt; #33133, the cursor on the band's first figure; I: a
+     * second opening in that turn, the other openings).  A ship's docking:
+     * that ship selected, the white cursor on it (V clip008 #30022).
      *
      * @param how How it was opened.
      * @param built The building a @BUILT zoom dissolves in, or null for
@@ -3770,6 +4102,7 @@ final class ClassicColonyPanel extends JPanel {
                 net.sf.freecol.common.model.BuildingType built, Unit carrier) {
         this.mode = this.buttonMode = ClassicColonyRight.modeAtOpening(how, lastMode);
         lastMode = this.mode;
+        this.completionBlink = false;
         if (how == ClassicColonyRight.Opening.BUILT_BUILDING) {
             // The white cursor stays where it stands (V #57671: on the
             // selected colonist's tile, #105689: on his figure); ÄNDERN
@@ -3778,6 +4111,12 @@ final class ClassicColonyPanel extends JPanel {
             final net.sf.freecol.common.model.BuildingType done = (built != null)
                 ? built : ClassicColonyBuild.completed(this.colony);
             if (done != null && this.colony.getBuilding(done) != null) startDissolve(done);
+        } else if ((how == null || how == ClassicColonyRight.Opening.OTHER)
+                   && ClassicColonyBuild.completedThisTurn(this.colony)) {
+            // A click in the completion's turn: the blink alone, in the
+            // screen's own phase (its first toggle a half-period after the
+            // opening: V clip 049 +24).
+            this.completionBlink = true;
         }
         // Who is selected (M4.8 target 9): the founder at a founding, else
         // the one selected last here, else the row's first figure.
@@ -3801,6 +4140,13 @@ final class ClassicColonyPanel extends JPanel {
             tileCursor = CURSOR_CARRIER;
             ClassicFrameRecorder.event("colony-carrier", this.colony.getId() + " docked "
                 + carrier.getId());
+        }
+        // The white cursor left on a carrier (a press on one, a docking)
+        // in a colony with none in port would stand nowhere: the centre,
+        // as at a first opening (fixer A after part X, the colony review's
+        // later item; V #2260; I: where the original puts it).
+        if (tileCursor == CURSOR_CARRIER && ClassicColonyPort.carriers(this.colony).isEmpty()) {
+            tileCursor = ClassicColonyLayout.CENTRE_TILE;
         }
         repaint();
     }

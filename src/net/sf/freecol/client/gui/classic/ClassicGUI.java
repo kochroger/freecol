@@ -2471,6 +2471,21 @@ public class ClassicGUI extends GUI {
         public void terrainPage(Tile tile) {
             showTerrainPage(tile);
         }
+
+        @Override
+        public void terrainPage(Tile tile, double delayMs) {
+            showTerrainPage(tile, delayMs);
+        }
+
+        @Override
+        public void skillPage(int job, double delayMs) {
+            showSkillPage(job, delayMs);
+        }
+
+        @Override
+        public void buildingPage(BuildingType type, double delayMs) {
+            showBuildingPage(type, delayMs);
+        }
     }
 
     /**
@@ -4653,6 +4668,8 @@ public class ClassicGUI extends GUI {
     boolean openColonyScreen(Colony colony, Unit carrier,
                              ClassicColonyRight.Opening how, BuildingType built,
                              boolean docked) {
+        final ClassicColonyPanel[] made = { null };
+        final ClassicAdvisorLayer[] madeBoxes = { null };
         try {
             final boolean founding = how == ClassicColonyRight.Opening.FOUNDING;
             // The first colony's woodcut, before its screen (W9, D4).
@@ -4689,6 +4706,8 @@ public class ClassicGUI extends GUI {
             final ClassicAdvisorLayer boxes = new ClassicAdvisorLayer(
                 new ScreenBoxHost(ClassicPackFiles.runtime()),
                 waitClock(), SwingUtilities::invokeLater, true);
+            made[0] = panel;
+            madeBoxes[0] = boxes;
             // Built while the map shows after the woodcut, shown at
             // its time (V: 328 ms, clip008 #4009 -> #4032).
             if (due != 0L) {
@@ -4738,7 +4757,35 @@ public class ClassicGUI extends GUI {
         } catch (Exception e) {
             logger.log(Level.WARNING, "ClassicGUI: could not show colony "
                 + "screen for " + colony.getId(), e);
+            // A failure in the push's paint (or before the screen was
+            // taken as ours) must not leave a screen nobody can close
+            // (fixer A after part X, the colony review's later item).
+            if (made[0] != null && this.colonyPanel != made[0]) {
+                dropFailedScreen(made[0], madeBoxes[0], "colony");
+                made[0].dispose();
+            }
             return false;
+        }
+    }
+
+    /**
+     * Take a screen away whose opening failed after its push (fixer A after
+     * part X: the push paints at once, a paint failure left the screen up
+     * with no way to close it, the map hidden and the turn held): its
+     * boxes go, it leaves the stack, the map or the screen under it shows.
+     *
+     * @param screen The screen.
+     * @param boxes Its box layer, or null.
+     * @param what For the recorder.
+     */
+    private void dropFailedScreen(JComponent screen, ClassicAdvisorLayer boxes, String what) {
+        try {
+            if (boxes != null) boxes.dispose();
+            if (this.screens != null) this.screens.pop(screen, "failed");
+            ClassicFrameRecorder.event("screen-failed", what);
+        } catch (RuntimeException ex) {
+            logger.log(Level.WARNING, "ClassicGUI: could not take the failed " + what
+                + " screen away", ex);
         }
     }
 
@@ -4823,6 +4870,8 @@ public class ClassicGUI extends GUI {
         if (player == null || player.getEurope() == null) return null;
         this.europeAskedAt = waitClock().now();
         SwingUtilities.invokeLater(() -> {
+            final ClassicEuropePanel[] made = { null };
+            final ClassicAdvisorLayer[] madeBoxes = { null };
             try {
                 if (europeHosted() && this.europePanel.europe() == player.getEurope()) {
                     this.europeAskedAt = 0L;
@@ -4852,6 +4901,8 @@ public class ClassicGUI extends GUI {
                 final ClassicAdvisorLayer boxes = new ClassicAdvisorLayer(
                     new ScreenBoxHost(pack), waitClock(),
                     SwingUtilities::invokeLater, true);
+                made[0] = panel;
+                madeBoxes[0] = boxes;
                 // @TUTORIAL17 is timed from here, before the push's paint
                 // (its first one loads the pictures, ~0.07-0.12 s), as on
                 // P (the Q review; V: landfall #27917 -> #27956).
@@ -4880,6 +4931,11 @@ public class ClassicGUI extends GUI {
             } catch (Exception e) {
                 logger.log(Level.WARNING, "ClassicGUI: could not show Europe "
                     + "screen", e);
+                // As the colony's (fixer A after part X): no screen left
+                // up that nobody can close.
+                if (made[0] != null && this.europePanel != made[0]) {
+                    dropFailedScreen(made[0], madeBoxes[0], "europe");
+                }
             }
         });
         return null;
@@ -6515,6 +6571,19 @@ public class ClassicGUI extends GUI {
      * @param tile The tile.
      */
     void showTerrainPage(Tile tile) {
+        showTerrainPage(tile, 0.0);
+    }
+
+    /**
+     * {@link #showTerrainPage(Tile)} a time after now (F1 and the
+     * right-click, {@link ClassicPedia#PAGE_FRAMES}); the page goes
+     * {@link ClassicPedia#PAGE_CLOSE_FRAMES} after its key (fixer A after
+     * part X).  EDT only.
+     *
+     * @param tile The tile.
+     * @param delayMs When the page comes after now.
+     */
+    void showTerrainPage(Tile tile, double delayMs) {
         final TileType type = pediaType((tile == null) ? null : tile.getType());
         if (type == null) return;
         final ClassicPackFiles pack = ClassicPackFiles.runtime();
@@ -6526,9 +6595,99 @@ public class ClassicGUI extends GUI {
         }
         ClassicFrameRecorder.event("pedia", "terrain " + type.getId()
             + " " + tile.getId());
-        this.colonyPrompter.ask(ClassicAdvisorBox.Request.builder("pedia terrain")
-            .freeColText(Messages.getName(type)).picture(page)
-            .stopgap(Messages.getName(type), null).build());
+        this.colonyPrompter.ask(pageRequest("pedia terrain", Messages.getName(type), page,
+                                            delayMs));
+    }
+
+    /**
+     * A Colonopedia page over the colony screen as a box: it comes a time
+     * after now, goes {@link ClassicPedia#PAGE_CLOSE_FRAMES} after its key
+     * or click (fixer A after part X).
+     *
+     * @param id The box's id.
+     * @param title The stopgap's title.
+     * @param page The page.
+     * @param delayMs When it comes after now.
+     * @return The request.
+     */
+    static ClassicAdvisorBox.Request pageRequest(String id, String title, BufferedImage page,
+                                                 double delayMs) {
+        return ClassicAdvisorBox.Request.builder(id).freeColText(title).picture(page)
+            .openDelay(delayMs)
+            .closeLag(ClassicColonyMoves.ms(ClassicPedia.PAGE_CLOSE_FRAMES))
+            .stopgap(title, null).build();
+    }
+
+    /**
+     * The Colonopedia's skill page of a NAMES {@code @JOB} row over the
+     * colony screen ({@link ClassicPedia#skillPage}; fixer A after part X:
+     * F1 in the job menu, F1 with a colonist selected, a right-click on a
+     * unit), until a key or a click.  EDT only.
+     *
+     * @param job The row.
+     * @param delayMs When the page comes after now.
+     */
+    void showSkillPage(int job, double delayMs) {
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final BufferedImage page = skillPageImage(pack, ClassicText.load(pack), job, getSpecification());
+        if (page == null) {
+            ClassicFrameRecorder.event("pedia-missing", "skill " + job);
+            return;
+        }
+        ClassicFrameRecorder.event("pedia", "skill " + job);
+        this.colonyPrompter.ask(pageRequest("pedia skill " + job, "Colonopedia", page,
+                                            delayMs));
+    }
+
+    /**
+     * @param pack The pack, or null.
+     * @param text The texts, or null.
+     * @param job The NAMES {@code @JOB} row.
+     * @param spec The rules, or null.
+     * @return The skill page, or null without the pack's texts.
+     */
+    static BufferedImage skillPageImage(ClassicPackFiles pack, ClassicText text, int job,
+                                        Specification spec) {
+        if (pack == null || text == null) return null;
+        return ClassicPedia.skillPage(ClassicPedia.load(pack), text,
+            pack.font(ClassicFont.TINY), pack.image(ClassicPedia.WOODPANL_KEY), job, spec,
+            name -> pack.image(ClassicPackFiles.ssKey(name)));
+    }
+
+    /**
+     * The Colonopedia's page of a building type over the colony screen
+     * ({@link ClassicPedia#buildingPage}; fixer A after part X: F1 or a
+     * right-click in the build list), until a key or a click.  EDT only.
+     *
+     * @param type The building type.
+     * @param delayMs When the page comes after now.
+     */
+    void showBuildingPage(BuildingType type, double delayMs) {
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final BufferedImage page = buildingPageImage(pack, ClassicText.load(pack), type);
+        if (page == null) {
+            ClassicFrameRecorder.event("pedia-missing", "building "
+                + ((type == null) ? "-" : type.getSuffix()));
+            return;
+        }
+        ClassicFrameRecorder.event("pedia", "building " + type.getSuffix());
+        this.colonyPrompter.ask(pageRequest("pedia building " + type.getSuffix(),
+                                            Messages.getName(type), page, delayMs));
+    }
+
+    /**
+     * @param pack The pack, or null.
+     * @param text The texts, or null.
+     * @param type The building type.
+     * @return Its page, or null without the pack's texts.
+     */
+    static BufferedImage buildingPageImage(ClassicPackFiles pack, ClassicText text,
+                                           BuildingType type) {
+        if (pack == null || text == null || type == null) return null;
+        final ClassicColonyBuildings.Assets art = ClassicColonyBuildings.Assets.load(pack);
+        return ClassicPedia.buildingPage(ClassicPedia.load(pack), text,
+            pack.font(ClassicFont.TINY), pack.image(ClassicPedia.WOODPANL_KEY), type,
+            art::building, name -> pack.image(ClassicPackFiles.ssKey(name)));
     }
 
     /**
