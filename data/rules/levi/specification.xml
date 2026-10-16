@@ -388,10 +388,16 @@
         <booleanOption id="model.option.originalDropJobs"
                        defaultValue="true"/>
         <!-- The original's price for KAUFEN on the colony screen (part V,
-             build spec M4.10 R1; clip 020 #94078: 494 = 13 x 38 missing
-             hammers, dago-colony2: 1248 = 13 x 96): 13 per missing
-             hammer, the missing tools at the market's ask (I).  FreeCol
-             (classic, freecol): 20 per hammer, the tools 10 % dearer. -->
+             build spec M4.10 R1; part X): 13 per missing hammer and 6 per
+             missing tool, all doubled while no hammer of the build is
+             stored yet.  All 23 KAUFEN boxes of Roger's playthrough 4
+             fit (clip 048 #70208: 4760 = 2 x (13 x 160 + 6 x 50), the
+             hammer area empty; 046 #119741: 484 = 13 x 28 + 6 x 20; 048
+             #102145: 300 = 6 x 50), and so do clip 020 #94078 (494 = 13 x
+             38) and dago-colony2 (1248 = 13 x 96).  Amsterdam's tools
+             stood at 1/2 the whole time: whether the 6 follows the
+             market is not seen (I).  FreeCol (classic, freecol): 20 per
+             hammer, the tools at the market's ask plus 10 %. -->
         <booleanOption id="model.option.originalBuildPrice"
                        defaultValue="true"/>
         <!-- The original's completed build (part V, build spec M4.10 R4;
@@ -417,6 +423,46 @@
              sails into one of our colonies has no moves left; it sails on
              next turn.  FreeCol (classic, freecol): only the move's cost. -->
         <booleanOption id="model.option.dockingEndsMoves"
+                       defaultValue="true"/>
+        <!-- The original's colony production (part X, spec
+             freecol-spike-results\x-prep\production-rules.md; seven
+             colonies of the clips and dago's save COLONY00).  Classic and
+             freecol keep FreeCol's yields; they have none of these
+             options.
+             The colony's centre square: FreeCol's unattended value + 2
+             food and + 1 of the second good, then the plow, the
+             resource and the Sons of Liberty as FreeCol has them (clip
+             020 #2260 swamp, plowed and with a road: 6 food + 3 sugar,
+             FreeCol 4 + 2; #14817 rain forest 4 + 2; #123003 broadleaf
+             4 + 3 furs; clip008 #4032 conifer 4 + 3; dago's Fur Town at
+             100 % 6 + 5).  Only the colony's own centre: the natives'
+             land is not touched. -->
+        <booleanOption id="model.option.originalColonyCenter"
+                       defaultValue="true"/>
+        <!-- Lumber: an expert lumberjack gets a road's + 2 once, not
+             doubled (clip 020 #75440: 10 on tropical forest with a road,
+             a colonist 6 there, #93178; FreeCol 12); the Sons of Liberty
+             bonus counts twice for lumber (dago's Fur Town E: 22 at
+             100 %, FreeCol 20; its Base NE 30 with prime timber; I+). -->
+        <booleanOption id="model.option.originalLumber"
+                       defaultValue="true"/>
+        <!-- The expert fisherman: + 2 fish, not FreeCol's + 3 (clip 020
+             #46108 and #134173: 6 on a coastal ocean square where a
+             colonist makes 4; clip 048 #13896: 12 on a fishery where an
+             expert farmer makes 7; dago: 10 at 100 %). -->
+        <booleanOption id="model.option.originalFisherman"
+                       defaultValue="true"/>
+        <!-- The horses: half the food surplus, rounded up (dago's Fur
+             City: a surplus of 1 breeds 1 horse; Fur Town: 21 gives 11,
+             10 stored); FreeCol rounds down. -->
+        <booleanOption id="model.option.originalHorseFood"
+                       defaultValue="true"/>
+        <!-- Roads and silver: a road raises silver only on a square with
+             a silver deposit (the manual, p. 27: "Building a road in a
+             mountain square does not increase the production of silver
+             unless there is a silver deposit in the square"); FreeCol
+             everywhere.  A mineral deposit does not count (I). -->
+        <booleanOption id="model.option.originalRoadSilver"
                        defaultValue="true"/>
         <!-- Row 8: capture units under repair when a colony is
              captured. -->

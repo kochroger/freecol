@@ -339,8 +339,10 @@ public class ClassicWoodcutTest extends TestCase {
             ClassicWoodcut.messageWoodcut("combat.raid.building", false));
         assertEquals(ClassicWoodcut.DESTROYED,
             ClassicWoodcut.messageWoodcut("combat.colonyBurned.ours", false));
-        assertEquals(ClassicWoodcut.RAID,
-            ClassicWoodcut.messageWoodcut("combat.raid.ours", false));
+        // The raid's 13 is no notice's own: it comes with the first native
+        // attack on any unit of ours (part X, ClassicWoodcut.raidSlot).
+        assertEquals(-1, ClassicWoodcut.messageWoodcut("combat.raid.ours", false));
+        assertEquals("combat.raid.ours", ClassicWoodcut.SURPRISE_RAID);
         assertEquals(-1, ClassicWoodcut.messageWoodcut("combat.raid.theirs", false));
         assertEquals(-1, ClassicWoodcut.messageWoodcut(null, true));
         assertEquals("model.nation.english",

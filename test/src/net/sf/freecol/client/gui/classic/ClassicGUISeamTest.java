@@ -3269,7 +3269,8 @@ public class ClassicGUISeamTest extends FreeColTestCase {
      * W9/N17: the first meeting with a native nation shows woodcut 3
      * before the first-contact box, once per game (V: clip004's Sioux
      * after the landfall's Arawaks has none); the Aztecs and the Incas have
-     * their own (4, 5), which count as 3 too.  The meeting sound of a
+     * their own (4, 5), which do not count as 3: 3 comes at the first other
+     * tribe (part X, V clip 045 #7864 -&gt; #16290, clip 047 #3839).  The meeting sound of a
      * European nation and a European contact's negotiation show 10, once;
      * a native nation's meeting sound shows nothing.  A woodcut that could
      * not be shown is not marked: it comes at the next trigger.
@@ -3300,17 +3301,43 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         assertEquals(ClassicWoodcut.bit(3) | ClassicWoodcut.bit(4) | ClassicWoodcut.bit(5),
                      gui.woodcutsShown());
         assertEquals(gui.woodcutsShown(), dutch.getClassicWoodcuts());
-        // The Aztecs first: 4, and 3 counts as shown.
+        // The Aztecs first: 4, and 3 still comes at the next tribe (part X,
+        // V clip 045 #7864 the Aztecs, #16290 the Araukaner).
         final Game g2 = getStandardGame();
         final Player d2 = g2.getPlayerByNationId("model.nation.dutch");
         final WoodcutGUI gui2 = new WoodcutGUI(g2, d2);
         onEdt(() -> gui2.showFirstContactDialog(d2, g2.getPlayerByNationId("model.nation.aztec"),
                                                 null, 3, b -> { }));
+        assertFalse(gui2.woodcutShown(ClassicWoodcut.NATIVES));
         onEdt(() -> gui2.showFirstContactDialog(d2, g2.getPlayerByNationId("model.nation.tupi"),
                                                 null, 3, b -> { }));
-        assertEquals(List.of("woodcut 4", "first-contact aztec", "first-contact tupi"),
+        onEdt(() -> gui2.showFirstContactDialog(d2, g2.getPlayerByNationId("model.nation.sioux"),
+                                                null, 3, b -> { }));
+        assertEquals(List.of("woodcut 4", "first-contact aztec", "woodcut 3",
+                             "first-contact tupi", "first-contact sioux"),
                      meetings(gui2.order));
         assertTrue(gui2.woodcutShown(ClassicWoodcut.NATIVES));
+        assertEquals(ClassicWoodcut.bit(3) | ClassicWoodcut.bit(4), d2.getClassicWoodcuts());
+        // The Incas, then the Aztecs, then another tribe: 5, 4, 3.
+        final Game g4 = getStandardGame();
+        final Player d4 = g4.getPlayerByNationId("model.nation.dutch");
+        final WoodcutGUI gui4 = new WoodcutGUI(g4, d4);
+        for (String n : new String[] { "inca", "aztec", "apache", "inca" }) {
+            onEdt(() -> gui4.showFirstContactDialog(d4,
+                g4.getPlayerByNationId("model.nation." + n), null, 3, b -> { }));
+        }
+        assertEquals(List.of("woodcut 5", "first-contact inca", "woodcut 4",
+                             "first-contact aztec", "woodcut 3", "first-contact apache",
+                             "first-contact inca"), meetings(gui4.order));
+        // A woodcut that ended (the box layer's call) marks itself only.
+        final Game g5 = getStandardGame();
+        final Player d5 = g5.getPlayerByNationId("model.nation.dutch");
+        final WoodcutGUI gui5 = new WoodcutGUI(g5, d5);
+        onEdt(() -> gui5.woodcutDone(ClassicWoodcut.AZTECS));
+        onEdt(() -> gui5.woodcutDone(ClassicWoodcut.INCAS));
+        assertTrue(gui5.woodcutShown(ClassicWoodcut.AZTECS));
+        assertFalse(gui5.woodcutShown(ClassicWoodcut.NATIVES));
+        assertEquals(ClassicWoodcut.bit(4) | ClassicWoodcut.bit(5), d5.getClassicWoodcuts());
         // Europeans: the native meeting sound shows nothing, the European's 10.
         gui.order.clear();
         onEdt(() -> gui.playSound("sound.event.meet." + arawak.getNationId()));
@@ -3375,10 +3402,12 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             msg.apply("combat.raid.ours", dutch))));
         // The arrivals in Europe are no boxes (W13: the band and Europe
         // at the turn start); the first laden one still brings its woodcut.
+        // The raid's 13 comes after the surprise raid's notice (part X, V
+        // clip 048 #63172 @INDIANSURPRISE -> #63305 the woodcut).
         assertEquals(List.of("woodcut 9",
                              "woodcut 11", "message combat.raid.building",
                              "woodcut 12", "message combat.colonyBurned.ours",
-                             "woodcut 13", "message combat.raid.ours",
+                             "message combat.raid.ours", "woodcut 13",
                              "message combat.raid.ours"), gui.order);
         // The Fountain of Youth: its recruit box first brings it, its
         // notice later none.
@@ -3399,6 +3428,259 @@ public class ClassicGUISeamTest extends FreeColTestCase {
             };
         onEdt(() -> gui2.showModelMessages(List.of(msg.apply("combat.raid.ours", dutch))));
         assertEquals(List.of("woodcut 13"), gui2.order);
+    }
+
+    /**
+     * Part X: woodcut 13 «INDIANERÜBERFALL» comes at the first native
+     * attack on any unit of ours, not only a colony's surprise raid (V
+     * clip 045 #32815: the Araukaner attack our pioneer in the field, the
+     * woodcut before the fight's KAMPFANALYSE #32934; 048 #63305 at Silver
+     * City after @INDIANSURPRISE).  The attack (FreeCol's animation, which
+     * the server sends to a defender's owner) is noted in the natives'
+     * phase; the turn start's notices bring the woodcut before their first
+     * combat notice (after a surprise raid's notice when there is one),
+     * once per game.  Our own attack on natives, a European's attack on
+     * us and a fight we only watch bring none.
+     */
+    public void testTheRaidWoodcutAtTheFirstNativeAttack() throws Exception {
+        final Game game = getStandardGame();
+        final Map map = getTestMap(true);
+        game.changeMap(map);
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Player sioux = game.getPlayerByNationId("model.nation.sioux");
+        final Player french = game.getPlayerByNationId("model.nation.french");
+        final Unit pioneer = new ServerUnit(game, map.getTile(5, 5), dutch,
+            spec().getUnitType("model.unit.hardyPioneer"));
+        final Unit brave = new ServerUnit(game, map.getTile(6, 5), sioux,
+            spec().getUnitType("model.unit.brave"));
+        final Unit soldier = new ServerUnit(game, map.getTile(7, 5), french,
+            spec().getUnitType("model.unit.veteranSoldier"));
+        final net.sf.freecol.common.model.ModelMessage price
+            = new net.sf.freecol.common.model.ModelMessage(
+                net.sf.freecol.common.model.ModelMessage.MessageType.MARKET_PRICES,
+                "model.market.priceIncrease", dutch);
+        final net.sf.freecol.common.model.ModelMessage result
+            = new net.sf.freecol.common.model.ModelMessage(
+                net.sf.freecol.common.model.ModelMessage.MessageType.COMBAT_RESULT,
+                "combat.unitDemoted.ours", dutch, pioneer);
+        final WoodcutGUI gui = new WoodcutGUI(game, dutch);
+        // Our attack on the natives, a European's on us: no woodcut.
+        onEdt(() -> gui.animateUnitAttack(pioneer, brave, pioneer.getTile(),
+                                          brave.getTile(), true));
+        onEdt(() -> gui.animateUnitAttack(soldier, pioneer, soldier.getTile(),
+                                          pioneer.getTile(), true));
+        onEdt(() -> gui.showReportTurnPanel(List.of(result)));
+        assertEquals(List.of("message combat.unitDemoted.ours"), gui.order);
+        assertFalse(ClassicWoodcut.nativeAttackOn(pioneer, brave, dutch));
+        assertFalse(ClassicWoodcut.nativeAttackOn(soldier, pioneer, dutch));
+        assertFalse(ClassicWoodcut.nativeAttackOn(brave, soldier, dutch));
+        assertTrue(ClassicWoodcut.nativeAttackOn(brave, pioneer, dutch));
+        // The natives attack our pioneer in the field: the next turn start
+        // brings 13 before the fight's notice (after the other notices
+        // before it), not a notice of our own turn before that.
+        gui.order.clear();
+        onEdt(() -> gui.animateUnitAttack(brave, pioneer, brave.getTile(),
+                                          pioneer.getTile(), false));
+        onEdt(() -> gui.showModelMessages(List.of(price)));
+        assertEquals(List.of("message model.market.priceIncrease"), gui.order);
+        onEdt(() -> gui.showReportTurnPanel(List.of(price, result)));
+        assertEquals(List.of("message model.market.priceIncrease",
+                             "message model.market.priceIncrease", "woodcut 13",
+                             "message combat.unitDemoted.ours"), gui.order);
+        assertTrue(gui.woodcutShown(ClassicWoodcut.RAID));
+        // Once per game: the next attack, a surprise raid, none.
+        gui.order.clear();
+        onEdt(() -> gui.animateUnitAttack(brave, pioneer, brave.getTile(),
+                                          pioneer.getTile(), true));
+        onEdt(() -> gui.showReportTurnPanel(List.of(result)));
+        assertEquals(List.of("message combat.unitDemoted.ours"), gui.order);
+        // A surprise raid's notice alone (the last box): the woodcut after it.
+        final WoodcutGUI gui4 = new WoodcutGUI(game, dutch);
+        final net.sf.freecol.common.model.ModelMessage raid
+            = new net.sf.freecol.common.model.ModelMessage(
+                net.sf.freecol.common.model.ModelMessage.MessageType.COMBAT_RESULT,
+                "combat.raid.ours", dutch, dutch);
+        onEdt(() -> gui4.showReportTurnPanel(List.of(raid)));
+        assertEquals(List.of("message combat.raid.ours", "woodcut 13"), gui4.order);
+        // In a new game: the attack's notices all dropped, the woodcut alone.
+        final WoodcutGUI gui2 = new WoodcutGUI(game, dutch) {
+                @Override
+                List<net.sf.freecol.common.model.ModelMessage> noticesShown(
+                    List<net.sf.freecol.common.model.ModelMessage> messages) {
+                    return new ArrayList<>();
+                }
+            };
+        onEdt(() -> gui2.animateUnitAttack(brave, pioneer, brave.getTile(),
+                                           pioneer.getTile(), false));
+        onEdt(() -> gui2.showReportTurnPanel(List.of(result)));
+        assertEquals(List.of("woodcut 13"), gui2.order);
+        // A woodcut that could not be shown is not marked: the next attack brings it.
+        final WoodcutGUI gui3 = new WoodcutGUI(game, dutch);
+        gui3.shows = ClassicAdvisorLayer.NOT_SHOWN;
+        onEdt(() -> gui3.animateUnitAttack(brave, pioneer, brave.getTile(),
+                                           pioneer.getTile(), false));
+        onEdt(() -> gui3.showReportTurnPanel(List.of(result)));
+        assertFalse(gui3.woodcutShown(ClassicWoodcut.RAID));
+        gui3.shows = 1L;
+        gui3.order.clear();
+        onEdt(() -> gui3.showReportTurnPanel(List.of(result)));
+        assertEquals("no attack since: none", List.of("message combat.unitDemoted.ours"),
+                     gui3.order);
+        gui3.order.clear();
+        onEdt(() -> gui3.animateUnitAttack(brave, pioneer, brave.getTile(),
+                                           pioneer.getTile(), false));
+        onEdt(() -> gui3.showReportTurnPanel(List.of(result)));
+        assertEquals(List.of("woodcut 13", "message combat.unitDemoted.ours"), gui3.order);
+    }
+
+    /**
+     * A client of the server's game with FreeCol's real controller and a
+     * classic GUI of the test (ClassicColonyServerScene's pattern).
+     */
+    private static net.sf.freecol.client.FreeColClient raidClient(Game game, Player me,
+                                                                  ClassicGUI gui)
+        throws Exception {
+        final Class<?> uc = Class.forName("sun.misc.Unsafe");
+        final java.lang.reflect.Field theUnsafe = uc.getDeclaredField("theUnsafe");
+        theUnsafe.setAccessible(true);
+        final net.sf.freecol.client.FreeColClient fcc = (net.sf.freecol.client.FreeColClient)uc
+            .getMethod("allocateInstance", Class.class)
+            .invoke(theUnsafe.get(null), net.sf.freecol.client.FreeColClient.class);
+        for (Object[] f : new Object[][] {
+                { "gui", gui },
+                { "clientOptions", new net.sf.freecol.client.ClientOptions() },
+                { "inGameController", new net.sf.freecol.client.control.InGameController(fcc) },
+                { "inGame", Boolean.TRUE } }) {
+            final java.lang.reflect.Field field = net.sf.freecol.client.FreeColClient.class
+                .getDeclaredField((String)f[0]);
+            field.setAccessible(true);
+            field.set(fcc, f[1]);
+        }
+        fcc.setGame(game);
+        fcc.setMyPlayer(me);
+        return fcc;
+    }
+
+    /**
+     * Part X with the real server and FreeCol's real client controller:
+     * the natives' attack on our pioneer in the open field
+     * ({@code ServerPlayer.csCombat}) reaches our client as the attack's
+     * animation ({@code AnimateAttackMessage} -&gt;
+     * {@code InGameController.animateAttackHandler} -&gt;
+     * {@code ClassicGUI.animateUnitAttack}) and its combat notices; the
+     * turn start's notices then bring woodcut 13 before the fight's first
+     * notice (V clip 045 #32815).  A surprise raid on a colony at peace:
+     * the raid's notice first, the woodcut after it (V clip 048 #63172 -&gt;
+     * #63305).
+     */
+    public void testTheRaidWoodcutThroughTheServer() throws Exception {
+        try {
+            for (boolean colony : new boolean[] { false, true }) {
+                final Game game = ServerTestHelper.startServerGame(getTestMap(true));
+                final ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+                final ServerPlayer sioux = getServerPlayer(game, "model.nation.sioux");
+                dutch.setAI(false);
+                Player.makeContact(dutch, sioux);
+                final Unit defender, brave;
+                if (colony) {
+                    final Colony c = createStandardColony(2);
+                    brave = new ServerUnit(game, c.getTile().getNeighbourOrNull(Direction.E),
+                        sioux, spec().getUnitType("model.unit.brave"));
+                    defender = c.getDefendingUnit(brave);
+                } else {
+                    // A soldier in the open, who loses his muskets: both
+                    // units stay in the shared game (a slaughtered one
+                    // would be gone before the client's handler looks it
+                    // up; a real client still has it then).
+                    defender = new ServerUnit(game, game.getMap().getTile(5, 5), dutch,
+                        spec().getUnitType("model.unit.veteranSoldier"),
+                        spec().getRole("model.role.soldier"));
+                    brave = new ServerUnit(game, game.getMap().getTile(6, 5), sioux,
+                        spec().getUnitType("model.unit.brave"));
+                }
+                assertNotNull(defender);
+                final WoodcutGUI gui = new WoodcutGUI(game, dutch);
+                final net.sf.freecol.client.FreeColClient fcc = raidClient(game, dutch, gui);
+                final net.sf.freecol.common.networking.ChangeSet cs
+                    = new net.sf.freecol.common.networking.ChangeSet();
+                sioux.csCombat(brave, defender,
+                    fakeAttackResult(net.sf.freecol.common.model.CombatModel.CombatEffectType.WIN,
+                                     brave, defender),
+                    new Random(1), cs);
+                final net.sf.freecol.common.networking.Message m = cs.build(dutch);
+                assertNotNull(m);
+                // The server's messages to our client: the attack's
+                // animation and the notices (FeatureChangeMessage), each
+                // to FreeCol's real client handler (the game objects are
+                // the server's: the other updates are there already).
+                final List<net.sf.freecol.common.networking.Message> parts = new ArrayList<>();
+                if (m instanceof net.sf.freecol.common.networking.MultipleMessage) {
+                    final java.lang.reflect.Field f = net.sf.freecol.common.networking
+                        .MultipleMessage.class.getDeclaredField("messages");
+                    f.setAccessible(true);
+                    @SuppressWarnings("unchecked")
+                    final List<net.sf.freecol.common.networking.Message> l
+                        = (List<net.sf.freecol.common.networking.Message>)f.get(m);
+                    parts.addAll(l);
+                } else {
+                    parts.add(m);
+                }
+                assertTrue(colony + ": the attack is sent to the defender's owner",
+                    parts.stream().anyMatch(p -> p instanceof
+                        net.sf.freecol.common.networking.AnimateAttackMessage));
+                dutch.clearModelMessages();
+                onEdt(() -> {
+                        try {
+                            for (net.sf.freecol.common.networking.Message p : parts) {
+                                if (p instanceof net.sf.freecol.common.networking.AnimateAttackMessage
+                                    || p instanceof net.sf.freecol.common.networking.FeatureChangeMessage) {
+                                    p.clientHandler(fcc);
+                                }
+                            }
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+                onEdt(() -> { });
+                final List<net.sf.freecol.common.model.ModelMessage> notices
+                    = new ArrayList<>(dutch.getModelMessages());
+                assertFalse(colony + ": the fight's notices", notices.isEmpty());
+                onEdt(() -> gui.showReportTurnPanel(notices));
+                final int cut = gui.order.indexOf("woodcut 13");
+                assertTrue(colony + " " + gui.order, cut >= 0);
+                assertEquals(1, java.util.Collections.frequency(gui.order, "woodcut 13"));
+                assertTrue(gui.woodcutShown(ClassicWoodcut.RAID));
+                if (colony) {
+                    assertEquals(gui.order.toString(), "message combat.raid.ours",
+                                 gui.order.get(cut - 1));
+                } else {
+                    assertEquals(gui.order.toString(), 0, cut);
+                    assertTrue(gui.order.size() > 1);
+                }
+                ServerTestHelper.stopServerGame();
+            }
+        } finally {
+            ServerTestHelper.stopServerGame();
+        }
+    }
+
+    /** The raid woodcut's place among a batch's notices (ClassicWoodcut.raidSlot). */
+    public void testTheRaidSlot() {
+        final List<String> ids = List.of("model.market.priceIncrease", "combat.unitDemoted.ours",
+                                         "combat.raid.ours", "combat.raid.goods");
+        final List<Boolean> combat = List.of(false, true, true, true);
+        assertEquals("after the surprise raid's notice", 3,
+                     ClassicWoodcut.raidSlot(ids, combat, false));
+        assertEquals(3, ClassicWoodcut.raidSlot(ids, combat, true));
+        final List<String> field = List.of("model.market.priceIncrease", "combat.unitDemoted.ours");
+        assertEquals("before the first combat notice", 1,
+                     ClassicWoodcut.raidSlot(field, List.of(false, true), true));
+        assertEquals("no attack: none", -1,
+                     ClassicWoodcut.raidSlot(field, List.of(false, true), false));
+        assertEquals("no combat notice: none here", -1,
+                     ClassicWoodcut.raidSlot(List.of("x"), List.of(false), true));
+        assertEquals("the raid notice last", 1,
+                     ClassicWoodcut.raidSlot(List.of("combat.raid.ours"), List.of(true), false));
     }
 
     /**
@@ -3984,10 +4266,12 @@ public class ClassicGUISeamTest extends FreeColTestCase {
     /**
      * W9: the woodcuts a save without the record counts as shown, from the
      * traces of their events (spec G5 section 4.2): explored land, a
-     * colony, a met native nation (the Aztecs, the Incas), a visited
-     * village, goods sold in Europe, a met European.
+     * colony, a met native nation other than the Aztecs and the Incas (3,
+     * part X), the Aztecs (4), the Incas (5), a visited village, goods
+     * sold in Europe, a met European.  An older build's record that
+     * counted 4 as 3 too loses its 3 while no other tribe was met.
      */
-    public void testDerivedWoodcuts() {
+    public void testDerivedWoodcuts() throws Exception {
         final Game game = getStandardGame();
         final Player dutch = game.getPlayerByNationId("model.nation.dutch");
         assertEquals(0, ClassicWoodcut.derived(null, null));
@@ -4008,12 +4292,47 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         dutch.setStance(english, net.sf.freecol.common.model.Stance.PEACE);
         createStandardColony();
         d = ClassicWoodcut.derived(dutch, map);
-        for (int k : new int[] { ClassicWoodcut.COLONY, ClassicWoodcut.NATIVES,
-                                 ClassicWoodcut.AZTECS, ClassicWoodcut.EUROPEANS }) {
+        for (int k : new int[] { ClassicWoodcut.COLONY, ClassicWoodcut.AZTECS,
+                                 ClassicWoodcut.EUROPEANS }) {
             assertTrue("k=" + k, (d & ClassicWoodcut.bit(k)) != 0);
         }
+        assertEquals("the Aztecs met: not 3 (part X)", 0, d & ClassicWoodcut.bit(ClassicWoodcut.NATIVES));
         assertEquals(0, d & ClassicWoodcut.bit(ClassicWoodcut.INCAS));
         assertEquals(0, d & ClassicWoodcut.bit(ClassicWoodcut.FOUNTAIN));
+        // An older build's record (3 marked with the Aztecs' 4): its 3 goes.
+        final int old = ClassicWoodcut.bit(ClassicWoodcut.NATIVES) | ClassicWoodcut.bit(ClassicWoodcut.AZTECS)
+            | ClassicWoodcut.bit(ClassicWoodcut.DISCOVERY);
+        assertEquals(old & ~ClassicWoodcut.bit(ClassicWoodcut.NATIVES),
+                     ClassicWoodcut.correctedRecord(old, dutch));
+        // A 3 without 4 or 5 is a real one: kept.
+        final int real = ClassicWoodcut.bit(ClassicWoodcut.NATIVES) | ClassicWoodcut.bit(ClassicWoodcut.DISCOVERY);
+        assertEquals(real, ClassicWoodcut.correctedRecord(real, dutch));
+        // The game view's load reads the save's record so: 3 comes again.
+        dutch.setClassicWoodcuts(old);
+        final WoodcutGUI gui = new WoodcutGUI(game, dutch);
+        final java.lang.reflect.Method load = ClassicGUI.class.getDeclaredMethod("loadWoodcuts");
+        load.setAccessible(true);
+        onEdt(() -> {
+                try {
+                    load.invoke(gui);
+                } catch (ReflectiveOperationException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        assertTrue(gui.woodcutShown(ClassicWoodcut.AZTECS));
+        assertFalse(gui.woodcutShown(ClassicWoodcut.NATIVES));
+        onEdt(() -> gui.showFirstContactDialog(dutch, game.getPlayerByNationId("model.nation.tupi"),
+                                               null, 3, b -> { }));
+        assertEquals("woodcut 3", gui.order.get(0));
+        // Another tribe met (the Sioux, since destroyed): 3 derived, the record kept.
+        final Player sioux = game.getPlayerByNationId("model.nation.sioux");
+        dutch.setStance(sioux, net.sf.freecol.common.model.Stance.PEACE);
+        sioux.setDead(true);
+        d = ClassicWoodcut.derived(dutch, map);
+        assertTrue((d & ClassicWoodcut.bit(ClassicWoodcut.NATIVES)) != 0);
+        assertTrue(ClassicWoodcut.metOtherNatives(dutch));
+        assertEquals(old, ClassicWoodcut.correctedRecord(old, dutch));
+        assertFalse(ClassicWoodcut.metOtherNatives(null));
     }
 
     /**

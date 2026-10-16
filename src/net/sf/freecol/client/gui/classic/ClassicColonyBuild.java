@@ -70,9 +70,12 @@ import net.sf.freecol.common.option.GameOptions;
  *       Abschluß von Lagerhaus: 494¤.» / «Schatzkammer: 348¤.»), closed
  *       by any key or click (I); enough gold, {@code @BUYME1} with «Na,
  *       dann nicht.» (the bar, Escape) / «Trotzdem abschließen.».  The
- *       price is the colony's ({@code Colony.priceGoodsForBuilding}): in
- *       levi 13 per missing hammer and the tools at the market's ask
- *       (rule R1, {@code model.option.originalBuildPrice}).</li>
+ *       price is the colony's ({@code Colony.priceGoodsForBuilding}, the
+ *       server's too): in levi 13 per missing hammer and 6 per missing
+ *       tool, doubled while no hammer is stored (rule R1, part X,
+ *       {@code model.option.originalBuildPrice}; V all 23 boxes of
+ *       playthrough 4, e.g. 048 #70208 4760 with the hammer area
+ *       empty).</li>
  * </ul>
  */
 final class ClassicColonyBuild {

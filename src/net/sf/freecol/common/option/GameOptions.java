@@ -120,11 +120,15 @@ public class GameOptions {
 
     /**
      * The original's price for finishing a build at once (part V, build
-     * spec M4.10 rule R1; clip 020 #94078: 494 for 38 missing hammers,
-     * dago-colony2: 1248 for 96): 13 per missing hammer, the missing
-     * tools at the market's ask.  FreeCol prices a hammer at the goods
-     * type's price (20) and adds 10 percent to the tools.  On in the
-     * "levi" rules (and a levi save from before the rule).
+     * spec M4.10 rule R1; part X with Roger's playthrough 4): 13 per
+     * missing hammer and 6 per missing tool, the whole doubled while no
+     * hammer of the build is stored yet (all 23 KAUFEN boxes of clips
+     * 045-048 fit, e.g. 048 #70208: 4760 = 2 x (13 x 160 + 6 x 50) with
+     * the hammer area empty, 046 #119741: 484 = 13 x 28 + 6 x 20; clip 020
+     * #94078: 494 for 38 missing hammers, dago-colony2: 1248 for 96).
+     * FreeCol prices a hammer at the goods type's price (20) and the tools
+     * at the market's ask plus 10 percent.  On in the "levi" rules (and a
+     * levi save from before the rule).
      */
     public static final String ORIGINAL_BUILD_PRICE
         = "model.option.originalBuildPrice";
@@ -166,6 +170,59 @@ public class GameOptions {
      */
     public static final String DOCKING_ENDS_MOVES
         = "model.option.dockingEndsMoves";
+
+    /**
+     * The original's colony centre square (part X, change 1 and 2 of
+     * freecol-spike-results/x-prep/production-rules.md): the colony's own
+     * centre makes 2 food and 1 of its second good more than FreeCol's
+     * unattended value (seven colonies of the clips and dago's save, e.g.
+     * clip 020 #2260 swamp, plowed: 6 food + 3 sugar where FreeCol has
+     * 4 + 2).  Only the colony's centre: a native settlement's land and
+     * the AI's site ranking keep FreeCol's values.  On in the "levi" rules
+     * (and a levi save from before the rule).
+     */
+    public static final String ORIGINAL_COLONY_CENTER
+        = "model.option.originalColonyCenter";
+
+    /**
+     * The original's lumber (part X, change 3 and 4): an expert lumberjack
+     * gets a road's +2 once, not doubled (clip 020 #75440: 10 on tropical
+     * forest with a road where FreeCol has 12), and the Sons of Liberty
+     * bonus counts twice for lumber (dago's Fur Town E 22 at 100 %, I+).
+     * On in the "levi" rules (and a levi save from before the rule).
+     */
+    public static final String ORIGINAL_LUMBER
+        = "model.option.originalLumber";
+
+    /**
+     * The original's expert fisherman (part X, change 5): 2 fish more than
+     * a colonist on the same water, FreeCol 3 (clip 020 #46108 and #134173:
+     * 6 on a coastal ocean square where a colonist makes 4; clip 048
+     * #13896: 12 on a fishery).  On in the "levi" rules (and a levi save
+     * from before the rule).
+     */
+    public static final String ORIGINAL_FISHERMAN
+        = "model.option.originalFisherman";
+
+    /**
+     * The original's horses (part X, change 6): they take half the food
+     * surplus rounded up, FreeCol rounds down (dago's Fur City: a surplus
+     * of 1 breeds 1; Fur Town: 21 gives 11).  On in the "levi" rules (and
+     * a levi save from before the rule).
+     */
+    public static final String ORIGINAL_HORSE_FOOD
+        = "model.option.originalHorseFood";
+
+    /**
+     * The original's roads and silver (part X, change 7; the manual, p.
+     * 27: "Building a road in a mountain square does not increase the
+     * production of silver unless there is a silver deposit in the
+     * square"): a road raises silver only on a square with a silver
+     * deposit, FreeCol everywhere.  On in the "levi" rules (and a levi
+     * save from before the rule).
+     */
+    public static final String ORIGINAL_ROAD_SILVER
+        = "model.option.originalRoadSilver";
 
     /** Do missionaries provide extra benefits. */
     public static final String ENHANCED_MISSIONARIES

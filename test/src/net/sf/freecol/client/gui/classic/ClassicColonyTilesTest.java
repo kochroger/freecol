@@ -462,6 +462,70 @@ public class ClassicColonyTilesTest extends FreeColTestCase {
     }
 
     /**
+     * Part X: on the levi rules the screen's tile rows show the original's
+     * numbers (the model's, ClassicColonyTiles.made): Base's centre
+     * «Sumpfland/Straße/Gepflügt» 6 food + 3 sugar (V clip 020 #2260),
+     * the expert lumberjack on tropical forest with a road 10 (V #75440),
+     * the expert fisherman on the coast 6 (V #134173 E); with the rules'
+     * options off FreeCol's 4 + 2, 12 and 7.
+     */
+    public void testTheLeviRulesShowTheOriginalsNumbers() {
+        final Specification levi = spec("levi");
+        final String[] options = {
+            net.sf.freecol.common.option.GameOptions.ORIGINAL_COLONY_CENTER,
+            net.sf.freecol.common.option.GameOptions.ORIGINAL_LUMBER,
+            net.sf.freecol.common.option.GameOptions.ORIGINAL_FISHERMAN,
+            net.sf.freecol.common.option.GameOptions.ORIGINAL_HORSE_FOOD,
+            net.sf.freecol.common.option.GameOptions.ORIGINAL_ROAD_SILVER };
+        try {
+            final Game game = getStandardGame("levi");
+            levi.applyDifficultyLevel("model.difficulty.veryEasy");
+            final net.sf.freecol.common.model.Map map = new MapBuilder(game)
+                .setBaseTileType(levi.getTileType("model.tile.plains")).build();
+            game.changeMap(map);
+            final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+            final Tile c = map.getTile(5, 8);
+            c.setType(levi.getTileType("model.tile.swamp"));
+            final Tile n = c.getNeighbourOrNull(Direction.N);
+            n.setType(levi.getTileType("model.tile.tropicalForest"));
+            final Tile e = c.getNeighbourOrNull(Direction.E);
+            e.setType(levi.getTileType("model.tile.ocean"));
+            for (Object[] ti : new Object[][] { { c, "plow" }, { c, "road" }, { n, "road" },
+                                                 { e, "fishBonusLand" } }) {
+                final TileImprovement imp = new TileImprovement(game, (Tile)ti[0],
+                    levi.getTileImprovementType("model.improvement." + ti[1]), null);
+                imp.setTurnsToComplete(0);
+                ((Tile)ti[0]).add(imp);
+            }
+            final Colony colony = new net.sf.freecol.server.model.ServerColony(game, dutch,
+                "Base", c);
+            dutch.addSettlement(colony);
+            colony.placeSettlement(true);
+            colony.addBuilding(new ServerBuilding(game, colony,
+                levi.getBuildingType("model.building.docks")));
+            final Unit lumberjack = new ServerUnit(game, c, dutch,
+                levi.getUnitType("model.unit.expertLumberJack"));
+            assertTrue(lumberjack.setLocation(colony.getColonyTile(n)));
+            lumberjack.changeWorkType(levi.getGoodsType("model.goods.lumber"));
+            final Unit fisherman = new ServerUnit(game, c, dutch,
+                levi.getUnitType("model.unit.expertFisherman"));
+            assertTrue(fisherman.setLocation(colony.getColonyTile(e)));
+            fisherman.changeWorkType(levi.getGoodsType("model.goods.fish"));
+            colony.invalidateCache();
+            final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
+            assertEquals("N=027x10 C=022x6+023x3 E=057x6",
+                         rows(ClassicColonyTiles.model(colony, text, assets())));
+            for (String id : options) levi.setBoolean(id, false);
+            colony.invalidateCache();
+            assertEquals("FreeCol's", "N=027x12 C=022x4+023x2 E=057x7",
+                         rows(ClassicColonyTiles.model(colony, text, assets())));
+        } finally {
+            for (String id : options) levi.setBoolean(id, true);
+            levi.applyDifficultyLevel("model.difficulty.medium");
+        }
+    }
+
+    /**
      * A stack's count label follows «Beschriftung an Waren und Terrain»
      * (I: the option's meaning in the original, as the buildings' «12»):
      * the expert lumberjack's 12 lumber on the tropical forest with a road

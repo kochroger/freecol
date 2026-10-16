@@ -32,8 +32,10 @@ import javax.xml.stream.XMLStreamException;
 import net.sf.freecol.common.io.FreeColXMLReader;
 import net.sf.freecol.common.io.FreeColXMLWriter;
 import net.sf.freecol.common.model.Player.NoClaimReason;
+import net.sf.freecol.common.model.production.OriginalProduction;
 import net.sf.freecol.common.model.production.TileProductionCalculator;
 import net.sf.freecol.common.model.production.WorkerAssignment;
+import net.sf.freecol.common.option.GameOptions;
 
 
 /**
@@ -160,8 +162,7 @@ public class ColonyTile extends WorkLocation {
      * @see ProductionCache#update
      */
     public ProductionInfo getBasicProductionInfo() {
-        final TileProductionCalculator tpc = new TileProductionCalculator(getOwner(),
-                colony.getProductionBonus());
+        final TileProductionCalculator tpc = calculator();
         
         final UnitType workerUnitType = getUnits().findFirst()
                 .map(Unit::getType)
@@ -444,8 +445,22 @@ public class ColonyTile extends WorkLocation {
     @Override
     public Stream<Modifier> getProductionModifiers(GoodsType goodsType,
                                                    UnitType unitType) {
-        return new TileProductionCalculator(getOwner(), getColony().getProductionBonus())
+        return calculator()
                 .getProductionModifiers(getGame().getTurn(), workTile, goodsType, unitType, List.of());
+    }
+
+    /**
+     * The calculator of this square's production: the colony's owner and
+     * production bonus, and on the colony's own centre square the
+     * original's extra yield when the levi rule holds (part X,
+     * {@code GameOptions.ORIGINAL_COLONY_CENTER}).
+     *
+     * @return The calculator.
+     */
+    private TileProductionCalculator calculator() {
+        return new TileProductionCalculator(getOwner(), getColony().getProductionBonus(),
+            isColonyCenterTile() && OriginalProduction.on(getSpecification(),
+                GameOptions.ORIGINAL_COLONY_CENTER));
     }
 
     /**

@@ -71,6 +71,11 @@ public class LeviRulesTest extends FreeColTestCase {
         CHANGED.put(GameOptions.ORIGINAL_BUILD_COMPLETION, Boolean.TRUE);  // the original's (V, R4)
         CHANGED.put(GameOptions.ORIGINAL_COLONY_REPORTS, Boolean.TRUE);    // the original's (W, M4.11)
         CHANGED.put(GameOptions.DOCKING_ENDS_MOVES, Boolean.TRUE);         // the original's (W, R5)
+        CHANGED.put(GameOptions.ORIGINAL_COLONY_CENTER, Boolean.TRUE);     // the original's (X, 1-2)
+        CHANGED.put(GameOptions.ORIGINAL_LUMBER, Boolean.TRUE);            // the original's (X, 3-4)
+        CHANGED.put(GameOptions.ORIGINAL_FISHERMAN, Boolean.TRUE);         // the original's (X, 5)
+        CHANGED.put(GameOptions.ORIGINAL_HORSE_FOOD, Boolean.TRUE);        // the original's (X, 6)
+        CHANGED.put(GameOptions.ORIGINAL_ROAD_SILVER, Boolean.TRUE);       // the original's (X, 7)
         CHANGED.put(GameOptions.CANCEL_KEEPS_MOVE, Boolean.TRUE);          // house rules
         CHANGED.put(GameOptions.REVENGE_MODE, Boolean.FALSE);
         CHANGED.put(GameOptions.LAST_COLONY_DEFEAT, Boolean.TRUE);
@@ -423,16 +428,60 @@ public class LeviRulesTest extends FreeColTestCase {
     }
 
     /**
+     * The original's colony production (part X, changes 1-7 of the
+     * spec): on in levi, off in classic and freecol (which get the
+     * options from Specification.fixGameOptions); in the colony group,
+     * with their names.  The rules' effects: {@code LeviProductionTest}.
+     */
+    public void testOriginalProductionRules() {
+        assertEquals(5, Specification.ORIGINAL_PRODUCTION_OPTIONS.size());
+        for (String id : Specification.ORIGINAL_PRODUCTION_OPTIONS) {
+            assertTrue(id, spec(LEVI).getBoolean(id));
+            assertFalse(id, spec("classic").getBoolean(id));
+            assertFalse(id, spec("freecol").getBoolean(id));
+            assertNotNull(id, spec(LEVI).getOptionGroup(GameOptions.GAMEOPTIONS_COLONY)
+                          .getOption(id));
+            assertTrue(id, CHANGED.containsKey(id));
+        }
+        assertEquals("The colony's own square: the original yield",
+                     Messages.getName(GameOptions.ORIGINAL_COLONY_CENTER));
+        assertEquals("Lumber as in the original",
+                     Messages.getName(GameOptions.ORIGINAL_LUMBER));
+        assertEquals("Expert fisherman as in the original",
+                     Messages.getName(GameOptions.ORIGINAL_FISHERMAN));
+        assertEquals("Horse breeding as in the original",
+                     Messages.getName(GameOptions.ORIGINAL_HORSE_FOOD));
+        assertEquals("Roads and silver as in the original",
+                     Messages.getName(GameOptions.ORIGINAL_ROAD_SILVER));
+        assertTrue(Specification.originalProductionDefault(LEVI));
+        assertFalse(Specification.originalProductionDefault("classic"));
+        assertFalse(Specification.originalProductionDefault("freecol"));
+        assertFalse(Specification.originalProductionDefault(null));
+        // The expert fisherman's modifier itself stays classic's in levi:
+        // the rule is the option's (an old levi save gets it too).
+        assertEquals(toList(spec("classic").getUnitType("model.unit.expertFisherman")
+                            .getModifiers("model.goods.fish")).get(0).getValue(),
+                     toList(spec(LEVI).getUnitType("model.unit.expertFisherman")
+                            .getModifiers("model.goods.fish")).get(0).getValue(), 0f);
+    }
+
+    /**
      * A save from before part V (its specification without the two
      * options) gets them through Specification.fixGameOptions: on for a
      * levi game, off for classic (the review of part V, regression L2);
-     * the same for part W's two (the original's colony reports, docking).
+     * the same for part W's two (the original's colony reports, docking)
+     * and part X's five (the original's colony production).
      */
     public void testOriginalBuildRulesInAnOldSave() throws Exception {
         final String[] ids = { GameOptions.ORIGINAL_BUILD_PRICE,
                                GameOptions.ORIGINAL_BUILD_COMPLETION,
                                GameOptions.ORIGINAL_COLONY_REPORTS,
-                               GameOptions.DOCKING_ENDS_MOVES };
+                               GameOptions.DOCKING_ENDS_MOVES,
+                               GameOptions.ORIGINAL_COLONY_CENTER,
+                               GameOptions.ORIGINAL_LUMBER,
+                               GameOptions.ORIGINAL_FISHERMAN,
+                               GameOptions.ORIGINAL_HORSE_FOOD,
+                               GameOptions.ORIGINAL_ROAD_SILVER };
         for (String rules : new String[] { LEVI, "classic" }) {
             final java.io.StringWriter sw = new java.io.StringWriter();
             try (net.sf.freecol.common.io.FreeColXMLWriter xw

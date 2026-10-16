@@ -39,6 +39,7 @@ import javax.xml.stream.XMLStreamException;
 
 import net.sf.freecol.common.io.FreeColXMLReader;
 import net.sf.freecol.common.io.FreeColXMLWriter;
+import net.sf.freecol.common.model.production.OriginalProduction;
 import net.sf.freecol.common.option.GameOptions;
 import net.sf.freecol.common.util.RandomChoice;
 
@@ -332,9 +333,12 @@ public final class TileImprovementType extends FreeColSpecObjectType {
             return Stream.<Modifier>empty();
         }
         
+        // The original adds a road's lumber after an expert lumberjack's
+        // doubling (levi, part X change 3).
         if (unitType != null
                 && unitType.getExpertProduction() != null
-                && unitType.getExpertProduction().equals(goodsType)) {
+                && unitType.getExpertProduction().equals(goodsType)
+                && OriginalProduction.expertBonusDoubled(spec, this, goodsType)) {
             final Stream<Modifier> expertMultiplicativeModifier = unitType.getModifiers(goodsType.getId(), tileType, null)
                 .filter(mod -> mod.getType() == Modifier.ModifierType.MULTIPLICATIVE);
             

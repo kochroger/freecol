@@ -35,6 +35,7 @@ import net.sf.freecol.common.io.FreeColXMLReader;
 import net.sf.freecol.common.io.FreeColXMLWriter;
 import net.sf.freecol.common.model.Constants.IntegrityType;
 import net.sf.freecol.common.model.Map.Layer;
+import net.sf.freecol.common.model.production.OriginalProduction;
 import net.sf.freecol.common.util.LogBuilder;
 import net.sf.freecol.common.util.RandomChoice;
 
@@ -577,6 +578,11 @@ public class TileImprovement extends TileItem {
     @Override
     public Stream<Modifier> getProductionModifiers(GoodsType goodsType, UnitType unitType) {
         if (goodsType == null || !isComplete()) {
+            return Stream.<Modifier>empty();
+        }
+        // A road raises silver only on a silver deposit (levi, part X
+        // change 7; the manual, p. 27).
+        if (!OriginalProduction.roadRaises(getSpecification(), type, goodsType, tile)) {
             return Stream.<Modifier>empty();
         }
         

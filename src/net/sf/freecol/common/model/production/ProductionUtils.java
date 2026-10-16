@@ -63,6 +63,9 @@ public final class ProductionUtils {
                 && unitType.getExpertProduction().equals(goodsType)) {
             rebelFactor *= 2.0F;
         }
+        // The original counts the bonus twice for lumber (levi, part X
+        // change 4).
+        rebelFactor *= OriginalProduction.rebelFactor(goodsType, colonyProductionBonus);
         if (tile != null && tile.getResource() != null) {
             final Stream<Modifier> multiplicativeResourceModifiers = tile.getResource().getProductionModifiers(goodsType, unitType)
                     .filter(m -> m.getType() == Modifier.ModifierType.MULTIPLICATIVE);

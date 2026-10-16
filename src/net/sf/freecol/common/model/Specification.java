@@ -3129,6 +3129,13 @@ public final class Specification implements OptionContainer {
         ret |= checkOp(GameOptions.DOCKING_ENDS_MOVES,
                        GameOptions.GAMEOPTIONS_COLONY,
                        originalFlowDefault(getId()), BooleanOption.class);
+        // The original's colony production (levi, part X): without them
+        // FreeCol's yields; a levi save from before the rules gets the
+        // levi rules' values.
+        for (String id : ORIGINAL_PRODUCTION_OPTIONS) {
+            ret |= checkOp(id, GameOptions.GAMEOPTIONS_COLONY,
+                           originalProductionDefault(getId()), BooleanOption.class);
+        }
         ret |= checkOp(GameOptions.REVENGE_MODE,
                        GameOptions.GAMEOPTIONS_VICTORY_CONDITIONS,
                        Boolean.TRUE, BooleanOption.class);
@@ -3222,6 +3229,29 @@ public final class Specification implements OptionContainer {
      * @return The value.
      */
     static Boolean originalFlowDefault(String specId) {
+        return "levi".equals(specId);
+    }
+
+    /**
+     * The original's colony production rules of part X (the levi rules'
+     * options in the colony group): the centre square, lumber, the expert
+     * fisherman, the horses' food, roads and silver.
+     */
+    static final List<String> ORIGINAL_PRODUCTION_OPTIONS = List.of(
+        GameOptions.ORIGINAL_COLONY_CENTER, GameOptions.ORIGINAL_LUMBER,
+        GameOptions.ORIGINAL_FISHERMAN, GameOptions.ORIGINAL_HORSE_FOOD,
+        GameOptions.ORIGINAL_ROAD_SILVER);
+
+    /**
+     * The value the options of {@link #ORIGINAL_PRODUCTION_OPTIONS} get in
+     * rules or a save that lack them ({@link #fixGameOptions}): on for the
+     * "levi" rules (a game of Roger's begun before part X produces as the
+     * original does), off for any other.
+     *
+     * @param specId The specification's id.
+     * @return The value.
+     */
+    static Boolean originalProductionDefault(String specId) {
         return "levi".equals(specId);
     }
 

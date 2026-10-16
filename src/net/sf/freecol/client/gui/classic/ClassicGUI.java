@@ -2252,11 +2252,7 @@ public class ClassicGUI extends GUI {
 
         @Override
         public void woodcutEnded(int k) {
-            markWoodcut(k);
-            // The Aztecs' and the Incas' woodcut is the natives' too.
-            if (k == ClassicWoodcut.AZTECS || k == ClassicWoodcut.INCAS) {
-                markWoodcut(ClassicWoodcut.NATIVES);
-            }
+            woodcutDone(k);
         }
 
         @Override
@@ -5808,9 +5804,14 @@ public class ClassicGUI extends GUI {
      *       messages and before its other notices (build spec D8a,
      *       {@link #askFathers}).</li>
      *   <li>A notice of an event with a woodcut (the Fountain of Youth, the
-     *       first laden ship in Europe, a burning, destroyed or raided
-     *       colony; N17, {@link #messageWoodcut}) brings it before its box,
-     *       once per game, also when the notice itself is dropped.</li>
+     *       first laden ship in Europe, a burning or destroyed colony; N17,
+     *       {@link #messageWoodcut}) brings it before its box, once per
+     *       game, also when the notice itself is dropped.</li>
+     *   <li>The natives' raid, woodcut 13, comes with the first native
+     *       attack on any unit of ours, once per game: after the surprise
+     *       raid's notice, else before the first combat notice of the
+     *       batch ({@link ClassicWoodcut#raidSlot}, part X); with the
+     *       notices dropped, first.</li>
      * </ul>
      */
     private void showMessagePopup(List<ModelMessage> all, String titleKey) {
@@ -5827,11 +5828,24 @@ public class ClassicGUI extends GUI {
         // notice; it comes first, before the turn's other notices.
         messages.removeIf(m -> ClassicCongress.JOINED_MESSAGE.equals(m.getId()));
         final List<Integer> unshown = new ArrayList<>();
+        // The natives' raid (woodcut 13, part X): a native attack on a
+        // unit of ours seen in the natives' phase, whose notices are the
+        // turn start's, or a surprise raid's notice (an attack itself).
+        final boolean raidDue = !woodcutShown(ClassicWoodcut.RAID);
+        final boolean attacked = raidDue && this.nativeAttackSeen
+            && TURN_REPORT.equals(titleKey);
+        boolean raidUnshown = false, combatShown = false;
         for (ModelMessage m : all) {
-            if (messages.contains(m)) continue;
+            if (messages.contains(m)) {
+                combatShown |= isCombatNotice(m);
+                continue;
+            }
             final int k = messageWoodcut(game, m);
             if (k >= 0) unshown.add(k);
+            if (raidDue && ClassicWoodcut.SURPRISE_RAID.equals(m.getId())) raidUnshown = true;
         }
+        // Its notices dropped: the woodcut first, as a dropped notice's.
+        if (raidUnshown || (attacked && !combatShown)) unshown.add(ClassicWoodcut.RAID);
         if (messages.isEmpty() && unshown.isEmpty() && !joinsDue()) return;
         if (this.firstScenePending || this.sceneShowing) {
             this.heldMessages.add(new HeldMessages(all, titleKey));
@@ -5840,6 +5854,8 @@ public class ClassicGUI extends GUI {
             return;
         }
         if (game == null) return;
+        // The attack's notices are these: its woodcut comes with them.
+        if (attacked) this.nativeAttackSeen = false;
         final List<FoundingFather> joins = takeJoins();
         // One box per notice, each after the one before (build spec W7):
         // the original has no paged report.  The original's words where
@@ -5856,6 +5872,8 @@ public class ClassicGUI extends GUI {
         final List<ClassicAdvisorBox.Request> boxes = new ArrayList<>();
         final List<Integer> woodcutsOf = new ArrayList<>();
         final List<Unit> unrestOf = new ArrayList<>();
+        final List<String> boxIds = new ArrayList<>();
+        final List<Boolean> boxCombat = new ArrayList<>();
         // The colonies' turn reports with their zoom rows (part W, M4.11):
         // after the other notices, by colony.
         final List<ClassicColonyReports.Report> reports = new ArrayList<>();
@@ -5876,19 +5894,25 @@ public class ClassicGUI extends GUI {
                 boxes.add(r);
                 woodcutsOf.add(messageWoodcut(game, m));
                 unrestOf.add(unrestUnit(m, display, me));
+                boxIds.add(m.getId());
+                boxCombat.add(isCombatNotice(m));
             }
         }
+        // Woodcut 13 before this box (boxes.size(): after the last).
+        final int raidAt = (raidDue) ? ClassicWoodcut.raidSlot(boxIds, boxCombat, attacked) : -1;
         onEventThread(() -> {
                 showJoins(joins);
                 for (int k : unshown) noticeWoodcut(k);
                 for (ClassicAdvisorBox.Request r : prices) this.prompter.ask(r);
                 if (fathers != null) askFathers(fathers);
                 for (int i = 0; i < boxes.size(); i++) {
+                    if (i == raidAt) noticeWoodcut(ClassicWoodcut.RAID);
                     noticeWoodcut(woodcutsOf.get(i));
                     this.prompter.ask(boxes.get(i));
                     // A colonist the unrest brought: @TUTORIAL5 after it (W11).
                     if (unrestOf.get(i) != null) unrestClosed(unrestOf.get(i), lastBoxClose());
                 }
+                if (raidAt == boxes.size()) noticeWoodcut(ClassicWoodcut.RAID);
                 if (!reports.isEmpty()) {
                     // A turn start's reports wait for its hold, after our
                     // ships' arrivals (holdTurnStart); others come now.
@@ -7710,12 +7734,22 @@ public class ClassicGUI extends GUI {
      * notice ({@link #showCaptureGoodsDialog}), whose message does not name
      * the loser.  The server sends the attack's animation before the loot
      * in the same change set, and the controller posts both in that order.
+     * A native attack on a unit of ours is noted for woodcut 13, which
+     * comes with the fight's notices ({@link #showMessagePopup}; the server
+     * tells a defender's owner of every attack on his units,
+     * {@code ChangeSet.AttackChange}).
      */
     @Override
     public void animateUnitAttack(Unit attacker, Unit defender,
                                   Tile attackerTile, Tile defenderTile,
                                   boolean success) {
         this.lastFight = new Fight(attacker, defender);
+        if (ClassicWoodcut.nativeAttackOn(attacker, defender, myPlayer())
+            && !woodcutShown(ClassicWoodcut.RAID)) {
+            this.nativeAttackSeen = true;
+            ClassicFrameRecorder.event("native-attack", attacker.getId()
+                + " on " + defender.getId());
+        }
     }
 
     /**
@@ -9946,6 +9980,13 @@ public class ClassicGUI extends GUI {
     /** Woodcuts posted and not yet queued: the turn flow waits for them. */
     private int woodcutsPosted = 0;
 
+    /**
+     * A native attack on a unit of ours was seen ({@link #animateUnitAttack})
+     * and its notices have not come yet: woodcut 13 comes with them
+     * ({@link ClassicWoodcut#raidSlot}).  EDT only.
+     */
+    private boolean nativeAttackSeen = false;
+
     /** The woodcuts' art of the pack, loaded on first use. */
     private ClassicWoodcut.Art woodcutArt = null;
     private ClassicPackFiles woodcutPack = null;
@@ -9969,12 +10010,15 @@ public class ClassicGUI extends GUI {
     private void loadWoodcuts() {
         final Player me = myPlayer();
         final Game game = getGame();
-        final int saved = (me == null) ? 0 : me.getClassicWoodcuts();
+        // An older build's record counted woodcut 4 and 5 as 3 too.
+        final int saved = (me == null) ? 0
+            : ClassicWoodcut.correctedRecord(me.getClassicWoodcuts(), me);
         final int derived = ClassicWoodcut.derived(me,
             (game == null) ? null : game.getMap());
         this.woodcuts = saved | derived;
         this.woodcutsAsked = 0;
         this.woodcutsPosted = 0;
+        this.nativeAttackSeen = false;
         this.foundingTile = null;
         ClassicFrameRecorder.note("woodcuts", "saved=" + Integer.toBinaryString(saved)
             + " derived=" + Integer.toBinaryString(derived));
@@ -10029,6 +10073,19 @@ public class ClassicGUI extends GUI {
             repaintInfo();
         }
         return back;
+    }
+
+    /**
+     * A woodcut's screen has ended (the box layer's call): it is marked,
+     * and only it.  The Aztecs' and the Incas' woodcut is theirs alone:
+     * woodcut 3 still comes at the first other tribe (V clip 045 #7864
+     * the Aztecs, then #16290 the Araukaner; part X; part G marked 3 too).
+     * EDT only.
+     *
+     * @param k The woodcut.
+     */
+    void woodcutDone(int k) {
+        markWoodcut(k);
     }
 
     /**
@@ -10733,30 +10790,33 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * The woodcut of a first meeting with a native nation (3, or 4 and 5
-     * for the Aztecs and the Incas, which count as 3 too), before its box.
-     * EDT only.
+     * The woodcut of a first meeting with a native nation, before its box:
+     * the Aztecs' 4 and the Incas' 5 at their own first meeting, and 3 at
+     * the first meeting with any other tribe, each once per game.  The
+     * Aztecs' or the Incas' does not count as 3 (V clip 045: woodcut 4 at
+     * the Aztecs #7864, 1493, and woodcut 3 later at the Araukaner #16290,
+     * 1499; clip 047 #3839: woodcut 5 at the Incas in 1546 after woodcut 3
+     * in 1494; part X).  EDT only.
      *
      * @param other The native nation.
      */
     private void contactWoodcut(Player other) {
         final int k = ClassicWoodcut.contactWoodcut((other == null
             || other.getNation() == null) ? null : other.getNation().getSuffix());
-        // While the Aztecs' or the Incas' woodcut is up, another tribe met
-        // meanwhile brings no woodcut 3 after it.
-        final int natives = ClassicWoodcut.bit(ClassicWoodcut.NATIVES);
-        final boolean own = k != ClassicWoodcut.NATIVES && !woodcutShown(ClassicWoodcut.NATIVES);
-        if (own) this.woodcutsAsked |= natives;
-        long back = ClassicAdvisorLayer.NOT_SHOWN;
-        try {
-            back = woodcut(k, afterFinalDraw(), ClassicWoodcut.FOLLOW_NATIVES_MS);
-        } finally {
-            if (own) this.woodcutsAsked &= ~natives;
-        }
-        if (back != ClassicAdvisorLayer.NOT_SHOWN && k != ClassicWoodcut.NATIVES
-            && (this.woodcuts & natives) == 0) {
-            markWoodcut(ClassicWoodcut.NATIVES);
-        }
+        woodcut(k, afterFinalDraw(), ClassicWoodcut.FOLLOW_NATIVES_MS);
+    }
+
+    /**
+     * Whether a notice tells of a fight: FreeCol's combat results and the
+     * surprise raid's notice (woodcut 13's place,
+     * {@link ClassicWoodcut#raidSlot}).
+     *
+     * @param m The message.
+     * @return True for a combat notice.
+     */
+    static boolean isCombatNotice(ModelMessage m) {
+        return m != null && (m.getMessageType() == ModelMessage.MessageType.COMBAT_RESULT
+            || ClassicWoodcut.SURPRISE_RAID.equals(m.getId()));
     }
 
     /**

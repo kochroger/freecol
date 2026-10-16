@@ -623,8 +623,11 @@ final class ClassicWoodcut {
 
     /**
      * The woodcut of a first meeting with a native nation: the Aztecs and
-     * the Incas have their own (I: no clip; FreeCol's meeting picture does
-     * the same), any other nation the natives' one.
+     * the Incas have their own, any other nation the natives' one (V clip
+     * 045 #7864 woodcut 4 at the Aztecs, #16290 woodcut 3 at the
+     * Araukaner; clip 047 #3839 woodcut 5 at the Incas).  Each is its own
+     * once-per-game event: the Aztecs' or the Incas' does not count as 3
+     * (part X; part G counted it so).
      *
      * @param suffix The nation's suffix ({@code Nation.getSuffix}).
      * @return {@link #AZTECS}, {@link #INCAS} or {@link #NATIVES}.
@@ -636,8 +639,44 @@ final class ClassicWoodcut {
     }
 
     /**
+     * Whether we have met a native nation whose meeting brings woodcut 3:
+     * neither the Aztecs nor the Incas (a tribe since destroyed counts:
+     * the game keeps its player).
+     *
+     * @param me Our player (null: no).
+     * @return True if so.
+     */
+    static boolean metOtherNatives(Player me) {
+        if (me == null || me.getGame() == null) return false;
+        return me.getGame().getPlayers(p -> p != me && p.isIndian()
+                && p.getNation() != null
+                && contactWoodcut(p.getNation().getSuffix()) == NATIVES
+                && me.getStance(p) != Stance.UNCONTACTED)
+            .findAny().isPresent();
+    }
+
+    /**
+     * A save's woodcut record as this build reads it.  Builds before part
+     * X counted the Aztecs' and the Incas' woodcut as 3 too: a record with
+     * 3 and 4 or 5 but no other tribe met has its 3 from that rule, and it
+     * is dropped, so woodcut 3 comes at the first other tribe as in the
+     * original.
+     *
+     * @param saved The save's record ({@code Player.getClassicWoodcuts}).
+     * @param me Our player.
+     * @return The record to use.
+     */
+    static int correctedRecord(int saved, Player me) {
+        final int natives = bit(NATIVES);
+        if ((saved & natives) == 0 || (saved & (bit(AZTECS) | bit(INCAS))) == 0
+            || metOtherNatives(me)) return saved;
+        return saved & ~natives;
+    }
+
+    /**
      * The woodcut a notice brings before its box (N17; I: no clip but
-     * k = 9).
+     * k = 9).  The natives' raid, 13, is no notice's own: it comes with
+     * the first native attack on any unit of ours ({@link #raidSlot}).
      *
      * @param messageId The message's id.
      * @param ladenShip Whether its display object is a ship with goods
@@ -651,9 +690,61 @@ final class ClassicWoodcut {
         case "model.unit.arriveInEurope": return (ladenShip) ? CARGO : -1;
         case "combat.raid.building": return BURNING;
         case "combat.colonyBurned.ours": return DESTROYED;
-        case "combat.raid.ours": return RAID;
         default: return -1;
         }
+    }
+
+    /**
+     * FreeCol's notice of the natives' surprise raid on a colony of ours
+     * at peace ({@code ServerPlayer.csCombat}), the original's
+     * {@code @INDIANSURPRISE}.
+     */
+    static final String SURPRISE_RAID = "combat.raid.ours";
+
+    /**
+     * Where woodcut 13 «INDIANERÜBERFALL» comes among a batch of notices.
+     * The first native attack on any unit of ours brings it, once per
+     * game, in the open field as at a colony (V clip 045 #32815: the
+     * Araukaner attack our pioneer in the field, the woodcut before the
+     * fight's KAMPFANALYSE #32934; clip 048 #63305: the Sioux at Silver
+     * City, after @INDIANSURPRISE #63172 and before the KAMPFANALYSE
+     * #63480; part G showed it for the colony raid's notice only).  So: it
+     * comes after the batch's first surprise raid notice
+     * ({@link #SURPRISE_RAID}, an attack itself), else, when an attack was
+     * seen, before the batch's first combat notice (the KAMPFANALYSE is
+     * not built: the fight's result follows).
+     *
+     * @param ids The notices' message ids, in their order.
+     * @param combat Whether each is a combat notice
+     *     ({@code ModelMessage.MessageType.COMBAT_RESULT}).
+     * @param attacked Whether a native attack on a unit of ours was seen.
+     * @return The index of the box it comes before ({@code ids.size()}:
+     *     after the last), or -1 when none of these boxes is its place.
+     */
+    static int raidSlot(List<String> ids, List<Boolean> combat, boolean attacked) {
+        for (int i = 0; i < ids.size(); i++) {
+            if (SURPRISE_RAID.equals(ids.get(i))) return i + 1;
+        }
+        if (!attacked) return -1;
+        for (int i = 0; i < combat.size(); i++) {
+            if (Boolean.TRUE.equals(combat.get(i))) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * Whether a fight is a native attack on a unit of ours (woodcut 13's
+     * trigger, {@link #raidSlot}).
+     *
+     * @param attacker The attacking unit.
+     * @param defender The defending unit.
+     * @param me Our player.
+     * @return True if a native unit attacked a unit of ours.
+     */
+    static boolean nativeAttackOn(Unit attacker, Unit defender, Player me) {
+        return me != null && attacker != null && defender != null
+            && attacker.getOwner() != null && attacker.getOwner().isIndian()
+            && me.equals(defender.getOwner());
     }
 
     /**
@@ -701,7 +792,9 @@ final class ClassicWoodcut {
      * event has left a trace (spec G5 section 4.2).  Evaluated once, when
      * the game view is built.  The Pacific counts only when we discovered
      * it or sighted it ({@code Player.getPacificSighted}): woodcut 6 is
-     * each nation's own (Roger, 2026-10-09).
+     * each nation's own (Roger, 2026-10-09).  Woodcut 3 counts only after
+     * a tribe other than the Aztecs and the Incas ({@link #metOtherNatives},
+     * part X).
      *
      * @param me Our player (null: none).
      * @param map The client's map (null: none).
@@ -729,7 +822,9 @@ final class ClassicWoodcut {
         }
         if (colony) bits |= bit(COLONY);
         if (destroyed) bits |= bit(DESTROYED);
-        if (me.hasContactedIndians()) bits |= bit(NATIVES);
+        // Woodcut 3 only after a tribe other than the Aztecs and the
+        // Incas (part X; their own are below).
+        if (metOtherNatives(me)) bits |= bit(NATIVES);
         if (me.hasContactedEuropeans()) bits |= bit(EUROPEANS);
         if (me.getGame() != null) {
             for (Player p : me.getGame().getLivePlayerList()) {

@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 
+import net.sf.freecol.common.model.production.OriginalProduction;
 import net.sf.freecol.common.option.GameOptions;
 import static net.sf.freecol.common.util.CollectionUtils.*;
 
@@ -148,8 +149,11 @@ public class ProductionCache {
                     surplus.setAmount(surplus.getAmount()
                         + getGoodsCount(g.getType()));
                 } else {
-                    surplus.setAmount((int)FeatureContainer
-                        .applyModifiers(surplus.getAmount(), null, modifiers));
+                    // The horses' half: rounded up as the original
+                    // (levi, part X change 6), else down.
+                    surplus.setAmount(OriginalProduction.horseFood(spec,
+                        FeatureContainer.applyModifiers(surplus.getAmount(),
+                                                        null, modifiers)));
                 }
                 goods.add(surplus);
             }

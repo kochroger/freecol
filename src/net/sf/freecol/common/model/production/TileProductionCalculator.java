@@ -49,6 +49,14 @@ public class TileProductionCalculator {
 
     private Player owner;
     private int colonyProductionBonus;
+
+    /**
+     * Whether the square is a colony's own centre under the original's
+     * rule (levi, {@code GameOptions.ORIGINAL_COLONY_CENTER}): its
+     * unattended production gets the original's extra
+     * ({@link OriginalProduction#centerModifiers}).
+     */
+    private final boolean originalColonyCenter;
     
     
     /**
@@ -59,8 +67,24 @@ public class TileProductionCalculator {
      *      is located.
      */
     public TileProductionCalculator(Player owner, int colonyProductionBonus) {
+        this(owner, colonyProductionBonus, false);
+    }
+
+    /**
+     * Creates a calculator for the given owner and colony data, on a
+     * colony's own centre square when the original's rule holds.
+     *
+     * @param owner The {@code Player} owning the building.
+     * @param colonyProductionBonus The production bonus for the colony where the building
+     *      is located.
+     * @param originalColonyCenter True for a colony's own centre square
+     *      under the original's rule (part X).
+     */
+    public TileProductionCalculator(Player owner, int colonyProductionBonus,
+                                    boolean originalColonyCenter) {
         this.owner = owner;
         this.colonyProductionBonus = colonyProductionBonus;
+        this.originalColonyCenter = originalColonyCenter;
     }
     
     
@@ -280,15 +304,26 @@ public class TileProductionCalculator {
             return Stream.<Modifier>empty();
         }
         
+        // A planned road raises silver only where the original lets it
+        // (levi, part X change 7; the built road: TileImprovement).
+        final Specification spec = goodsType.getSpecification();
         Stream<Modifier> additionalProductionModifiers = additionalTileImprovements.stream()
-                .filter(tit -> !tit.isChangeType())
+                .filter(tit -> !tit.isChangeType()
+                    && OriginalProduction.roadRaises(spec, tit, goodsType, tile))
                 .flatMap(tit -> tit.getProductionModifiers(goodsType, unitType, newTileType, 1));
         
         return concat(productionModifiers,
                 additionalProductionModifiers,
-                (unitType != null) ? unitType.getModifiers(goodsType.getId(), newTileType, turn) : Stream.of(),
+                (unitType != null)
+                    ? OriginalProduction.fishermanModifiers(spec,
+                        unitType.getModifiers(goodsType.getId(), newTileType, turn),
+                        unitType, goodsType, newTileType)
+                    : Stream.of(),
                 (owner != null && unitType != null) ? owner.getModifiers(goodsType.getId(), unitType, turn) : Stream.of(),
                 //(owner != null && unitType == null) ? owner.getModifiers(goodsType.getId(), tile.getType(), turn) : Stream.of()
+                (unitType == null && this.originalColonyCenter)
+                    ? OriginalProduction.centerModifiers(goodsType, newTileType)
+                    : Stream.of(),
                 ProductionUtils.getRebelProductionModifiersForTile(((!tileTypeChanged) ? tile : null), colonyProductionBonus, goodsType, unitType));
     }
 

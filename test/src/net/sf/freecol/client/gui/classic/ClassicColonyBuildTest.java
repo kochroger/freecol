@@ -102,9 +102,12 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
 
     /**
      * KAUFEN's price (V clip 020 #94078: 494 = 13 x 38 for the Lagerhaus
-     * with 42 of 80 hammers; dago-colony2: 1248 = 13 x 96): with the levi
-     * rule 13 per missing hammer, the tools at the market's ask; without it
-     * FreeCol's 20 per hammer and the tools 10 % dearer.
+     * with 42 of 80 hammers; dago-colony2: 1248 = 13 x 96; part X with
+     * playthrough 4: 046 #119741 484 = 13 x 28 + 6 x 20, 048 #70208 4760 =
+     * 2 x (13 x 160 + 6 x 50) with no hammer stored): with the levi rule
+     * 13 per missing hammer and 6 per missing tool, doubled while no
+     * hammer is stored; without it FreeCol's 20 per hammer and the tools
+     * at the ask plus 10 % (every recorded box: {@code LeviBuildPriceTest}).
      */
     public void testThePrice() {
         final State s = ClassicColonyBuildingsTest.base1539();
@@ -114,18 +117,26 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         final GoodsType hammers = goods(classic(), "hammers"), tools = goods(classic(), "tools");
         final List<AbstractGoods> missing = List.of(new AbstractGoods(hammers, 38));
         classic().setBoolean(GameOptions.ORIGINAL_BUILD_PRICE, true);
+        c.addGoods(hammers, 42);
         assertEquals("V #94078", 494, c.priceGoodsForBuilding(missing));
         assertEquals("dago-colony2", 1248,
                      c.priceGoodsForBuilding(List.of(new AbstractGoods(hammers, 96))));
-        final int ask = c.getOwner().getMarket().getBidPrice(tools, 20);
-        assertEquals("the tools at the market's ask", 13 * 10 + ask,
-                     c.priceGoodsForBuilding(List.of(new AbstractGoods(hammers, 10),
+        assertEquals("046 #119741: 6 a tool", 13 * 28 + 6 * 20,
+                     c.priceGoodsForBuilding(List.of(new AbstractGoods(hammers, 28),
                                                      new AbstractGoods(tools, 20))));
+        c.removeGoods(hammers);
+        assertEquals("048 #70208: no hammer stored, doubled", 4760,
+                     c.priceGoodsForBuilding(List.of(new AbstractGoods(hammers, 160),
+                                                     new AbstractGoods(tools, 50))));
+        c.addGoods(hammers, 42);
+        final int ask = c.getOwner().getMarket().getBidPrice(tools, 20);
         classic().setBoolean(GameOptions.ORIGINAL_BUILD_PRICE, false);
         assertEquals("FreeCol: 20 a hammer", 760, c.priceGoodsForBuilding(missing));
         assertEquals("FreeCol: the tools 10 % dearer", 20 * 10 + ask * 110 / 100,
                      c.priceGoodsForBuilding(List.of(new AbstractGoods(hammers, 10),
                                                      new AbstractGoods(tools, 20))));
+        c.removeGoods(hammers);
+        assertEquals("FreeCol: no doubling", 760, c.priceGoodsForBuilding(missing));
         // The screen's KAUFEN: the build's missing goods; nothing to buy: -1.
         classic().setBoolean(GameOptions.ORIGINAL_BUILD_PRICE, true);
         c.setCurrentlyBuilding(building(classic(), "warehouse"));
@@ -621,9 +632,12 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         ClassicColonyServerScene.click(s.panel, 280, 142);
         assertSame(building(spec, "warehouse"), s.colony.getCurrentlyBuilding());
         assertNull(s.colony.getClassicBuilt());
-        // KAUFEN: 80 hammers missing (the Verlag's 52 spent) = 1040 at 13.
+        // KAUFEN: 80 hammers missing (the Verlag's 52 spent, none stored):
+        // 2 x 13 x 80 = 2080 (part X, V 048 #139919: doubled after a
+        // completion emptied the hammer area).
         final int price = ClassicColonyBuild.price(s.colony);
-        assertEquals(13 * (80 - s.colony.getGoodsCount(goods(spec, "hammers"))), price);
+        assertEquals(0, s.colony.getGoodsCount(goods(spec, "hammers")));
+        assertEquals(2 * 13 * 80, price);
         s.dutch.setGold(price - 1);
         ClassicColonyServerScene.click(s.panel, 230, 142);
         assertEquals("BUYME0", s.boxes.last().id);
@@ -637,6 +651,55 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         ClassicColonyServerScene.click(s.panel, 230, 142);
         assertEquals(s.api.log.toString(), 100, s.dutch.getGold());
         assertEquals(0, s.colony.getPriceForBuilding());
+    }
+
+    /**
+     * KAUFEN through the real controller and server (part X): the price
+     * the server takes is the original's.  046 #119741's Verlag with 24
+     * hammers and no tools: 484 = 13 x 28 + 6 x 20, the gold drops by
+     * exactly that and the colony has its 52 hammers and 20 tools; with
+     * the hammer area empty the price is doubled (048 #70208's rule):
+     * 2 x (13 x 52 + 6 x 20) = 1592, paid in full by the server too.
+     */
+    public void testTheServerTakesTheOriginalsPrice() throws Exception {
+        final Scene s = scene(true);
+        final Specification spec = spec();
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t == null) return;
+        final GoodsType hammers = goods(spec, "hammers"), tools = goods(spec, "tools");
+        final BuildingType press = building(spec, "printingPress");
+        assertEquals(52, press.getRequiredAmountOf(hammers));
+        assertEquals(20, press.getRequiredAmountOf(tools));
+        s.colony.setBuildQueue(List.<BuildableType>of(press));
+        s.colony.removeGoods(hammers);
+        s.colony.removeGoods(tools);
+        assertEquals("doubled", 1592, ClassicColonyBuild.price(s.colony));
+        s.colony.addGoods(hammers, 24);
+        assertEquals("046 #119741", 484, ClassicColonyBuild.price(s.colony));
+        s.dutch.setGold(1000);
+        s.boxes.answers.add(ClassicColonyBuild.BUY_YES);
+        ClassicColonyServerScene.click(s.panel, 230, 142);
+        assertEquals("BUYME1", s.boxes.last().id);
+        assertEquals(s.api.log.toString(), 1000 - 484, s.dutch.getGold());
+        assertEquals(52, s.colony.getGoodsCount(hammers));
+        assertEquals(20, s.colony.getGoodsCount(tools));
+        assertEquals(0, s.colony.getPriceForBuilding());
+        // Empty again: the server takes the doubled price.
+        s.colony.removeGoods(hammers);
+        s.colony.removeGoods(tools);
+        s.dutch.setGold(2000);
+        assertTrue(s.api.payForBuilding(s.colony));
+        assertEquals(2000 - 1592, s.dutch.getGold());
+        assertEquals(52, s.colony.getGoodsCount(hammers));
+        // Short of it: @BUYME0, nothing paid.
+        s.colony.removeGoods(hammers);
+        s.colony.removeGoods(tools);
+        s.dutch.setGold(1591);
+        ClassicColonyServerScene.click(s.panel, 230, 142);
+        assertEquals("BUYME0", s.boxes.last().id);
+        assertEquals(1591, s.dutch.getGold());
+        assertFalse("the server refuses it too", s.api.payForBuilding(s.colony));
+        assertEquals(1591, s.dutch.getGold());
     }
 
     /**

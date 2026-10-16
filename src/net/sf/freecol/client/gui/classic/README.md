@@ -2837,10 +2837,14 @@ clip007, 0 px off on the whole box apart from the original's arrow),
 
 The original's full-screen pictures at the great events, once per game:
 the discovery of the New World (k = 1), the first colony (2), the first
-meeting with the natives (3; the Aztecs 4, the Incas 5), the Pacific (6), the
+meeting with a tribe other than the Aztecs and the Incas (3), the Aztecs (4),
+the Incas (5) — each its own event: 4 or 5 does not count as 3 (part X, V clip
+045 #7864 the Aztecs, then #16290 the Araukaner with 3; clip 047 #3839 the
+Incas after 3) — the Pacific (6), the
 first village entered (7), the Fountain of Youth (8), the first laden ship in
 Europe (9), the first other Europeans (10), a burning colony (11), a
-destroyed colony (12), a raid on a colony (13). k is the WOODCUT.TXT entry
+destroyed colony (12), the first native attack on any unit of ours (13, in the
+field as at a colony: part X, V clip 045 #32815, 048 #63305). k is the WOODCUT.TXT entry
 and the WDCUT number (the landfall analysis numbers its woodcuts by
 appearance: its "woodcut 2" is k = 3, its "woodcut 3" k = 7). Spec:
 `g\prep\G5-spec.md`; report `g\G5.md`.
@@ -2903,9 +2907,15 @@ appearance: its "woodcut 2" is k = 3, its "woodcut 3" k = 7). Spec:
   save), and its client shows the picture and names nothing
   (`InGameController.newRegionNameHandler`); FreeCol's isometric maps keep
   FreeCol's rule, the first discoverer only); 7 the key into a village (`villageEntryKey`, before the move), else
-  before the village seams' boxes and the learn question; 8/9/11/12/13 the
+  before the village seams' boxes and the learn question; 8/9/11/12 the
   notice funnel (`showMessagePopup`, by message id, also for a dropped
-  notice; 8 also before the Fountain of Youth's recruit box); 10 a CONTACT
+  notice; 8 also before the Fountain of Youth's recruit box); 13 the first
+  native attack on any unit of ours: `animateUnitAttack` notes it (the server
+  sends the attack to a defender's owner), the turn start's notices bring it
+  after the surprise raid's notice (FreeCol's `combat.raid.ours`, the original's
+  @INDIANSURPRISE, V 048 #63172 → #63305), else before their first combat notice
+  (the KAMPFANALYSE is not built), first when those notices are dropped
+  (`ClassicWoodcut.raidSlot`); 10 a CONTACT
   negotiation or FreeCol's meeting sound of a European nation. A woodcut is
   shown only when the map is what the player sees (not over a colony, Europe
   or report screen, the first scene, without the pack); then it is not marked
@@ -2916,10 +2926,12 @@ appearance: its "woodcut 2" is k = 3, its "woodcut 3" k = 7). Spec:
   every later save has it (autosaves included). A save without it (an older
   build, the standard GUI) counts the woodcuts whose event left a trace as
   shown (`ClassicWoodcut.derived`: explored land, a colony or FOUND_COLONY,
-  a met native nation, the Aztecs/Incas met, a Pacific we discovered or
+  a met tribe other than the Aztecs and the Incas, the Aztecs/Incas met, a Pacific we discovered or
   sighted (`pacificSighted`; not one another nation discovered), a visited
   village, goods sold in Europe, a met European, COLONY_DESTROYED; none for 8,
-  11, 13). Multiplayer: this session and the derived bits only.
+  11, 13). A record of a build before part X with 3 and 4 or 5 but no other
+  tribe met has its 3 from part G's "4 and 5 count as 3" and loses it
+  (`ClassicWoodcut.correctedRecord`). Multiplayer: this session and the derived bits only.
 - **The recorder** puts the woodcut's palette (the index sheets of WOODFRAM,
   NAMEPLAT and WDCUT<k>, plus 94) into the frames' PLTE from the black and the
   entries of before back at the palette's return (`palette-woodcut`,
@@ -3814,10 +3826,22 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   FreeCol queue stays behind it, «(Keine Produktion)» empties the queue (`setBuildQueue`). **KAUFEN**:
   `@BUYME0` with MSS5 when the treasury is short, else `@BUYME1` («Na, dann nicht.» the bar and
   Escape, «Trotzdem abschließen.» pays through `payForBuilding`), 8 frames after the release
-  (dago-colony2 #12053 → #12061); the price is the colony's, in levi
-  13 per missing hammer and the tools at the market's ask (game option `originalBuildPrice`, R1).
+  (dago-colony2 #12053 → #12061); the price is the colony's (the server computes the same), in levi
+  13 per missing hammer and 6 per missing tool, the whole doubled while no hammer is stored (game
+  option `originalBuildPrice`, R1, part X: all 23 KAUFEN boxes of playthrough 4 fit, e.g. 048 #70208
+  4760 = 2 × (13 × 160 + 6 × 50) with the hammer area empty, 046 #119741 484 = 13 × 28 + 6 × 20).
   Nothing when a missing good is boycotted (the server refuses that purchase too, all rules; I) or
   FreeCol's `payForBuilding` option is off.
+- **Production as the original** (part X, levi game options in the colony group, spec
+  `freecol-spike-results\x-prep\production-rules.md`; `OriginalProduction` in the model, so the tile rows, the
+  job menus, the band and the AI see the same numbers): the colony's own centre square + 2 food and + 1 of
+  its second good (`originalColonyCenter`; V clip 020 #2260 swamp, plowed 6 + 3, FreeCol 4 + 2; natives'
+  land untouched); an expert lumberjack gets a road's lumber once and the Sons of Liberty bonus counts twice
+  for lumber (`originalLumber`; V #75440 10 on tropical forest with a road, FreeCol 12; dago Fur Town 22);
+  the expert fisherman + 2, not + 3 (`originalFisherman`; V #46108 6, clip 048 #13896 12 on a fishery); the
+  horses take half the surplus rounded up (`originalHorseFood`; dago Fur City 1 of 1); a road raises silver
+  only on a silver deposit (`originalRoadSilver`; the manual, p. 27). The Sons of Liberty percentage keeps
+  FreeCol's rounding (down, as the original's own pair in the saves). Goldens: `LeviProductionTest`.
 - **The completed build** (levi game option `originalBuildCompletion`, R4): a building finished with
   nothing else queued is recorded by the server (`Colony.classicBuilt` and its turn, in the save) and
   stays the current build — the hammer panel keeps its name and its «(Benötigt …)» line, the list shows

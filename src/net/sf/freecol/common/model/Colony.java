@@ -1239,24 +1239,71 @@ public class Colony extends Settlement implements TradeLocation {
      */
     public int priceGoodsForBuilding(List<AbstractGoods> required) {
         final Market market = getOwner().getMarket();
-        // The original's price (levi rule R1, build spec M4.10): 13 per
-        // missing hammer (clip 020 #94078: 494 = 13 x 38; dago-colony2:
-        // 1248 = 13 x 96), the tools at the market's ask (I: not seen).
-        final boolean original = originalBuildPrice();
+        if (originalBuildPrice()) return originalPriceGoodsForBuilding(required, market);
         // FIXME: magic number!
         return sum(required,
                 ag -> (ag.getType().isStorable())
-                        ? ((original) ? market.getBidPrice(ag.getType(), ag.getAmount())
-                           : (market.getBidPrice(ag.getType(), ag.getAmount()) * 110)/100)
-                        : ((original) ? ORIGINAL_HAMMER_PRICE : ag.getType().getPrice())
-                            * ag.getAmount());
+                        ? (market.getBidPrice(ag.getType(), ag.getAmount()) * 110)/100
+                        : ag.getType().getPrice() * ag.getAmount());
+    }
+
+    /**
+     * The original's price for the missing goods of a build (levi rule
+     * R1, build spec M4.10; part X): 13 per missing hammer and 6 per
+     * missing tool, the whole doubled while the colony has no hammer
+     * stored yet.  V, all 23 KAUFEN boxes of Roger's playthrough 4 (clips
+     * 045-048, {@code playthrough-4-analysis/10-new-for-us.md} section
+     * 3.1): 048 #70208 Zollhaus with the hammer area empty, 160 hammers
+     * and 50 tools missing: 4760 = 2 x (13 x 160 + 6 x 50); 048 #139919
+     * Druckerei, empty: 3720 = 2 x (13 x 120 + 6 x 50); 046 #119741
+     * Verlag with 24 hammers: 484 = 13 x 28 + 6 x 20; 048 #102145 ...
+     * #128864 Zollhaus, the hammers there: 6 a tool (300 ... 102); and
+     * clip 020 #94078 494 = 13 x 38, dago-colony2 1248 = 13 x 96,
+     * playthrough-2 #37082 364 = 13 x 28.  Amsterdam's tools stood at
+     * 1/2 in all of them: whether the 6 follows the market is not seen
+     * (I).  A storable good other than tools (none in the levi rules)
+     * costs the market's ask (I).
+     *
+     * @param required The missing goods.
+     * @param market The owner's market.
+     * @return The price.
+     */
+    private int originalPriceGoodsForBuilding(List<AbstractGoods> required,
+                                              Market market) {
+        final GoodsType tools = getSpecification().getGoodsType(TOOLS);
+        int price = 0;
+        boolean noHammers = false;
+        for (AbstractGoods ag : required) {
+            final GoodsType gt = ag.getType();
+            if (!gt.isStorable()) {
+                price += ORIGINAL_HAMMER_PRICE * ag.getAmount();
+                if (getGoodsCount(gt) <= 0) noHammers = true;
+            } else if (gt == tools) {
+                price += ORIGINAL_TOOL_PRICE * ag.getAmount();
+            } else {
+                price += market.getBidPrice(gt, ag.getAmount());
+            }
+        }
+        return (noHammers) ? ORIGINAL_EMPTY_FACTOR * price : price;
     }
 
     /**
      * The original's price of a missing hammer (levi rule R1, build spec
-     * M4.10; V clip 020 #94078 and dago-colony2, both 13).
+     * M4.10; V clip 020 #94078, dago-colony2 and all of playthrough 4: 13).
      */
     public static final int ORIGINAL_HAMMER_PRICE = 13;
+
+    /** The original's price of a missing tool (part X; V playthrough 4: 6). */
+    public static final int ORIGINAL_TOOL_PRICE = 6;
+
+    /**
+     * The original's factor while no hammer of the build is stored (part
+     * X; V clip 048 #70208, #139919: 2).
+     */
+    public static final int ORIGINAL_EMPTY_FACTOR = 2;
+
+    /** The tools' id (the original's price of a missing one). */
+    private static final String TOOLS = "model.goods.tools";
 
     /**
      * Whether the original's build price holds

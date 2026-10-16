@@ -43,6 +43,8 @@ public class AllTests {
         suite.addTestSuite(IndianSettlementTest.class);
         suite.addTestSuite(IndividualFatherTest.class);
         suite.addTestSuite(LeviRulesTest.class);
+        suite.addTestSuite(LeviProductionTest.class);
+        suite.addTestSuite(LeviBuildPriceTest.class);
         suite.addTestSuite(LimitTest.class);
         suite.addTestSuite(MapTest.class);
         suite.addTestSuite(MarketTest.class);
