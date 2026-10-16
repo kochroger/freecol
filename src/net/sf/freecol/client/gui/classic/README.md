@@ -3634,10 +3634,19 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   y + 1) when the pitch is 1, if «Beschriftung an Waren und Terrain» is on); the
   centre's food at y + 1 and its other good at y + 14, reaching 2 px into the tile
   below; the worker (his type's map sprite) at tile + (14,6) after his row with a
-  2-px black shadow; a worker who makes nothing (FreeCol: his tile has no
-  production for him) shows his good's icon at tile + (floor((16 − w)/2), 1) under
-  the red prohibition sign **ICONS.SS.064** at the tile's corner (V clip 020
-  #48712, #50260, playthrough-1 #75026); the totem ICONS.SS.108 at tile + (8,4) on
+  2-px black shadow; a worker who makes nothing of his job there shows his job's
+  good's icon at tile + (floor((16 − w)/2), 1) under the red prohibition sign
+  **ICONS.SS.064** at the tile's corner, no number (V clip 020 #48712, #50256,
+  #50260, playthrough-1 #75026, clip 046 #98141), also where FreeCol's rules would
+  give him the square's best other good (part Y3: Roger's expert farmer made
+  Holzfäller on grassland showed 4 corn). The levi rules make it a rule too: a
+  colonist whose job his square cannot make makes nothing there
+  (`model.option.originalDropJobs`, `ColonyTile.getBestProductionType`,
+  `OriginalProduction.makesNothing`; V the band's food row unchanged, clip 020
+  #48657 → #48767, #50148 → #50297); the classic and freecol rules keep FreeCol's
+  fallback (the colony gets that good, the tile shows the sign). The job menu lists
+  all nine tile jobs, zero rows included, as the original (V 117 menus, clip 042
+  #3033, 020 J2 #103, 046 #98153); the totem ICONS.SS.108 at tile + (8,4) on
   native land the player would have to buy (none after Peter Minuit); an enemy at
   war on his tile with his flag at + (4,4) (part M2); a tile another colony works framed red
   (ink 12, each cell its own frame; fixer A after part X, V clip 048 #86873); the selected colonist's

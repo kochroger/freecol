@@ -383,7 +383,9 @@ public class ClassicColonyTilesTest extends FreeColTestCase {
      * good second; a worker's row of his job's good at y + 1 and his figure
      * at + (14,6); a worker who makes nothing (FreeCol's tile without a
      * production for him) under the sign; FreeCol's own fallback (a job the
-     * tile cannot do: what it makes instead); the totem on native land, none
+     * tile cannot do, the classic rules: the colony gets the tile's best
+     * other good) under the sign too, as the original shows it (part Y3);
+     * the totem on native land, none
      * when the land costs nothing; an enemy at war; the hover labels.
      */
     public void testTheModel() {
@@ -394,8 +396,14 @@ public class ClassicColonyTilesTest extends FreeColTestCase {
         s.finish();
         final ClassicText text = ClassicText.load(ClassicPackFiles.runtime());
         ClassicColonyTiles.Model m = ClassicColonyTiles.model(s.colony, text, assets());
-        // FreeCol puts the planter on the hills' best good (2 grain).
-        assertEquals("NW=022x5 N=027x8 NE=022x2 C=022x4+023x2", rows(m));
+        // The classic rules put the planter on the hills' best good (2
+        // grain, the colony gets it); the screen shows his job's 0, the
+        // sugar under the sign, as the original (part Y3; V clip 020
+        // #48712, #50256), never that other good.
+        assertTrue(s.colony.getColonyTile(s.colony.getTile().getNeighbourOrNull(Direction.NE))
+                   .getProductionInfo().getProduction().stream()
+                   .anyMatch(ag -> ag.getType().isFoodType() && ag.getAmount() == 2));
+        assertEquals("NW=022x5 N=027x8 NE=023x0 C=022x4+023x2", rows(m));
         // A tile without a production for him (the original's 0 sugar):
         // the sugar under the sign (V #48712).
         s.tile(Direction.NE).setProductionType(null);

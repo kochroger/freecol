@@ -77,7 +77,17 @@ import net.sf.freecol.common.option.GameOptions;
  *       FreeCol's classic levels ({@link #toryLimitOffset}; V «Entdecker»
  *       from 10 Tories, clip 049 #39267 and #40699), and in a building
  *       before the building's level factor ({@link #toryModifier}; V the
- *       Sägewerk, clip 048 #111902 and 049 #39270).</li>
+ *       Sägewerk, clip 048 #111902 and 049 #39270);</li>
+ *   <li>a colonist on a field whose square cannot make his job makes
+ *       nothing there (part Y3, the option of the original's jobs,
+ *       {@code GameOptions.ORIGINAL_DROP_JOBS}; {@link #makesNothing},
+ *       {@code ColonyTile.getBestProductionType}): V clip 020 #48657 -&gt;
+ *       #48767 a miner made Zuckerpflanzer on hills, #50161 -&gt; #50256 a
+ *       sugar planter dragged onto hills, clip 046 #98102 a farmer on a
+ *       mountain, each his job's icon under the red sign and the band's
+ *       food row unchanged; FreeCol gives him the square's best other
+ *       production instead (Roger's test 2026-10-16: the expert farmer
+ *       made Holzfäller on grassland grew 4 corn).</li>
  * </ul>
  * The Sons of Liberty percentage keeps FreeCol's rounding (down, as the
  * original's own pair in the saves shows, spec section 2.11).
@@ -147,6 +157,31 @@ public final class OriginalProduction {
         } catch (RuntimeException e) {
             return false;
         }
+    }
+
+    /**
+     * Whether a colonist makes nothing on a field (part Y3): the levi rule
+     * of the original's jobs holds ({@code GameOptions.ORIGINAL_DROP_JOBS})
+     * and none of the square's production types for a colonist has his
+     * job among its outputs.  A production type with the job at 0 (a
+     * mineral deposit's silver, raised by the deposit) still counts: the
+     * square makes the job, its amount is the square's.  FreeCol's
+     * {@code ProductionType.getBestProductionType} would choose another
+     * type (the square's best output) and he would make that.
+     *
+     * @param spec The specification.
+     * @param workType The colonist's job, or null (none: FreeCol's choice).
+     * @param types The square's production types for a colonist.
+     * @return True if he makes nothing there.
+     */
+    public static boolean makesNothing(Specification spec, GoodsType workType,
+                                       java.util.Collection<ProductionType> types) {
+        if (workType == null || types == null
+            || !on(spec, GameOptions.ORIGINAL_DROP_JOBS)) return false;
+        for (ProductionType pt : types) {
+            if (pt != null && pt.getOutput(workType) != null) return false;
+        }
+        return true;
     }
 
     /**

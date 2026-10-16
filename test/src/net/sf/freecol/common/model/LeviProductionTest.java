@@ -961,6 +961,105 @@ public class LeviProductionTest extends FreeColTestCase {
     }
 
 
+    // A job the square cannot make (part Y3)
+
+    /** The square's production type now (the colony's own state). */
+    private static ProductionType typeOn(Rig r, Tile t) {
+        return r.colony.getColonyTile(t).getProductionType();
+    }
+
+    /**
+     * Part Y3 (Roger's test 2026-10-16: the expert farmer made «Holzfäller»
+     * on grassland grew 4 corn; the investigation colony-test-1521 finding
+     * 3a): with the levi rule of the original's jobs
+     * ({@code GameOptions.ORIGINAL_DROP_JOBS}) a colonist whose job his
+     * square cannot make makes nothing there, no other good (V clip 020
+     * #48657 -&gt; #48767 a miner made Zuckerpflanzer on hills, the band's
+     * food row unchanged; #50161 -&gt; #50256 dragged; clip 046 #98141 a
+     * farmer on a mountain, no ore).  The job menu's numbers stay (0 here,
+     * the square's own goods for the others).  A job the square makes at 0
+     * but a deposit raises (silver on a marsh with minerals) still makes
+     * it.  Back on a job the square makes, he makes it again.  An old save
+     * gets the rule at its load ({@code Game.readChildren} updates every
+     * colony's production types).  With the option off (the classic and
+     * freecol rules have none): FreeCol's square's best other good.
+     */
+    public void testAJobTheSquareCannotMakeMakesNothing() {
+        final Rig r = new Rig("plains");
+        final Tile nw = r.square(Direction.NW, "grassland");
+        final Tile ne = r.square(Direction.NE, "hills", "road");
+        final Tile w = r.square(Direction.W, "marsh");
+        r.resource(w, "minerals");
+        final Unit farmer = r.on("expertFarmer", nw, "lumber");
+        final Unit miner = r.on("expertOreMiner", ne, "sugar");
+        final Unit digger = r.on("freeColonist", w, "silver");
+        try {
+            assertTrue(OriginalProduction.on(levi(), GameOptions.ORIGINAL_DROP_JOBS));
+            for (String g : new String[] { "lumber", "grain", "ore", "sugar" }) {
+                assertEquals("farmer " + g, 0, r.made(nw, g));
+                assertEquals("miner " + g, 0, r.made(ne, g));
+            }
+            assertNull(typeOn(r, nw));
+            assertNull(typeOn(r, ne));
+            assertEquals("the deposit's silver", 1, r.made(w, "silver"));
+            assertNotNull(typeOn(r, w));
+            // The menu's numbers: 0 for his job here, the others as before.
+            assertEquals(0, r.menu(nw, "expertFarmer", "lumber"));
+            assertTrue(r.menu(nw, "expertFarmer", "grain") > 0);
+            assertTrue(r.menu(ne, "expertOreMiner", "ore") > 0);
+            // A job the square makes: he makes it again.
+            miner.changeWorkType(goods("ore"));
+            assertTrue(r.made(ne, "ore") > 0);
+            miner.changeWorkType(goods("sugar"));
+            assertEquals(0, r.made(ne, "ore"));
+            // FreeCol's own choice of a job (the AI's, the colony's when it
+            // chooses) is always one the square makes: never nothing.
+            final Occupation occ = r.colony.getColonyTile(nw).getOccupation(farmer, false);
+            assertNotNull(occ);
+            assertTrue(occ.install(farmer));
+            assertTrue("FreeCol's choice makes something", r.made(nw, "grain") > 0);
+            farmer.changeWorkType(goods("lumber"));
+            assertEquals(0, r.made(nw, "grain"));
+
+            // The option off: FreeCol's best other good of the square.
+            levi().setBoolean(GameOptions.ORIGINAL_DROP_JOBS, false);
+            r.colony.updateProductionTypes();
+            assertTrue("FreeCol: the farmer's fallback corn", r.made(nw, "grain") > 0);
+            assertEquals(0, r.made(nw, "lumber"));
+            assertTrue("FreeCol: the miner's hills make something",
+                       r.made(ne, "grain") + r.made(ne, "ore") > 0);
+            // A save from before the rule, loaded with it: the load's
+            // update of every colony takes the fallback away.
+            levi().setBoolean(GameOptions.ORIGINAL_DROP_JOBS, true);
+            assertNotNull("the stored fallback", typeOn(r, nw));
+            r.colony.updateProductionTypes();
+            assertNull(typeOn(r, nw));
+            assertEquals(0, r.made(nw, "grain"));
+            assertEquals(1, r.made(w, "silver"));
+            assertSame(digger, r.colony.getColonyTile(w).getFirstUnit());
+        } finally {
+            levi().setBoolean(GameOptions.ORIGINAL_DROP_JOBS, true);
+        }
+        // The pure rule.
+        final List<ProductionType> grass = tile("grassland").getAvailableProductionTypes(false);
+        assertTrue(OriginalProduction.makesNothing(levi(), goods("lumber"), grass));
+        assertFalse(OriginalProduction.makesNothing(levi(), goods("grain"), grass));
+        assertFalse("no job: FreeCol's choice",
+                    OriginalProduction.makesNothing(levi(), null, grass));
+        assertTrue(OriginalProduction.makesNothing(levi(), goods("silver"),
+            tile("grassland").getAvailableProductionTypes(false)));
+        assertFalse("silver at 0 on a marsh: a type makes it",
+            OriginalProduction.makesNothing(levi(), goods("silver"),
+                tile("marsh").getAvailableProductionTypes(false)));
+        final Specification classic = spec("classic");
+        assertFalse(OriginalProduction.on(classic, GameOptions.ORIGINAL_DROP_JOBS));
+        assertFalse(OriginalProduction.on(spec("freecol"), GameOptions.ORIGINAL_DROP_JOBS));
+        assertFalse(OriginalProduction.makesNothing(classic,
+            classic.getGoodsType("model.goods.lumber"),
+            classic.getTileType("model.tile.grassland").getAvailableProductionTypes(false)));
+    }
+
+
     // The rules and the other rules
 
     /** The classic rules keep FreeCol's numbers: none of the options, the same states. */

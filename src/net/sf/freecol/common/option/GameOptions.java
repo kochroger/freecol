@@ -111,9 +111,14 @@ public class GameOptions {
      * dago D3): one dragged from a building onto a work tile becomes a
      * Farmer whatever the tile or his expertise, one dragged from tile to
      * tile keeps his job even where it makes nothing.  FreeCol lets the
-     * colony choose the work for the tile.  On in the "levi" rules (and a
-     * levi save from before the rule); rules and saves without it play as
-     * FreeCol does.
+     * colony choose the work for the tile.  And (part Y3) a colonist whose
+     * job his field's square cannot make makes nothing there (V clip 020
+     * #48767, #50256, clip 046 #98141: his job's icon under the red sign,
+     * the colony's food unchanged), where FreeCol gives him the square's
+     * best other production ({@code ColonyTile.getBestProductionType},
+     * {@code OriginalProduction.makesNothing}).  On in the "levi" rules
+     * (and a levi save from before the rule); rules and saves without it
+     * play as FreeCol does.
      */
     public static final String ORIGINAL_DROP_JOBS
         = "model.option.originalDropJobs";

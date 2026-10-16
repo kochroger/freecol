@@ -465,6 +465,27 @@ public class ColonyTile extends WorkLocation {
 
     /**
      * {@inheritDoc}
+     *
+     * <p>With the levi rule of the original's jobs
+     * ({@code GameOptions.ORIGINAL_DROP_JOBS}) a colonist whose job the
+     * square cannot make gets no production type: he makes nothing there,
+     * as in the original (part Y3, {@link OriginalProduction#makesNothing};
+     * V clip 020 #48767, #50256, clip 046 #98141), not the square's best
+     * other production that FreeCol gives him.  The colony centre and the
+     * classic and freecol rules keep FreeCol's choice.
+     */
+    @Override
+    public ProductionType getBestProductionType(boolean unattended,
+                                                GoodsType workType) {
+        if (!unattended && OriginalProduction.makesNothing(getSpecification(),
+                workType, getAvailableProductionTypes(false))) {
+            return null;
+        }
+        return super.getBestProductionType(unattended, workType);
+    }
+
+    /**
+     * {@inheritDoc}
      */
     @Override
     public List<ProductionType> getAvailableProductionTypes(boolean unattended) {

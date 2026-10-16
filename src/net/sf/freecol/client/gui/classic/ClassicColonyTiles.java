@@ -316,16 +316,23 @@ final class ClassicColonyTiles {
         } else {
             final Unit u = ct.getUnitList().isEmpty() ? null : ct.getUnitList().get(0);
             if (u != null) {
-                // His job's good: what the tile makes of it.  FreeCol puts
-                // a colonist whose job the tile cannot do on the tile's own
-                // best good instead (I: no FreeCol job menu offers that):
-                // then what it makes is shown.  Nothing made: the good's
-                // icon under the prohibition sign (V #48712, #50260).
+                // His job's good: what the tile makes of it.  None of it:
+                // the good's icon under the prohibition sign, no number
+                // (V clip 020 #48712, #50256, #50260; clip 046 #98141 the
+                // corn of a farmer on a mountain, no ore), also where
+                // FreeCol's rules give him the square's best other good
+                // instead (the classic and freecol rules; the levi rules
+                // give him nothing there, part Y3, ColonyTile's
+                // getBestProductionType): the original's picture, never
+                // that other good (Roger's test 2026-10-16: 4 corn shown
+                // for an expert farmer made Holzfäller on grassland).  A
+                // colonist with no job: what the square makes.
                 final GoodsType job = u.getWorkType();
                 int n = 0;
                 for (AbstractGoods ag : made) if (ag.getType() == job) n += ag.getAmount();
-                final AbstractGoods shown = (n > 0) ? new AbstractGoods(job, n)
-                    : (made.isEmpty()) ? null : made.get(0);
+                final AbstractGoods shown = (job == null)
+                    ? ((made.isEmpty()) ? null : made.get(0))
+                    : (n > 0) ? new AbstractGoods(job, n) : null;
                 final TileRow tr = (shown == null) ? null
                     : row(a, shown, r.x, r.y + ClassicColonyLayout.TILE_ROW_DY);
                 if (tr != null) {
