@@ -512,6 +512,15 @@ final class ClassicTurnFlow {
         /** The next stage came due while a box was up: it runs at the close. */
         boolean held = false;
 
+        /**
+         * The unit is not the unit cycle's choice (a click, the
+         * Spielzugende mode's click, the boarding's carrier): it comes
+         * whether the cycle has it due or not.  A cycle's hand-over and the
+         * turn start bring their unit only while it is still due
+         * ({@link ClassicTurnFlow#staleTarget}).
+         */
+        boolean fixed = false;
+
         Pending(Kind kind, Unit unit, long base, Stage... stages) {
             this.kind = kind;
             this.unit = unit;
@@ -527,6 +536,16 @@ final class ClassicTurnFlow {
         /** @return When the next stage is due. */
         long dueNanos() {
             return this.base + nanos(this.stages[this.next].ms);
+        }
+
+        /**
+         * Mark the pause's unit as not the cycle's choice ({@link #fixed}).
+         *
+         * @return This pause.
+         */
+        Pending fixed() {
+            this.fixed = true;
+            return this;
         }
 
         /** {@inheritDoc} */
@@ -654,6 +673,9 @@ final class ClassicTurnFlow {
 
     /** The turn {@link #freed} was freed in. */
     private int freedTurn = NO_TURN;
+
+    /** The last stale active unit the backstop moved past ({@link #catchUp}), or null. */
+    private Unit staleSeen = null;
 
     /** The state for the recorder's probe (another thread). */
     private volatile String probeState = "idle";
@@ -807,14 +829,18 @@ final class ClassicTurnFlow {
     /**
      * Whether a unit is done for this turn: its last move is done, it was
      * skipped ("Keine Befehle", Space: the next unit comes as after a last
-     * move, clip007 #1397 -&gt; #1449, I), or it is gone.
+     * move, clip007 #1397 -&gt; #1449, I), it was put to work in a colony
+     * (a building or a field: the next unit comes as after a last move,
+     * V clip008 #32928 -&gt; #32963 after the colony screen; Roger's test
+     * 2026-10-16), or it is gone.
      *
      * @param u The unit, or null.
-     * @return True if it ran out of moves, was skipped or no longer exists.
+     * @return True if it ran out of moves, was skipped, works in a colony
+     *     or no longer exists.
      */
     static boolean ranOut(Unit u) {
         return u != null && (u.isDisposed() || !u.hasTile() || u.getMovesLeft() <= 0
-            || u.getState() == Unit.UnitState.SKIPPED);
+            || u.getState() == Unit.UnitState.SKIPPED || u.isInColony());
     }
 
 
@@ -854,16 +880,52 @@ final class ClassicTurnFlow {
      * colony screen the next unit 0.5 s after the map), not at once as
      * after a box (landfall 03 section 6: the unit 1 frame after a tip's
      * close).  Then as a box's close.
+     *
+     * <p>A hand-over whose unit the player put to work in the screen (or
+     * boarded, fortified or sentried there) does not bring it: the unit
+     * cycle's next due unit comes instead, its pause from the close, as
+     * after a unit gone; with none, the controller's next unit or the idle
+     * end ({@link #afterUnit}, {@link #staleTarget}).  Roger's test
+     * 2026-10-16 15:34 (turn 16, Base): the hand-over to the expert farmer
+     * was armed when the master carpenter went into the carpenter's house,
+     * the screen held it, the farmer was given a field, and at the close he
+     * came up inside the colony with no moves; nothing blinked, Enter was
+     * refused and the artillery never came (only Space went on).  Not for
+     * a click's or a boarding's hand-over ({@link Pending#fixed}): their
+     * unit is checked only for being usable at all.
      */
     void screenClosed() {
         if (this.disposed) return;
         final Pending p = this.pending;
-        if (p != null && p.held && p.kind == Kind.HANDOVER) {
+        if (p != null && p.kind == Kind.HANDOVER && staleTarget(p)) {
+            cancel("not due after the screen");
+            ClassicFrameRecorder.event("handover", "stale " + id(p.unit)
+                + " after the screen: the next unit");
+            afterUnit(p.unit, "not due after the screen");
+        } else if (p != null && p.held && p.kind == Kind.HANDOVER) {
             p.held = false;
             p.base = this.clock.now();
             schedule(p, "screen closed");
         }
         boxClosed();
+    }
+
+    /**
+     * The host refused to make {@code unit} the active unit (it works in a
+     * colony, is in Europe or is gone; a defensive check behind
+     * {@link #usable}, Roger's test 2026-10-16): unless another pause is
+     * pending already, the unit cycle's next unit comes as after a unit
+     * gone, so the turn never stands still with nothing up and nothing
+     * coming.  Posted by the host, after the stage that asked.
+     *
+     * @param unit The unit refused.
+     */
+    void unitRefused(Unit unit) {
+        if (this.disposed || unit == null || this.pending != null) return;
+        ClassicFrameRecorder.event("handover", "refused " + unit.getId()
+            + " by the host: the next unit");
+        afterUnit(unit, "refused by the host");
+        updateProbe();
     }
 
     /**
@@ -1212,12 +1274,12 @@ final class ClassicTurnFlow {
                 ClassicFrameRecorder.event("handover", "after boarding: carrier "
                     + unit.getId() + " (boarded " + previous.getId() + ")");
                 start(new Pending(Kind.HANDOVER, unit, lastChangeBase(),
-                        boardingStages(this.host.wouldJump(unit))));
+                        boardingStages(this.host.wouldJump(unit))).fixed());
                 return true;
             }
             if (fixed) {   // a click: that unit, as a plain hand-over
                 start(new Pending(Kind.HANDOVER, unit, lastChangeBase(),
-                        handOverStages(this.host.wouldJump(unit))));
+                        handOverStages(this.host.wouldJump(unit))).fixed());
             } else {
                 startHandOver(cycleChoice(unit, previous, "hand-over"), lastChangeBase());
             }
@@ -1253,7 +1315,7 @@ final class ClassicTurnFlow {
         ClassicFrameRecorder.event("endturn-prompt", "click " + unit.getId());
         this.host.promptClicked();
         start(new Pending(Kind.HANDOVER, unit, this.clock.now(),
-                          new Stage(PROMPT_CLICK_MS, Action.ACTIVATE)));
+                          new Stage(PROMPT_CLICK_MS, Action.ACTIVATE)).fixed());
         return true;
     }
 
@@ -1585,7 +1647,11 @@ final class ClassicTurnFlow {
      * unit can move again since it was held and no choice of it reached
      * the flow, the controller's next unit, as the held end's own fire
      * would have asked ({@link #idleDecision}: "kept"; before, the turn
-     * stood still with no unit up, the review of part M).
+     * stood still with no unit up, the review of part M).  And the
+     * backstop of Roger's test 2026-10-16: an active unit that works in a
+     * colony ({@link #staleUp}) with nothing pending is done, the next due
+     * unit comes as after a unit gone (once per unit: no poll loop when the
+     * controller brings nothing).
      */
     private void catchUp() {
         if (!this.host.myTurn() || this.ending || this.host.blocked()) return;
@@ -1615,6 +1681,15 @@ final class ClassicTurnFlow {
             return;
         }
         if (this.freed != null && bringFreed()) return;
+        final Unit up = this.host.activeUnit();
+        if (p == null && !this.prompt && this.gotoRuns == 0 && up != this.staleSeen
+            && staleUp(up)) {
+            this.staleSeen = up;
+            ClassicFrameRecorder.event("handover", "stale " + up.getId()
+                + " up, in a colony: the next unit");
+            afterUnit(up, "stale unit up");
+            return;
+        }
         if (this.idleWanted && p == null && !this.prompt
             && this.host.activeUnit() == null && !endHeld()) {
             if (this.host.hasNextActiveUnit()) {
@@ -2035,17 +2110,17 @@ final class ClassicTurnFlow {
                 this.promptEndWhy = null;
                 break;
             case JUMP:
-                if (usable(p.unit)) this.host.jumpTo(p.unit);
+                if (!staleTarget(p)) this.host.jumpTo(p.unit);
                 break;
             case ACTIVATE:
-                if (usable(p.unit)) {
+                if (!staleTarget(p)) {
                     this.host.activate(p.unit);
                     // Not a goto unit's block before its run (GOTO next).
                     if (last) cameUp(p.unit, p.kind.toString());
                 } else {
                     this.pending = null;
                     this.timer.cancel();
-                    afterUnit(p.unit, "unit gone");
+                    afterUnit(p.unit, (usable(p.unit)) ? "not due" : "unit gone");
                 }
                 break;
             case GOTO:
@@ -2079,11 +2154,54 @@ final class ClassicTurnFlow {
         }
     }
 
-    /** Whether a unit can still be handed control. */
+    /**
+     * Whether a unit can still be handed control: ours, on our turn, on
+     * the map (on a square or aboard a ship on one), not working in a
+     * colony and not in Europe.  A unit in a colony's building or field
+     * has the colony's square ({@code WorkLocation.getTile}), so the
+     * square alone let a hand-over bring a unit the player had put to
+     * work in the colony screen (Roger's test 2026-10-16, turn 16).
+     *
+     * @param u The unit, or null.
+     * @return True if it can come up.
+     */
     private boolean usable(Unit u) {
         final Player me = this.host.myPlayer();
         return u != null && !u.isDisposed() && u.hasTile()
+            && !u.isInColony() && !u.isInEurope()
             && me != null && u.getOwner() == me && this.host.myTurn();
+    }
+
+    /**
+     * Whether a pause must not bring its unit any more: the unit cannot be
+     * handed control ({@link #usable}), or, at a hand-over or the turn
+     * start that the unit cycle chose (not a click's or a boarding's,
+     * {@link Pending#fixed}), the cycle no longer has it due
+     * ({@link Host#dueKind}): put to work, boarded, fortified or sentried
+     * in a colony screen that held the pause.  The next due unit comes
+     * instead, as after a unit gone ({@link #afterUnit}).
+     *
+     * @param p The pause.
+     * @return True if its unit is not brought.
+     */
+    private boolean staleTarget(Pending p) {
+        if (!usable(p.unit)) return true;
+        return !p.fixed && (p.kind == Kind.HANDOVER || p.kind == Kind.TURN_START)
+            && this.host.dueKind(p.unit) == null;
+    }
+
+    /**
+     * Whether the map's active unit can never take orders on the map
+     * again: ours and working in a colony.  The flow's own hand-overs
+     * never bring such a unit ({@link #staleTarget}); this is the
+     * backstop for any other way one could come up ({@link #catchUp}).
+     *
+     * @param u The active unit, or null.
+     * @return True if it is stale.
+     */
+    private boolean staleUp(Unit u) {
+        final Player me = this.host.myPlayer();
+        return u != null && me != null && u.getOwner() == me && u.isInColony();
     }
 
     /**

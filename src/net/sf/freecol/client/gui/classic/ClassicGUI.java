@@ -3884,9 +3884,11 @@ public class ClassicGUI extends GUI {
 
     /**
      * Whether Enter (or Space with no unit) may end the turn now: in the
-     * Spielzugende mode, or with no unit up (none, or one off the map: a
-     * ship that has sailed for Europe, D acceptance D1) and none left that
-     * can move (spec delta W17 item 7).  Without the turn flow, always.
+     * Spielzugende mode, or with no unit up (none, one off the map: a
+     * ship that has sailed for Europe, D acceptance D1, or one at work in
+     * a colony, which can take no orders on the map: Roger's test
+     * 2026-10-16) and none left that can move (spec delta W17 item 7).
+     * Without the turn flow, always.
      *
      * @return True if the key ends the turn.
      */
@@ -3895,8 +3897,24 @@ public class ClassicGUI extends GUI {
         final Player p = getMyPlayer();
         final Unit active = (this.mapViewer == null) ? null
             : this.mapViewer.getActiveUnit();
-        return this.mapViewer != null && (active == null || !active.hasTile())
+        return this.mapViewer != null
+            && (active == null || !active.hasTile() || active.isInColony())
             && p != null && !p.hasNextActiveUnit() && !this.unitCycle.anyDue(p);
+    }
+
+    /**
+     * Whether the turn flow's host refuses to make a unit the map's active
+     * unit (a defensive check behind {@code ClassicTurnFlow.usable},
+     * Roger's test 2026-10-16): none, gone, at work in a colony (a
+     * building or a field has the colony's square, so it looked like a
+     * unit on the map) or in Europe.
+     *
+     * @param unit The unit, or null.
+     * @return True to refuse it.
+     */
+    static boolean refusesActivation(Unit unit) {
+        return unit == null || unit.isDisposed() || unit.isInColony()
+            || unit.isInEurope();
     }
 
     /**
@@ -4199,6 +4217,22 @@ public class ClassicGUI extends GUI {
         @Override
         public void activate(Unit unit) {
             if (mapViewer == null) return;
+            if (refusesActivation(unit)) {
+                // Defensive, behind the flow's own check (Roger's test
+                // 2026-10-16): a unit at work in a colony came up with no
+                // moves and the turn stood still.  The flow brings the
+                // next unit instead, after this stage.
+                logger.warning("ClassicGUI: refused to bring up "
+                    + ((unit == null) ? "no unit" : unit.getId())
+                    + ": gone, at work in a colony or in Europe.");
+                ClassicFrameRecorder.event("handover", "host refused "
+                    + ((unit == null) ? "-" : unit.getId()));
+                final ClassicTurnFlow f = turnFlow;
+                if (f != null && unit != null) {
+                    SwingUtilities.invokeLater(() -> f.unitRefused(unit));
+                }
+                return;
+            }
             if (infoPanel != null) {
                 infoPanel.releaseBlock();
                 infoPanel.dropPrompt();   // a click's kept word: the block replaces it

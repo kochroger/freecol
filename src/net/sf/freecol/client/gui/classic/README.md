@@ -4054,7 +4054,14 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   V clip008 #29957, clip 046 #86751 → #86815, a goto's arrival with no key between): the band for 64
   frames while the turn flow waits, then the screen with the ship selected and the white cursor on it
   (V #30021/#30022), `@TUTORIAL12` 542 ms later; after the player closes it the held hand-over runs
-  again from the close. **Every later docking** (V clip 047 #3430, clip 048 #12837, #36882, #78919,
+  again from the close. A held hand-over (or turn start) whose unit the player put to work in the
+  screen, boarded, fortified or sentried there does not bring it: the unit cycle's next due unit comes
+  500 ms after the close, with none the idle end (Roger's test 2026-10-16, turn 16: the expert
+  farmer, given his field, came up inside Base with no moves and the turn stood still;
+  `ClassicTurnFlow.staleTarget`, `usable` without units in a colony or in Europe, a unit put to work
+  counts as done, `ranOut`). Backstops: an active unit at work in a colony with nothing pending is
+  passed at the next poll (once), the game's host refuses to bring one up (`refusesActivation`, the
+  flow then brings the next unit), and Enter treats it as no unit. **Every later docking** (V clip 047 #3430, clip 048 #12837, #36882, #78919,
   #109748, #146248 — a hand move —, clip 020 #44590): no screen, also not for a goto's arrival; the
   band holds the turn flow and the map's input for 138 frames and then stays until our next unit comes
   up, which comes with the hold's end (V 047 #3430 → #3568, 048 #36882 → #37020); a docking that was

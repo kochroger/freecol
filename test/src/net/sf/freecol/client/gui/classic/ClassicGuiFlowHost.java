@@ -79,7 +79,10 @@ final class ClassicGuiFlowHost implements ClassicTurnFlow.Host {
     @Override public boolean myTurn() { return this.myTurn; }
     @Override public boolean blocked() { return this.gui.turnBlocked(); }
     @Override public boolean hasNextActiveUnit() { return false; }
-    @Override public ClassicUnitCycle.Kind dueKind(Unit unit) { return null; }
+    /** The real cycle's kind (no visits, no goto run): a cycle's hand-over brings a due unit only. */
+    private final ClassicUnitCycle cycle = new ClassicUnitCycle();
+
+    @Override public ClassicUnitCycle.Kind dueKind(Unit unit) { return this.cycle.kind(unit); }
     @Override public Unit cycleNext(Unit anchor) { return null; }
     @Override public void finished(Unit unit) { }
     @Override public boolean anyDue() { return false; }

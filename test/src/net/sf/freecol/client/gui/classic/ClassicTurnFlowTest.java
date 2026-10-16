@@ -94,7 +94,13 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
          * nothing due, so the controller's choice comes.
          */
         ClassicUnitCycle real = null;
-        /** The scripted kinds (absent: not due). */
+        /**
+         * The scripted kinds; absent: as the real cycle's kind of a unit
+         * with no order to show, {@code ORDERS} for a unit FreeCol's cycle
+         * could choose ({@code isCandidateForNextActiveUnit}: the
+         * controller's choices are), else not due.  A cycle's hand-over
+         * brings its unit only while it is due (Roger's test 2026-10-16).
+         */
         final java.util.Map<Unit, ClassicUnitCycle.Kind> kinds = new java.util.HashMap<>();
         /** The scripted next unit after an anchor (null: none). */
         java.util.function.UnaryOperator<Unit> cycle = a -> null;
@@ -131,7 +137,10 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
 
         @Override
         public ClassicUnitCycle.Kind dueKind(Unit unit) {
-            return (this.real != null) ? this.real.kind(unit) : this.kinds.get(unit);
+            if (this.real != null) return this.real.kind(unit);
+            if (this.kinds.containsKey(unit)) return this.kinds.get(unit);
+            return (unit != null && unit.isCandidateForNextActiveUnit())
+                ? ClassicUnitCycle.Kind.ORDERS : null;
         }
 
         @Override
@@ -1388,6 +1397,381 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         r.flow.screenClosed();
         assertEquals("at the close", 1, r.count("activate " + a.getId()));
         assertNull(r.flow.pending());
+    }
+
+    /**
+     * Roger's test 2026-10-16 in a test colony: a ship in its port with no
+     * moves, and three units of ours on the square in the cycle's order: a
+     * (the master carpenter, up), b (the expert farmer), c (the
+     * artillery); the real unit cycle, the real player's choices.
+     */
+    private final class BaseScene {
+        final Game g = getStandardGame();
+        final Map m = getTestMap(true);
+        final Colony colony;
+        final Player dutch;
+        final Unit ship, a, b, c;
+        final Rig r;
+
+        BaseScene() {
+            g.changeMap(m);
+            colony = createStandardColony();
+            dutch = colony.getOwner();
+            ship = new ServerUnit(g, colony.getTile(), dutch,
+                                  spec().getUnitType("model.unit.merchantman"));
+            ship.setMovesLeft(0);   // docked
+            a = new ServerUnit(g, colony.getTile(), dutch,
+                               spec().getUnitType("model.unit.masterCarpenter"));
+            b = new ServerUnit(g, colony.getTile(), dutch,
+                               spec().getUnitType("model.unit.expertFarmer"));
+            c = new ServerUnit(g, colony.getTile(), dutch,
+                               spec().getUnitType("model.unit.artillery"));
+            r = new Rig(g);
+            assertSame(dutch, r.host.me);
+            r.host.real = new ClassicUnitCycle();
+            r.host.nextActiveFrom = dutch::hasNextActiveUnit;
+            // The controller's next unit: its choice, else its end view.
+            r.host.onNext = () -> {
+                final Unit n = dutch.getNextActiveUnit();
+                if (n == null) {
+                    r.host.active = null;
+                    r.flow.noUnitLeft();
+                } else {
+                    choose(r, n);
+                }
+            };
+        }
+
+        /** Put a unit to work in a building of the colony (the screen's drag). */
+        void work(Unit u) {
+            for (net.sf.freecol.common.model.Building bd : colony.getBuildings()) {
+                if (bd.canAdd(u)) {
+                    assertTrue(u.setLocation(bd));
+                    break;
+                }
+            }
+            assertTrue(u.getId(), u.isInColony());
+            u.setMovesLeft(0);
+        }
+
+        /** Put a unit to work on a free field of the colony (the job menu). */
+        void field(Unit u) {
+            for (net.sf.freecol.common.model.ColonyTile ct : colony.getColonyTiles()) {
+                if (!ct.isColonyCenterTile() && ct.canAdd(u)) {
+                    assertTrue(u.setLocation(ct));
+                    break;
+                }
+            }
+            assertTrue(u.getId(), u.isInColony());
+            u.setMovesLeft(0);
+        }
+
+        /** Deal with a unit in the screen: work, field, board, fortify or sentry. */
+        void deal(String what, Unit u) {
+            switch (what) {
+            case "work": work(u); break;
+            case "field": field(u); break;
+            case "board":
+                assertTrue(u.setLocation(ship));
+                u.setState(Unit.UnitState.SENTRY);
+                break;
+            case "fortify": u.setState(Unit.UnitState.FORTIFYING); break;
+            case "sentry": u.setState(Unit.UnitState.SENTRY); break;
+            default: fail(what);
+            }
+            assertNull(what, r.host.dueKind(u));
+        }
+
+        /**
+         * a came up, the colony screen opened, a went into a building:
+         * the controller's choice b, the hand-over to the cycle's b held
+         * under the screen.
+         */
+        void handOverHeldToB() {
+            r.flow.unitShown(a);
+            r.host.activate(a);
+            r.host.blocked = true;                 // Base's screen
+            work(a);
+            r.flow.screenChanged();
+            assertTrue(r.flow.unitChosen(b, a));
+            assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
+            assertSame(b, r.flow.pending().unit);
+            r.advanceMs(600);
+            assertTrue(r.flow.pending().held);
+            assertEquals(0, r.count("activate " + b.getId()));
+        }
+    }
+
+    /**
+     * Roger's test 2026-10-16 15:34 (turn 16, Base; investigation
+     * colony-test-1521, finding 1): the hand-over to the cycle's next unit
+     * was armed when the unit up went into a building in the colony
+     * screen, the screen held it, and the player then gave that next unit
+     * a field (or a building, or boarded, fortified or sentried it there).
+     * At the close it must not come up (before: the expert farmer came up
+     * inside the colony with no moves, nothing blinked, Enter was refused,
+     * the artillery never came; only Space went on): the cycle's next due
+     * unit comes 500 ms after the close (V clip008 #32928 -&gt; #32963);
+     * with none, the automatic end 485 ms after the close, or with the
+     * pref the Spielzugende mode.  The controller's choice meanwhile (the
+     * artillery) goes back, as at every hand-over.
+     */
+    public void testAHandOversUnitDealtWithInTheScreenIsPassedOver() {
+        for (String what : new String[] { "field", "work", "board", "fortify", "sentry" }) {
+            final BaseScene s = new BaseScene();
+            final Rig r = s.r;
+            s.handOverHeldToB();
+            s.deal(what, s.b);
+            // The controller chooses the artillery: the hand-over keeps b.
+            assertTrue(r.flow.unitChosen(s.c, s.a));
+            assertSame(s.b, r.flow.pending().unit);
+            r.advanceMs(12000);                    // Roger's 13 s in the screen
+            r.host.blocked = false;
+            r.flow.screenClosed();
+            assertEquals(what, 0, r.count("activate " + s.b.getId()));
+            assertNotNull(what, r.flow.pending());
+            assertSame(what, s.c, r.flow.pending().unit);
+            r.advanceMs(499.9);
+            assertEquals(what, 0, r.count("activate " + s.c.getId()));
+            r.advanceMs(0.2);
+            assertEquals(what, 1, r.count("activate " + s.c.getId()));
+            assertSame(what, s.c, r.host.active);
+            assertEquals(what, 0, r.count("activate " + s.b.getId()));
+            assertNull(what, r.flow.pending());
+            assertFalse(what, r.flow.isInputBlocked());
+            r.advanceMs(20000);
+            r.flow.tick();
+            assertSame(what, s.c, r.host.active);
+            assertEquals(what, 0, r.count("endTurn"));
+        }
+        // Nothing else due (the artillery fortified in the screen too): the
+        // automatic end, or the Spielzugende mode with the pref.
+        for (boolean pref : new boolean[] { false, true }) {
+            final BaseScene s = new BaseScene();
+            final Rig r = s.r;
+            r.host.promptPref = pref;
+            s.handOverHeldToB();
+            s.field(s.b);
+            s.c.setState(Unit.UnitState.FORTIFYING);
+            assertFalse(s.dutch.hasNextActiveUnit());
+            r.advanceMs(5000);
+            r.host.blocked = false;
+            r.flow.screenClosed();
+            assertEquals(0, r.count("activate " + s.b.getId()));
+            assertEquals(1, r.count("next"));       // the controller's end view
+            assertNotNull(r.flow.pending());
+            final double idle = (pref) ? ClassicTurnFlow.PROMPT_MS : ClassicTurnFlow.END_TURN_MS;
+            r.advanceMs(idle - 0.1);
+            assertEquals(0, r.count("endTurn"));
+            assertFalse(r.flow.isPrompt());
+            r.advanceMs(0.2);
+            if (pref) {
+                assertTrue(r.flow.isPrompt());
+                r.flow.endTurnNow("key");
+                r.advanceMs(20);
+            }
+            assertEquals(1, r.count("endTurn"));
+            assertEquals(0, r.count("activate " + s.b.getId()));
+        }
+    }
+
+    /**
+     * The same stale unit at the turn start (a zoom's colony screen held
+     * the turn's first unit and the player put it to work there), and
+     * when the pause ran out under any box: the stage's own check passes
+     * the unit over, the next due unit comes as after a unit gone.  A
+     * click's hand-over (not the cycle's choice) still brings a unit that
+     * is not due but can come up (I: a unit with no moves clicked, as
+     * before).
+     */
+    public void testAStaleTargetIsPassedOverAtItsStage() {
+        // The turn start.
+        final BaseScene s = new BaseScene();
+        final Rig r = s.r;
+        nextTurn(r, 2);
+        r.flow.tick();
+        assertTrue(r.flow.unitChosen(s.b, null));
+        assertEquals(ClassicTurnFlow.Kind.TURN_START, r.flow.pending().kind);
+        final Unit first = r.flow.pending().unit;
+        r.host.blocked = true;                     // the zoom's screen
+        r.advanceMs(400);
+        assertTrue(r.flow.pending().held);
+        s.field(first);
+        r.host.blocked = false;
+        r.flow.screenClosed();
+        assertEquals(0, r.count("activate " + first.getId()));
+        assertNotNull(r.flow.pending());
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
+        final Unit after = r.flow.pending().unit;
+        assertNotSame(first, after);
+        r.advanceMs(500);
+        assertEquals(1, r.count("activate " + after.getId()));
+
+        // Under a box: the held stage at the box's close.
+        final BaseScene t = new BaseScene();
+        t.r.flow.unitShown(t.a);
+        t.r.host.activate(t.a);
+        t.work(t.a);
+        t.r.flow.screenChanged();
+        assertTrue(t.r.flow.unitChosen(t.b, t.a));
+        t.r.host.blocked = true;                   // a box
+        t.r.advanceMs(600);
+        assertTrue(t.r.flow.pending().held);
+        t.deal("sentry", t.b);
+        t.r.host.blocked = false;
+        t.r.flow.boxClosed();
+        assertEquals(0, t.r.count("activate " + t.b.getId()));
+        assertSame(t.c, t.r.flow.pending().unit);
+        t.r.advanceMs(500);
+        assertEquals(1, t.r.count("activate " + t.c.getId()));
+
+        // A click's hand-over: the clicked unit comes, due or not.
+        final BaseScene u = new BaseScene();
+        u.r.flow.unitShown(u.a);
+        u.r.host.activate(u.a);
+        u.a.setMovesLeft(0);
+        u.b.setMovesLeft(0);                       // not due, but on the map
+        assertNull(u.r.host.dueKind(u.b));
+        u.r.flow.screenChanged();
+        assertTrue(u.r.flow.unitClicked(u.b, u.a));
+        assertTrue(u.r.flow.pending().fixed);
+        u.r.host.blocked = true;
+        u.r.advanceMs(600);
+        u.r.host.blocked = false;
+        u.r.flow.screenClosed();
+        u.r.advanceMs(500);
+        assertEquals(1, u.r.count("activate " + u.b.getId()));
+        // ... but never one at work in the colony.
+        final BaseScene v = new BaseScene();
+        v.r.flow.unitShown(v.a);
+        v.r.host.activate(v.a);
+        v.a.setMovesLeft(0);
+        v.r.flow.screenChanged();
+        assertTrue(v.r.flow.unitClicked(v.b, v.a));
+        v.r.host.blocked = true;
+        v.r.advanceMs(600);
+        v.work(v.b);
+        v.r.host.blocked = false;
+        v.r.flow.screenClosed();
+        v.r.advanceMs(500);
+        assertEquals(0, v.r.count("activate " + v.b.getId()));
+        assertEquals(1, v.r.count("activate " + v.c.getId()));
+    }
+
+    /**
+     * A unit put to work in the colony screen is done for the turn even
+     * with moves left ({@code ClassicTurnFlow.ranOut}): the controller's
+     * next choice is a hand-over the screen holds and runs 500 ms after the
+     * close (V clip008 #32928 -&gt; #32963), never a unit made active at
+     * once under the screen (as after orders that keep the moves).
+     */
+    public void testAUnitPutToWorkWithMovesLeftIsDone() {
+        final BaseScene s = new BaseScene();
+        final Rig r = s.r;
+        r.flow.unitShown(s.a);
+        r.host.activate(s.a);
+        r.host.blocked = true;
+        s.work(s.a);
+        s.a.setMovesLeft(3);
+        assertTrue(ClassicTurnFlow.ranOut(s.a));
+        r.flow.screenChanged();
+        assertTrue(r.flow.unitChosen(s.b, s.a));
+        assertEquals(0, r.count("activate " + s.b.getId()));
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
+        r.advanceMs(3000);
+        assertEquals(0, r.count("activate " + s.b.getId()));
+        r.host.blocked = false;
+        r.flow.screenClosed();
+        r.advanceMs(499.9);
+        assertEquals(0, r.count("activate " + s.b.getId()));
+        r.advanceMs(0.2);
+        assertEquals(1, r.count("activate " + s.b.getId()));
+    }
+
+    /**
+     * The backstop (Roger's test 2026-10-16): a unit at work in the colony
+     * that came up by any other way, with nothing pending, is done at the
+     * next poll: the cycle's next unit comes as after a unit gone, once
+     * (no poll loop).  The host's refusal of a unit (its defensive check,
+     * {@code ClassicGUI.refusesActivation}) brings the next unit the same
+     * way, unless another pause is pending.
+     */
+    public void testAUnitAtWorkUpIsDoneAtThePoll() {
+        final BaseScene s = new BaseScene();
+        final Rig r = s.r;
+        r.flow.unitShown(s.a);
+        r.host.activate(s.a);
+        s.field(s.a);                              // the stale state
+        assertNull(r.flow.pending());
+        r.flow.tick();
+        assertNotNull(r.flow.pending());
+        assertSame(s.b, r.flow.pending().unit);
+        r.advanceMs(500);
+        assertEquals(1, r.count("activate " + s.b.getId()));
+        // Once: the same stale unit up again is left to the player.
+        r.host.active = s.a;
+        r.flow.tick();
+        assertNull(r.flow.pending());
+        assertEquals(1, r.count("activate " + s.b.getId()));
+        // A screen up holds the backstop.
+        final BaseScene h = new BaseScene();
+        h.r.flow.unitShown(h.a);
+        h.r.host.activate(h.a);
+        h.work(h.a);
+        h.r.host.blocked = true;
+        h.r.flow.tick();
+        assertNull(h.r.flow.pending());
+        h.r.host.blocked = false;
+        h.r.flow.tick();
+        assertSame(h.b, h.r.flow.pending().unit);
+
+        // The host's refusal.
+        final BaseScene f = new BaseScene();
+        f.r.flow.unitShown(f.a);
+        f.r.host.activate(f.a);
+        f.a.setMovesLeft(0);
+        f.work(f.b);
+        assertTrue(ClassicGUI.refusesActivation(f.b));
+        assertFalse(ClassicGUI.refusesActivation(f.c));
+        assertTrue(ClassicGUI.refusesActivation(null));
+        f.r.flow.unitRefused(f.b);
+        assertSame(f.c, f.r.flow.pending().unit);
+        f.r.flow.unitRefused(f.b);                 // a pause pending: nothing
+        assertSame(f.c, f.r.flow.pending().unit);
+        f.r.advanceMs(500);
+        assertEquals(1, f.r.count("activate " + f.c.getId()));
+        assertEquals(0, f.r.count("activate " + f.b.getId()));
+    }
+
+    /**
+     * Enter ends the turn with a unit at work in the colony up and nothing
+     * else to move (it can take no orders on the map); with a unit that
+     * can still move it does not (the next unit comes instead).
+     */
+    public void testEnterWithAUnitAtWorkUp() {
+        final BaseScene s = new BaseScene();
+        final ClassicGUI gui = new ClassicGUI(null) {
+                @Override
+                protected Player getMyPlayer() {
+                    return s.dutch;
+                }
+            };
+        final ClassicMapViewer mv = new ClassicMapViewer(null, gui, null, false);
+        gui.mapViewer = mv;
+        gui.turnFlow = s.r.flow;
+        try {
+            s.field(s.a);
+            s.field(s.b);
+            mv.changeToMoveUnits(s.b);
+            assertSame(s.b, mv.getActiveUnit());
+            assertTrue(s.dutch.hasNextActiveUnit());   // the artillery
+            assertFalse(gui.mayEndTurnByKey());
+            s.c.setState(Unit.UnitState.FORTIFYING);
+            assertFalse(s.dutch.hasNextActiveUnit());
+            assertTrue(gui.mayEndTurnByKey());
+        } finally {
+            mv.dispose();
+        }
     }
 
     /** No unit left while a hand-over waits: it is dropped for the end. */
@@ -3881,6 +4265,234 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
             if (err[0] instanceof Error) throw (Error)err[0];
             if (err[0] != null) throw new AssertionError(err[0]);
         }
+    }
+
+    /**
+     * Roger's own game, headless (the investigation colony-test-1521,
+     * finding 1): a COPY of his turn-16 autosave (Frühjahr 1507, given with
+     * {@code -Dclassic.repro.save=<path>}; skipped without) loaded into a
+     * real server, FreeCol's real client controller on it, the real unit
+     * cycle and the turn flow.  The merchantman docks at Base with the
+     * master carpenter, the expert farmer and the artillery; the carpenter
+     * comes up; Base's screen opens; the carpenter goes into the
+     * carpenter's house (the hand-over to the farmer is armed and held);
+     * the farmer is given his field (colonyTile:6835, grain); the screen
+     * closes.  Then the artillery comes up 500 ms after the close (before
+     * the fix: the farmer, inside the colony with no moves, and the turn
+     * stood still); with the artillery fortified too, the automatic end.
+     */
+    public void testRogersTurn16SaveHeadless() throws Exception {
+        final String path = System.getProperty("classic.repro.save");
+        if (path == null || !new java.io.File(path).isFile()) {
+            System.err.println(getClass().getSimpleName()
+                + ".testRogersTurn16SaveHeadless: no -Dclassic.repro.save, skipped");
+            return;
+        }
+        for (boolean fortify : new boolean[] { false, true }) {
+            final net.sf.freecol.server.FreeColServer server
+                = net.sf.freecol.server.ServerTestHelper.startServer(
+                    new java.io.File(path), false, true);
+            try {
+                rogersTurn16(server, fortify);
+            } finally {
+                net.sf.freecol.server.ServerTestHelper.stopServer();
+            }
+        }
+    }
+
+    /** {@link #testRogersTurn16SaveHeadless}, with the artillery fortified in the screen or not. */
+    private void rogersTurn16(net.sf.freecol.server.FreeColServer server, boolean fortify)
+        throws Exception {
+        final Game g = server.getGame();
+        final net.sf.freecol.server.model.ServerPlayer dutch
+            = (net.sf.freecol.server.model.ServerPlayer)g.getPlayerByNationId("model.nation.dutch");
+        final Unit ship = g.getFreeColGameObject("unit:6717", Unit.class);
+        final Unit carpenter = g.getFreeColGameObject("unit:6853", Unit.class);
+        final Unit farmer = g.getFreeColGameObject("unit:6880", Unit.class);
+        final Unit artillery = g.getFreeColGameObject("unit:6881", Unit.class);
+        final Colony base = g.getFreeColGameObject("colony:6829", Colony.class);
+        assertNotNull(ship);
+        assertNotNull(base);
+        assertSame(ship, farmer.getLocation());
+        g.setCurrentPlayer(dutch);
+        final List<String> api = new ArrayList<>();
+        final FreeColClient fcc = serverClient(g, dutch, server, api);
+        final Rig r = new Rig(g);
+        assertSame(dutch, r.host.me);
+        r.host.real = new ClassicUnitCycle();
+        r.host.nextActiveFrom = dutch::hasNextActiveUnit;
+        r.host.onNext = () -> fcc.getInGameController().nextActiveUnit();
+        final ClassicGUI gui = new ClassicGUI(fcc) {
+                @Override
+                public void changeView(Unit unit, boolean force) {
+                    super.changeView(unit, force);
+                    if (unit != null) choose(r, unit);   // the map's part
+                }
+
+                @Override
+                public Unit getActiveUnit() {
+                    return r.host.active;
+                }
+            };
+        setField(fcc, "gui", gui);
+        gui.unitArt = u -> null;
+        gui.turnFlow = r.flow;
+        final Throwable[] err = { null };
+        final java.util.function.Consumer<Runnable> edt = step -> {
+            try {
+                javax.swing.SwingUtilities.invokeAndWait(() -> {
+                        try {
+                            step.run();
+                        } catch (Throwable e) {
+                            if (err[0] == null) err[0] = e;
+                        }
+                    });
+                javax.swing.SwingUtilities.invokeAndWait(() -> { });   // what it queued
+            } catch (Exception e) {
+                if (err[0] == null) err[0] = e;
+            }
+        };
+        // 725.3 s: the merchantman's last steps into Base (the server's moves).
+        edt.accept(() -> {
+                r.flow.unitShown(ship);
+                r.host.activate(ship);
+                final net.sf.freecol.common.model.PathNode path = ship.findPath(base.getTile());
+                assertNotNull("a way to Base", path);
+                for (net.sf.freecol.common.model.PathNode n = path.next;
+                     n != null && ship.getTile() != base.getTile(); n = n.next) {
+                    assertTrue(api.toString(),
+                        fcc.askServer().move(ship, n.getDirection()));
+                }
+                assertSame(base.getTile(), ship.getTile());
+                assertEquals(0, ship.getMovesLeft());
+                assertSame(base.getTile(), carpenter.getLocation());
+                assertTrue(carpenter.isCandidateForNextActiveUnit());
+                r.flow.screenChanged();                 // the final draw
+                fcc.getInGameController().nextActiveUnit();
+            });
+        if (err[0] != null) throw new AssertionError(err[0]);
+        assertEquals(ClassicTurnFlow.Kind.HANDOVER, r.flow.pending().kind);
+        assertSame("the cycle's next after the ship", carpenter, r.flow.pending().unit);
+        edt.accept(() -> r.advanceMs(500));
+        assertEquals(1, r.count("activate " + carpenter.getId()));
+        // 728.0 s: Base's screen; 731.3 s: the carpenter into his house.
+        final net.sf.freecol.common.model.Building house
+            = base.getBuilding(g.getSpecification().getBuildingType("model.building.carpenterHouse"));
+        edt.accept(() -> {
+                r.host.blocked = true;
+                assertTrue(api.toString(), fcc.getInGameController().work(carpenter, house));
+                r.flow.screenChanged();
+            });
+        if (err[0] != null) throw new AssertionError(err[0]);
+        assertTrue(carpenter.isInColony());
+        assertNotNull("the controller's next choice made a hand-over", r.flow.pending());
+        assertSame(farmer, r.flow.pending().unit);
+        edt.accept(() -> r.advanceMs(600));
+        assertTrue(r.flow.pending().held);
+        // 735.4 s: the farmer's field (colonyTile:6835, grain).
+        final net.sf.freecol.common.model.ColonyTile field
+            = g.getFreeColGameObject("colonyTile:6835", net.sf.freecol.common.model.ColonyTile.class);
+        edt.accept(() -> {
+                assertTrue(api.toString(), fcc.getInGameController().work(farmer, field));
+                if (fortify) {
+                    assertTrue(api.toString(), fcc.getInGameController()
+                        .changeState(artillery, Unit.UnitState.FORTIFYING));
+                }
+            });
+        if (err[0] != null) throw new AssertionError(err[0]);
+        assertTrue(farmer.isInColony());
+        assertSame("the screen still holds the farmer's hand-over", farmer, r.flow.pending().unit);
+        edt.accept(() -> r.advanceMs(12900));
+        // 748.3 s: the player closes the screen.
+        edt.accept(() -> {
+                r.host.blocked = false;
+                r.flow.screenClosed();
+            });
+        if (err[0] != null) throw new AssertionError(err[0]);
+        edt.accept(() -> r.advanceMs(499.0));
+        assertEquals(0, r.count("activate " + artillery.getId()));
+        edt.accept(() -> r.advanceMs(1.0));
+        edt.accept(() -> r.advanceMs(1.0));
+        assertEquals("never the farmer at work in Base " + r.host.calls, 0,
+                     r.count("activate " + farmer.getId()));
+        if (fortify) {
+            assertEquals("nothing left: the automatic end " + r.host.calls + " " + api,
+                         1, r.count("endTurn"));
+        } else {
+            assertEquals("the artillery 500 ms after the close " + r.host.calls, 1,
+                         r.count("activate " + artillery.getId()));
+            assertSame(artillery, r.host.active);
+            assertEquals(0, r.count("endTurn"));
+        }
+        System.err.println("testRogersTurn16SaveHeadless fortify=" + fortify + ": "
+            + r.host.calls + " api=" + api);
+    }
+
+    /**
+     * A client of a server's game (the game objects are the server's) with
+     * FreeCol's real controller: its move, work and state requests go to
+     * the server's own handlers for our player, noted in {@code log}.
+     */
+    private static FreeColClient serverClient(Game game,
+        net.sf.freecol.server.model.ServerPlayer me,
+        net.sf.freecol.server.FreeColServer server, List<String> log) throws Exception {
+        final FreeColClient fcc = wakeClient(game, me);
+        setField(fcc, "clientOptions", new net.sf.freecol.client.ClientOptions() {
+                @Override
+                public boolean getBoolean(String id) {
+                    return false;
+                }
+            });
+        setField(fcc, "serverAPI", new ServerAPI() {
+                private boolean handle(String what, net.sf.freecol.common.networking.ChangeSet cs) {
+                    final String s = (cs == null) ? "" : cs.toString();
+                    final boolean bad = s.contains("error") || s.contains("reject");
+                    log.add(what + ((bad) ? " refused" : ""));
+                    return !bad;
+                }
+
+                @Override
+                public boolean move(Unit unit, net.sf.freecol.common.model.Direction d) {
+                    return handle("move " + unit.getId() + " " + d,
+                        new net.sf.freecol.common.networking.MoveMessage(unit, d)
+                            .serverHandler(server, me));
+                }
+
+                @Override
+                public boolean work(Unit unit, net.sf.freecol.common.model.WorkLocation wl) {
+                    return handle("work " + unit.getId() + " " + wl.getId(),
+                        new net.sf.freecol.common.networking.WorkMessage(unit, wl)
+                            .serverHandler(server, me));
+                }
+
+                @Override
+                public boolean changeState(Unit unit, Unit.UnitState state) {
+                    return handle("state " + unit.getId() + " " + state,
+                        new net.sf.freecol.common.networking.ChangeStateMessage(unit, state)
+                            .serverHandler(server, me));
+                }
+
+                @Override
+                public Connection connect(String name, String host, int port) {
+                    return null;
+                }
+
+                @Override
+                public boolean disconnect() {
+                    return true;
+                }
+
+                @Override
+                public Connection reconnect() {
+                    return null;
+                }
+
+                @Override
+                public Connection getConnection() {
+                    return null;
+                }
+            });
+        return fcc;
     }
 
     private static void setField(FreeColClient fcc, String name, Object value)
