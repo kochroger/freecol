@@ -20,18 +20,23 @@
 package net.sf.freecol.client.gui.classic;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntConsumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 import javax.swing.SwingUtilities;
 import javax.xml.stream.XMLStreamConstants;
@@ -44,18 +49,24 @@ import net.sf.freecol.common.model.StringTemplate;
 
 
 /**
- * The saved games the classic <b>load box</b> offers ("Spiel zum Laden
- * wählen", {@code opening_055}), each with a cheap, original-style label such
- * as "Entdecker Dago der Holl., Herbst 1729".
+ * The label of a saved game, cheap and in the original's style, such as
+ * "Entdecker Dago der Holl., Herbst 1729" ({@link #peek},
+ * {@link #formatLabel}), and the list of <b>every</b> saved game on disk.
  *
- * <p>The original has 8 fixed save slots plus 2 autosave rows; FreeCol saves
- * are plain files, so the list is simply every manual save, then every
- * autosave, each newest first -- no "(EMPTY)" rows.
+ * <p>The original has 8 fixed save slots plus 2 autosave rows; the boxes
+ * and the title's load page show exactly those 10 rows
+ * ({@link ClassicSaveSlots}, part SL).  This list -- every manual save,
+ * then every autosave, each newest first, no "(EMPTY)" rows -- is the
+ * title page's second page, "all saved games" (PageDown on the page;
+ * {@code ClassicMainMenuPanel} mode ARCHIVE), so the saves of the builds
+ * before part SL (the numbered autosaves above all) stay loadable from
+ * the game (I, decision D-SL5 for Roger).
  *
  * <p>Reading a whole save to label it would take seconds, so {@link #peek}
  * streams {@code savegame.xml} only up to the owner's {@code <player>}
- * element, before the map (about 30 ms per save), on a background thread;
- * until then a row shows its file name and date.
+ * element, before the map (about 30 ms per save); the list labels its rows
+ * on a background thread, and until then a row shows its file name and
+ * date.
  */
 final class ClassicSaveGames {
 
@@ -145,6 +156,13 @@ final class ClassicSaveGames {
      * turn, the difficulty, the year options, and the owner's nation -- then
      * stop before the map.
      *
+     * <p>The save is read through a {@link ZipFile} that is closed again
+     * here, not through {@code FreeColSavegameFile}'s jar URLs: a jar URL
+     * may keep its file open for the rest of the session (the JDK caches
+     * the first jar it opens), and on Windows an open file can neither be
+     * replaced nor moved, so the next save into that slot would fail (part
+     * SL, {@link ClassicSaveSlots#writeAtomic}).
+     *
      * @return The facts, or {@code null} if the save cannot be read (for
      *     example an old sandbox save whose XML comment contains "--").
      */
@@ -152,8 +170,8 @@ final class ClassicSaveGames {
         String owner = null, difficulty = null, nation = null;
         int turn = 1, startingYear = 1492, seasonYear = 1600, seasons = 2;
         boolean gotStart = false, gotSeasonYear = false, gotSeasons = false;
-        try (FreeColXMLReader xr = new FreeColSavegameFile(f)
-                .getSavedGameFreeColXMLReader()) {
+        try (ZipFile zip = new ZipFile(f);
+             FreeColXMLReader xr = new FreeColXMLReader(savegameStream(zip))) {
             xr.nextTag();                                   // <savedGame>
             owner = xr.getAttribute("owner", (String) null);
             while (xr.hasNext()) {
@@ -191,6 +209,32 @@ final class ClassicSaveGames {
                         seasonYear, Math.max(1, seasons));
     }
 
+    /**
+     * The {@code savegame.xml} of a save: the entry of that name, or one
+     * in a folder (as {@code FreeColDataFile} allows a save to keep its
+     * entries in one).
+     *
+     * @param zip The save.
+     * @return The entry's stream.
+     * @exception IOException if the save has none.
+     */
+    private static InputStream savegameStream(ZipFile zip) throws IOException {
+        ZipEntry e = zip.getEntry(FreeColSavegameFile.SAVEGAME_FILE);
+        if (e == null) {
+            final Enumeration<? extends ZipEntry> all = zip.entries();
+            while (all.hasMoreElements()) {
+                final ZipEntry z = all.nextElement();
+                if (z.getName().endsWith("/" + FreeColSavegameFile.SAVEGAME_FILE)) {
+                    e = z;
+                    break;
+                }
+            }
+        }
+        if (e == null) throw new IOException("No " + FreeColSavegameFile.SAVEGAME_FILE
+                                             + " in " + zip.getName());
+        return zip.getInputStream(e);
+    }
+
     private static int parse(String s, int fallback) {
         try {
             return (s == null) ? fallback : Integer.parseInt(s.trim());
@@ -208,6 +252,19 @@ final class ClassicSaveGames {
      * only (uses {@link Messages}).
      */
     static String formatLabel(Info i) {
+        return formatLabel(i, i.owner);
+    }
+
+    /**
+     * The label of {@link #formatLabel(Info)} with another leader's name:
+     * the name cut to fit the row ({@link ClassicSaveSlots#fitLabel}).
+     * EDT only.
+     *
+     * @param i The facts.
+     * @param leader The name to show for the owner.
+     * @return The label.
+     */
+    static String formatLabel(Info i, String leader) {
         final int year = i.turn - 1 + i.startingYear;
         final int displayYear, season;
         if (year < i.seasonYear) {
@@ -225,7 +282,7 @@ final class ClassicSaveGames {
         final String label = Messages.message(StringTemplate
             .template("classic.save.label")
             .addName("%difficulty%", lookup("classic.difficulty.", i.difficultyId))
-            .addName("%leader%", i.owner)
+            .addName("%leader%", leader)
             .addName("%nation%", lookup("classic.nationAbbrev.", i.nationId))
             .addName("%season%", seasonName)
             .addName("%year%", Integer.toString(displayYear)));

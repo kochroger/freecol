@@ -122,8 +122,10 @@ public class ClassicMenuBarTest extends TestCase {
         assertEquals(0, ClassicMenuStrip.nextSelectable(spiel, -1, 1));
         assertTrue(spiel.get(0).enabled);
         assertTrue(spiel.get(1).enabled);   // the colony report options
-        assertFalse(spiel.get(6).enabled);  // save: a no-op seam, inert
-        assertFalse(spiel.get(6).greyed);
+        assertTrue(spiel.get(6).enabled);   // save (part SL)
+        assertTrue(spiel.get(7).enabled);   // load (part SL)
+        assertFalse(spiel.get(9).enabled);  // independence: a no-op seam, inert
+        assertFalse(spiel.get(9).greyed);
         assertTrue(spiel.get(12).enabled);  // quit
         // Without the host's action (the preview) the option rows are inert.
         final List<ClassicMenuModel.Slot> none = ClassicMenuModel.slots(
@@ -210,8 +212,8 @@ public class ClassicMenuBarTest extends TestCase {
     public void testActionMap() {
         final String[][] expect = {
             { "0", "0", "classic.gameOptions" }, { "0", "1", "classic.colonyOptions" },
-            { "0", "2", null }, { "0", "4", "saveAction" },
-            { "0", "5", "openAction" }, { "0", "6", "declareIndependenceAction" },
+            { "0", "2", null }, { "0", "4", "classic.saveGame" },
+            { "0", "5", "classic.loadGame" }, { "0", "6", "declareIndependenceAction" },
             { "0", "7", "retireAction" }, { "0", "8", "quitAction" },
             { "1", "0", "toggleViewModeAction" }, { "1", "1", "toggleViewModeAction" },
             { "1", "2", "europeAction" }, { "1", "3", "findSettlementAction" },
@@ -244,9 +246,22 @@ public class ClassicMenuBarTest extends TestCase {
     /** Enabled = an action, not a no-op seam, and the action enabled. */
     public void testLiveRule() {
         final ClassicMenuModel.Item save = ClassicMenuModel.items(ClassicMenuModel.SPIEL).get(4);
+        final ClassicMenuModel.Item load = ClassicMenuModel.items(ClassicMenuModel.SPIEL).get(5);
+        final ClassicMenuModel.Item independence
+            = ClassicMenuModel.items(ClassicMenuModel.SPIEL).get(6);
         final ClassicMenuModel.Item quit = ClassicMenuModel.items(ClassicMenuModel.SPIEL).get(8);
         final ClassicMenuModel.Item music = ClassicMenuModel.items(ClassicMenuModel.SPIEL).get(3);
-        assertFalse(ClassicMenuModel.isLive(save, id -> true));    // no-op seam
+        assertFalse(ClassicMenuModel.isLive(independence, id -> true));    // no-op seam
+        // Spiel sichern and Spiel laden are the Classic UI's own rows (part SL).
+        assertTrue(ClassicMenuModel.isLive(save, id -> true));
+        assertTrue(ClassicMenuModel.isLive(load, id -> true));
+        assertFalse(ClassicMenuModel.isLive(save, id -> false));
+        assertFalse(ClassicMenuModel.NOOP_SEAMS.contains("saveAction"));
+        assertFalse(ClassicMenuModel.NOOP_SEAMS.contains("openAction"));
+        for (ClassicMenuModel.Item it : ClassicMenuModel.allItems()) {
+            assertFalse(it.toString(), "saveAction".equals(it.actionId)
+                        || "openAction".equals(it.actionId));
+        }
         assertTrue(ClassicMenuModel.isLive(quit, id -> true));
         assertFalse(ClassicMenuModel.isLive(quit, id -> false));   // action disabled
         assertFalse(ClassicMenuModel.isLive(music, id -> true));   // no action

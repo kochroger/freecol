@@ -92,6 +92,7 @@ import net.sf.freecol.common.model.StringTemplate;
 import net.sf.freecol.common.model.Tension;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.TradeRoute;
+import net.sf.freecol.common.model.Turn;
 import net.sf.freecol.common.model.TypeCountMap;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
@@ -1145,6 +1146,26 @@ public class GUI extends FreeColClientHolder {
      *     InGameController.loadGame, MapEditorController.newMap, StartMapAction
      */    
     public void removeInGameComponents() {}
+
+    /**
+     * The autosave of a turn start: the view may take the turn's own
+     * autosave (the one FreeCol writes to the last-turn file) itself.  The
+     * Classic UI writes the original's decade row on a year's first turn
+     * divisible by 10, and nothing while the original's "Autom. Sichern"
+     * is off (part SL).  Called on the thread that saves, never the EDT
+     * by itself.
+     *
+     * Used by: InGameController.autoSaveGame
+     *
+     * @param turn The turn being saved.
+     * @param lastTurnFile The last-turn autosave FreeCol would write.
+     * @return True if the view has taken the turn's autosave, so FreeCol
+     *     neither moves the last-turn autosave nor writes it; false (the
+     *     default) for FreeCol's own.
+     */
+    public boolean autosaveTurn(Turn turn, File lastTurnFile) {
+        return false;
+    }
 
     /**
      * Shows the {@code VideoPanel}.

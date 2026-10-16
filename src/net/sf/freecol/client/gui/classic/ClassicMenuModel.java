@@ -99,12 +99,23 @@ final class ClassicMenuModel {
         COLONY_OPTIONS = "classic.colonyOptions";
 
     /**
+     * SPIEL rows 4 and 5, "Spiel sichern" and "Spiel laden" (part SL): the
+     * original's save box ({@code @SAVEGAME}, 8 rows) and load box
+     * ({@code @LOADGAME}, 10 rows) on the original's ten fixed rows
+     * ({@link ClassicSaveSlots}).  FreeCol's {@code saveAction} and
+     * {@code openAction}, the rows' engine actions before, ask for a file
+     * name and move FreeCol's save folder to the file's
+     * ({@code FreeColDirectories.setSavegameFile}); the Classic UI never
+     * uses them.  No hotkeys: the rows have none (MENU.TXT, E1).
+     */
+    static final String SAVE_GAME = "classic.saveGame",
+        LOAD_GAME = "classic.loadGame";
+
+    /**
      * Actions whose classic GUI seam is still the base {@code GUI} no-op, so
      * firing them would do nothing visible: shown greyed until a classic
      * screen exists.  Remove an id when its seam is wired.
      * <ul>
-     *   <li>saveAction: {@code showSaveDialog} returns null (GUI.java:2475)</li>
-     *   <li>openAction: {@code showLoadSaveFileDialog} (not overridden)</li>
      *   <li>declareIndependenceAction: {@code showDeclarationPanel} (GUI.java:2039)</li>
      *   <li>findSettlementAction: {@code showFindSettlementPanel} (GUI.java:2129)</li>
      *   <li>assignTradeRouteAction, tradeRouteAction: {@code showTradeRoutePanel} (GUI.java:2577)</li>
@@ -114,8 +125,7 @@ final class ClassicMenuModel {
      * is false, GUI.java:1701.)
      */
     static final Set<String> NOOP_SEAMS = Collections.unmodifiableSet(new HashSet<>(
-        Arrays.asList("saveAction", "openAction",
-                      "declareIndependenceAction", "findSettlementAction",
+        Arrays.asList("declareIndependenceAction", "findSettlementAction",
                       "assignTradeRouteAction", "tradeRouteAction",
                       pedia(ColopediaAction.PanelType.GOODS),
                       pedia(ColopediaAction.PanelType.UNITS),
@@ -214,7 +224,8 @@ final class ClassicMenuModel {
 
         /**
          * The engine action, a Classic UI row's own ({@link #GAME_OPTIONS},
-         * {@link #COLONY_OPTIONS}), or null when there is no equivalent.
+         * {@link #COLONY_OPTIONS}, {@link #SAVE_GAME}, {@link #LOAD_GAME}),
+         * or null when there is no equivalent.
          */
         final String actionId;
 
@@ -287,8 +298,8 @@ final class ClassicMenuModel {
         new Item(SPIEL, 1, 0, COLONY_OPTIONS, null, ALWAYS, ALWAYS),
         new Item(SPIEL, 2, 1, null, null, ALWAYS, ALWAYS),     // sound options
         new Item(SPIEL, 3, 1, null, null, ALWAYS, ALWAYS),     // choose music
-        new Item(SPIEL, 4, 2, "saveAction", null, ALWAYS, ALWAYS),
-        new Item(SPIEL, 5, 2, "openAction", null, ALWAYS, ALWAYS),
+        new Item(SPIEL, 4, 2, SAVE_GAME, null, ALWAYS, ALWAYS),
+        new Item(SPIEL, 5, 2, LOAD_GAME, null, ALWAYS, ALWAYS),
         new Item(SPIEL, 6, 3, "declareIndependenceAction", null, ALWAYS, ALWAYS),
         new Item(SPIEL, 7, 4, "retireAction", null, ALWAYS, ALWAYS),
         new Item(SPIEL, 8, 4, "quitAction", null, ALWAYS, ALWAYS),
