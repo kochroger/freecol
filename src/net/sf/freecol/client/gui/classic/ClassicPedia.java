@@ -391,8 +391,9 @@ final class ClassicPedia {
     /**
      * The Colonopedia's page of a terrain type (F1 on the colony screen,
      * build spec M4.11 target 4; V clip 020 #76922 REGENWALD, #78325
-     * TROPENWALD from the colony, #121397 LAUBWALD from the map), over
-     * {@code WOODPANL.PIK}:
+     * TROPENWALD from the colony, #121397 LAUBWALD from the map; clip 048
+     * #15234 NADELWALD from the colony, clip 046 #11119 from the map),
+     * over {@code WOODPANL.PIK}:
      * <ul>
      *   <li>the two header lines as the father page's, the second
      *       "(<i>NAMES terrain name</i>: Art des Geländes)" (PEDIA

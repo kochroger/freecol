@@ -38,15 +38,22 @@ import net.sf.freecol.util.test.FreeColTestCase;
  * the colony screen; {@link ClassicPedia#terrainPage}): its rows from the
  * rules and the pack's texts, and the whole page against the three pages
  * of clip 020 (#78325 TROPENWALD and #76922 REGENWALD from the colony,
- * #121397 LAUBWALD from the map).
+ * #121397 LAUBWALD from the map) and the NADELWALD of Roger's playthrough
+ * 4 (clip 048 #15234 from the colony, clip 046 #11119 from the map).
  */
 public class ClassicPediaTerrainTest extends FreeColTestCase {
 
-    /** The pages: frame, tile type, PEDIA {@code @TERRAINk}. */
+    /** The pages: folder under the clips, frame, tile type, PEDIA {@code @TERRAINk}. */
     private static final Object[][] PAGES = {
-        { "frame_078325.png", "model.tile.tropicalForest", 13 },
-        { "frame_076922.png", "model.tile.rainForest", 15 },
-        { "frame_121397.png", "model.tile.broadleafForest", 11 },
+        { "playthrough-3", "frame_078325.png", "model.tile.tropicalForest", 13 },
+        { "playthrough-3", "frame_076922.png", "model.tile.rainForest", 15 },
+        { "playthrough-3", "frame_121397.png", "model.tile.broadleafForest", 11 },
+        // Roger's playthrough 4: the conifer forest from the colony (048
+        // #15234) and from the map (046 #11119).
+        { "colony-flow-analysis/key", "c048_015234_pedia-nadelwald.png",
+          "model.tile.coniferForest", 12 },
+        { "colony-flow-analysis/key", "c046_011119_pedia-nadelwald-map.png",
+          "model.tile.coniferForest", 12 },
     };
 
     private static ClassicText texts(String test) {
@@ -102,6 +109,12 @@ public class ClassicPediaTerrainTest extends FreeColTestCase {
                 "Pelzjäger: 2 | Straße/Fluß: +2 | Experte: x2 | Wild: +2 @98",
                 "Holzfäller: 4 | Straße/Fluß: +2 | Experte: x2"),
             rows(t, broadleaf));
+        assertEquals(List.of(
+                "Farmer: 2 | Pflügen/Fluß: +1 | Experte: +3",
+                "Tabakpflanzer: 1 | Pflügen/Fluß: +1 | Experte: x2",
+                "Pelzjäger: 2 | Straße/Fluß: +2 | Experte: x2",
+                "Holzfäller: 6 | Straße/Fluß: +2 | Experte: x2 | Bestes Holz: +4 @99"),
+            rows(t, spec().getTileType("model.tile.coniferForest")));
         assertEquals("Bewegungskosten: 2", ClassicPedia.movesText(t, tropical));
         assertEquals("Bewegungskosten: 3", ClassicPedia.movesText(t, rain));
         assertEquals("Verteidigungs- oder Geländebonus: +50%",
@@ -183,9 +196,10 @@ public class ClassicPediaTerrainTest extends FreeColTestCase {
         final StringBuilder fails = new StringBuilder();
         int arrow = 0, compared = 0;
         for (Object[] p : PAGES) {
-            final TileType type = spec().getTileType((String) p[1]);
-            assertEquals((int) (Integer) p[2], ClassicPedia.terrainEntry(type));
-            final BufferedImage frame = ImageIO.read(new File(dir, (String) p[0]));
+            final TileType type = spec().getTileType((String) p[2]);
+            assertEquals((int) (Integer) p[3], ClassicPedia.terrainEntry(type));
+            final File folder = new File(dir.getParentFile(), (String) p[0]);
+            final BufferedImage frame = ImageIO.read(new File(folder, (String) p[1]));
             final Raster idx = (frame.getColorModel() instanceof IndexColorModel)
                 ? frame.getRaster() : null;
             int best = Integer.MAX_VALUE, bestArrow = 0, bestPhase = -1;
@@ -213,8 +227,8 @@ public class ClassicPediaTerrainTest extends FreeColTestCase {
             }
             compared += 64000;
             arrow += bestArrow;
-            if (best > 0) fails.append(' ').append(p[0]).append('=').append(best);
-            System.out.println("ClassicPediaTerrainTest: " + p[0] + " best at phase "
+            if (best > 0) fails.append(' ').append(p[1]).append('=').append(best);
+            System.out.println("ClassicPediaTerrainTest: " + p[1] + " best at phase "
                 + bestPhase + ": " + best + " px off");
         }
         System.out.println("ClassicPediaTerrainTest: golden check, " + PAGES.length

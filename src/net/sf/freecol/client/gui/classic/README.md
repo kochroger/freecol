@@ -3893,7 +3893,7 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   plow's or the road's bonus «Pflügen/Fluß: +1» / «Straße/Fluß: +2» green, the resource «Bestes Holz:
   +4» gold after its marker, «Experte: x2» green; the farmer's expert «+3» as the original's page
   writes it, the rule is +2); «Bewegungskosten» and «Verteidigungs- oder Geländebonus»; PEDIA
-  `@TERRAINk`. 0 px on #78325, #76922 and #121397 (the arrow excused, the river at the frame's cycling
+  `@TERRAINk`. 0 px on clip 020 #78325, #76922, #121397 and the NADELWALD of clips 048 #15234 and 046 #11119 (the arrow excused, the river at the frame's cycling
   phase: ours stands still, I). Only forests are seen; the other types follow the same rules (I).
 - **Docking** (M4.12, clip008 `01-shipcolony.md`; game option `model.option.dockingEndsMoves`, on in
   levi: a human player's ship that enters its colony has no moves left, R5): FreeCol's controller then
@@ -3905,7 +3905,7 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   the screen. Recorder `dock`, `colony-carrier docked`.
 - **Tests**: `ClassicColonyReportsTest` (the reports of FreeCol's messages, the boxes and their groups,
   18 boxes against clip 020, 040 and 046-048 frames 0 px but the two named wrap residues, the run with its zoom,
-  flashes and tips), `ClassicPediaTerrainTest` (the rows, the picture's frames, three pages 0 px),
+  flashes and tips), `ClassicPediaTerrainTest` (the rows, the picture's frames, five pages 0 px),
   `ClassicScreenStackTest.testTheZoomAndTheDocking`, `ClassicColonyMovesTest` (the exit's time, F1,
   @TUTORIAL16), `ServerColonyTest.testOriginalNeedTools` / `testOriginalCargoReady`,
   `ServerUnitTest.testDockingEndsMoves`, `LeviRulesTest.testOriginalFlowRules`.
