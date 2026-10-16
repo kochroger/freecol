@@ -3880,6 +3880,8 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   percentage keeps FreeCol's rounding (down, as the original's own pair in the saves). Goldens:
   `LeviProductionTest`.
 - **The Tory penalty as the original** (levi game option `originalToryPenalty`, fixer B after part X;
+  its option texts name the «Entdecker» threshold and the Sägewerk as seen, the other levels, the -2
+  limit and the other buildings and factories as guesses, the xg fixer;
   `OriginalProduction.toryLimitOffset`, `toryModifier`): on «Entdecker» it starts at 10 Tories (V clip
   049 #39267 red with 10, #40699 white with 9; clip 048 #111418, #112088; clip 050 #34423), FreeCol's very
   easy at 9, counting the Tories the screen shows (the rebels rounded, `OriginalProduction.originalToryCount`;
@@ -3937,7 +3939,10 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   store runs empty: not built. They run when the turn flow holds after the ships' arrivals (a report
   after the Europe screen, V #69), grouped by colony in the order they came (I), a colony's Sons of
   Liberty first (V clip 048 #106927 @SONSUP → #107109 @NEEDTOOLS; FreeCol's order is the other way
-  round; one case, I for the rest). **Before a colony's first box the map jumps to the colony when it
+  round; one case, I for the rest), and a building's run-out reports (@FURS, @ORE ...) before its @BUILT,
+  where FreeCol sends the completion first (the xg fixer after the independent check: V clip 049 Base's
+  @FURS #48073 → the row-less @BUILT #48095, clip 050 @FURS closed #30478 → @BUILT #30483; I: only the
+  run-out reports move, to just before the first @BUILT; `ClassicColonyReports.ranOutFirst`). **Before a colony's first box the map jumps to the colony when it
   is not in view** (the view rule of a unit coming up), the box 9 frames later (V clip 048 #135474 →
   #135504 → #135526, #118895 → #118906 → #118915, clip 046 #116539 → #116549; 5–9 frames in five
   cases, 21–22 in two: I); nothing moves when it is in view (V 046 #66519, 048 #19552, #110271); after
@@ -3954,7 +3959,11 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   and 45 frames; I for the other kinds, kept timed) — then its
   screen 23 frames after the last box closed (V 20 to 28; `colony-zoom`), in the mode of spec §0.1
   decision 8: a building's @BUILT in hammer mode with the dissolve and ÄNDERN's blink (the only way to
-  them now), @NEEDTOOLS in hammer mode, @ORE and @SPOIL in the house mode (V 048 #5690 → #5884/#5887
+  the dissolve now), and so any zoom of a colony whose reports hold a @BUILT that turn, from whichever
+  of them it was chosen (`ClassicColonyReports.zoomAs`; V clip 049 @FURS → zoom → the row-less @BUILT →
+  Base #48219, the dissolve #48237 – #48292; clip 050 @FURS → @BUILT «… Ställe.» → #30611, the dissolve
+  #30633 – #30685, ÄNDERN #30708; the independent check after fixer A found ours in the house mode with
+  no dissolve and no blink), @NEEDTOOLS in hammer mode, @ORE and @SPOIL in the house mode (V 048 #5690 → #5884/#5887
   after a visit that ended in hammer mode), the others the last visit's. The other colonies' reports
   follow when that screen closes. The run has its own timer (a docking's band cannot drop it) and ends
   at any throw inside, so the turn start is never held for good. Without the pack: FreeCol's notices.
@@ -4002,7 +4011,8 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   nothing), the pages of a good (the «Felle» page in Europe, clip 046 #106993), of a unit type
   («Art der Einheit»: the build list's unit rows, the carriers) and the right click in Europe.
 - **The Colonopedia from the colony screen** (fixer A after part X; V Roger's clips 046, 049 and 052,
-  049 and 052 with the keylog): **F1 in a job menu** (and a right-click on its row): the menu goes at
+  049 and 052 with the keylog): **F1 in a job menu** (and a right-click on its row, I: never seen in a
+  clip, an Unsichtbarkeit kept): the menu goes at
   the key, the skill page of the job under the bar 22 frames later (049 #3106 «Pelzjäger», 052 #15108
   «Tabakpflanzer» with the bar moved there from row 1), the same menu again 7 frames after the page
   with its bar on its default row (052 #15840); on «(SPEZIALFÄHIGKEIT LÖSCHEN)» and «(Weitere)» his
@@ -4015,7 +4025,11 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   the list again 7 frames after the page, its bar on the current build, the build unchanged (046
   #71516 → #71550 → #71579 → #71721); the unit rows and «(Keine Produktion)» have none (I). The
   right and middle buttons never act as the left one: in a wood box they never take a row (a list's
-  help aside, `ClassicAdvisorBox.Bar.rightPress`), on the screen they never press, drag, select,
+  help aside, `ClassicAdvisorBox.Bar.rightPress`: a right-click on a row of a box with a help asks
+  that help, e.g. the job's skill page in a job menu and the father's page in the founding fathers' box;
+  **Unsichtbarkeit** (the xg fixer): no clip shows a right-click in a job menu or in the founding
+  fathers' box, only F1 in the job menus (049, 052) and the right-click in the build list (046) — kept as built, I), on the
+  screen they never press, drag, select,
   switch a mode or leave (the review of part W, L7; the colony review's must 4). Every page goes 16
   frames after its key (052: 14-17; `ClassicAdvisorBox.Request.closeLagMs`, input ignored meanwhile).
   The **skill page** (`ClassicPedia.skillPage`, PEDIA `@JOBk`, k the NAMES `@JOB` row: a unit's type

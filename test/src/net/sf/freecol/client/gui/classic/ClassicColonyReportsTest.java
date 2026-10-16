@@ -918,6 +918,134 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
     }
 
     /**
+     * A colony's run-out reports before its @BUILT, and a zoom from any
+     * report of a group with a @BUILT opens as that @BUILT's zoom (the xg
+     * fixer after the independent check: V clip 049 Base @FURS #48073
+     * -&gt; zoom, the row-less @BUILT «… Druckerei.» #48095, the screen
+     * #48219 and the dissolve #48237-#48292; clip 050 Base @FURS row 2
+     * closed #30478, the row-less @BUILT «… Ställe.» #30483, the screen
+     * #30611, the dissolve #30633-#30685, ÄNDERN #30708): in FreeCol's
+     * order (the completion first) and in the original's, the zoom on the
+     * @FURS shows the @BUILT without rows and opens in BUILT_BUILDING with
+     * the building to dissolve; «Runde fortsetzen.» on the @FURS and the
+     * zoom on the @BUILT the same; a @BUILT passed with «Runde
+     * fortsetzen.» and a zoom from a later report of that colony the same;
+     * a group without a @BUILT keeps its report's opening.
+     */
+    public void testTheRunOutReportsComeBeforeTheBuilt() throws Exception {
+        final ClassicText t = texts("testTheRunOutReportsComeBeforeTheBuilt");
+        if (t == null) return;
+        final Game game = getStandardGame();
+        game.changeMap(getTestMap(true));
+        final Colony a = colony("Base", 5, 8);
+        final Colony b = colony("Silver City", 10, 4);
+        final Player dutch = a.getOwner();
+        dutch.setClassicTips(0);
+        final BuildingType press = building("printingPress");
+        final Building furs = a.getBuilding(building("furTraderHouse"));
+        final Building smith = a.getBuilding(building("blacksmithHouse"));
+        assertNotNull(furs);
+        assertNotNull(smith);
+        // FreeCol's order: the completion (csNewTurn) before the run-out
+        // report; the original's: the run-out report first.
+        final List<ClassicColonyReports.Report> freecol = new ArrayList<>();
+        freecol.add(ClassicColonyReports.of(t, sons(a, 20, 30), game));
+        freecol.add(ClassicColonyReports.of(t, built(a, press), game));
+        freecol.add(ClassicColonyReports.of(t, cargo(a, 0, goods("rum"), 200, 103), game));
+        freecol.add(ClassicColonyReports.of(t, noInput(a, furs, goods("furs")), game));
+        freecol.add(ClassicColonyReports.of(t, needTools(b, press, 20, 3), game));
+        freecol.add(ClassicColonyReports.of(t, noInput(a, smith, goods("ore")), game));
+        final List<List<ClassicColonyReports.Report>> g1 = ClassicColonyReports.grouped(freecol);
+        assertEquals("[SONSUP Base, FURS Base, ORE Base, BUILT Base, CARGOREADY0 Base]",
+                     g1.get(0).toString());
+        assertEquals("[NEEDTOOLS Silver City]", g1.get(1).toString());
+        final List<ClassicColonyReports.Report> original = new ArrayList<>();
+        original.add(ClassicColonyReports.of(t, noInput(a, furs, goods("furs")), game));
+        original.add(ClassicColonyReports.of(t, built(a, press), game));
+        final List<List<ClassicColonyReports.Report>> g2 = ClassicColonyReports.grouped(original);
+        assertEquals("[FURS Base, BUILT Base]", g2.get(0).toString());
+        final List<ClassicColonyReports.Report> fc2 = new ArrayList<>();
+        fc2.add(ClassicColonyReports.of(t, built(a, press), game));
+        fc2.add(ClassicColonyReports.of(t, noInput(a, furs, goods("furs")), game));
+        final List<List<ClassicColonyReports.Report>> g3 = ClassicColonyReports.grouped(fc2);
+        assertEquals("[FURS Base, BUILT Base]", g3.get(0).toString());
+        // Without a @BUILT nothing moves.
+        final List<ClassicColonyReports.Report> none = new ArrayList<>();
+        none.add(ClassicColonyReports.of(t, cargo(a, 0, goods("rum"), 200, 103), game));
+        none.add(ClassicColonyReports.of(t, noInput(a, furs, goods("furs")), game));
+        assertEquals("[CARGOREADY0 Base, FURS Base]",
+                     ClassicColonyReports.grouped(none).get(0).toString());
+
+        // The zoom on the @FURS, in both orders: the @BUILT without rows,
+        // then the screen as the @BUILT's zoom (the hammer panel and the
+        // press's dissolve, ClassicColonyPanel.opened).
+        for (List<List<ClassicColonyReports.Report>> groups : List.of(g2, g3)) {
+            final RunGUI gui = new RunGUI(game, dutch);
+            gui.answers.put("report FURS", ClassicColonyReports.ROW_ZOOM);
+            edt(() -> {
+                    gui.installScreens(null);
+                    gui.addReports(groups, true);
+                });
+            assertEquals("[report FURS, report BUILT (flash)]", gui.askedIds().toString());
+            final ClassicOneShot timer = gui.zoomTimer();
+            assertTrue(timer.isScheduled());
+            gui.clock.now = timer.dueNanos();
+            assertTrue(timer.runIfDue());
+            flush();
+            assertEquals("[Base BUILT_BUILDING printingPress]", gui.opened.toString());
+            edt(() -> gui.reportScreenGone(a));
+            flush();
+            assertNull(gui.reportRun());
+        }
+
+        // «Runde fortsetzen.» on the @FURS, the zoom on the @BUILT: the same.
+        RunGUI gui = new RunGUI(game, dutch);
+        gui.answers.put("report BUILT", ClassicColonyReports.ROW_ZOOM);
+        final RunGUI gb = gui;
+        edt(() -> {
+                gb.installScreens(null);
+                gb.addReports(g3, true);
+            });
+        assertEquals("[report FURS, report BUILT]", gui.askedIds().toString());
+        gui.clock.now = gui.zoomTimer().dueNanos();
+        assertTrue(gui.zoomTimer().runIfDue());
+        flush();
+        assertEquals("[Base BUILT_BUILDING printingPress]", gui.opened.toString());
+
+        // The @BUILT passed with «Runde fortsetzen.», the zoom on the new
+        // load after it: still the @BUILT's zoom (the group has one).
+        gui = new RunGUI(game, dutch);
+        gui.answers.put("report CARGOREADY0", ClassicColonyReports.ROW_ZOOM);
+        final RunGUI gc = gui;
+        edt(() -> {
+                gc.installScreens(null);
+                gc.addReports(List.of(g1.get(0)), true);
+            });
+        assertEquals("[report SONSUP, report FURS, report ORE, report BUILT,"
+                     + " report CARGOREADY0, TUTORIAL6]", gui.askedIds().toString());
+        gui.clock.now = gui.zoomTimer().dueNanos();
+        assertTrue(gui.zoomTimer().runIfDue());
+        flush();
+        assertEquals("[Base BUILT_BUILDING printingPress]", gui.opened.toString());
+
+        // A group without a @BUILT: the chosen report's own opening.
+        assertSame(none.get(1), ClassicColonyReports.zoomAs(none, none.get(1)));
+        gui = new RunGUI(game, dutch);
+        gui.answers.put("report FURS", ClassicColonyReports.ROW_ZOOM);
+        final RunGUI gd = gui;
+        final List<List<ClassicColonyReports.Report>> furOnly
+            = ClassicColonyReports.grouped(List.of(none.get(1)));
+        edt(() -> {
+                gd.installScreens(null);
+                gd.addReports(furOnly, true);
+            });
+        gui.clock.now = gui.zoomTimer().dueNanos();
+        assertTrue(gui.zoomTimer().runIfDue());
+        flush();
+        assertEquals("[Base ORE -]", gui.opened.toString());
+    }
+
+    /**
      * The map shows each colony before its first report (the review of
      * part W, fidelity M1: V clip 048 #135474 view on Base -&gt; #135504 on
      * Silver City -&gt; #135526 its @NEEDTOOLS0, #118906 -&gt; #118915 nine

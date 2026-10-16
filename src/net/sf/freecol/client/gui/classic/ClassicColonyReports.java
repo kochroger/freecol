@@ -99,7 +99,9 @@ import net.sf.freecol.common.model.UnitType;
  * moves when it is in view, 046 #66519, 048 #19552, #110271).
  * «Zur Kolonie zoomen.» opens the colony screen {@link #ZOOM_FRAMES} after
  * the box closed (V 20 to 28), in the mode of spec §0.1 decision 8
- * ({@link Report#opening}).  The same colony's other reports of the turn
+ * ({@link Report#opening}), as the colony's @BUILT when it has one this
+ * turn, whichever report the zoom was chosen on ({@link #zoomAs}: the
+ * hammer panel, the dissolve, ÄNDERN's blink).  The same colony's other reports of the turn
  * come first as boxes without rows that close by themselves after a time
  * that grows with their words ({@link #flashFrames}; V clip 040 #85 061 -
  * #85 184, clip 048 #128660, #135687), a @BUILT among them waits for a
@@ -530,8 +532,15 @@ final class ClassicColonyReports {
      * colony its Sons of Liberty first, the rest in the order they came (V
      * clip 048 #106927 @SONSUP -&gt; #107109 @NEEDTOOLS; @NEEDTOOLS before
      * @CARGOREADY as FreeCol's, V 048 #110271 -&gt; #110402, #128314 -&gt;
-     * #128660, #135526 -&gt; #135687; I for the rest), and the goods it
-     * threw away in one box when there are several ({@link #spoiled}).
+     * #128660, #135526 -&gt; #135687; I for the rest), but a building's
+     * run-out reports (@FURS, @ORE ...) before its @BUILT, where FreeCol
+     * sends the completion first (V clip 049 Base's @FURS #48073, then the
+     * row-less @BUILT «… Druckerei.» #48095-#48191; clip 050 Base's @FURS
+     * closed #30478, then the row-less @BUILT «… Ställe.» #30483; the xg
+     * fixer after the independent check; I: only the run-out reports move,
+     * each to just before the colony's first @BUILT, the others keep
+     * FreeCol's place), and the goods it threw away in one box when there
+     * are several ({@link #spoiled}).
      *
      * @param reports The reports in FreeCol's order.
      * @return The groups, one list per colony.
@@ -550,10 +559,57 @@ final class ClassicColonyReports {
             for (Report r : spoiled(g)) {
                 ((r.kind == Kind.SONS) ? sons : rest).add(r);
             }
-            sons.addAll(rest);
+            sons.addAll(ranOutFirst(rest));
             out.add(sons);
         }
         return out;
+    }
+
+    /**
+     * A colony's reports with its run-out reports moved to just before its
+     * first @BUILT ({@link #grouped}; V clips 049 and 050), the rest in
+     * their order.
+     *
+     * @param g One colony's reports.
+     * @return The reports in that order.
+     */
+    static List<Report> ranOutFirst(List<Report> g) {
+        int first = -1;
+        for (int i = 0; i < g.size() && first < 0; i++) {
+            if (g.get(i).kind == Kind.BUILT) first = i;
+        }
+        if (first < 0) return g;
+        final List<Report> out = new ArrayList<>(g.subList(0, first));
+        final List<Report> later = new ArrayList<>();
+        for (Report r : g.subList(first, g.size())) {
+            if (r.kind == Kind.RAN_OUT) out.add(r); else later.add(r);
+        }
+        out.addAll(later);
+        return out;
+    }
+
+    /**
+     * The report whose opening a zoom takes: the group's @BUILT when it has
+     * one, whichever of its reports carried the chosen «Zur Kolonie
+     * zoomen.» (the hammer panel, a building's dissolve and ÄNDERN's blink
+     * after it: V clip 049 @FURS -&gt; zoom, the row-less @BUILT, Base
+     * #48219 and its dissolve #48237-#48292; clip 050 @FURS row 2 closed
+     * #30478, the row-less @BUILT, the screen #30611 and its dissolve
+     * #30633-#30685, the blink #30708; the independent check after fixer
+     * A: ours opened in the run-out report's house panel, no dissolve, no
+     * blink), else the chosen report itself.
+     *
+     * @param g The colony's reports.
+     * @param chosen The report the zoom was chosen on.
+     * @return The report to open as.
+     */
+    static Report zoomAs(List<Report> g, Report chosen) {
+        if (g != null) {
+            for (Report r : g) {
+                if (r != null && r.kind == Kind.BUILT && r.colony == chosen.colony) return r;
+            }
+        }
+        return chosen;
     }
 
     /**

@@ -237,10 +237,13 @@ public class GameOptions {
      * clip 049 #38856 «28% (4) 72% (9)» of 13 white), one Tory later on every
      * level, the very bad government too (FreeCol's ratios with the same
      * offset, I), and in a building each worker loses the penalty before
-     * the building's level factor (a colonist in a Sägewerk 6 -&gt; 4, two
-     * expert carpenters 24 -&gt; 20; FreeCol takes only 1 from a colonist
-     * in most level 2 and 3 buildings).  On in the "levi" rules (and a
-     * levi save from before the rule).
+     * the building's level factor (V: a colonist in a Sägewerk 6 -&gt; 4,
+     * two expert carpenters 24 -&gt; 20; I: the other level 2 buildings and
+     * the factories' level 3 by the same rule; FreeCol takes only 1 from a
+     * colonist in most level 2 and 3 buildings).  The option texts name
+     * the «Entdecker» threshold and the Sägewerk as seen, the other
+     * levels, the -2 limit and the factories as guesses (the xg fixer).
+     * On in the "levi" rules (and a levi save from before the rule).
      */
     public static final String ORIGINAL_TORY_PENALTY
         = "model.option.originalToryPenalty";

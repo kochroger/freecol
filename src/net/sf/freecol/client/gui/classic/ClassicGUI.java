@@ -6383,7 +6383,10 @@ public class ClassicGUI extends GUI {
                             + r.colony.getName() + " flashed");
                         if (this.reportRun != run) return;
                     }
-                    zoom(run, r, lastBoxClose());
+                    // A group with a @BUILT opens as its zoom, from any of
+                    // its reports (ClassicColonyReports.zoomAs: the hammer
+                    // panel, the dissolve, ÄNDERN's blink; V clips 049, 050).
+                    zoom(run, ClassicColonyReports.zoomAs(g, r), lastBoxClose());
                     return;
                 }
             }
