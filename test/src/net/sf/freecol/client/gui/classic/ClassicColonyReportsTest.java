@@ -51,12 +51,15 @@ import net.sf.freecol.util.test.FreeColTestCase;
  * Part W (build spec M4.11): the colony's turn reports with their zoom
  * rows ({@link ClassicColonyReports}): FreeCol's messages and the levi
  * rules' as the original's reports, their boxes (rows, bar, Escape, the
- * colonist), the boxes over the clips' frames (clip 020: @NEEDTOOLS,
- * @BUILT, @ORE, @CARGOREADY0 twice, @TUTORIAL6, @TUTORIAL16; clip 040:
- * @BUILT, @CARGOREADY2 and the two reports without rows after a zoom),
- * the groups by colony, and the GUI's run of them: the zoom, the flashed
- * reports, the next colony's after the screen, the hold of the turn start,
- * @TUTORIAL6 after a @CARGOREADY0 closed on its first row.
+ * advisor, a row-less box's time from its words), the boxes over the
+ * clips' frames (clip 020: @NEEDTOOLS, @BUILT, @ORE, @CARGOREADY0 twice,
+ * @TUTORIAL6, @TUTORIAL16; clip 040: @BUILT, @CARGOREADY2 and the two
+ * reports without rows after a zoom; clips 046-048: @CARGOREADY1 with its
+ * rows and without, @CARGOREADY0 without, @NEEDTOOLS0, @LUMBER, @SPOIL1,
+ * @DEPLETION, @SONSUP, @TUTORIAL6 after a zoom), the groups by colony, and
+ * the GUI's run of them: the zoom with its map jump, the flashed reports,
+ * the next colony's after the screen, the hold of the turn start,
+ * @TUTORIAL6 after a new load's box whatever row, before a zoom's screen.
  */
 public class ClassicColonyReportsTest extends FreeColTestCase {
 
@@ -106,6 +109,30 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
         return new ModelMessage(MessageType.MISSING_GOODS, "model.building.noInput", b, g)
             .addNamed("%inputGoods%", g).addNamed("%building%", b)
             .addName("%colony%", c.getName());
+    }
+
+    /** FreeCol's goods thrown away at the store's capacity. */
+    private static ModelMessage waste(Colony c, GoodsType g, int waste) {
+        return new ModelMessage(MessageType.WAREHOUSE_CAPACITY,
+            "model.colony.warehouseWaste", c, g).addNamed("%goods%", g)
+            .addAmount("%waste%", waste).addAmount("%level%", 90)
+            .addName("%colony%", c.getName());
+    }
+
+    /** FreeCol's worked-out resource near a colony. */
+    private static ModelMessage depleted(Colony c) {
+        return new ModelMessage(MessageType.WARNING,
+            "model.colonyTile.resourceExhausted", c)
+            .addNamed("%resource%", spec().getResourceType("model.resource.minerals"))
+            .addName("%colony%", c.getName());
+    }
+
+    /** FreeCol's Sons of Liberty up (or down). */
+    private static ModelMessage sons(Colony c, int oldSoL, int newSoL) {
+        return new ModelMessage(MessageType.SONS_OF_LIBERTY,
+            (newSoL > oldSoL) ? "model.colony.soLIncrease" : "model.colony.soLDecrease",
+            c, goods("bells")).addAmount("%oldSoL%", oldSoL)
+            .addAmount("%newSoL%", newSoL).addName("%colony%", c.getName());
     }
 
     /** A colony of the standard test game, named. */
@@ -206,7 +233,29 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
             MessageType.WAREHOUSE_CAPACITY, "model.colony.warehouseOverfull", base,
             goods("rum")).addNamed("%goods%", goods("rum")).addName("%colony%", "Base"),
             game).section);
-        // Not a report: FreeCol's words.
+        // Goods thrown away: @SPOIL1 (clip 048 #5690), the colonist.
+        r = ClassicColonyReports.of(t, waste(base, goods("sugar"), 2), game);
+        assertEquals("SPOIL1", r.section);
+        assertEquals(ClassicColonyReports.Kind.SPOILED, r.kind);
+        assertEquals("Zucker", r.values.get("STRING1"));
+        assertEquals("2", r.values.get("NUMBER0"));
+        assertEquals(ClassicColonyRight.Opening.OTHER, r.opening);
+        assertSame(ClassicAdvisorBox.Portrait.COLONIST, ClassicColonyReports.portrait(r.kind));
+        assertNull("nothing thrown away", ClassicColonyReports.of(t,
+            waste(base, goods("sugar"), 0), game));
+        // A worked-out mine: @DEPLETION with the frontiersman (#115237).
+        r = ClassicColonyReports.of(t, depleted(base), game);
+        assertEquals("DEPLETION", r.section);
+        assertEquals("Base", r.values.get("STRING0"));
+        assertSame(ClassicAdvisorBox.Portrait.SCOUT, ClassicColonyReports.portrait(r.kind));
+        // The Sons of Liberty: @SONSUP / @SONSDOWN with the soldier (046 #66519).
+        r = ClassicColonyReports.of(t, sons(base, 9, 11), game);
+        assertEquals("SONSUP", r.section);
+        assertEquals("11", r.values.get("NUMBER0"));
+        assertSame(ClassicAdvisorBox.Portrait.SOLDIER, ClassicColonyReports.portrait(r.kind));
+        assertEquals("SONSDOWN", ClassicColonyReports.of(t, sons(base, 21, 19), game).section);
+        // Not a report: FreeCol's words (@FOOD1 has the rows too, but
+        // FreeCol sends nothing when the food store runs empty).
         assertNull(ClassicColonyReports.of(t, new ModelMessage(MessageType.WARNING,
             "model.colony.famineFeared", base).addName("%colony%", "Base")
             .addAmount("%number%", 2), game));
@@ -217,7 +266,7 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
     /**
      * The boxes: the two LABELS.TXT rows «Runde fortsetzen.» (the bar,
      * Escape) and «Zur Kolonie zoomen.», the colonist; without rows a box
-     * that closes by itself after 57 frames.
+     * that closes by itself after a time from its words.
      */
     public void testTheBoxes() {
         final ClassicText t = texts("testTheBoxes");
@@ -237,7 +286,15 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
         assertEquals("Kolonie Base produziert Verlag.", q.plainText().trim());
         final ClassicAdvisorBox.Request f = ClassicColonyReports.request(t, r, false, "t");
         assertEquals(0, f.rows.size());
-        assertEquals(ClassicColonyLayout.frames(57), f.closeAfterMs, 1e-9);
+        // Its time from its words: 31 + 0.44 per character (I, the four
+        // seen: 58 characters 60 frames, 63 52, 64 63, 194 117).
+        final int chars = "Kolonie Base produziert Verlag.".length();
+        assertEquals(ClassicColonyLayout.frames(31 + Math.round(0.44 * chars)),
+                     f.closeAfterMs, 1e-9);
+        assertEquals(57, ClassicColonyReports.flashFrames(58));
+        assertEquals(59, ClassicColonyReports.flashFrames(63));
+        assertEquals(116, ClassicColonyReports.flashFrames(194));
+        assertEquals(31, ClassicColonyReports.flashFrames(0));
         assertEquals("7 frames after the box before (clip 040 #85 054 -> #85 061)",
                      ClassicColonyLayout.frames(7), f.chainMs, 1e-9);
         assertTrue("a row box keeps the boxes' usual distance", q.chainMs < 0.0);
@@ -278,7 +335,14 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
      * (5,10,226,96, no portrait).  Clip 040: @BUILT «Artillerie» #84900,
      * @CARGOREADY2 «Pferde» «(300)» #84666 (42,105,236,52), the reports
      * without rows after the zoom #85061 (42,116,236,30) and #85132
-     * (42,119,236,24).  Two residues are named and not counted (each must
+     * (42,119,236,24).  Clips 046-048 (Roger's playthrough 4): @CARGOREADY1
+     * 046 #116549 (42,102,236,58), @TUTORIAL6 after its zoom 046 #116740,
+     * the row-less @CARGOREADY1 048 #135687 (42,110,236,42) and
+     * @CARGOREADY0 048 #128660 (42,119,236,24), @NEEDTOOLS0 048 #10023
+     * (62,105,196,52), @LUMBER 046 #96631 and @SPOIL1 048 #5690
+     * (42,105,236,52), @DEPLETION with MSS3 048 #115237 (77,124,166,40),
+     * @SONSUP with MSS1 046 #66521 (39,110,226,58).  Two residues are
+     * named and not counted (each must
      * still differ): @ORE #96400 and the Musketen box #85132, where the
      * original keeps a line of 225 and 226 px on one line that our box
      * measure ({@link ClassicTextLayout}'s W - 6 = 224, pinned on the
@@ -301,6 +365,7 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
         game.changeMap(getTestMap(true));
         final Colony base = colony("Base", 5, 8);
         final Colony inka = colony("Inka Cotton", 10, 4);
+        final Colony silver = colony("Silver City", 15, 11);
         final Player dutch = base.getOwner();
         final Building smith = base.getBuilding(building("blacksmithHouse"));
         final Unit art = new ServerUnit(game, base.getTile(), dutch,
@@ -346,6 +411,37 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
               new Rectangle(42, 116, 236, 30),
               "the original keeps the line in one (226 px of the 224 our measure allows):"
               + " its box (42,119,236,24)" },
+            // Clips 046-048 (Roger's playthrough 4).
+            { new File(key, "c046_116549_cargoready1-zucker.png"), request(t, game,
+                cargo(base, 1, goods("sugar"), 100, 100), true),
+              new Rectangle(42, 102, 236, 58) },
+            { new File(key, "c046_116740_tutorial6-after-zoom.png"), ClassicTips.request(t,
+                ClassicTips.CARGO, ClassicColonyReports.cargoTipValues(t,
+                    ClassicColonyReports.of(t, cargo(base, 1, goods("sugar"), 100, 100),
+                                            game))),
+              new Rectangle(49, 115, 226, 42) },
+            { new File(key, "c048_135687_rowless-cargoready1-felle.png"), request(t, game,
+                cargo(silver, 1, goods("furs"), 100, 100), false),
+              new Rectangle(42, 110, 236, 42) },
+            { new File(key, "c048_128660_rowless-cargoready0-rum.png"), request(t, game,
+                cargo(base, 0, goods("rum"), 200, 100), false),
+              new Rectangle(42, 119, 236, 24) },
+            { new File(key, "c048_010023_needtools0-verlag.png"), request(t, game,
+                needTools(base, building("printingPress"), 20, 0), true),
+              new Rectangle(62, 105, 196, 52) },
+            { new File(key, "c046_096631_lumber-silver-city.png"), request(t, game,
+                noInput(silver, silver.getBuilding(building("carpenterHouse")),
+                        goods("lumber")), true),
+              new Rectangle(42, 105, 236, 52) },
+            { new File(key, "c048_005690_spoil1-zucker.png"), request(t, game,
+                waste(base, goods("sugar"), 2), true),
+              new Rectangle(42, 105, 236, 52) },
+            { new File(key, "c048_115237_depletion-silver-city.png"), request(t, game,
+                depleted(silver), true),
+              new Rectangle(77, 124, 166, 40) },
+            { new File(key, "c046_066521_sonsup-11.png"), request(t, game,
+                sons(base, 9, 11), true),
+              new Rectangle(39, 110, 226, 58) },
         };
         final StringBuilder fails = new StringBuilder();
         int compared = 0, arrow = 0, n = 0;
@@ -466,6 +562,15 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
         /** The screens opened: "colony how built". */
         final List<String> opened = new ArrayList<>();
 
+        /** The colonies the map jumped to at a zoom. */
+        final List<Colony> jumps = new ArrayList<>();
+
+        @Override
+        void zoomJump(Colony colony) {
+            this.jumps.add(colony);
+            super.zoomJump(colony);
+        }
+
         RunGUI(Game game, Player me) {
             super(null);
             this.game = game;
@@ -514,7 +619,7 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
         List<String> askedIds() {
             final List<String> out = new ArrayList<>();
             for (ClassicAdvisorBox.Request r : this.asked) {
-                out.add(r.id + ((r.rows.isEmpty()) ? " (flash)" : ""));
+                out.add(r.id + ((r.id.startsWith("report ") && r.rows.isEmpty()) ? " (flash)" : ""));
             }
             return out;
         }
@@ -606,16 +711,18 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
                 g1.installScreens(null);
                 g1.addReports(groups, true);
             });
-        assertEquals("[report BUILT, report CARGOREADY0, report NEEDTOOLS, report ORE]",
-                     gui.askedIds().toString());
+        assertEquals("[report BUILT, report CARGOREADY0, TUTORIAL6, report NEEDTOOLS,"
+                     + " report ORE]", gui.askedIds().toString());
         assertNull("over", gui.reportRun());
         assertTrue(gui.opened.isEmpty());
-        assertEquals(1, gui.pendingTips().size());
-        final ClassicGUI.Tip tip = gui.pendingTips().get(0);
-        assertEquals(ClassicTips.CARGO, tip.k);
-        assertEquals(gui.clock.now + ClassicVoyages.nanos(33 * 1000.0 / 70.0863), tip.due);
-        assertEquals("Rum", tip.values.get("STRING0"));
-        assertEquals("103", tip.values.get("NUMBER0"));
+        assertTrue(gui.jumps.isEmpty());
+        final ClassicAdvisorBox.Request tip = gui.asked.get(2);
+        assertEquals("33 frames after the rum's box closed",
+                     gui.clock.now + ClassicVoyages.nanos(33 * 1000.0 / 70.0863),
+                     tip.showAtNanos);
+        assertTrue(tip.plainText(), tip.plainText().contains("103 Rum"));
+        assertTrue("asked in the run, not by the tips' timer", gui.pendingTips().isEmpty());
+        assertTrue(ClassicGUI.tipShown(dutch, ClassicTips.CARGO));
 
         // 2. The zoom: Base's other report without rows, then its screen
         // 23 frames later; Silver City's after the screen went.
@@ -627,6 +734,7 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
                 g2.addReports(groups, true);
             });
         assertEquals("[report BUILT, report CARGOREADY0 (flash)]", gui.askedIds().toString());
+        assertEquals("the map jumps to the colony", List.of(a), gui.jumps);
         assertTrue(gui.pendingTips().isEmpty());
         assertNotNull(gui.reportRun());
         assertSame(a, gui.reportRun().zoomed);
@@ -668,5 +776,40 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
         assertFalse("done", held[0]);
         edt(() -> held[0] = g3.holdTurnStart());
         assertFalse(held[0]);
+
+        // 4. «Zur Kolonie zoomen.» on a new load (V clip 046 #116708): the
+        // map jumps to the colony, @TUTORIAL6 comes first, the screen 23
+        // frames after the tip's close (V #116872 -> #116896: 24).
+        dutch.setClassicTips(0);
+        final List<ClassicColonyReports.Report> one = new ArrayList<>();
+        one.add(ClassicColonyReports.of(t, cargo(a, 1, goods("sugar"), 100, 100), game));
+        final List<List<ClassicColonyReports.Report>> cargoOnly
+            = ClassicColonyReports.grouped(one);
+        gui = new RunGUI(game, dutch);
+        gui.answers.put("report CARGOREADY1", ClassicColonyReports.ROW_ZOOM);
+        final RunGUI g4 = gui;
+        edt(() -> {
+                g4.installScreens(null);
+                g4.addReports(cargoOnly, true);
+            });
+        assertEquals("[report CARGOREADY1, TUTORIAL6]", gui.askedIds().toString());
+        assertEquals(List.of(a), gui.jumps);
+        final ClassicOneShot t4 = gui.colonyTimer();
+        assertTrue(t4.isScheduled());
+        assertEquals(gui.clock.now + ClassicVoyages.nanos(ClassicColonyLayout.frames(23)),
+                     t4.dueNanos());
+        gui.clock.now = t4.dueNanos();
+        assertTrue(t4.runIfDue());
+        flush();
+        assertEquals("[Base OTHER -]", gui.opened.toString());
+        // The tip once per game: a second zoom has none.
+        gui = new RunGUI(game, dutch);
+        gui.answers.put("report CARGOREADY1", ClassicColonyReports.ROW_ZOOM);
+        final RunGUI g5 = gui;
+        edt(() -> {
+                g5.installScreens(null);
+                g5.addReports(cargoOnly, true);
+            });
+        assertEquals("[report CARGOREADY1]", gui.askedIds().toString());
     }
 }

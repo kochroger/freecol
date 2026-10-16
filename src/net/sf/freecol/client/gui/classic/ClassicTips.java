@@ -79,9 +79,8 @@ import net.sf.freecol.common.model.Unit;
  *       colony screen a ship's docking opened (V: clip008 #30022 -&gt;
  *       #30059); {@code %STRING0} the colony.  The docking is part W's
  *       (build spec M4.12, {@code ClassicGUI.shipDocks}).</li>
- *   <li>{@code @TUTORIAL6} (admiral): {@link #CARGO_TIP_MS} after a
- *       {@code @CARGOREADY0} report closed on «Runde fortsetzen.» (part W,
- *       {@link #CARGO}).</li>
+ *   <li>{@code @TUTORIAL6} (admiral): {@link #CARGO_TIP_MS} after a new
+ *       load's report closed, whatever row (part W, {@link #CARGO}).</li>
  *   <li>{@code @TUTORIAL16} (no portrait): {@link #FOOD_TIP_MS} after a
  *       change on the colony screen made the colony's food run short
  *       (part W, {@link #FOOD}).</li>
@@ -107,11 +106,14 @@ final class ClassicTips {
 
     /**
      * {@code @TUTORIAL6} (admiral): a new load is ready, ship it to Europe
-     * (part W, build spec M4.11): {@link #CARGO_TIP_MS} after a
-     * {@code @CARGOREADY0} closed on «Runde fortsetzen.» (V clip 020 #109608
-     * -&gt; #109641, box (49,115,226,42), MSS0 (45,44)); {@code %STRING0}
-     * the good, {@code %STRING1} the colony, {@code %NUMBER0} its stock
-     * («103 Rum»), {@code %STRING2} the home port.
+     * (part W, build spec M4.11): {@link #CARGO_TIP_MS} after a new load's
+     * report ({@code @CARGOREADY0-2}) closed, whatever row closed it (V clip
+     * 020 #109608 -&gt; #109641 a @CARGOREADY0 on «Runde fortsetzen.»; clip
+     * 046 #116708 -&gt; #116740 a @CARGOREADY1 on «Zur Kolonie zoomen.», the
+     * zoom's screen 24 frames after the tip's close; box (49,115,226,42),
+     * MSS0 (45,44)); {@code %STRING0} the good, {@code %STRING1} the
+     * colony, {@code %NUMBER0} its stock («103 Rum»), {@code %STRING2} the
+     * home port.
      */
     static final int CARGO = 6;
 
@@ -124,7 +126,10 @@ final class ClassicTips {
      */
     static final int FOOD = 16;
 
-    /** A @CARGOREADY0 closed to {@code @TUTORIAL6}: 33 frames (V clip 020 #109608 -&gt; #109641). */
+    /**
+     * A new load's report closed to {@code @TUTORIAL6}: 33 frames (V clip
+     * 020 #109608 -&gt; #109641; clip 046 #116708 -&gt; #116740: 32).
+     */
     static final double CARGO_TIP_MS = 33 * 1000.0 / 70.0863;
 
     /** The colony screen's change to {@code @TUTORIAL16}: 44 frames (V clip 020 #18949 -&gt; #18993). */

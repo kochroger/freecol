@@ -55,30 +55,50 @@ import net.sf.freecol.common.model.UnitType;
  *       #111, #157, #227, #245; clip 040 #84 900 «Artillerie»): FreeCol's
  *       {@code model.colony.buildingReady} and {@code unitReady}, the
  *       NAMES.TXT name (no longer FreeCol's «Druckerei»).</li>
- *   <li>{@code @NEEDTOOLS} (V clip 020 #35, #69, #75, #85, #91) and
- *       {@code @NEEDTOOLS0} (SRC, no tools at all): the levi rule's
- *       {@code model.colony.classicNeedTools} (the server's, a build with
- *       all its hammers that lacks tools), or FreeCol's
+ *   <li>{@code @NEEDTOOLS} (V clip 020 #35, #69, #75, #85, #91; clip 048
+ *       x11) and {@code @NEEDTOOLS0} (V clip 048 #10022, #101904, #135526:
+ *       no tools at all, the narrower box (62,105,196,52)): the levi
+ *       rule's {@code model.colony.classicNeedTools} (the server's, a
+ *       build with all its hammers that lacks tools), or FreeCol's
  *       {@code buildableNeedsGoods} of tools under its own rule.</li>
- *   <li>{@code @ORE} (V clip 020 #204) and its siblings {@code @LUMBER},
- *       {@code @COTTON}, {@code @TOBACCO}, {@code @CANESUGAR},
- *       {@code @FURS}, {@code @TOOLS} (SRC, I: the same rows): FreeCol's
+ *   <li>{@code @ORE} (V clip 020 #204) and its siblings {@code @LUMBER}
+ *       (V clip 046 #96631, clip 048 #118915), {@code @COTTON},
+ *       {@code @TOBACCO}, {@code @CANESUGAR}, {@code @FURS},
+ *       {@code @TOOLS} (SRC, I: the same rows): FreeCol's
  *       {@code model.building.noInput}, a building whose workers stand
  *       idle for want of its input.</li>
  *   <li>{@code @CARGOREADY0} (V clip 020 #236, #274, #283), {@code 1}
- *       (SRC), {@code 2} (V clip 040 #84 666): the levi rule's
+ *       (V x9, clips 046 #116549, 047 #400, 048 #24875 ...: box
+ *       (42,102,236,58)), {@code 2} (V clip 040 #84 666): the levi rule's
  *       {@code model.colony.classicCargoReady0-2} (a new load of 100), or
  *       FreeCol's {@code warehouseFull} / {@code warehouseOverfull} under
  *       its own rule.</li>
+ *   <li>{@code @SPOIL1} (V clip 048 #5690): FreeCol's
+ *       {@code model.colony.warehouseWaste}, goods thrown away at the
+ *       store's capacity, under every rule.</li>
+ *   <li>{@code @DEPLETION} with the frontiersman MSS3 (V clip 048
+ *       #115237, box (77,124,166,40)): FreeCol's
+ *       {@code model.colonyTile.resourceExhausted}.</li>
+ *   <li>{@code @SONSUP} with the soldier MSS1 at the right (V clip 046
+ *       #66519, #110556, clip 048 x3, box (39,110,226,58)) and
+ *       {@code @SONSDOWN} (SRC, I: the same): FreeCol's
+ *       {@code model.colony.soLIncrease} / {@code soLDecrease}.</li>
  * </ul>
+ * {@code @FOOD1} «Der Nahrungsvorrat in … ist erschöpft» carries the rows
+ * too (V clip 046 #89692, after a food party emptied the store), but
+ * FreeCol sends nothing when a colony's food store runs empty: not built.
  * «Zur Kolonie zoomen.» opens the colony screen {@link #ZOOM_FRAMES} after
- * the box closed, in the mode of spec §0.1 decision 8
- * ({@link Report#opening}).  The same colony's other reports of the turn
- * come first as boxes without rows that close by themselves
- * ({@link #FLASH_FRAMES}; V once, clip 040 #85 061 - #85 184), the other
- * colonies' after the screen closed (I).  The reports of a turn come
- * after its other notices, grouped by colony in the order they came
- * ({@link #grouped}; the manual p.10: the European issues first, then
+ * the box closed (V 20 to 28), in the mode of spec §0.1 decision 8
+ * ({@link Report#opening}); the map jumps to the colony at once (V clip
+ * 046 #116708 -&gt; #116710).  The same colony's other reports of the turn
+ * come first as boxes without rows that close by themselves after a time
+ * that grows with their words ({@link #flashFrames}; V clip 040 #85 061 -
+ * #85 184, clip 048 #128660, #135687), the other colonies' after the
+ * screen closed (I).  A new load's report brings @TUTORIAL6 after its box
+ * whatever row closed it, a zoom's screen after the tip (V clip 046
+ * #116708 -&gt; #116740 -&gt; #116872 -&gt; #116896).  The reports of a
+ * turn come after its other notices, grouped by colony in the order they
+ * came ({@link #grouped}; the manual p.10: the European issues first, then
  * each colony's; I for the grouping).
  */
 final class ClassicColonyReports {
@@ -92,7 +112,13 @@ final class ClassicColonyReports {
         /** A building idle for want of its input (@ORE and its siblings). */
         RAN_OUT,
         /** A new load of a good (@CARGOREADY0-2). */
-        CARGO_READY
+        CARGO_READY,
+        /** Goods thrown away at the store's capacity (@SPOIL1). */
+        SPOILED,
+        /** A mine near the colony worked out (@DEPLETION). */
+        DEPLETED,
+        /** The colony's Sons of Liberty up or down (@SONSUP, @SONSDOWN). */
+        SONS
     }
 
     /** LABELS.TXT {@code @MISC} «Runde fortsetzen.» (LABELS.TXT:49). */
@@ -114,13 +140,21 @@ final class ClassicColonyReports {
     static final int ZOOM_FRAMES = 23;
 
     /**
-     * A report without rows after a zoom stays this long and closes by
-     * itself (V once each, clip 040: «Eine neue Ladung {Baumwolle} …»
-     * #85 061 -&gt; #85 124, 63 frames; «… {Musketen} …» #85 132 -&gt;
-     * #85 184, 52; no key or click between, the calibrated keylog; I: the
-     * mean, the cause of the difference is not known).
+     * A report without rows after a zoom stays for a time that grows with
+     * its text and closes by itself: {@link #FLASH_BASE_FRAMES} +
+     * {@link #FLASH_FRAMES_PER_CHAR} per character of its words
+     * ({@link #flashFrames}; the least-squares line through the four seen,
+     * I: clip 040 «Eine neue Ladung {Baumwolle} …» 64 characters #85 061
+     * -&gt; #85 124, 63 frames, «… {Musketen} …» 63 characters #85 132 -&gt;
+     * #85 184, 52 (no key or click between, the calibrated keylog); clip
+     * 048 «… {Rum} …» 58 characters #128660 -&gt; #128720, 60, the four
+     * lines of a @CARGOREADY1 for Silver City, 194 characters, #135687
+     * -&gt; #135804, 117 (no keylog)).
      */
-    static final int FLASH_FRAMES = 57;
+    static final int FLASH_BASE_FRAMES = 31;
+
+    /** {@link #FLASH_BASE_FRAMES}' per character. */
+    static final double FLASH_FRAMES_PER_CHAR = 0.44;
 
     /** The next report without rows after one closed: 7 frames (V clip 040 #85 125 -&gt; #85 132). */
     static final int FLASH_GAP_FRAMES = 7;
@@ -145,7 +179,11 @@ final class ClassicColonyReports {
         NO_INPUT = "model.building.noInput",
         CARGO_READY = "model.colony.classicCargoReady",
         STORE_FULL = "model.colony.warehouseFull",
-        STORE_AT_CAPACITY = "model.colony.warehouseOverfull";
+        STORE_AT_CAPACITY = "model.colony.warehouseOverfull",
+        STORE_WASTE = "model.colony.warehouseWaste",
+        RESOURCE_EXHAUSTED = "model.colonyTile.resourceExhausted",
+        SONS_UP = "model.colony.soLIncrease",
+        SONS_DOWN = "model.colony.soLDecrease";
 
 
     /** One report. */
@@ -227,7 +265,8 @@ final class ClassicColonyReports {
         return id != null && (BUILDING_READY.equals(id) || UNIT_READY.equals(id)
             || NEED_TOOLS.equals(id) || NEEDS_GOODS.equals(id) || NO_INPUT.equals(id)
             || id.startsWith(CARGO_READY) || STORE_FULL.equals(id)
-            || STORE_AT_CAPACITY.equals(id));
+            || STORE_AT_CAPACITY.equals(id) || STORE_WASTE.equals(id)
+            || RESOURCE_EXHAUSTED.equals(id) || SONS_UP.equals(id) || SONS_DOWN.equals(id));
     }
 
     /**
@@ -290,6 +329,31 @@ final class ClassicColonyReports {
             return new Report(Kind.RAN_OUT, section, colony, v,
                 ClassicColonyRight.Opening.ORE, null, g, 0, m);
         }
+        if (STORE_WASTE.equals(id)) {
+            // «{%NUMBER0} Tonnen {%STRING1} wurden weggeworfen» (V clip 048 #5690).
+            final GoodsType g = goodsOf(spec, m, "%goods%");
+            final String name = (g == null) ? null
+                : ClassicTips.cargoName(t, ClassicTips.cargoRow(g.getId()));
+            final int waste = number(m, "%waste%");
+            if (name == null || waste <= 0) return null;
+            v.put("STRING1", name);
+            v.put("NUMBER0", Integer.toString(waste));
+            return new Report(Kind.SPOILED, "SPOIL1", colony, v,
+                ClassicColonyRight.Opening.OTHER, null, g, 0, m);
+        }
+        if (RESOURCE_EXHAUSTED.equals(id)) {
+            // «Mine erschöpft in der Nähe von %STRING0.» (V clip 048 #115237).
+            return new Report(Kind.DEPLETED, "DEPLETION", colony, v,
+                ClassicColonyRight.Opening.OTHER, null, null, 0, m);
+        }
+        if (SONS_UP.equals(id) || SONS_DOWN.equals(id)) {
+            // «… ist auf %NUMBER0%% gestiegen …» (V clip 046 #66519: 11 %).
+            final int sol = number(m, "%newSoL%");
+            if (sol < 0) return null;
+            v.put("NUMBER0", Integer.toString(sol));
+            return new Report(Kind.SONS, (SONS_UP.equals(id)) ? "SONSUP" : "SONSDOWN",
+                colony, v, ClassicColonyRight.Opening.OTHER, null, null, 0, m);
+        }
         // A new load (the levi rule's, or FreeCol's store warnings under its own).
         final GoodsType g = goodsOf(spec, m, "%goods%");
         final String name = (g == null) ? null
@@ -322,14 +386,19 @@ final class ClassicColonyReports {
     }
 
     /**
-     * A report's box: GAME.TXT's words with its values, the colonist
-     * (MSS5) centred over it at box y − 62, the box and portrait centred
-     * on y 100 together (V clip 020: @BUILT (87,111,146,40), @NEEDTOOLS
-     * (42,105,236,52), @ORE (42,108,236,46), @CARGOREADY0 (42,111,236,40)).
-     * With its rows: «Runde fortsetzen.» / «Zur Kolonie zoomen.», the bar on
-     * row 1, Escape on row 1 (I).  Without (after a zoom, V clip 040
-     * #85 061: (42,116,236,30), #85 132: (42,119,236,24)): no bar, it
-     * closes by itself after {@link #FLASH_FRAMES}.
+     * A report's box: GAME.TXT's words with its values, its advisor over
+     * it ({@link #portrait}: the colonist MSS5 centred at box y − 62), the
+     * box and portrait centred on y 100 together (V clip 020: @BUILT
+     * (87,111,146,40), @NEEDTOOLS (42,105,236,52), @ORE (42,108,236,46),
+     * @CARGOREADY0 (42,111,236,40); clips 046-048: @CARGOREADY1
+     * (42,102,236,58), @NEEDTOOLS0 (62,105,196,52), @LUMBER and @SPOIL1
+     * (42,105,236,52), @DEPLETION (77,124,166,40) with MSS3 at (86,37),
+     * @SONSUP (39,110,226,58) with MSS1 at (210,33)).  With its rows:
+     * «Runde fortsetzen.» / «Zur Kolonie zoomen.», the bar on row 1,
+     * Escape on row 1 (I).  Without (after a zoom, V clip 040 #85 061:
+     * (42,116,236,30), #85 132: (42,119,236,24); clip 048 #135687:
+     * (42,110,236,42)): no bar, it closes by itself after
+     * {@link #flashFrames} of its words.
      *
      * @param t The pack's texts, or null.
      * @param r The report.
@@ -343,20 +412,47 @@ final class ClassicColonyReports {
         final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText(
             "report " + r.section, m, r.values);
         if (b == null) return null;
-        b.portrait(ClassicAdvisorBox.Portrait.COLONIST);
+        b.portrait(portrait(r.kind));
         if (rows) {
             final String go = label(t, MISC_CONTINUE), zoom = label(t, MISC_ZOOM);
             if (go == null || zoom == null) return null;
             b.rows(ClassicAdvisorBox.literal(go), ClassicAdvisorBox.literal(zoom))
                 .defaultRow(ROW_CONTINUE).cancelRow(ROW_CONTINUE);
-        } else {
-            // 7 frames after the box before (the zoom's or the last of
-            // these), not the boxes' usual 200 ms (V clip 040 #85 054 ->
-            // #85 061, #85 124 -> #85 132).
-            b.closeAfter(ClassicColonyMoves.ms(FLASH_FRAMES))
-                .chain(ClassicColonyMoves.ms(FLASH_GAP_FRAMES));
+            return b.stopgap(title, null).build();
         }
-        return b.stopgap(title, null).build();
+        // 7 frames after the box before (the zoom's or the last of these),
+        // not the boxes' usual 200 ms (V clip 040 #85 054 -> #85 061,
+        // #85 124 -> #85 132; clip 048 #128653 -> #128660); its time from
+        // its words.
+        b.chain(ClassicColonyMoves.ms(FLASH_GAP_FRAMES));
+        final int chars = b.stopgap(title, null).build().plainText().trim().length();
+        return b.closeAfter(ClassicColonyMoves.ms(flashFrames(chars))).build();
+    }
+
+    /**
+     * How long a report without rows stays (class comment; I: the
+     * least-squares line of the four seen, {@link #FLASH_BASE_FRAMES} +
+     * {@link #FLASH_FRAMES_PER_CHAR} per character, rounded).
+     *
+     * @param chars The characters of its words.
+     * @return The frames.
+     */
+    static int flashFrames(int chars) {
+        return FLASH_BASE_FRAMES + (int) Math.round(FLASH_FRAMES_PER_CHAR * Math.max(0, chars));
+    }
+
+    /**
+     * Who stands at a report: the colonist (MSS5), the frontiersman (MSS3)
+     * at a worked-out mine (V clip 048 #115237), the soldier (MSS1) for
+     * the Sons of Liberty (V clip 046 #66519).
+     *
+     * @param kind The report's kind.
+     * @return The portrait.
+     */
+    static ClassicAdvisorBox.Portrait portrait(Kind kind) {
+        if (kind == Kind.DEPLETED) return ClassicAdvisorBox.Portrait.SCOUT;
+        if (kind == Kind.SONS) return ClassicAdvisorBox.Portrait.SOLDIER;
+        return ClassicAdvisorBox.Portrait.COLONIST;
     }
 
     /**

@@ -3850,15 +3850,21 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   `10-port-carriers.md` §4): a colony's turn messages become the original's boxes
   (`ClassicColonyReports.of`, from `ClassicGUI.showMessagePopup`): `@BUILT` «Kolonie Base produziert
   {Verlag}.» (FreeCol's `buildingReady` / `unitReady`, the NAMES name — no longer FreeCol's
-  «Druckerei»), `@NEEDTOOLS` / `@NEEDTOOLS0`, `@ORE` and its siblings (`noInput`), `@CARGOREADY0-2`;
+  «Druckerei»), `@NEEDTOOLS` / `@NEEDTOOLS0`, `@ORE` and its siblings (`noInput`; `@LUMBER` seen),
+  `@CARGOREADY0-2`, `@SPOIL1` (`warehouseWaste`), `@DEPLETION` (`resourceExhausted`, the frontiersman
+  MSS3), `@SONSUP` / `@SONSDOWN` (`soLIncrease` / `soLDecrease`, the soldier MSS1 at the right); else
   MSS5 at (130, box y − 62), the rows «Runde fortsetzen.» (the bar, Escape) and «Zur Kolonie zoomen.»
-  (LABELS.TXT:49/50). They run when the turn flow holds after the ships' arrivals (a report after the
-  Europe screen, V #69), grouped by colony in the order they came (I). «Zur Kolonie zoomen.»: the same
-  colony's other reports come as boxes without rows that close by themselves (57 frames, the next 7
-  frames later; V clip 040 #85 061 – #85 184), then its screen 23 frames after the box closed (V ×8;
-  `colony-zoom`), in the mode of spec §0.1 decision 8: a building's @BUILT in hammer mode with the
-  dissolve and ÄNDERN's blink (the only way to them now), @NEEDTOOLS in hammer mode, @ORE in the house
-  mode. The other colonies' reports follow when that screen closes. Without the pack: FreeCol's
+  (LABELS.TXT:49/50). `@FOOD1` has the rows too (clip 046 #89692) but FreeCol sends nothing when a
+  food store runs empty: not built. They run when the turn flow holds after the ships' arrivals (a
+  report after the Europe screen, V #69), grouped by colony in the order they came (I). «Zur Kolonie
+  zoomen.»: the map jumps to the colony at once (the view rule; V clip 046 #116708 → #116710), the
+  same colony's other reports come as boxes without rows that close by themselves after a time from
+  their words — 31 + 0.44 frames per character (I: the line through 63, 52, 60 and 117 frames for 64,
+  63, 58 and 194 characters, clip 040 #85 061 – #85 184, clip 048 #128660, #135687), the next 7 frames
+  after the last close — then its screen 23 frames after the last box closed (V 20 to 28; `colony-zoom`),
+  in the mode of spec §0.1 decision 8: a building's @BUILT in hammer mode with the dissolve and ÄNDERN's
+  blink (the only way to them now), @NEEDTOOLS in hammer mode, @ORE in the house mode, the others the
+  last visit's. The other colonies' reports follow when that screen closes. Without the pack: FreeCol's
   notices. Recorder: `colony-reports`, `colony-report`, `colony-zoom`.
 - **The levi rules behind them** (game option `model.option.originalColonyReports`, on in levi, off in
   classic/freecol and their saves; `ServerColony`): @NEEDTOOLS every turn a build has all its hammers
@@ -3866,8 +3872,10 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   @CARGOREADY when a good's stock passes a multiple of 100 (`classicCargoReady0`; at the store's
   capacity 1 while the warehouse can grow, else 2; V clip 020 #236, clip 040 #84 666); FreeCol's
   `warehouseFull` / `warehouseOverfull` are not sent then.
-- **Tips** (`ClassicTips`): `@TUTORIAL6` 33 frames after a `@CARGOREADY0` closed on «Runde
-  fortsetzen.» (V clip 020 #109608 → #109641; the good, the colony, its stock, the home port);
+- **Tips** (`ClassicTips`): `@TUTORIAL6` 33 frames after a new load's report closed, whatever row
+  (V clip 020 #109608 → #109641 «Runde fortsetzen.»; clip 046 #116708 → #116740 «Zur Kolonie
+  zoomen.», the zoom's screen 24 frames after the tip's close; the good, the colony, its stock, the
+  home port), asked in the run of the reports;
   `@TUTORIAL16`, no portrait, 44 frames after a change on the screen made the colony's food run short
   (V #18949 → #18993; I: the first shortfall; `colony-food-short`).
 - **The exit**: Escape (the manual's key card) and «Abb» act on the release, nothing pressed shows; the
@@ -3896,7 +3904,7 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   after the player closes it the held hand-over runs again from the close. L and U stay unmapped on
   the screen. Recorder `dock`, `colony-carrier docked`.
 - **Tests**: `ClassicColonyReportsTest` (the reports of FreeCol's messages, the boxes and their groups,
-  the boxes against clip 020/040 frames 0 px but the two named wrap residues, the run with its zoom,
+  18 boxes against clip 020, 040 and 046-048 frames 0 px but the two named wrap residues, the run with its zoom,
   flashes and tips), `ClassicPediaTerrainTest` (the rows, the picture's frames, three pages 0 px),
   `ClassicScreenStackTest.testTheZoomAndTheDocking`, `ClassicColonyMovesTest` (the exit's time, F1,
   @TUTORIAL16), `ServerColonyTest.testOriginalNeedTools` / `testOriginalCargoReady`,

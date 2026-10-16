@@ -5839,12 +5839,13 @@ public class ClassicGUI extends GUI {
 
     /**
      * Ask the colony reports in turn (class comment of
-     * {@link ClassicColonyReports}): each with its rows; «Zur Kolonie
-     * zoomen.» shows the same colony's others without rows, closing by
-     * themselves, then its screen {@link ClassicColonyReports#ZOOM_FRAMES}
-     * after the last box, and the next colony's reports come after that
-     * screen closed.  «Runde fortsetzen.» on a @CARGOREADY0 brings
-     * @TUTORIAL6.  EDT only.
+     * {@link ClassicColonyReports}): each with its rows; a new load's
+     * report brings @TUTORIAL6 after its box (once per game); «Zur Kolonie
+     * zoomen.» jumps the map to the colony, shows the same colony's others
+     * without rows, closing by themselves, then its screen
+     * {@link ClassicColonyReports#ZOOM_FRAMES} after the last box (the
+     * tip's, if it came), and the next colony's reports come after that
+     * screen closed.  EDT only.
      *
      * @param run The run.
      */
@@ -5872,7 +5873,19 @@ public class ClassicGUI extends GUI {
                 ClassicFrameRecorder.event("colony-report", r.section + " "
                     + r.colony.getName() + " row=" + row);
                 if (this.reportRun != run) return;   // the game view went
-                if (row == ClassicColonyReports.ROW_ZOOM && !r.colony.isDisposed()) {
+                final boolean zoom = row == ClassicColonyReports.ROW_ZOOM
+                    && !r.colony.isDisposed();
+                if (zoom) zoomJump(r.colony);
+                // A new load brings @TUTORIAL6 after its box, whatever row
+                // closed it, before the zoom's screen (V clip 020 #109608 ->
+                // #109641 «Runde fortsetzen.»; clip 046 #116708 -> #116740
+                // «Zur Kolonie zoomen.», the screen 24 frames after the
+                // tip's close #116872 -> #116896).
+                if (r.kind == ClassicColonyReports.Kind.CARGO_READY) {
+                    cargoTip(t, r, lastBoxClose());
+                    if (this.reportRun != run) return;
+                }
+                if (zoom) {
                     for (int j = i + 1; j < g.size(); j++) {
                         final ClassicAdvisorBox.Request f = ClassicColonyReports.request(t,
                             g.get(j), false, title);
@@ -5885,11 +5898,24 @@ public class ClassicGUI extends GUI {
                     zoom(run, r, lastBoxClose());
                     return;
                 }
-                if (row == ClassicColonyReports.ROW_CONTINUE
-                    && "CARGOREADY0".equals(r.section)) cargoTip(t, r, lastBoxClose());
             }
         }
         finishReports(run);
+    }
+
+    /**
+     * «Zur Kolonie zoomen.» chosen: the map jumps to the colony at once, by
+     * the view rule of a unit coming up (V clip 046 #116708 -&gt; #116710,
+     * the view centred on Base; clip 020's colony was in view already).
+     * EDT only.
+     *
+     * @param colony The colony.
+     */
+    void zoomJump(Colony colony) {
+        final ClassicMapViewer mv = this.mapViewer;
+        if (mv != null && colony != null && colony.getTile() != null) {
+            mv.jumpTo(colony.getTile(), "zoom");
+        }
     }
 
     /**
@@ -5949,18 +5975,27 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * {@code @TUTORIAL6} after a @CARGOREADY0 closed on «Runde
-     * fortsetzen.» (V clip 020 #109608 -&gt; #109641), with the good, the
-     * colony, its stock and the home port taken now.  EDT only.
+     * {@code @TUTORIAL6} after a new load's report closed, whatever row
+     * closed it ({@link ClassicTips#CARGO_TIP_MS} later: V clip 020 #109608
+     * -&gt; #109641, clip 046 #116708 -&gt; #116740), with the good, the
+     * colony, its stock and the home port taken now; asked in the run, so
+     * the next report or the zoom's screen comes after its close.  Once
+     * per game, with Tutortips on.  EDT only.
      *
      * @param t The pack's texts, or null.
      * @param r The report.
      * @param closed When its box closed.
      */
     private void cargoTip(ClassicText t, ClassicColonyReports.Report r, long closed) {
-        scheduleTip(new Tip(ClassicTips.CARGO,
-            closed + ClassicVoyages.nanos(ClassicTips.CARGO_TIP_MS), closed, null, null,
-            ClassicColonyReports.cargoTipValues(t, r)));
+        final Player me = myPlayer();
+        if (me == null || !tipsOn() || tipShown(me, ClassicTips.CARGO)) return;
+        final ClassicAdvisorBox.Request q = ClassicTips.request(t, ClassicTips.CARGO,
+            ClassicColonyReports.cargoTipValues(t, r),
+            closed + ClassicVoyages.nanos(ClassicTips.CARGO_TIP_MS));
+        if (q == null) return;   // no pack: FreeCol has no such tip
+        markTip(me, ClassicTips.CARGO);
+        ClassicFrameRecorder.event("tip", ClassicTips.section(ClassicTips.CARGO));
+        this.prompter.ask(q);
     }
 
     /**

@@ -715,7 +715,7 @@ public class ServerColony extends Colony implements TurnTaker {
             }
             // The original (levi, part W): a new load of 100 instead of
             // FreeCol's high-water mark and capacity warnings; goods thrown
-            // away stay reported in FreeCol's words.
+            // away stay reported (the Classic UI shows @SPOIL1).
             if (original && messageId != null && STORE_WARNINGS.contains(messageId)) {
                 messageId = null;
             }
