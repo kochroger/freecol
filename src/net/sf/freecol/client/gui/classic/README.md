@@ -3620,13 +3620,36 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   cell is placed by the work tile's compass `Direction` from the colony
   (`ClassicColonyTiles.placeOf`), **not** its raw `(x,y)` offset — FreeCol's map
   is isometric, so the eight neighbours' raw offsets do not fill a −1..+1 square.
-  **Terrain: ours, not the original's** (L §4.2: its finer 24-px art comes from
-  a scaler nobody has found): each tile as our map composes it
-  (`ClassicTerrainComposer` over the pack's index sheets, through the game
-  palette; the map's RGBA tiles without them), the colony's sprite on the centre
-  where the map draws it (its flag in the owner's colours), the 16 px scaled to 24
-  by source pixel floor((2d + 1)/3); its water cycles with the map's palette
-  (the original's one VGA palette: 144 px of its 3×3 every 40–41 frames, clip 020
+  **Terrain: the original's enlargement** (part Y5, Roger's colony test
+  2026-10-16 "der Teufel steckt im Detail"; the prep's
+  `freecol-spike-results/y/prep/3x3-scaler.md`; L §4.2's open point closed):
+  each tile as our map composes it in palette indices (`ClassicTerrainComposer`
+  over the pack's index sheets), the colony's sprite on the centre where the map
+  draws it (its flag in the owner's colours, pasted as indices; a colour the
+  palette lacks kept unshaded), without the tile's resource marker and rumour;
+  the 16 px enlarged to 24 as the original (`ClassicColonyTiles.enlarge`):
+  target (x, y) shows source (floor(2x/3), floor((2y + 1)/3)) (ours before:
+  floor((2d + 1)/3) in x too, a column off), shaded in its colour ramp by the
+  original's fixed pattern anchored on the whole 72×72 map, q = (X +
+  `noiseRow`(Y)) mod 192, `NOISE` (±1…±3) and on the grey ramp 0x10–0x2F its own
+  `GREY_NOISE` (±12): s + d in the ramp, else s − d; the middle one of each three
+  columns (X mod 3 = 1) chained to the pixel left of it, its step d(q) − d(q − 1)
+  reflected about it (builder 2's find: the prep's |d| = 3 rule and its "wrap by
+  4" were this chain; six grey steps measured anew under it); EGA colours (the
+  flag), 0x88–0x8A and (I) the reds 0x70–0x77 and 0x90+ unshaded; then the
+  resource marker and the rumour unscaled and unshaded at tile + (4,4) (V the
+  fish of Provisorische Kolonie's NE, #14817, 70 of 70 px; the other markers and
+  the rumour I; on the colony's own tile, under its sprite, the map's cell as it
+  is, I). The original has no 24-px terrain art and no smoothing; the original's
+  own map of three colonies enlarged so is its 3×3 index for index on the twelve
+  clean tiles of #2260, #123003 and #14817: 6906 of 6912 px (ours before: 28 %),
+  nine tiles all 576 (ocean, coast, forest, hills, mountains); the six misses are
+  one source pixel at an outer coast tile's corner each, where the map frame shows
+  land and the 3×3 water (I, not understood: the original may compose the 3×3's
+  coast corners from its nine tiles only; ours composes the true neighbours, as
+  the map). Unseen (I): rivers, plowed land, unexplored tiles, the desert's ramp
+  0x60–0x67. Without the index sheets: the map's RGBA tiles in the same geometry,
+  unshaded (ours). Its water cycles with the map's palette (the original's one VGA palette: 144 px of its 3×3 every 40–41 frames, clip 020
   #2262, #2303, #2343; a palette step repaints the 3×3 when one of its tiles
   holds a cycling index). **Over it, as the original:** each tile's production
   row (dago §3.3: R = 24 − w, m halved while m − 1 > R, pitch min(w + 1,

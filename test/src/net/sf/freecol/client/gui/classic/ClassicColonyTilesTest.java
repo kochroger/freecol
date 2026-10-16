@@ -60,15 +60,18 @@ import static net.sf.freecol.client.gui.classic.ClassicColonyLayout.Row;
  * tile rows as pure functions against every row the analyses measured
  * (clip 020's 17, dago's 29), the model of a test colony (the centre's two
  * rows, a worker's row, the prohibition sign, the totem, an enemy, the
- * labels), the white cursor, the terrain art (our map's tile scaled to 24,
- * its water cycling); then golden: the state of clip 020's frames rebuilt
+ * labels), the white cursor, the terrain art (our map's tile enlarged to 24
+ * as the original, part Y5: the rules as pure functions, Silver City's
+ * ocean rows, the markers unscaled; its water cycling); then golden: the
+ * original's own map of three colonies enlarged against their 3x3 index
+ * for index, and the state of clip 020's frames rebuilt
  * in a test game on the classic rules (the tiles' terrain as the clip's
  * hover labels name it, the workers, the selection, the cursor's place and
  * blink half, a hovered tile) and the screen's canvas compared with the
  * frame pixel for pixel over everything the original or ours draws on the
  * terrain (the rows, the count labels, the workers with their shadows, the
  * sign, the totems, the frames, the hover label), the original arrow left
- * out; the terrain itself is ours (L §4.2) and only counted; and dago's
+ * out (there the terrain, our test game's, is only counted); and dago's
  * four tile models drawn by the same painter against dago's frames.
  * Where FreeCol's rules make another amount than the clip shows, the test
  * names both and draws the clip's to check the drawing apart from the
@@ -726,11 +729,14 @@ public class ClassicColonyTilesTest extends FreeColTestCase {
     }
 
     /**
-     * The terrain art: our map's composed tile (the pack's index sheets
-     * through the game palette) scaled 16 to 24 by source pixel
-     * floor((2d + 1)/3), the colony's sprite on the centre where the map
-     * draws it; the ocean holds cycling indices and changes with the
-     * phase, the grassland does not.
+     * The terrain art (part Y5): our map's composed tile (the pack's index
+     * sheets) enlarged as the original ({@link ClassicColonyTiles#enlarge},
+     * the cell's slot anchoring the shades) through the game palette at
+     * the phase; the colony's sprite on the centre where the map draws it,
+     * its palette colours shaded with the terrain, a colour the palette
+     * lacks kept; the swamp holds cycling indices and changes with the
+     * phase, the plains do not; the fallback's scale in the original's
+     * geometry, floor(2x/3) and floor((2y + 1)/3).
      */
     public void testTheArt() {
         final ClassicPackFiles pack = ClassicPackFiles.runtime();
@@ -745,39 +751,323 @@ public class ClassicColonyTilesTest extends FreeColTestCase {
         final boolean[] cyc = { false };
         // Base's centre, the swamp: its water cycles (the composer's
         // cycling indices 120-127: swamps, rivers, sea lanes, beaches).
-        final BufferedImage swamp0 = art.tile(c.getMap(), c, null, 0, cyc);
+        final int centre = ClassicColonyLayout.CENTRE_TILE;
+        final BufferedImage swamp0 = art.tile(c.getMap(), c, centre, null, 0, cyc);
         assertEquals(24, swamp0.getWidth());
         assertEquals(24, swamp0.getHeight());
         assertTrue("the swamp cycles", cyc[0]);
-        final BufferedImage swamp3 = art.tile(c.getMap(), c, null, 3, null);
+        final BufferedImage swamp3 = art.tile(c.getMap(), c, centre, null, 3, null);
         int changed = 0;
         for (int y = 0; y < 24; y++) {
             for (int x = 0; x < 24; x++) if (swamp0.getRGB(x, y) != swamp3.getRGB(x, y)) changed++;
         }
         assertTrue("another phase, other water: " + changed, changed > 0);
         cyc[0] = false;
-        final BufferedImage land = art.tile(c.getMap(), far, null, 0, cyc);
+        final BufferedImage land = art.tile(c.getMap(), far, 0, null, 0, cyc);
+        assertNotNull(land);
         assertFalse("plains among plains do not cycle", cyc[0]);
-        // The scale: each target pixel is the source pixel floor((2d + 1)/3).
+        // Each pixel: the composed cell's, enlarged and shaded at its slot.
+        final ClassicTerrainComposer comp = ClassicTerrainLayer.create(pack).composer();
+        final ClassicGamePalette pal = art.palette();
+        final byte[] cell = new byte[256];
+        comp.composeCell(ClassicColonyTiles.source(c.getMap()), c.getX(), c.getY(), cell, 0, 16);
+        final byte[] big = ClassicColonyTiles.enlarge(cell, centre);
+        for (int y = 0; y < 24; y++) {
+            for (int x = 0; x < 24; x++) {
+                assertEquals(x + "," + y, pal.rgb(3, big[y * 24 + x] & 0xFF),
+                             swamp3.getRGB(x, y) & 0xFFFFFF);
+            }
+        }
+        // The same tile in another slot: other shades.
+        final BufferedImage elsewhere = art.tile(c.getMap(), c, 0, null, 3, null);
+        int other = 0;
+        for (int y = 0; y < 24; y++) {
+            for (int x = 0; x < 24; x++) if (elsewhere.getRGB(x, y) != swamp3.getRGB(x, y)) other++;
+        }
+        assertTrue("the shades are the 3x3's: " + other, other > 100);
+        // The fallback's scale: the original's geometry.
         final int[] src = new int[256];
         for (int k = 0; k < 256; k++) src[k] = 0xFF000000 | k;
         final BufferedImage sc = ClassicColonyTiles.scale(src, 16, 24);
         for (int d = 0; d < 24; d++) {
-            assertEquals(d + "", (2 * d + 1) / 3, sc.getRGB(d, 0) & 0xFF);
+            assertEquals(d + "", (2 * d) / 3, sc.getRGB(d, 0) & 0xFF);
             assertEquals(d + "", 16 * ((2 * d + 1) / 3), sc.getRGB(0, d) & 0xFF);
         }
         // The colony's sprite over the centre: an opaque 21-px sprite
         // overhangs 2 px each side on the map (settlementOffset -2), so in
         // the 24-px cell it covers every column, its 16 rows the cell's 24.
+        // A colour the palette lacks: kept, unshaded.
         final BufferedImage sprite = new BufferedImage(21, 16, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < 16; y++) for (int x = 0; x < 21; x++) sprite.setRGB(x, y, 0xFF123456);
-        final BufferedImage centre = art.tile(c.getMap(), c, sprite, 0, null);
+        final BufferedImage kept = art.tile(c.getMap(), c, centre, sprite, 0, null);
         for (int y = 0; y < 24; y++) {
             for (int x = 0; x < 24; x++) {
-                assertEquals(x + "," + y, 0x123456, centre.getRGB(x, y) & 0xFFFFFF);
+                assertEquals(x + "," + y, 0x123456, kept.getRGB(x, y) & 0xFFFFFF);
             }
         }
-        assertNotNull(land);
+        // A palette green (0x44): the green's shades at the centre's
+        // place (V the colony's sprite shaded with the terrain, #123003);
+        // the Dutch flag's orange 0x0D: an EGA colour, unshaded (V).
+        for (int y = 0; y < 16; y++) {
+            for (int x = 0; x < 21; x++) {
+                sprite.setRGB(x, y, 0xFF000000 | pal.rgb(0, (x == 10) ? 0x0D : 0x44));
+            }
+        }
+        final BufferedImage shaded = art.tile(c.getMap(), c, centre, sprite, 0, null);
+        final java.util.Set<Integer> greens = new java.util.HashSet<>();
+        for (int y = 0; y < 24; y++) {
+            for (int x = 0; x < 24; x++) {
+                final int sx = ClassicColonyTiles.enlargedSourceX(x) + 2;
+                final int want = (sx == 10) ? 0x0D
+                    : ClassicColonyTiles.shaded(0x44, 24 + x, 24 + y);
+                assertEquals(x + "," + y, pal.rgb(0, want), shaded.getRGB(x, y) & 0xFFFFFF);
+                if (sx != 10) greens.add(want);
+            }
+        }
+        assertTrue("the green's shades: " + greens, greens.size() >= 3
+                   && greens.stream().allMatch(v -> v >= 0x40 && v <= 0x47));
+    }
+
+    /** The source index shaded at a step of the pattern (the same at every pixel of that step). */
+    private static int shadedAt(int s, int q) {
+        int found = -1;
+        for (int y = 0; y < 72; y++) {
+            for (int x = 0; x < 72; x++) {
+                if ((x + ClassicColonyTiles.noiseRow(y)) % ClassicColonyTiles.NOISE_PERIOD != q) {
+                    continue;
+                }
+                final int v = ClassicColonyTiles.shaded(s, x, y);
+                if (found < 0) found = v;
+                assertEquals("step " + q + " at " + x + "," + y, found, v);
+            }
+        }
+        assertTrue("step " + q + " in the 3x3", found >= 0);
+        return found;
+    }
+
+    /**
+     * The original's enlargement as pure functions (part Y5, prep y
+     * {@code 3x3-scaler.md} §3 and builder 2's chain): the geometry, the
+     * rows' offsets of the pattern, its antiperiods and its values, the
+     * ramps, and the shades of the frames' cases: s +- d in the ramp, the
+     * middle one of three chained to the pixel left of it.
+     */
+    public void testTheEnlargementRules() {
+        // The geometry: columns 2, 1, 2 ... per source pixel, rows 1, 2, 1 ...
+        final int[] sx = { 0, 0, 1, 2, 2, 3 }, sy = { 0, 1, 1, 2, 3, 3 };
+        for (int d = 0; d < 24; d++) {
+            assertEquals(d + "", sx[d % 6] + 4 * (d / 6), ClassicColonyTiles.enlargedSourceX(d));
+            assertEquals(d + "", sy[d % 6] + 4 * (d / 6), ClassicColonyTiles.enlargedSourceY(d));
+        }
+        assertEquals(15, ClassicColonyTiles.enlargedSourceX(23));
+        assertEquals(15, ClassicColonyTiles.enlargedSourceY(23));
+        // The rows' offsets (prep §3.1), the same as the steps between
+        // rows -72 -36 -24 +60 +84 +48 by y mod 6, over all 72 rows.
+        final int[] off = { 0, 156, 132, 0, 84, 132, 60, 24, 0, 60, 144, 0, 120, 84, 60, 120,
+                            12, 60, 180, 144, 120, 180, 72, 120 };
+        for (int y = 0; y < off.length; y++) {
+            assertEquals("row " + y, off[y], ClassicColonyTiles.noiseRow(y));
+        }
+        final int[] step = { -72, -36, -24, 60, 84, 48 };
+        int o = 0;
+        for (int y = 0; y < 72; y++) {
+            if (y > 0) o = Math.floorMod(o + step[y % 6], 192);
+            assertEquals("row " + y, o, ClassicColonyTiles.noiseRow(y));
+            assertEquals(0, o % 12);
+        }
+        // The patterns: 192 steps, the antiperiod; +-3 only in the middle
+        // of three, the others 0, +-1, +-2.
+        assertEquals(192, ClassicColonyTiles.NOISE.length);
+        assertEquals(192, ClassicColonyTiles.GREY_NOISE.length);
+        for (int q = 0; q < 96; q++) {
+            assertEquals("antiperiod " + q, -ClassicColonyTiles.NOISE[q],
+                         ClassicColonyTiles.NOISE[q + 96]);
+            assertEquals("grey antiperiod " + q, -ClassicColonyTiles.GREY_NOISE[q],
+                         ClassicColonyTiles.GREY_NOISE[q + 96]);
+        }
+        for (int q = 0; q < 192; q++) {
+            final int a = Math.abs(ClassicColonyTiles.NOISE[q]);
+            assertTrue("step " + q + ": " + a, (q % 3 == 1) ? a <= 3 : a <= 2);
+        }
+        // The grey's own steps (not 4 x the others), the chain's six.
+        assertEquals(3, ClassicColonyTiles.GREY_NOISE[4]);
+        assertEquals(8, ClassicColonyTiles.GREY_NOISE[7]);
+        assertEquals(8, ClassicColonyTiles.GREY_NOISE[37]);
+        assertEquals(12, ClassicColonyTiles.GREY_NOISE[94]);
+        assertEquals(-8, ClassicColonyTiles.GREY_NOISE[133]);
+        assertEquals(10, ClassicColonyTiles.GREY_NOISE[139]);
+        assertEquals(10, ClassicColonyTiles.GREY_NOISE[169]);
+        assertEquals(-12, ClassicColonyTiles.GREY_NOISE[190]);
+        // The ramps.
+        assertEquals(0x10, ClassicColonyTiles.rampLow(0x29));
+        assertEquals(0x2F, ClassicColonyTiles.rampHigh(0x10));
+        assertEquals(0x30, ClassicColonyTiles.rampLow(0x3F));
+        assertEquals(0x3F, ClassicColonyTiles.rampHigh(0x30));
+        assertEquals(0x40, ClassicColonyTiles.rampLow(0x47));
+        assertEquals(0x47, ClassicColonyTiles.rampHigh(0x40));
+        assertEquals(0x68, ClassicColonyTiles.rampLow(0x6F));
+        assertEquals(0x78, ClassicColonyTiles.rampLow(0x7A));
+        assertEquals(0x80, ClassicColonyTiles.rampLow(0x87));
+        for (int s : new int[] { 0x00, 0x05, 0x0D, 0x0F, 0x70, 0x77, 0x88, 0x8A, 0x90, 0xFD }) {
+            assertEquals(Integer.toHexString(s), -1, ClassicColonyTiles.rampLow(s));
+            for (int q = 0; q < 192; q += 7) assertEquals(s, shadedAt(s, q));
+        }
+        // s +- d (prep §3.4): in the ramp, else reflected.
+        assertEquals(0x44, shadedAt(0x43, 3));    // +1
+        assertEquals(0x46, shadedAt(0x47, 3));    // +1 at the ramp's end: 46 (V 128 times)
+        assertEquals(0x44, shadedAt(0x46, 15));   // +2: 44
+        assertEquals(0x49, shadedAt(0x48, 5));    // -1 at the ramp's start: 49
+        // The chain: the middle of three (q mod 3 = 1) is the pixel left
+        // of it plus the step, reflected about it.  q 46 (+2, +1): Base's
+        // W, #2260 (10,18) s46 -> 43, (16,19) s47 -> 44; in the ramp +1.
+        assertEquals(0x43, shadedAt(0x46, 46));
+        assertEquals(0x44, shadedAt(0x47, 46));
+        assertEquals(0x44, shadedAt(0x43, 46));
+        // q 79 (+1, +3): s47 -> 44, s46 -> 45 (the prep's |d| = 3 rule).
+        assertEquals(0x44, shadedAt(0x47, 79));
+        assertEquals(0x45, shadedAt(0x46, 79));
+        // q 142 (-2, -1): Silver City's N, #123003 (16,22) s48 -> 4B.
+        assertEquals(0x4B, shadedAt(0x48, 142));
+        // The grey: q 190 (-4, -12), Silver City's SW s29 -> 1D (the
+        // prep's table: +4, 2D); q 4 (+5, +3): s29 -> 2C (V prep §3.3).
+        assertEquals(0x1D, shadedAt(0x29, 190));
+        assertEquals(0x2C, shadedAt(0x29, 4));
+    }
+
+    /**
+     * Golden (part Y5, self-contained): three open-ocean cells
+     * (TERRAIN.SS.010) composed and enlarged at the slots NW, N, NE are
+     * the original's first six rows of Silver City's 3x3 (clip 020
+     * #123003, y 32-37, x 224-295), 432 of 432 indices.
+     */
+    public void testTheOceanAsTheOriginal() {
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicTerrainLayer layer = (pack == null) ? null : ClassicTerrainLayer.create(pack);
+        if (layer == null) {
+            System.err.println(getName() + ": no index sheets, skipped");
+            return;
+        }
+        final String[] rows = {
+            "3a393a3c3c3b3b3c3b3b3b3c3a383b3e3d3b3b3b3a3b3c3c39393b3b393d3d3c3b3d3d3a3b3c3a3b3b3c3a393c3d3c3a3b3b393b3c3c3a3a3c3c3b3b3d3c383d3d3a3a3b3b3a3a3d",
+            "3a3b3c3a3a3c3b3a3b3d3d3a3b3c3b3b3c3d3a383c3a393b3d3d393b3c3b3a3a3d3b393c3b3a3b3d3d3a3b3c3b39393c3b393b3d3c3b3c3c3a3c3d3b3a3a3c3c3a3c3d3c3b3b3b3a",
+            "3c3b3a3c3c3a3b3c3a3a3b3d3a3a3c3c3b3b3c3c3a3a3b3b3a3b3c3a3a3c3b3a3b3d3d3a3b3c3b3b3c3d3a383c3a393b3d3d393b3c3b3a3a3d3b393c3b3a3b3d3d3a3b3c3b39393c",
+            "3b3a3b3c3c3b3b3c3a3a3a3c39373c3d3c3b3b3b3a3b3c3b3a3a3c3b393d3d3c3a3c3c3a3a3b3b3a3a3c3a393c3d3c393c3c3a3b3c3c3a3a3b3b3a3b3c3b393c3c3a3a3b3b3a3a3c",
+            "39393c3c3b3b3c3c393c3e3a3b3c3a3a3a3c3b3a3b3b3b393b3d3a3a3b3b3a3a3c3b3a3b3c3c393b3d3a393a3b39393b3a393b3d3d3a3b3c3a393a3d3a3a3b3b3a3b3c3c3a3a3b3a",
+            "3a393b3d3d3a3b3c3a393a3d3a3a3b3b3a3b3c3c3a3a3b3a38393d3b3b3c3b3a3b3c3c3a3b3c3a3a3b3d3a383c3a393a3b3b3a3c3d3b3a3a3d3a383c3b3a3a3c3c3a3b3c3b39393b" };
+        final net.sf.freecol.common.model.TileType ocean = classic().getTileType("model.tile.ocean");
+        final ClassicTerrainComposer.TerrainSource sea = new ClassicTerrainComposer.TerrainSource() {
+                @Override
+                public boolean onMap(int x, int y) {
+                    return x >= 0 && y >= 0 && x < 9 && y < 9;
+                }
+
+                @Override
+                public boolean explored(int x, int y) {
+                    return onMap(x, y);
+                }
+
+                @Override
+                public net.sf.freecol.common.model.TileType type(int x, int y) {
+                    return onMap(x, y) ? ocean : null;
+                }
+
+                @Override
+                public void overlays(int x, int y, java.util.function.IntConsumer frames) {}
+            };
+        int equal = 0, old = 0;
+        for (int slot = 0; slot < 3; slot++) {
+            final byte[] cell = new byte[256];
+            layer.composer().composeCell(sea, 3 + slot, 3, cell, 0, 16);
+            final byte[] big = ClassicColonyTiles.enlarge(cell, slot);
+            for (int y = 0; y < rows.length; y++) {
+                for (int x = 0; x < 24; x++) {
+                    final int at = 2 * (24 * slot + x);
+                    final int want = Integer.parseInt(rows[y].substring(at, at + 2), 16);
+                    if ((big[y * 24 + x] & 0xFF) == want) equal++;
+                    if ((cell[((2 * y + 1) / 3) * 16 + (2 * x + 1) / 3] & 0xFF) == want) old++;
+                }
+            }
+        }
+        System.err.println(getName() + ": " + equal + " of 432 (before part Y5, floor((2d + 1)/3)"
+                           + " without shades: " + old + ")");
+        assertEquals(432, equal);
+    }
+
+    /**
+     * The resource marker and the rumour: drawn unscaled and unshaded
+     * over the enlarged terrain at tile + (4,4) (part Y5, V the fish on
+     * Provisorische Kolonie's NE, clip 020 #14817, 70 of 70 px; the other
+     * markers and the rumour I), not in the composed cell that is
+     * enlarged; on the colony's own tile, under its sprite, the map's cell
+     * as it is (I).
+     */
+    public void testTheMarkersAreDrawnUnscaled() {
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicColonyTiles.Art art = ClassicColonyTiles.Art.load(pack, null);
+        if (!art.indexed()) {
+            System.err.println(getName() + ": no index sheets, skipped");
+            return;
+        }
+        final State s = base(1539);
+        final net.sf.freecol.common.model.Map map = s.colony.getTile().getMap();
+        final Tile e = s.colony.getTile().getNeighbourOrNull(Direction.E);
+        e.addResource(new net.sf.freecol.common.model.Resource(s.game, e,
+            classic().getResourceType("model.resource.fish")));
+        final Tile w = s.colony.getTile().getNeighbourOrNull(Direction.W);
+        w.addLostCityRumour(new net.sf.freecol.common.model.LostCityRumour(s.game, w));
+        final ClassicTerrainComposer comp = ClassicTerrainLayer.create(pack).composer();
+        final ClassicIndexSheet phys = pack.indexSheet(ClassicPackFiles.PHYS0_SS);
+        final ClassicGamePalette pal = art.palette();
+        final int[][] cases = { { 5, 96 }, { 3, ClassicTileArt.LOST_CITY } };
+        for (int[] k : cases) {
+            final Tile t = (k[0] == 5) ? e : w;
+            final List<Integer> marks = new ArrayList<>();
+            final byte[] cell = new byte[256], whole = new byte[256];
+            comp.composeCell(ClassicColonyTiles.source(map, marks::add), t.getX(), t.getY(),
+                             cell, 0, 16);
+            comp.composeCell(ClassicColonyTiles.source(map), t.getX(), t.getY(), whole, 0, 16);
+            assertEquals(Arrays.asList(k[1]), marks);
+            assertFalse("the map's cell holds the marker", Arrays.equals(cell, whole));
+            final byte[] big = ClassicColonyTiles.enlarge(cell, k[0]);
+            final byte[] px = phys.pixels(k[1]);
+            final int fw = phys.width(k[1]);
+            final BufferedImage img = art.tile(map, t, k[0], null, 0, null);
+            int marker = 0;
+            for (int y = 0; y < 24; y++) {
+                for (int x = 0; x < 24; x++) {
+                    final int mx = x - 4, my = y - 4;
+                    int v = big[y * 24 + x] & 0xFF;
+                    if (mx >= 0 && my >= 0 && mx < Math.min(16, fw)
+                        && my < Math.min(16, phys.height(k[1]))) {
+                        final int m = px[my * fw + mx] & 0xFF;
+                        if (m != ClassicIndexSheet.TRANSPARENT) {
+                            v = m;
+                            marker++;
+                        }
+                    }
+                    assertEquals(k[1] + " at " + x + "," + y, pal.rgb(0, v),
+                                 img.getRGB(x, y) & 0xFFFFFF);
+                }
+            }
+            assertTrue(k[1] + ": " + marker, marker > 20);
+        }
+        // The colony's own tile with a resource and its sprite: the map's
+        // cell, the marker in it, enlarged (I).
+        final Tile c = s.colony.getTile();
+        c.addResource(new net.sf.freecol.common.model.Resource(s.game, c,
+            classic().getResourceType("model.resource.grain")));
+        final BufferedImage sprite = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+        final byte[] whole = new byte[256];
+        comp.composeCell(ClassicColonyTiles.source(map), c.getX(), c.getY(), whole, 0, 16);
+        final byte[] big = ClassicColonyTiles.enlarge(whole, ClassicColonyLayout.CENTRE_TILE);
+        final BufferedImage img = art.tile(map, c, ClassicColonyLayout.CENTRE_TILE, sprite, 0,
+                                           null);
+        for (int y = 0; y < 24; y++) {
+            for (int x = 0; x < 24; x++) {
+                assertEquals(x + "," + y, pal.rgb(0, big[y * 24 + x] & 0xFF),
+                             img.getRGB(x, y) & 0xFFFFFF);
+            }
+        }
     }
 
     /** A screen of a test colony. */
@@ -1087,6 +1377,101 @@ public class ClassicColonyTilesTest extends FreeColTestCase {
         }
         return ClassicColonyGolden.compare("tiles " + name, ClassicColonyGolden.pixels(
             s.panel.canvas()), theirs, TILES, arrow, rest);
+    }
+
+    /**
+     * The frames of the enlargement (part Y5, prep y §1 and §4): a colony
+     * frame of clip 020, a map frame of the same colony and the 3x3's
+     * 48x48 block on it (its NW corner), then per clean tile (nothing over
+     * it in either frame) the pixels it misses: one source pixel at an
+     * outer coast tile's corner each, where the map frame shows land and
+     * the 3x3 water (I, named in {@link ClassicColonyTiles#enlarge}).
+     */
+    private static final int[][] ENLARGED = {
+        { 2260, 1700, 80, 104,    2, 0,   3, 0,   5, 1,   6, 0 },
+        { 123003, 122700, 96, 56,    0, 4,   1, 0,   2, 0,   6, 0,   8, 0 },
+        { 123003, 123300, 96, 56,    5, 0 },
+        { 14817, 14300, 96, 88,    8, 1 },
+        { 14817, 15500, 80, 88,    5, 0 } };
+
+    /** A frame's palette indices, [y][x]. */
+    private static int[][] indices(BufferedImage frame) {
+        assertTrue("an indexed frame",
+                   frame.getColorModel() instanceof java.awt.image.IndexColorModel);
+        final int[][] p = new int[frame.getHeight()][frame.getWidth()];
+        for (int y = 0; y < p.length; y++) {
+            for (int x = 0; x < p[y].length; x++) p[y][x] = frame.getRaster().getSample(x, y, 0);
+        }
+        return p;
+    }
+
+    /**
+     * Golden (part Y5, the 3x3's terrain): the original's own map of a
+     * colony (its 16-px cells in a map frame) enlarged by {@link
+     * ClassicColonyTiles#enlarge} is the original's 3x3 of that colony,
+     * index for index, on the twelve clean tiles of Base #2260, Silver
+     * City #123003 and Provisorische Kolonie #14817 (ocean, coast, forest,
+     * hills, mountains, plains): 6906 of 6912 px, nine tiles all 576, the
+     * misses named in {@link #ENLARGED}; before part Y5 (floor((2d +
+     * 1)/3) without shades) about a quarter.  And the fish of #14817's NE
+     * (PHYS0.SS 096) unscaled at its tile + (4,4) with its own indices, 70
+     * of 70 px.
+     */
+    public void testTheEnlargementAgainstClip020() throws Exception {
+        final ClassicColonyGolden gold = ClassicColonyGolden.open(getName());
+        if (gold == null) return;
+        final StringBuilder report = new StringBuilder();
+        int all = 0, equal = 0, before = 0;
+        for (int[] k : ENLARGED) {
+            final int[][] colony = indices(gold.frame(k[0])), map = indices(gold.frame(k[1]));
+            for (int i = 4; i < k.length; i += 2) {
+                final int t = k[i], c = t % 3, r = t / 3;
+                final byte[] cell = new byte[256];
+                for (int y = 0; y < 16; y++) {
+                    for (int x = 0; x < 16; x++) {
+                        cell[y * 16 + x] = (byte) map[k[3] + 16 * r + y][k[2] + 16 * c + x];
+                    }
+                }
+                final byte[] big = ClassicColonyTiles.enlarge(cell, t);
+                int miss = 0, old = 0;
+                for (int y = 0; y < 24; y++) {
+                    for (int x = 0; x < 24; x++) {
+                        final int want = colony[32 + 24 * r + y][224 + 24 * c + x];
+                        if ((big[y * 24 + x] & 0xFF) != want) miss++;
+                        if ((cell[((2 * y + 1) / 3) * 16 + (2 * x + 1) / 3] & 0xFF) == want) old++;
+                    }
+                }
+                all += 576;
+                equal += 576 - miss;
+                before += old;
+                final String name = "#" + k[0] + " / #" + k[1] + " "
+                    + ClassicColonyLayout.TILE_NAMES[t];
+                report.append(String.format("  %-22s %3d of 576 (before %3d)%n", name, 576 - miss,
+                                            old));
+                assertEquals(name + " misses", k[i + 1], miss);
+            }
+        }
+        // The fish: PHYS0.SS 096 at NE + (4,4), unscaled, unshaded.
+        final ClassicIndexSheet phys = gold.pack.indexSheet(ClassicPackFiles.PHYS0_SS);
+        final int[][] prov = indices(gold.frame(14817));
+        final byte[] fish = phys.pixels(96);
+        int opaque = 0, same = 0;
+        for (int y = 0; y < phys.height(96); y++) {
+            for (int x = 0; x < phys.width(96); x++) {
+                final int v = fish[y * phys.width(96) + x] & 0xFF;
+                if (v == ClassicIndexSheet.TRANSPARENT) continue;
+                opaque++;
+                if (prov[32 + ClassicColonyLayout.TILE_MARKER_DY + y]
+                    [224 + 48 + ClassicColonyLayout.TILE_MARKER_DX + x] == v) same++;
+            }
+        }
+        report.append(String.format("  all %d of %d (%.2f %%), before %d (%.1f %%); the fish %d of"
+            + " %d%n", equal, all, 100.0 * equal / all, before, 100.0 * before / all, same,
+            opaque));
+        System.err.println(getName() + ":\n" + report);
+        assertEquals(6906, equal);
+        assertEquals(70, opaque);
+        assertEquals(70, same);
     }
 
 

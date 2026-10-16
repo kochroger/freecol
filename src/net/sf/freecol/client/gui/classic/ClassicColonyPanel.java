@@ -3575,8 +3575,9 @@ final class ClassicColonyPanel extends JPanel {
      * wood panel's black frame ({@link ClassicColonyChrome#paintWoodPanel}),
      * the colony's nine tiles placed by their compass direction from the
      * colony (FreeCol's isometric map: the raw offsets do not fill a
-     * square), each with our map's art scaled to 24 at the water's phase,
-     * the colony's sprite on the centre; the rows, the workers, the sign,
+     * square), each with our map's art enlarged to 24 as the original at
+     * the water's phase (part Y5), the colony's sprite on the centre; the
+     * rows, the workers, the sign,
      * the totem, an enemy at war at tile + (4,4) with his flag (M2,
      * war-french #13962); the selected colonist's green frame and the
      * white cursor in its blink's on half (the blink: {@link #blinkOff}).
@@ -3600,9 +3601,10 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * A tile's terrain: our map's art of it scaled to 24 ({@link
-     * ClassicColonyTiles.Art#tile}), with the colony's sprite on the
-     * centre as the map draws it (its flag in the owner's colours).
+     * A tile's terrain: our map's art of it enlarged to 24 as the original
+     * ({@link ClassicColonyTiles.Art#tile}, part Y5), with the colony's
+     * sprite on the centre as the map draws it (its flag in the owner's
+     * colours).
      *
      * @param g The canvas, clipped to the cell.
      * @param c The cell.
@@ -3619,7 +3621,7 @@ final class ClassicColonyPanel extends JPanel {
             }
         }
         final boolean[] cycles = { false };
-        final BufferedImage img = this.tileArt.tile(c.tile.getMap(), c.tile, settlement,
+        final BufferedImage img = this.tileArt.tile(c.tile.getMap(), c.tile, c.index, settlement,
             this.waterPhase.getAsInt(), cycles);
         if (img == null) return false;
         final Rectangle r = c.bounds();

@@ -832,6 +832,14 @@ final class ClassicColonyLayout {
     static final int ENEMY_DX = 4, ENEMY_DY = 4;
 
     /**
+     * A tile's resource marker (PHYS0.SS 089 + its row), drawn unscaled
+     * and unshaded over the tile's enlarged terrain at tile + (4,4) (part
+     * Y5, V clip 020 #14817: the fish 096 on NE, 70 of 70 px; the other
+     * markers and the lost city rumour I, alike).
+     */
+    static final int TILE_MARKER_DX = 4, TILE_MARKER_DY = 4;
+
+    /**
      * A tile's hover label's box x (dago §3.5, V «Ozean» x 226-246 on W,
      * «Grünland/Straße/Gepflügt» x 213-306 on N): tile x + 12 - (w + 1)/2,
      * not clamped; its y the tile's y.

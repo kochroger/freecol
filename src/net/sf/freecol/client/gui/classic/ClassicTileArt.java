@@ -129,7 +129,8 @@ final class ClassicTileArt {
     /** Road centre-hub frame; the eight spokes follow at {@code ROAD_HUB+1..+8}. */
     static final int ROAD_HUB = 80;
 
-    private static final int LOST_CITY = 103;
+    /** The lost city rumour's frame (the colony screen draws it apart, {@link ClassicColonyTiles#source}). */
+    static final int LOST_CITY = 103;
     private static final int PLOWED = 149;
 
     /** The first coast quarter; quarter q of land bits c is +4c+q. */

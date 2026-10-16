@@ -53,9 +53,10 @@ import static net.sf.freecol.client.gui.classic.ClassicColonyBuildings.Figure;
  * The colony screen's <b>3x3 colony map</b> in the original's look (build
  * spec M4.4, {@code playthrough-3-analysis/11-spec-M4-colony.md}; L §4, dago
  * {@code 01-layout.md} §3, clip 020): the nine tiles in their 24-px cells,
- * each with our map's art of the tile scaled to 24 px (the original's finer
- * 24-px art comes from a scaler nobody has found, L §4.2: the one element
- * that is not the original's), the colony's sprite on the centre, the
+ * each with our map's art of the tile enlarged to 24 px as the original
+ * enlarges its 16-px map (part Y5: its geometry and its fixed shade
+ * pattern, {@link #enlarge}; L §4.2's open point), the resource markers
+ * unscaled over it, the colony's sprite on the centre, the
  * production rows (the centre's food at y + 1 and its other good at y + 14),
  * the workers at tile + (14,6) with their black shadows, the red
  * prohibition sign over the good of a worker who makes nothing, the totem
@@ -458,19 +459,26 @@ final class ClassicColonyTiles {
     }
 
 
-    // The art: our map's tile scaled to 24 px (L §4.2, the open point)
+    // The art: the original's 24-px tiles (part Y5, L §4.2 closed)
 
     /**
-     * The terrain of the 3x3 map: each tile as our map composes it (the
-     * pack's TERRAIN and PHYS0 index sheets through the game palette at
-     * the water's phase, {@link ClassicTerrainComposer}; the RGBA tiles of
-     * the map's fallback without them), the colony's sprite on the centre
-     * where the map draws it, the 16 px scaled to 24 by source pixel
-     * floor((2d + 1)/3) (L §4.2's closest of the rules tried: 9-28 % of the
-     * original's pixels, so this is ours, not the original's).  The
-     * original's palette cycles the water of its 3x3 map with the map's
-     * (V clip 020: 144 px every 40-41 frames, #2262, #2303, #2343): ours
-     * too, a palette step repaints the cells that hold a cycling index.
+     * The terrain of the 3x3 map as the original draws it (part Y5, Roger's
+     * colony test 2026-10-16 15:21; the prep's
+     * {@code freecol-spike-results/y/prep/3x3-scaler.md}): each tile as our
+     * map composes it in palette indices (the pack's TERRAIN and PHYS0
+     * index sheets, {@link ClassicTerrainComposer}) with the colony's
+     * sprite on the centre where the map draws it, but without its
+     * resource marker and rumour; the 16 px enlarged to 24 as the original
+     * ({@link #enlarge}: its geometry and its fixed shade pattern); the
+     * markers over that unscaled at tile + (4,4) with no shades (V the
+     * fish on Provisorische Kolonie's NE, clip 020 #14817, 70 of 70 px;
+     * the other markers and the rumour I, alike); then the game palette at
+     * the water's phase.  The original's palette cycles the water of its
+     * 3x3 map with the map's (V clip 020: 144 px every 40-41 frames,
+     * #2262, #2303, #2343): ours too, a palette step repaints the cells
+     * that hold a cycling index.  Without the index sheets: the map's RGBA
+     * tiles in the original's geometry ({@link #scale}) with no shades
+     * (ours: there is no palette to shade in).
      */
     static final class Art {
 
@@ -480,6 +488,9 @@ final class ClassicColonyTiles {
         /** The fallback's art (no index sheets), or null. */
         private final ImageLibrary lib;
         private ClassicTileArt tileArt = null;
+
+        /** RGB to the lowest palette index of that colour (the sprites' colours), built once. */
+        private Map<Integer, Integer> indexOf = null;
 
         private Art(ClassicTerrainComposer composer, ClassicGamePalette palette,
                     ImageLibrary lib) {
@@ -527,24 +538,21 @@ final class ClassicColonyTiles {
          *
          * @param map The map.
          * @param t The tile.
+         * @param slot Its cell in the 3x3 map, 0-8 ({@link
+         *     ClassicColonyLayout#tileCell}; the shade pattern is anchored
+         *     on the whole 3x3).
          * @param settlement The sprite on it (the colony's on the centre,
          *     as the map draws it), or null.
          * @param phase The water's cycling phase.
          * @param cycles Set to true when the tile holds a cycling index.
          * @return The picture, or null without any art.
          */
-        BufferedImage tile(net.sf.freecol.common.model.Map map, Tile t, BufferedImage settlement,
-                           int phase, boolean[] cycles) {
+        BufferedImage tile(net.sf.freecol.common.model.Map map, Tile t, int slot,
+                           BufferedImage settlement, int phase, boolean[] cycles) {
+            if (indexed()) return indexedTile(map, t, slot, settlement, phase, cycles);
             final int cell = ClassicTerrainComposer.CELL;
             final int[] rgb = new int[cell * cell];
-            if (indexed()) {
-                final byte[] idx = new byte[cell * cell];
-                final boolean c = this.composer.composeCell(source(map), t.getX(), t.getY(),
-                                                            idx, 0, cell);
-                if (cycles != null && c) cycles[0] = true;
-                final IndexColorModel cm = this.palette.colorModel(phase);
-                for (int k = 0; k < idx.length; k++) rgb[k] = cm.getRGB(idx[k] & 0xFF) | 0xFF000000;
-            } else if (this.lib != null && t.getType() != null) {
+            if (this.lib != null && t.getType() != null) {
                 final BufferedImage b = new BufferedImage(cell, cell, BufferedImage.TYPE_INT_ARGB);
                 final Graphics2D g = b.createGraphics();
                 try {
@@ -573,6 +581,96 @@ final class ClassicColonyTiles {
                 }
             }
             return scale(rgb, cell, ClassicColonyLayout.TILE);
+        }
+
+        /**
+         * A tile's picture from the pack's indices: composed, the sprite
+         * pasted in, enlarged with the original's shades ({@link
+         * #enlarge}), the markers over it, the palette at the phase.
+         */
+        private BufferedImage indexedTile(net.sf.freecol.common.model.Map map, Tile t,
+                                          int slot, BufferedImage settlement, int phase,
+                                          boolean[] cycles) {
+            final int cell = ClassicTerrainComposer.CELL, size = ClassicColonyLayout.TILE;
+            final byte[] idx = new byte[cell * cell];
+            // The markers apart, but on the colony's own tile, where the
+            // map draws its sprite over them (I: never seen, they stay in
+            // the cell as the map composes it, mostly under the sprite).
+            final List<Integer> markers = new ArrayList<>();
+            this.composer.composeCell((settlement == null) ? source(map, markers::add)
+                                      : source(map), t.getX(), t.getY(), idx, 0, cell);
+            // The sprite as indices (V: the colony's sprite and its flag are
+            // enlarged and shaded with the terrain, Silver City's centre
+            // #123003 row 0, 24 of 24 px; the four nations' flag fills are
+            // EGA colours, unshaded); a colour the palette lacks (Spain's
+            // unmeasured dark shade, ClassicHud.nationDark) keeps its
+            // colour, unshaded.
+            int[] fixed = null;
+            if (settlement != null) {
+                final int ox = ClassicHud.settlementOffset(settlement.getWidth());
+                for (int y = 0; y < Math.min(cell, settlement.getHeight()); y++) {
+                    for (int x = 0; x < settlement.getWidth(); x++) {
+                        final int p = settlement.getRGB(x, y);
+                        final int cx = x + ox;
+                        if ((p >>> 24) <= 128 || cx < 0 || cx >= cell) continue;
+                        final Integer i = indexOf(p & 0xFFFFFF);
+                        if (i != null) {
+                            idx[y * cell + cx] = (byte) i.intValue();
+                        } else {
+                            if (fixed == null) fixed = new int[cell * cell];
+                            fixed[y * cell + cx] = p | 0xFF000000;
+                        }
+                    }
+                }
+            }
+            final byte[] out = enlarge(idx, slot);
+            final byte[] marks = new byte[size * size];
+            java.util.Arrays.fill(marks, (byte) ClassicIndexSheet.TRANSPARENT);
+            for (int f : markers) {
+                this.composer.overlayAt(f, marks, ClassicColonyLayout.TILE_MARKER_DY * size
+                                        + ClassicColonyLayout.TILE_MARKER_DX, size);
+            }
+            final IndexColorModel cm = this.palette.colorModel(phase);
+            final BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+            boolean c = false;
+            for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) {
+                    final int k = y * size + x;
+                    final int m = marks[k] & 0xFF;
+                    final int src = enlargedSourceY(y) * cell + enlargedSourceX(x);
+                    final int v;
+                    if (m != ClassicIndexSheet.TRANSPARENT) {
+                        v = m;
+                    } else if (fixed != null && fixed[src] != 0) {
+                        img.setRGB(x, y, fixed[src]);
+                        continue;
+                    } else {
+                        v = out[k] & 0xFF;
+                    }
+                    c |= this.palette.cycles(v);
+                    img.setRGB(x, y, cm.getRGB(v) | 0xFF000000);
+                }
+            }
+            if (cycles != null && c) cycles[0] = true;
+            return img;
+        }
+
+        /**
+         * The lowest palette index of a colour (the base palette; the
+         * lowest is never a cycling one: 0x4D65AE is 56 and 120, 0x283892
+         * 59 and 127).
+         *
+         * @param rgb The colour, 0xRRGGBB.
+         * @return The index, or null for a colour the palette lacks.
+         */
+        private synchronized Integer indexOf(int rgb) {
+            if (this.indexOf == null) {
+                final int[] base = this.palette.base();
+                final Map<Integer, Integer> m = new java.util.HashMap<>();
+                for (int i = base.length - 1; i >= 0; i--) m.put(base[i] & 0xFFFFFF, i);
+                this.indexOf = m;
+            }
+            return this.indexOf.get(rgb);
         }
 
         /** The game palette (tests), or null. */
@@ -634,8 +732,11 @@ final class ClassicColonyTiles {
     }
 
     /**
-     * A square picture scaled up by the source pixel floor((2d + 1) s /
-     * (2 S)) for S = 24, s = 16: floor((2d + 1)/3).
+     * A square picture scaled up in the original's geometry (the fallback
+     * without the pack's indices, no shades): the source pixel (floor(x s
+     * / S), floor((2y + 1) s / (2 S))), for S = 24, s = 16 (floor(2x/3),
+     * floor((2y + 1)/3)), as {@link #enlargedSourceX} and {@link
+     * #enlargedSourceY}.
      *
      * @param rgb The source, s x s ARGB.
      * @param s The source size.
@@ -647,11 +748,217 @@ final class ClassicColonyTiles {
         for (int y = 0; y < size; y++) {
             final int sy = Math.min(s - 1, ((2 * y + 1) * s) / (2 * size));
             for (int x = 0; x < size; x++) {
-                final int sx = Math.min(s - 1, ((2 * x + 1) * s) / (2 * size));
+                final int sx = Math.min(s - 1, (x * s) / size);
                 out.setRGB(x, y, rgb[sy * s + sx]);
             }
         }
         return out;
+    }
+
+
+    // The original's enlargement of its 16-px tiles (part Y5)
+
+    /**
+     * The shade pattern on the eight-shade and blue ramps, 192 steps
+     * (V all 192 from the colony frames against the map frames, prep y
+     * §3.2; the antiperiod {@code NOISE[q + 96] == -NOISE[q]} holds for
+     * every q): a 12-px motif [0 -1 0][+1 +1 -1][0 +1 0][-1 -1 +1] with a
+     * slip about every 15 px; the middle one of each three (q mod 3 = 1)
+     * mostly +-1 (54 of 64) and the only +-3 (6), the others 0, +-1 or
+     * +-2.
+     */
+    static final int[] NOISE = {
+         0, -1,  0,  1,  1, -1,  0,  1,  0, -1, -1,  1, -1, -3,  1,  2,  1,  0,  1,  1, -1,  0,  1,  0,
+        -1, -1,  1,  0, -2,  1,  2,  1,  0,  1,  1, -1,  0,  1,  0, -1, -1,  1,  0, -1,  1,  2,  1, -2,
+         1,  1, -1,  0,  1,  0, -1, -1,  1,  0, -1,  0,  2,  1, -2,  1,  1, -1,  0,  1,  0, -1, -1,  1,
+         0, -1,  0,  1,  0, -2,  1,  3, -1,  0,  1,  0, -1, -1,  1,  0, -1,  0,  1,  1, -2,  1,  3, -1,
+         0,  1,  0, -1, -1,  1,  0, -1,  0,  1,  1, -1,  1,  3, -1, -2, -1,  0, -1, -1,  1,  0, -1,  0,
+         1,  1, -1,  0,  2, -1, -2, -1,  0, -1, -1,  1,  0, -1,  0,  1,  1, -1,  0,  1, -1, -2, -1,  2,
+        -1, -1,  1,  0, -1,  0,  1,  1, -1,  0,  1,  0, -2, -1,  2, -1, -1,  1,  0, -1,  0,  1,  1, -1,
+         0,  1,  0, -1,  0,  2, -1, -3,  1,  0, -1,  0,  1,  1, -1,  0,  1,  0, -1, -1,  2, -1, -3,  1 };
+
+    /**
+     * The shade pattern on the grey ramp 0x10-0x2F, on the same 192 steps
+     * (not 4 x {@link #NOISE}: q 4 is 3 against 1, q 7 is 8 against 1).  V
+     * from the frames (prep y §3.3), with six middle steps measured anew
+     * under {@link #shaded}'s chain, where the prep's rule had misread
+     * them: q 37 +8 (was -4), 133 -8 (4), 139 +10 (-4), 169 +10 (-4), 190
+     * -12 (4); q 94 +12 (was -4) by the antiperiod, the frames alike for
+     * both (I); so the antiperiod {@code GREY_NOISE[q + 96] ==
+     * -GREY_NOISE[q]} now holds for every q, the prep's four uncertain
+     * steps (43, 73, 139, 169) included.  Ten steps the prep never saw
+     * directly are the antiperiod's (I, prep y §3.3).
+     */
+    static final int[] GREY_NOISE = {
+          0, -5,  0,  5,  3, -6,  2,  8, -3, -7, -4,  7, -4,-12,  4,  8,  3,  0,  5,  5, -6,  2,  8, -2,
+         -7, -4,  7, -3,-11,  4,  8,  4,  0,  5,  5, -5,  2,  8, -2, -6, -3,  7, -3,-10,  4,  8,  4, -8,
+          5,  5, -5,  0,  6, -2, -6, -4,  7, -3,-10,  3,  8,  4, -8,  4,  4, -5,  0,  5, -2, -6, -4,  6,
+         -3,-10,  3,  7,  3, -8,  4, 12, -5,  0,  5,  0, -6, -4,  6, -2, -9,  3,  7,  4, -8,  4, 12, -4,
+          0,  5,  0, -5, -3,  6, -2, -8,  3,  7,  4, -7,  4, 12, -4, -8, -3,  0, -5, -5,  6, -2, -8,  2,
+          7,  4, -7,  3, 11, -4, -8, -4,  0, -5, -5,  5, -2, -8,  2,  6,  3, -7,  3, 10, -4, -8, -4,  8,
+         -5, -5,  5,  0, -6,  2,  6,  4, -7,  3, 10, -3, -8, -4,  8, -4, -4,  5,  0, -5,  2,  6,  4, -6,
+          3, 10, -3, -7, -3,  8, -4,-12,  5,  0, -5,  0,  6,  4, -6,  2,  9, -3, -7, -4,  8, -4,-12,  4 };
+
+    /** The patterns' period. */
+    static final int NOISE_PERIOD = 192;
+
+    /**
+     * The original's enlargement of a tile's 16-px cell to its 24-px cell
+     * of the 3x3 map (part Y5; V the colony frames against map frames of
+     * the same colonies: clip 020 Base #2260 / #1700, Silver City #123003
+     * / #122700 and #123300, Provisorische Kolonie #14817 / #14300 and
+     * #15500, the prep's {@code 3x3-scaler.md}; the same pattern in the
+     * dago game, clip 010 #448 / #400): target pixel (x, y) shows the
+     * source pixel ({@link #enlargedSourceX}, {@link #enlargedSourceY})
+     * shaded in its colour ramp by a fixed pattern anchored on the whole
+     * 72x72 map ({@link #shaded}).  The original has no 24-px terrain art
+     * (every sheet holds 16-px tiles, its map zooms only down) and no
+     * smoothing (bilinear, area, bicubic: 17-36 %); a plain enlargement in
+     * any phase reaches 33 % at best, the prep's rule 97-100 % per clean
+     * tile, this one with its chain 6906 of 6912 px (99.9 %) of the twelve
+     * clean tiles of those frames, nine of them all 576 (ocean, coast,
+     * forest, hills, mountains); the six others are one source pixel at
+     * an outer tile's corner each (Base E, Prov. Kolonie SE (20,0); Silver
+     * City NW (3-4,22-23)) where the map frame shows land and the 3x3 water:
+     * a corner piece of a coast tile next to tiles beyond the 3x3 (I, not
+     * understood: the original may compose the 3x3's coast corners from
+     * its own nine tiles only; ours composes the true neighbours, as the
+     * map).
+     *
+     * @param src The cell, 16 x 16 palette indices.
+     * @param slot Its cell of the 3x3, 0-8 (column slot mod 3, row slot / 3).
+     * @return The 24 x 24 indices.
+     */
+    static byte[] enlarge(byte[] src, int slot) {
+        final int s = ClassicTerrainComposer.CELL, n = ClassicColonyLayout.TILE;
+        final int ox = n * (slot % 3), oy = n * (slot / 3);
+        final byte[] out = new byte[n * n];
+        for (int y = 0; y < n; y++) {
+            final int row = enlargedSourceY(y) * s;
+            for (int x = 0; x < n; x++) {
+                out[y * n + x] = (byte) shaded(src[row + enlargedSourceX(x)] & 0xFF,
+                                               ox + x, oy + y);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The source column of a target column: floor(2x/3), so the columns
+     * go two, one, two ... per source pixel (V the hill PHYS0.SS.048 on
+     * Base's NE, #2260, pixel for pixel with its hole at (14,13) as (14,19);
+     * ours before: floor((2x + 1)/3), a column off in two of three).
+     *
+     * @param x The target column, 0-23.
+     * @return The source column, 0-15.
+     */
+    static int enlargedSourceX(int x) {
+        return (2 * x) / 3;
+    }
+
+    /**
+     * The source row of a target row: floor((2y + 1)/3), one, two, one,
+     * two ... per source row (V, as {@link #enlargedSourceX}).
+     *
+     * @param y The target row, 0-23.
+     * @return The source row, 0-15.
+     */
+    static int enlargedSourceY(int y) {
+        return (2 * y + 1) / 3;
+    }
+
+    /**
+     * The shade pattern's offset of a row of the 72x72 map (V rows 0-71,
+     * Silver City's top tiles and Base's bottom ones alike, prep y §3.1):
+     * j = floor(y/3), b = 60 floor(j/2); y mod 3 = 0: b, 1: b + 156 (j
+     * even) or b + 84 (j odd), 2: b + 132, all mod 192.  Each is a multiple
+     * of 12, so the step's q mod 3 is the column's x mod 3; the pattern
+     * repeats every 96 rows.
+     *
+     * @param y The row of the 3x3, 0-71.
+     * @return Its offset, 0-191.
+     */
+    static int noiseRow(int y) {
+        final int j = y / 3, b = 60 * (j / 2);
+        switch (y % 3) {
+        case 0:
+            return b % NOISE_PERIOD;
+        case 1:
+            return (b + ((j % 2 == 0) ? 156 : 84)) % NOISE_PERIOD;
+        default:
+            return (b + 132) % NOISE_PERIOD;
+        }
+    }
+
+    /**
+     * The lowest index of the colour ramp a palette index is shaded in,
+     * or -1 for one the original leaves (prep y §3.4): the grey 0x10-0x2F
+     * (32 shades, {@link #GREY_NOISE}), the blue 0x30-0x3F (16), the
+     * eight-shade ramps 0x40-0x6F (0x60-0x67 never seen shaded, I), the
+     * water's cycling 0x78-0x7F (V 393 of 399), the browns 0x80-0x87; not
+     * the EGA colours 0x00-0x0F (V the colony's orange flag 0x05/0x0D),
+     * not 0x88-0x8A (V 0x88 unchanged 47 times; as one ramp 0x80-0x8A
+     * Base's NE matches 97.6 % instead of 100 %), and (I) not the reds
+     * 0x70-0x77 nor 0x90-0xFF, never seen.
+     *
+     * @param s The index.
+     * @return Its ramp's lowest index, or -1.
+     */
+    static int rampLow(int s) {
+        if (s >= 0x10 && s <= 0x2F) return 0x10;
+        if (s >= 0x30 && s <= 0x3F) return 0x30;
+        if ((s >= 0x40 && s <= 0x6F) || (s >= 0x78 && s <= 0x87)) return s & ~7;
+        return -1;
+    }
+
+    /**
+     * @param lo A ramp's lowest index ({@link #rampLow}).
+     * @return Its highest.
+     */
+    static int rampHigh(int lo) {
+        return (lo == 0x10) ? 0x2F : (lo == 0x30) ? 0x3F : lo + 7;
+    }
+
+    /**
+     * A source index shaded at a pixel of the 3x3 (X 0-71, Y 0-71): its
+     * step q = (X + {@link #noiseRow}(Y)) mod 192 of the pattern ({@link
+     * #GREY_NOISE} on the grey, else {@link #NOISE}); s + d where that
+     * stays in s's ramp, else s - d (V: s47 +1 -> 46 128 times, s46 +2 ->
+     * 44, s48 -1 -> 49), else s.  The middle one of the three target
+     * columns of two source pixels (X mod 3 = 1, the second that shows its
+     * source pixel) is chained to the one left of it: that pixel plus the
+     * pattern's step d(q) - d(q - 1), reflected about it where that leaves
+     * the ramp (found by builder 2 of part Y: every pixel the prep's rule
+     * missed on the clean tiles was such a middle one at a ramp's end, 32
+     * of 32 with +1 after a reflected +2 giving -3 (s46 -> 43, s47 -> 44),
+     * 7 of 7 with +3 after a reflected +1 giving -3, 6 of 6 with -1 after
+     * a reflected -2 giving +3, the greys alike (+4 after a reflected +8:
+     * -12, 9 of 9); the prep's |d| = 3 rule and its "wrap by 4" are this
+     * chain; the other columns follow s +- d with no exception, 221 pixels
+     * whose s + d leaves the ramp).
+     *
+     * @param s The source index.
+     * @param x The pixel's column in the 3x3, 0-71.
+     * @param y Its row, 0-71.
+     * @return The shaded index.
+     */
+    static int shaded(int s, int x, int y) {
+        final int lo = rampLow(s);
+        if (lo < 0) return s;
+        final int hi = rampHigh(lo);
+        final int[] steps = (lo == 0x10) ? GREY_NOISE : NOISE;
+        final int q = Math.floorMod(x + noiseRow(y), NOISE_PERIOD);
+        if (x % 3 != 1) return reflect(s, steps[q], lo, hi);
+        final int p = (q + NOISE_PERIOD - 1) % NOISE_PERIOD;
+        return reflect(reflect(s, steps[p], lo, hi), steps[q] - steps[p], lo, hi);
+    }
+
+    /** s + d in [lo, hi], else s - d, else s. */
+    private static int reflect(int s, int d, int lo, int hi) {
+        int o = s + d;
+        if (o >= lo && o <= hi) return o;
+        o = s - d;
+        return (o >= lo && o <= hi) ? o : s;
     }
 
     /**
@@ -665,6 +972,21 @@ final class ClassicColonyTiles {
      * @return The source.
      */
     static ClassicTerrainComposer.TerrainSource source(final net.sf.freecol.common.model.Map map) {
+        return source(map, null);
+    }
+
+    /**
+     * The map for the composer, a tile's resource marker and lost city
+     * rumour handed apart (the 3x3 draws them unscaled over its enlarged
+     * tiles, {@link ClassicColonyLayout#TILE_MARKER_DX}).
+     *
+     * @param map The map.
+     * @param markers Receives the markers' {@code PHYS0.SS} frames
+     *     instead of the composer, or null to leave them in the overlays.
+     * @return The source.
+     */
+    static ClassicTerrainComposer.TerrainSource source(final net.sf.freecol.common.model.Map map,
+                                                       final IntConsumer markers) {
         return new ClassicTerrainComposer.TerrainSource() {
             @Override
             public boolean onMap(int x, int y) {
@@ -686,9 +1008,21 @@ final class ClassicColonyTiles {
             @Override
             public void overlays(int x, int y, IntConsumer frames) {
                 final Tile t = map.getTile(x, y);
-                if (t != null && t.getType() != null) {
+                if (t == null || t.getType() == null) return;
+                if (markers == null) {
                     ClassicTileArt.overlayFrames(map, t, ClassicTileArt.modelTypes(map), frames);
+                    return;
                 }
+                final int resource = (t.hasResource())
+                    ? ClassicTileArt.resourceFrame(t.getResource()) : -1;
+                final int rumour = (t.hasLostCityRumour()) ? ClassicTileArt.LOST_CITY : -1;
+                ClassicTileArt.overlayFrames(map, t, ClassicTileArt.modelTypes(map), f -> {
+                    if (f >= 0 && (f == resource || f == rumour)) {
+                        markers.accept(f);
+                    } else {
+                        frames.accept(f);
+                    }
+                });
             }
         };
     }

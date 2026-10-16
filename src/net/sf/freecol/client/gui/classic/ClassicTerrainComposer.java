@@ -938,6 +938,20 @@ final class ClassicTerrainComposer {
         }
     }
 
+    /**
+     * Copy a PHYS0.SS overlay's opaque pixels, at most 16 x 16, to a
+     * buffer (the colony screen's resource markers, drawn unscaled over
+     * its enlarged tiles, {@link ClassicColonyTiles#source}).
+     *
+     * @param f The frame.
+     * @param dst The index buffer.
+     * @param off The offset of the overlay's top-left pixel.
+     * @param stride The buffer's row length.
+     */
+    void overlayAt(int f, byte[] dst, int off, int stride) {
+        overlay(f, dst, off, stride);
+    }
+
     /** Copy a PHYS0.SS overlay's opaque pixels (from the cell's corner). */
     private void overlay(int f, byte[] dst, int off, int stride) {
         if (f < 0 || f >= this.phys.size()) return;
