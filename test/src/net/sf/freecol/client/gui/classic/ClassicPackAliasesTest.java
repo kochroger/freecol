@@ -363,9 +363,78 @@ public class ClassicPackAliasesTest extends TestCase {
     }
 
     /**
+     * The colony's map icon shows its fortification only (part Y2; Roger's
+     * test 2026-10-16 15:21: at 4 colonists Base's icon changed to the
+     * stockade's and he thought an Einpfählung had been built by itself;
+     * the investigation colony-test-1521 finding 2): FreeCol's key for real
+     * colonies of 1, 4 and 8 colonists (small, medium, large;
+     * {@code ImageLibrary.getSettlementKey}) without a wall, with a
+     * stockade, a fort or a fortress, and the frame every nation's key and
+     * the neutral key give it: 003 houses with no wall at every size (V
+     * Jamestown 1 clip 045 #24850, Silver City 4 046 #124320, Base 5 047
+     * #14595, Silver City 7 048 #35910, Silver City 11 048 #72345), 000
+     * the stockade (V Base 047 #14595 -&gt; «Base produziert Einpfählung»
+     * #18267 -&gt; #19810), 001 the fort (I, by elimination), 002 the
+     * fortress (V Base 19, clip 010 #1937).
+     */
+    public void testTheColonyIconShowsTheFortificationOnly() throws IOException {
+        final Properties p = aliases();
+        final net.sf.freecol.common.model.Game game
+            = net.sf.freecol.util.test.FreeColTestCase.getStandardGame();
+        final net.sf.freecol.common.model.Map map = net.sf.freecol.util.test.FreeColTestCase
+            .getTestMap(net.sf.freecol.util.test.FreeColTestCase.spec()
+                .getTileType("model.tile.plains"));
+        game.changeMap(map);
+        final net.sf.freecol.common.model.Player dutch
+            = game.getPlayerByNationId("model.nation.dutch");
+        final String[][] levels = {
+            { null, "003" }, { "model.building.stockade", "000" },
+            { "model.building.fort", "001" }, { "model.building.fortress", "002" },
+        };
+        final String[] nations = { "", ".dutch", ".english", ".french", ".spanish",
+                                   ".portuguese", ".danish", ".swedish", ".russian" };
+        final String colony = "image.tileitem.model.settlement.colony.";
+        int i = 0, n = 0;   // 12 colonies, 4 squares apart on the 20 x 15 map
+        for (int count : new int[] { 1, 4, 8 }) {
+            for (String[] level : levels) {
+                final net.sf.freecol.common.model.Colony c
+                    = net.sf.freecol.util.test.FreeColTestUtils.getColonyBuilder()
+                        .player(dutch).colonyTile(map.getTile(2 + 4 * (i % 4), 2 + 4 * (i / 4)))
+                        .initialColonists(count).build();
+                i++;
+                if (level[0] != null) {
+                    c.addBuilding(new net.sf.freecol.server.model.ServerBuilding(game, c,
+                        game.getSpecification().getBuildingType(level[0])));
+                }
+                assertEquals(count, c.getApparentUnitCount());
+                final String key = net.sf.freecol.client.gui.ImageLibrary.getSettlementKey(c);
+                final String size = (count <= 3) ? "small" : (count <= 7) ? "medium" : "large";
+                final String wall = (level[0] == null) ? ""
+                    : "." + level[0].substring("model.building.".length());
+                assertEquals(colony + size + wall, key);
+                for (String nation : nations) {
+                    assertEquals(key + nation, ICONS + level[1], p.getProperty(key + nation));
+                    n++;
+                }
+            }
+        }
+        assertEquals(3 * 4 * 9, n);
+        // Every colony alias is one of the four fortification frames.
+        for (String key : p.stringPropertyNames()) {
+            if (!key.startsWith(colony)) continue;
+            final String v = p.getProperty(key);
+            final String want = (key.contains(".stockade")) ? "000"
+                : (key.contains(".fortress")) ? "002"
+                : (key.contains(".fort")) ? "001" : "003";
+            assertEquals(key, ICONS + want, v);
+        }
+    }
+
+    /**
      * The generated pack carries the committed aliases (skipped without
      * the pack): a forgotten {@code ant classic-assets} after an alias
-     * change would show the old sprites without any error.
+     * change would show the old sprites without any error.  The units'
+     * and, since part Y2, the settlements' aliases.
      */
     public void testThePackHasTheseAliases() throws IOException {
         final Path pack = Path.of("data", "mods", "classic_original", "resources.properties");
@@ -379,7 +448,8 @@ public class ClassicPackAliasesTest extends TestCase {
         }
         final Properties p = aliases();
         for (String key : p.stringPropertyNames()) {
-            if (!key.startsWith(UNIT)) continue;
+            if (!key.startsWith(UNIT)
+                && !key.startsWith("image.tileitem.model.settlement.")) continue;
             assertEquals("re-run ant classic-assets: " + key, p.getProperty(key),
                          have.getProperty(key));
         }

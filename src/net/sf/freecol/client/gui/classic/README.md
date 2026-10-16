@@ -643,8 +643,8 @@ pack-absent art is sized for its 128×64 tiles, larger than the cell, and is
 through `getScaledSettlementImage` (native ~16px, so the up-scale branch fires),
 mirroring `getScaledUnitImage` — *not* `getSettlementImage(…, TILE_SIZE)`, which
 would pre-size to 128×64 and bypass the crisp branch. Per-nation unit/colony
-tinting and a fortress-distinct colony frame are documented follow-ups in
-`CLASSIC_UI_PLAN.md`.
+tinting is a documented follow-up in `CLASSIC_UI_PLAN.md` (the fort and the
+fortress have their own colony frames since part Y2).
 
 **Settlement sprites.** Colony and native-settlement map-sprites are aliased onto
 FreeCol's `image.tileitem.model.settlement.*` keys in the same `aliases.properties`
@@ -654,9 +654,18 @@ subtler: `ImageLibrary.getSettlementKey` builds `…colony.<size>[.stockade|.for
 .fortress]` and then *prefers a per-nation key when one exists* — and the base pack
 defines one for every European nation — so a neutral `…colony.small` alias would
 never be reached. The block therefore overrides all 8 nation suffixes directly,
-folding Col1's real signal (fortification) onto FreeCol's size×stockade grid:
-unfortified `003`(small)→`000`(medium/large), stockade `001`, fort/fortress the
-stone `002`. See the "Settlements" block of `aliases.properties` for the full table.
+folding Col1's real signal (fortification) onto FreeCol's size×stockade grid
+(part Y2, from Roger's clips; the earlier eyeballed table was off by one, so an
+unfortified colony of 4 showed the stockade and Roger thought an Einpfählung had
+been built by itself): every unfortified size `003` (houses, no wall; V clips
+045-048 at 1, 2, 4, 5, 7 and 11 colonists, clip 010 Fur City 14), stockade `000`
+(low palisade; V Base 047 #14595 → «Base produziert Einpfählung» #18267 → `000`
+#19810), fort `001` (tall palisade; I, by elimination), fortress `002` (grey
+stone; V Base 19 with its Festung, clip 010 #1937). The pack's
+`data/mods/classic_original/resources.properties` carries these aliases (the
+converter appends them), so a pack converted before part Y2 shows the old icons
+until it is converted again (`ant classic-assets`). See the "Settlements" block of
+`aliases.properties` for the full table.
 
 **No edge scrolling (removed in part K1).** The pointer's motion never moves
 the view; only presses are listened to. Phase 1b had FreeCol's edge scrolling:
