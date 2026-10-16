@@ -232,8 +232,10 @@ public class GameOptions {
      * The original's Tory penalty (fixer B after part X, the colony
      * review's FIX-LIST must 7; clip 049 #39267 and #40699, clip 048
      * #111418 and #112088, clip 050 #34423): on «Entdecker» the penalty
-     * starts at 10 Tories, not at FreeCol's 9 (one Tory later on every
-     * level, the very bad government too: FreeCol's ratios with the same
+     * starts at 10 Tories, not at FreeCol's 9, the Tories counted as the
+     * colony screen shows them (the rebels rounded; FreeCol rounds down;
+     * clip 049 #38856 «28% (4) 72% (9)» of 13 white), one Tory later on every
+     * level, the very bad government too (FreeCol's ratios with the same
      * offset, I), and in a building each worker loses the penalty before
      * the building's level factor (a colonist in a Sägewerk 6 -&gt; 4, two
      * expert carpenters 24 -&gt; 20; FreeCol takes only 1 from a colonist

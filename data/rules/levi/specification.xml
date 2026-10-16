@@ -488,7 +488,10 @@
              line «26% (4) 74% (10)» turns red and every worker gives 1
              less, #40699: white again at 9 Tories; clip 048 #111418,
              #112088 and clip 050 #34423 the same): on «Entdecker» it
-             starts at 10 Tories, FreeCol's classic level at 9.  Every
+             starts at 10 Tories, FreeCol's classic level at 9, and the
+             Tories counted are the ones the colony screen shows, the
+             rebels rounded (049 #38856 «28% (4) 72% (9)» of 13 white,
+             where FreeCol rounds down and counts 10).  Every
              level and the very bad government start one Tory later than
              FreeCol's (FreeCol's ratios with the same offset, I: only
              «Entdecker» and the -1 seen).  In a building the worker loses

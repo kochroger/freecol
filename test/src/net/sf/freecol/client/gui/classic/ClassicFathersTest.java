@@ -530,6 +530,45 @@ public class ClassicFathersTest extends FreeColTestCase {
     }
 
     /**
+     * The client's controller turns "no father" into the server's refusal
+     * under the levi rule (fixer B after part X, FIX-LIST must 10): a
+     * choice without a father sent, the server drops the offer; without
+     * the rule nothing is sent and the offer stays (FreeCol's
+     * postponement).  FreeCol's real controller through the loopback.
+     */
+    public void testTheControllerDeclinesTheOffer() throws Exception {
+        final net.sf.freecol.server.model.ServerGame game
+            = net.sf.freecol.server.ServerTestHelper.startServerGame(getTestMap(true));
+        try {
+            final net.sf.freecol.server.model.ServerPlayer dutch = (net.sf.freecol.server.model.ServerPlayer)
+                game.getPlayerByNationId("model.nation.dutch");
+            dutch.setAI(false);
+            createStandardColony();
+            final ClassicColonyServerScene.Loopback api = new ClassicColonyServerScene.Loopback(
+                net.sf.freecol.server.ServerTestHelper.getServer(), dutch);
+            final net.sf.freecol.client.FreeColClient fcc
+                = ClassicColonyServerScene.client(game, dutch, api);
+            final List<FoundingFather> ffs = fathers(spec(), "adamSmith", "thomasJefferson");
+            final java.lang.reflect.Method choose = net.sf.freecol.client.control.InGameController
+                .class.getDeclaredMethod("chooseFoundingFather", List.class, FoundingFather.class);
+            choose.setAccessible(true);
+            spec().setBoolean(net.sf.freecol.common.option.GameOptions.ORIGINAL_FATHER_OFFER, true);
+            dutch.setOfferedFathers(ffs);
+            assertTrue((Boolean) choose.invoke(fcc.getInGameController(), ffs, null));
+            assertEquals(List.of("father none"), api.log);
+            assertTrue("the offer dropped", dutch.getOfferedFathers().isEmpty());
+            spec().setBoolean(net.sf.freecol.common.option.GameOptions.ORIGINAL_FATHER_OFFER, false);
+            dutch.setOfferedFathers(ffs);
+            assertFalse((Boolean) choose.invoke(fcc.getInGameController(), ffs, null));
+            assertEquals("nothing sent without the rule", 1, api.log.size());
+            assertEquals(ffs, dutch.getOfferedFathers());
+        } finally {
+            spec().setBoolean(net.sf.freecol.common.option.GameOptions.ORIGINAL_FATHER_OFFER, false);
+            net.sf.freecol.server.ServerTestHelper.stopServerGame();
+        }
+    }
+
+    /**
      * Without notices the offer is asked just before the year flips: the
      * turn flow's hold posts it once and holds until it is taken.  Out of
      * the turn report (an out-of-turn notice) it stays pending; a box left

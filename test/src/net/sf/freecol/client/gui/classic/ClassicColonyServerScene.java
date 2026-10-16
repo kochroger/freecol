@@ -117,6 +117,14 @@ final class ClassicColonyServerScene {
         }
 
         @Override
+        public boolean chooseFoundingFather(List<net.sf.freecol.common.model.FoundingFather> ffs,
+                                            net.sf.freecol.common.model.FoundingFather ff) {
+            return handle("father " + ((ff == null) ? "none" : ff.getId()),
+                new net.sf.freecol.common.networking.ChooseFoundingFatherMessage(ffs, ff)
+                    .serverHandler(this.server, this.player));
+        }
+
+        @Override
         public boolean rename(FreeColGameObject object, String name) {
             return handle("rename " + name,
                 new RenameMessage(object, name).serverHandler(this.server, this.player));

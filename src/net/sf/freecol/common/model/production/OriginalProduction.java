@@ -301,6 +301,25 @@ public final class OriginalProduction {
     }
 
     /**
+     * The original's Tories of a colony: the colonists less the rebels
+     * rounded, (percent x colonists + 50) div 100, the counts its colony
+     * screen shows in brackets (the Classic UI's band,
+     * {@code ClassicColonyLayout.memberCount}; V: every frame seen fits).
+     * The penalty follows the number shown (V clip 049 #38856 «28% (4) 72%
+     * (9)» of 13 colonists white, #39267 «26% (4) 74% (10)» of 14 red; clip
+     * 048 #111418 «24% (3) 76% (10)» of 13 red, #112088 «26% (3) 74% (9)»
+     * of 12 white): FreeCol's count rounds the rebels down and would make
+     * 13 colonists at 28 % 10 Tories.
+     *
+     * @param uc The colonists.
+     * @param solPercent The Sons of Liberty percentage.
+     * @return The Tories.
+     */
+    public static int originalToryCount(int uc, int solPercent) {
+        return uc - Math.max(0, (solPercent * uc + 50) / 100);
+    }
+
+    /**
      * The Tory penalty of a worker in a building under the levi rule: the
      * colony's penalty times the building's level factor
      * ({@link #levelFactor}), at {@link #TORY_INDEX}, after the expert's

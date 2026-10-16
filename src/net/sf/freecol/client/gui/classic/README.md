@@ -3882,7 +3882,9 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
 - **The Tory penalty as the original** (levi game option `originalToryPenalty`, fixer B after part X;
   `OriginalProduction.toryLimitOffset`, `toryModifier`): on «Entdecker» it starts at 10 Tories (V clip
   049 #39267 red with 10, #40699 white with 9; clip 048 #111418, #112088; clip 050 #34423), FreeCol's very
-  easy at 9; every level and the -2 one Tory later than FreeCol's (I). In a building a worker loses it
+  easy at 9, counting the Tories the screen shows (the rebels rounded, `OriginalProduction.originalToryCount`;
+  V 049 #38856 «28% (4) 72% (9)» of 13 white where FreeCol rounds down to 10); every level and the -2 one Tory
+  later than FreeCol's (I). In a building a worker loses it
   before the building's level factor, after the expert's own (a colonist in the Sägewerk 4, V 048 #111902;
   its two experts 24 -> 20, V 049 #39266 -> #39280; the other level 2 and 3 buildings by the same rule, I:
   a colonist in a Rumbrennerei 4, FreeCol 5); the squares keep FreeCol's -1 (V 049 #39278). While it

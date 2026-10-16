@@ -1446,7 +1446,7 @@ public class Colony extends Settlement implements TradeLocation {
         this.oldSonsOfLiberty = this.sonsOfLiberty;
         this.oldTories = this.tories;
         this.sonsOfLiberty = calculateSoLPercentage(uc, getLiberty());
-        this.tories = calculateToryCount(uc, this.sonsOfLiberty);
+        this.tories = governmentToryCount(uc, this.sonsOfLiberty);
     }
 
     /**
@@ -1496,6 +1496,26 @@ public class Colony extends Settlement implements TradeLocation {
     }
 
     /**
+     * The Tories the government's limits count: FreeCol's
+     * ({@link #calculateToryCount}, the rebels rounded down), or under the
+     * levi rule {@code GameOptions.ORIGINAL_TORY_PENALTY} the original's,
+     * the colonists less the rebels rounded as its colony screen shows them
+     * ({@link OriginalProduction#originalToryCount}; V clip 049 #38856
+     * «28% (4) 72% (9)» of 13 white where FreeCol counts 10 Tories, #39267
+     * «26% (4) 74% (10)» of 14 red, clip 048 #111418 «24% (3) 76% (10)» of
+     * 13 red, #112088 «26% (3) 74% (9)» of 12 white).
+     *
+     * @param uc The number of units in the colony.
+     * @param solPercent The percentage of sons-of-liberty.
+     * @return The number of tories.
+     */
+    int governmentToryCount(int uc, int solPercent) {
+        return (OriginalProduction.toryLimitOffset(getSpecification()) > 0)
+            ? OriginalProduction.originalToryCount(uc, solPercent)
+            : calculateToryCount(uc, solPercent);
+    }
+
+    /**
      * The Tories a colony may have before its government is bad: the
      * rules' {@code badGovernmentLimit}, one more under the levi rule
      * {@code GameOptions.ORIGINAL_TORY_PENALTY} (the original's
@@ -1541,7 +1561,7 @@ public class Colony extends Settlement implements TradeLocation {
             = spec.getInteger(GameOptions.GOOD_GOVERNMENT_LIMIT);
         if (solPercent >= veryGoodGovernment) return GOVERNMENT_VERY_GOOD;
         if (solPercent >= goodGovernment) return GOVERNMENT_GOOD;
-        int tc = calculateToryCount(getUnitCount(), solPercent);
+        int tc = governmentToryCount(getUnitCount(), solPercent);
         return (tc > veryBadGovernment) ? GOVERNMENT_VERY_BAD
             : (tc > badGovernment) ? GOVERNMENT_BAD
             : GOVERNMENT_ORDINARY;
@@ -1740,7 +1760,7 @@ public class Colony extends Settlement implements TradeLocation {
                 = spec.getInteger(GameOptions.GOOD_GOVERNMENT_LIMIT);
 
         int newSoLPercent = calculateSoLPercentage(unitCount, getLiberty());
-        int newToryCount = calculateToryCount(unitCount, newSoLPercent);
+        int newToryCount = governmentToryCount(unitCount, newSoLPercent);
         int oldSoLPercent = getSonsOfLiberty();
         int oldToryCount = getToryCount();
         

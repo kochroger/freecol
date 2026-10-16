@@ -837,6 +837,39 @@ public class LeviProductionTest extends FreeColTestCase {
     }
 
     /**
+     * The Tories counted are the ones the colony screen shows, the rebels
+     * rounded (the original's), not FreeCol's rounded down: the six SoL
+     * lines of the clips, each built with its colonists and percentage
+     * (V clip 049 #38577 «30% (4) 70% (8)» of 12 white, #38856 «28% (4) 72%
+     * (9)» of 13 white, #39267 «26% (4) 74% (10)» of 14 red; clip 048
+     * #111418 «24% (3) 76% (10)» of 13 red, #112088 «26% (3) 74% (9)» of 12
+     * white; clip 050 #34423 «28% (4) 72% (10)» of 14 red).  FreeCol's
+     * count makes all six bad.
+     */
+    public void testTheToriesAreTheOnesShown() {
+        final int[][] cases = {
+            // { colonists, percent, Tories shown, levi's bonus, FreeCol's bonus }
+            { 12, 30, 8, 0, -1 }, { 13, 28, 9, 0, -1 }, { 14, 26, 10, -1, -1 },
+            { 13, 24, 10, -1, -1 }, { 12, 26, 9, 0, -1 }, { 14, 28, 10, -1, -1 } };
+        for (int[] k : cases) {
+            assertEquals(k[0] + " at " + k[1] + " %", k[2],
+                         OriginalProduction.originalToryCount(k[0], k[1]));
+            for (boolean on : new boolean[] { true, false }) {
+                levi().setBoolean(GameOptions.ORIGINAL_TORY_PENALTY, on);
+                final Rig r = new Rig("plains");
+                colonists(r, k[0]);
+                r.colony.addLiberty(2 * k[1] * k[0]);
+                assertEquals(k[0] + " colonists", k[1], r.colony.getSonsOfLiberty());
+                assertEquals(k[0] + " at " + k[1] + " %, rule " + on,
+                             (on) ? k[3] : k[4], r.colony.getProductionBonus());
+                assertEquals((on) ? k[2] : Colony.calculateToryCount(k[0], k[1]),
+                             r.colony.getToryCount());
+            }
+        }
+        levi().setBoolean(GameOptions.ORIGINAL_TORY_PENALTY, true);
+    }
+
+    /**
      * In a building the worker loses the penalty before the building's
      * level factor, after the expert's own (V clip 048 #111902 «Hämmer
      * 4/6» for a colonist in the Sägewerk, «Rum 2/3» in the level 1 house;
@@ -869,6 +902,20 @@ public class LeviProductionTest extends FreeColTestCase {
                 assertEquals(k[0] + " " + k[2] + ", rule " + on, (on) ? k[3] : k[4],
                              potential(r, b, (String) k[1], (String) k[2]));
             }
+        }
+        // The colony's own production of a colonist in a Rumbrennerei: 4,
+        // FreeCol 5 (the production's own path, ProductionUtils).
+        for (boolean on : new boolean[] { true, false }) {
+            levi().setBoolean(GameOptions.ORIGINAL_TORY_PENALTY, on);
+            final Rig d = new Rig("plains");
+            d.build("rumDistillery");
+            d.in("freeColonist", "rumDistillery");
+            d.colony.addGoods(goods("sugar"), 100);
+            final Building still = d.colony.getBuilding(
+                levi().getBuildingType("model.building.rumDistillery"));
+            assertEquals(6, made(d, still, "rum"));
+            d.bonus(-1);
+            assertEquals("rule " + on, (on) ? 4 : 5, made(d, still, "rum"));
         }
         // The colony's own production: two expert carpenters in the
         // Sägewerk, 24 -> 20 (V 049 #39266 -> #39280).
