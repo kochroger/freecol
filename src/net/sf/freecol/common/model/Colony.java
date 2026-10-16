@@ -41,6 +41,7 @@ import net.sf.freecol.FreeCol;
 import net.sf.freecol.common.io.FreeColXMLReader;
 import net.sf.freecol.common.io.FreeColXMLWriter;
 import static net.sf.freecol.common.model.Constants.*;
+import net.sf.freecol.common.model.production.OriginalProduction;
 import net.sf.freecol.common.option.GameOptions;
 import static net.sf.freecol.common.util.CollectionUtils.*;
 import net.sf.freecol.common.util.LogBuilder;
@@ -1495,6 +1496,33 @@ public class Colony extends Settlement implements TradeLocation {
     }
 
     /**
+     * The Tories a colony may have before its government is bad: the
+     * rules' {@code badGovernmentLimit}, one more under the levi rule
+     * {@code GameOptions.ORIGINAL_TORY_PENALTY} (the original's
+     * «Entdecker» from 10 Tories; {@link OriginalProduction#toryLimitOffset}).
+     *
+     * @param spec The specification.
+     * @return The limit.
+     */
+    private static int badGovernmentLimit(Specification spec) {
+        return spec.getInteger(GameOptions.BAD_GOVERNMENT_LIMIT)
+            + OriginalProduction.toryLimitOffset(spec);
+    }
+
+    /**
+     * The Tories a colony may have before its government is very bad: the
+     * rules' {@code veryBadGovernmentLimit}, one more under the levi rule
+     * (I: no -2 seen in the original).
+     *
+     * @param spec The specification.
+     * @return The limit.
+     */
+    private static int veryBadGovernmentLimit(Specification spec) {
+        return spec.getInteger(GameOptions.VERY_BAD_GOVERNMENT_LIMIT)
+            + OriginalProduction.toryLimitOffset(spec);
+    }
+
+    /**
      * Calculate the colony production bonus for a given
      * sons-of-liberty percentage.
      *
@@ -1504,9 +1532,9 @@ public class Colony extends Settlement implements TradeLocation {
     private int calculateProductionBonus(int solPercent) {
         final Specification spec = getSpecification();
         final int veryBadGovernment
-            = spec.getInteger(GameOptions.VERY_BAD_GOVERNMENT_LIMIT);
+            = veryBadGovernmentLimit(spec);
         final int badGovernment
-            = spec.getInteger(GameOptions.BAD_GOVERNMENT_LIMIT);
+            = badGovernmentLimit(spec);
         final int veryGoodGovernment
             = spec.getInteger(GameOptions.VERY_GOOD_GOVERNMENT_LIMIT);
         final int goodGovernment
@@ -1703,9 +1731,9 @@ public class Colony extends Settlement implements TradeLocation {
     public int governmentChange(int unitCount) {
         final Specification spec = getSpecification();
         final int veryBadGovernment
-                = spec.getInteger(GameOptions.VERY_BAD_GOVERNMENT_LIMIT);
+                = veryBadGovernmentLimit(spec);
         final int badGovernment
-                = spec.getInteger(GameOptions.BAD_GOVERNMENT_LIMIT);
+                = badGovernmentLimit(spec);
         final int veryGoodGovernment
                 = spec.getInteger(GameOptions.VERY_GOOD_GOVERNMENT_LIMIT);
         final int goodGovernment
@@ -1759,9 +1787,9 @@ public class Colony extends Settlement implements TradeLocation {
     public ModelMessage checkForGovMgtChangeMessage() {
         final Specification spec = getSpecification();
         final int veryBadGovernment
-                = spec.getInteger(GameOptions.VERY_BAD_GOVERNMENT_LIMIT);
+                = veryBadGovernmentLimit(spec);
         final int badGovernment
-                = spec.getInteger(GameOptions.BAD_GOVERNMENT_LIMIT);
+                = badGovernmentLimit(spec);
         final int veryGoodGovernment
                 = spec.getInteger(GameOptions.VERY_GOOD_GOVERNMENT_LIMIT);
         final int goodGovernment
@@ -2254,6 +2282,13 @@ public class Colony extends Settlement implements TradeLocation {
     public Stream<Modifier> getProductionModifiers(GoodsType goodsType,
                                                    UnitType unitType, WorkLocation wl) {
         if (productionBonus == 0) return Stream.<Modifier>empty();
+        // The original's Tory penalty in a building (levi, fixer B after
+        // part X), as the building's production has it (ProductionUtils).
+        if (unitType != null && wl instanceof Building) {
+            final Modifier tory = OriginalProduction.toryModifier(
+                ((Building)wl).getType(), goodsType, productionBonus);
+            if (tory != null) return Stream.of(tory);
+        }
         int bonus = (int)Math.floor(productionBonus * wl.getRebelFactor());
         Modifier mod = new Modifier(goodsType.getId(), bonus,
                 Modifier.ModifierType.ADDITIVE,

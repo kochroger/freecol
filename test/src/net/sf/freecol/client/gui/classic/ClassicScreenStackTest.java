@@ -48,6 +48,7 @@ import net.sf.freecol.common.model.Colony;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Player;
+import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.server.model.ServerUnit;
@@ -1430,6 +1431,118 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         assertFalse(edt(gui::screenHosted));
         assertFalse(edt(gui::turnBlocked));
         assertTrue(gui.docked.isEmpty());
+        edt(() -> {
+                flow.dispose();
+                return null;
+            });
+    }
+
+    /**
+     * A docking whose passenger went ashore (fixer B after part X,
+     * FIX-LIST must 8; V clip 051: the band #13418, the soldier sentried
+     * aboard since 1492 up #13459 with «Züge: 1», the band gone #13556;
+     * clip 050 #33289 -&gt; #33331 -&gt; #33427): the hand-over 41 frames
+     * after the band, the map's input back with it, the band its 138
+     * frames.  Who was aboard comes from the move's animation before the
+     * update; a unit of ours that stood on the square anyway is no
+     * passenger (the W band-only docking above).  A click on the docked
+     * colony goes through the band-only hold.
+     */
+    public void testAPassengersDockingHandsOverWhileTheBandStays() throws Exception {
+        final FakeClock clock = new FakeClock();
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Colony colony = createStandardColony(2, 9, 7);
+        final Player dutch = colony.getOwner();
+        Tile sea = null;
+        for (Tile t : colony.getTile().getSurroundingTiles(1)) {
+            if (!t.isLand()) sea = t;
+        }
+        assertNotNull("a sea square beside the colony", sea);
+        final Unit ship = new ServerUnit(game, sea, dutch, merchantman);
+        final Unit soldier = new ServerUnit(game, ship, dutch,
+            spec().getUnitType("model.unit.veteranSoldier"));
+        soldier.setState(Unit.UnitState.SENTRY);
+        final HostGUI gui = new HostGUI(game, dutch, clock);
+        gui.tips = true;
+        dutch.setClassicTips(1 << ClassicTips.DOCK);   // @TUTORIAL12 shown
+        gui.host();
+        final ClassicGuiFlowHost fh = new ClassicGuiFlowHost(gui, dutch, clock);
+        final ClassicTurnFlow flow = new ClassicTurnFlow(fh, clock, fh.posted::add, false);
+        edt(() -> {
+                gui.useTurnFlow(flow);
+                return null;
+            });
+        // The move's animation comes before its update: the soldier aboard.
+        gui.animateUnitMoveQueued(ship, sea, colony.getTile());
+        // The update: the ship docked with no moves, the soldier ashore,
+        // active, with his move (the server's levi R5).
+        ship.setLocation(colony.getTile());
+        ship.setMovesLeft(0);
+        soldier.setLocation(colony.getTile());
+        soldier.setState(Unit.UnitState.ACTIVE);
+        soldier.setMovesLeft(soldier.getInitialMovesLeft());
+        fh.active = ship;
+        assertTrue(edt(() -> flow.unitChosen(soldier, ship)));
+        gui.showColonyPanel(colony, ship);
+        flush();
+        assertEquals(1, gui.bands.size());
+        assertTrue("the turn flow waits", edt(gui::turnBlocked));
+        final ClassicOneShot dt = edt(gui::dockTimer);
+        assertEquals(41, ClassicGUI.DOCK_PASSENGER_FRAMES);
+        assertEquals(clock.now + Math.round(ClassicColonyLayout.frames(41) * 1e6),
+                     edt(dt::dueNanos).longValue());
+        // The hand-over's 500 ms run out under the band: held till 41 frames.
+        advance(clock, flow, fh, 520);
+        assertEquals(0, fh.count("activate " + soldier.getId()));
+        clock.now = edt(dt::dueNanos);
+        assertTrue(edt(dt::runIfDue));
+        flush();
+        edt(() -> {
+                fh.runPosted();
+                return null;
+            });
+        assertEquals("the passenger up at 41 frames", 1,
+                     fh.count("activate " + soldier.getId()));
+        assertFalse(edt(gui::turnBlocked));
+        assertFalse(edt(gui::turnInputBlocked));
+        assertEquals("the band still up", 0, gui.bandsCleared);
+        // The band's 138 frames.
+        assertTrue(edt(dt::isScheduled));
+        assertEquals(clock.now + Math.round(ClassicColonyLayout.frames(138 - 41) * 1e6),
+                     edt(dt::dueNanos).longValue());
+        clock.now = edt(dt::dueNanos);
+        assertTrue(edt(dt::runIfDue));
+        flush();
+        assertTrue("the band goes at 138 frames", gui.bandsCleared >= 1);
+        assertTrue(gui.colonyShownAt.isEmpty());
+        // Who was aboard is the ship's own: another ship's note, or a
+        // unit that stood on the square, is no passenger.
+        final ClassicGUI.Aboard a = ClassicGUI.Aboard.of(ship, colony.getTile(), dutch);
+        assertNull("the ship is empty now", a);
+        final ClassicGUI.Aboard was = new ClassicGUI.Aboard(ship, colony.getTile(),
+            java.util.List.of(soldier));
+        assertTrue(ClassicGUI.passengersAshore(colony, ship, was));
+        assertFalse(ClassicGUI.passengersAshore(colony, ship, null));
+        final Unit other = new ServerUnit(game, colony.getTile(), dutch, merchantman);
+        assertFalse(ClassicGUI.passengersAshore(colony, other, was));
+        soldier.setMovesLeft(0);
+        assertFalse("no moves: not up", ClassicGUI.passengersAshore(colony, ship, was));
+        assertNull("not into a colony", ClassicGUI.Aboard.of(ship, sea, dutch));
+        // A band-only docking without passengers: a click on the colony
+        // goes through its hold, nothing else.
+        gui.showColonyPanel(colony, ship);
+        flush();
+        assertTrue(edt(gui::turnInputBlocked));
+        assertTrue(edt(() -> gui.clickPassesHold(colony.getTile())));
+        final Tile water = sea;
+        assertFalse(edt(() -> gui.clickPassesHold(water)));
+        assertFalse(edt(() -> gui.clickPassesHold(null)));
+        clock.now = edt(dt::dueNanos);
+        assertTrue(edt(dt::runIfDue));
+        flush();
+        assertFalse("no band hold, nothing to pass", edt(() -> gui.clickPassesHold(colony.getTile())));
         edt(() -> {
                 flow.dispose();
                 return null;

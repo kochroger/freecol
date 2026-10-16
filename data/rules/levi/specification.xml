@@ -370,6 +370,18 @@
              the units stay aboard. -->
         <booleanOption id="model.option.europeArrivalDocks"
                        defaultValue="true"/>
+        <!-- The original's founding father offer after Escape (fixer B
+             after part X; Roger 2026-10-16 and clip 051: Escape on the
+             choice box at the end of 1494 - Adam Smith, La Salle, Paul
+             Revere, Thomas Jefferson, William Brewster - and the next
+             offer at the end of 1495 had Peter Minuit, Francisco
+             Coronado and Hernando Cortez in place of the first three):
+             a choice declined draws a new offer at the next turn start.
+             Whether the original draws anew because of the Escape or at
+             every offer is not seen (I).  FreeCol (classic, freecol):
+             the same fathers again until one is chosen. -->
+        <booleanOption id="model.option.originalFatherOffer"
+                       defaultValue="true"/>
         <!-- The original's sailing time between Europe and the New
              World: two turns each way (landfall: off the map in 1503,
              in Amsterdam at the start of 1505; clip008: off the map in
@@ -421,7 +433,11 @@
         <!-- The original's docking (part W, build spec M4.12 rule R5;
              clip008 #29957 -> #32928, "Züge: 0"): a ship of ours that
              sails into one of our colonies has no moves left; it sails on
-             next turn.  FreeCol (classic, freecol): only the move's cost. -->
+             next turn.  Its passengers, sentried ones too, go ashore
+             active with the moves they had (fixer B after part X: clip
+             051 #13459 the soldier with «Züge: 1», clip 050 #33331).
+             FreeCol (classic, freecol): only the move's cost, and the
+             passengers lose their moves. -->
         <booleanOption id="model.option.dockingEndsMoves"
                        defaultValue="true"/>
         <!-- The original's colony production (part X, spec
@@ -435,13 +451,15 @@
              020 #2260 swamp, plowed and with a road: 6 food + 3 sugar,
              FreeCol 4 + 2; #14817 rain forest 4 + 2; #123003 broadleaf
              4 + 3 furs; clip008 #4032 conifer 4 + 3; dago's Fur Town at
-             100 % 6 + 5).  Only the colony's own centre: the natives'
+             100 % 6 + 5; clip 051 #13792 hills with a road 4 + 5 ore,
+             FreeCol 2 + 4).  Only the colony's own centre: the natives'
              land is not touched. -->
         <booleanOption id="model.option.originalColonyCenter"
                        defaultValue="true"/>
         <!-- Lumber: an expert lumberjack gets a road's + 2 once, not
              doubled (clip 020 #75440: 10 on tropical forest with a road,
-             a colonist 6 there, #93178; FreeCol 12); the Sons of Liberty
+             a colonist 6 there, #93178; FreeCol 12; clip 049 #38577 Base
+             SE 14 on conifer with a road, FreeCol 16); the Sons of Liberty
              bonus counts twice for lumber (dago's Fur Town E: 22 at
              100 %, FreeCol 20; its Base NE 30 with prime timber; I+). -->
         <booleanOption id="model.option.originalLumber"
@@ -460,9 +478,28 @@
         <!-- Roads and silver: a road raises silver only on a square with
              a silver deposit (the manual, p. 27: "Building a road in a
              mountain square does not increase the production of silver
-             unless there is a silver deposit in the square"); FreeCol
+             unless there is a silver deposit in the square"; clip 048
+             #47324 «Silber 1/1» for a servant on a mountain with a road
+             and no deposit, FreeCol 2); FreeCol
              everywhere.  A mineral deposit does not count (I). -->
         <booleanOption id="model.option.originalRoadSilver"
+                       defaultValue="true"/>
+        <!-- The Tory penalty (fixer B after part X; clip 049 #39267: the
+             line «26% (4) 74% (10)» turns red and every worker gives 1
+             less, #40699: white again at 9 Tories; clip 048 #111418,
+             #112088 and clip 050 #34423 the same): on «Entdecker» it
+             starts at 10 Tories, FreeCol's classic level at 9.  Every
+             level and the very bad government start one Tory later than
+             FreeCol's (FreeCol's ratios with the same offset, I: only
+             «Entdecker» and the -1 seen).  In a building the worker loses
+             the penalty before the building's level factor: a colonist in
+             the Sägewerk 6 -> 4 (V 048 #111902), the Sägewerk's label 24
+             -> 20 (V 049 #39270; two expert carpenters, 12 -> 10 each,
+             I), so a level 2 building takes 2 and a factory 3 (I for the
+             buildings other than the Sägewerk);
+             FreeCol takes 1 in most of them.  The squares keep FreeCol's
+             -1 (V 049 #39278: 12 -> 11, the expert lumberjack 14 -> 13). -->
+        <booleanOption id="model.option.originalToryPenalty"
                        defaultValue="true"/>
         <!-- Row 8: capture units under repair when a colony is
              captured. -->

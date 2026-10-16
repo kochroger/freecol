@@ -356,6 +356,51 @@ public class ClassicOptionBoxesTest extends FreeColTestCase {
     }
 
     /**
+     * The game rows as a game keeps them (fixer B after part X, FIX-LIST
+     * must 12): bit k for row k of GAME_ROWS; the defaults are the new
+     * game's {@code Player.CLASSIC_OPTIONS_NEW_GAME} (V clip 052 #8093,
+     * Roger's screenshot: rows 3 and 4 off); a game's bits set the prefs
+     * and FreeCol's three options, and read back the same.
+     */
+    public void testTheGameRowsAsBits() {
+        assertEquals(8, ClassicPrefs.GAME_ROWS.size());
+        final ClassicPrefs prefs = new ClassicPrefs(null);
+        final ClientOptions co = clientOptions(1, true, true);
+        final ClassicOptionBoxes.Store s = ClassicOptionBoxes.store(prefs, co, null);
+        assertEquals("the defaults are the new game's",
+                     net.sf.freecol.common.model.Player.CLASSIC_OPTIONS_NEW_GAME,
+                     ClassicOptionBoxes.gameBits(s));
+        // Clip 051's end: Tutortips off (the original's COLONY04, 0xC600).
+        ClassicOptionBoxes.applyGameBits(s, 0x73);
+        assertFalse(ClassicOptionBoxes.clientValue(co, ClassicPrefs.TUTOR_TIPS));
+        assertEquals(Boolean.FALSE, prefs.remembered(ClassicPrefs.TUTOR_TIPS));
+        assertTrue(prefs.is(ClassicPrefs.SHOW_NATIVE_MOVES));
+        assertEquals(0x73, ClassicOptionBoxes.gameBits(s));
+        // Clip 052's changes (COLONY09, 0x1680): the natives and the
+        // Europeans off, the accelerator on.
+        ClassicOptionBoxes.applyGameBits(s, 0xF4);
+        assertFalse(prefs.is(ClassicPrefs.SHOW_NATIVE_MOVES));
+        assertFalse(prefs.is(ClassicPrefs.SHOW_EUROPEAN_MOVES));
+        assertTrue(prefs.is(ClassicPrefs.MOVE_ACCELERATOR));
+        assertTrue(ClassicOptionBoxes.clientValue(co, ClassicPrefs.TUTOR_TIPS));
+        assertEquals(0xF4, ClassicOptionBoxes.gameBits(s));
+        // Autom. Sichern off and on again: every turn (1).
+        ClassicOptionBoxes.applyGameBits(s, 0xE4);
+        assertEquals(0, (int) co.getOption(ClientOptions.AUTOSAVE_PERIOD,
+                                            IntegerOption.class).getValue());
+        ClassicOptionBoxes.applyGameBits(s,
+            net.sf.freecol.common.model.Player.CLASSIC_OPTIONS_NEW_GAME);
+        assertEquals(1, (int) co.getOption(ClientOptions.AUTOSAVE_PERIOD,
+                                            IntegerOption.class).getValue());
+        assertEquals(net.sf.freecol.common.model.Player.CLASSIC_OPTIONS_NEW_GAME,
+                     ClassicOptionBoxes.gameBits(s));
+        // The report rows are not the game's.
+        prefs.set(ClassicPrefs.BUILDING_LABELS, false);
+        assertEquals(net.sf.freecol.common.model.Player.CLASSIC_OPTIONS_NEW_GAME,
+                     ClassicOptionBoxes.gameBits(s));
+    }
+
+    /**
      * The report rows hold back exactly their notices, in order; every
      * other notice passes, whatever its type.
      */

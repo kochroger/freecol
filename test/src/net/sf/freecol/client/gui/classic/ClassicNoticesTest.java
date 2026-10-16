@@ -457,6 +457,43 @@ public class ClassicNoticesTest extends FreeColTestCase {
     }
 
     /**
+     * A ship repaired (fixer B after part X; V clip 049 #16294: «Handels-
+     * schiff: Reparaturen in Amsterdam abgeschlossen.» with the admiral):
+     * FreeCol's {@code model.unit.unitRepaired} as the server sends it is
+     * the original's @REFIT, «Amsterdam» for Europe, the colony's name for
+     * a drydock; without the ship FreeCol's words.
+     */
+    public void testRefitNotice() {
+        final ClassicText t = texts("testRefitNotice");
+        if (t == null) return;
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final Unit ship = new ServerUnit(game, dutch.getEurope(), dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final ModelMessage m = new ModelMessage(ModelMessage.MessageType.UNIT_REPAIRED,
+            "model.unit.unitRepaired", ship, dutch.getEurope())
+            .addStringTemplate("%unit%", ship.getLabel())
+            .addStringTemplate("%repairLocation%", dutch.getEurope().getLocationLabelFor(dutch));
+        final ClassicAdvisorBox.Request r = ClassicNotices.request(t, "message",
+            m, Messages.message(m), dutch.getEurope(), dutch, "t", null);
+        assertEquals("REFIT", r.id);
+        assertSame(ClassicAdvisorBox.Portrait.ADMIRAL, r.portrait);
+        assertTrue(r.isNotice());
+        assertEquals("Handelsschiff: Reparaturen in Amsterdam abgeschlossen.",
+                     r.plainText().trim());
+        game.changeMap(getTestMap(true));
+        final net.sf.freecol.common.model.Colony colony = createStandardColony();
+        final ClassicAdvisorBox.Request c = ClassicNotices.request(t, "message",
+            m, Messages.message(m), colony, dutch, "t", null);
+        assertTrue(c.plainText(), c.plainText().contains(colony.getName()));
+        // From something else than a ship: FreeCol's words.
+        final ModelMessage w = new ModelMessage(ModelMessage.MessageType.UNIT_REPAIRED,
+            "model.unit.unitRepaired", dutch, dutch.getEurope());
+        assertEquals("message", ClassicNotices.request(t, "message", w,
+            Messages.message(w), dutch.getEurope(), dutch, "t", null).id);
+    }
+
+    /**
      * Part O B2: the controller's new success notice is the original's
      * @LEARNDONE with the tribe and the job («Araukaner», «Meister-
      * Baumwollpflanzer»; V playthrough-1 C29), the chief, 271 ms (19

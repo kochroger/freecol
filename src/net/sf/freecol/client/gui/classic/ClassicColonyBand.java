@@ -74,6 +74,13 @@ final class ClassicColonyBand {
         /** The SoL and Tory percentages and the counts in brackets. */
         final int sol, tory, rebels, tories;
 
+        /**
+         * Whether the Tory penalty applies (the colony's production bonus
+         * below 0): the whole SoL line is drawn in dark red then
+         * ({@link ClassicColonyLayout#INK_TORY_PENALTY}).
+         */
+        final boolean penalty;
+
         /** The colonists the counts are of. */
         final int population;
 
@@ -92,6 +99,13 @@ final class ClassicColonyBand {
 
         Model(int sol, int population, int fishUsed, int cornUsed, int stored,
               int shortfall, int crosses, int bells, int[] widths) {
+            this(sol, population, fishUsed, cornUsed, stored, shortfall, crosses, bells,
+                 widths, false);
+        }
+
+        Model(int sol, int population, int fishUsed, int cornUsed, int stored,
+              int shortfall, int crosses, int bells, int[] widths, boolean penalty) {
+            this.penalty = penalty;
             this.sol = Math.max(0, Math.min(100, sol));
             this.tory = 100 - this.sol;
             this.rebels = ClassicColonyLayout.memberCount(this.sol, population);
@@ -135,7 +149,7 @@ final class ClassicColonyBand {
         Model with(int fishUsed, int cornUsed, int stored, int shortfall, int crosses,
                    int bells) {
             return new Model(this.sol, this.population, fishUsed, cornUsed, stored,
-                             shortfall, crosses, bells, this.widths);
+                             shortfall, crosses, bells, this.widths, this.penalty);
         }
 
         /**
@@ -144,12 +158,23 @@ final class ClassicColonyBand {
          */
         Model withSol(int sol) {
             return new Model(sol, this.population, this.fishUsed, this.cornUsed, this.stored,
-                             this.shortfall, this.crosses, this.bells, this.widths);
+                             this.shortfall, this.crosses, this.bells, this.widths,
+                             this.penalty);
+        }
+
+        /**
+         * @param penalty Whether the Tory penalty applies.
+         * @return The same with it.
+         */
+        Model withPenalty(boolean penalty) {
+            return new Model(this.sol, this.population, this.fishUsed, this.cornUsed,
+                             this.stored, this.shortfall, this.crosses, this.bells,
+                             this.widths, penalty);
         }
 
         @Override
         public String toString() {
-            return "sol=" + ((this.sol > 0)
+            return ((this.penalty) ? "penalty " : "") + "sol=" + ((this.sol > 0)
                     ? ClassicColonyLayout.memberText(this.sol, this.rebels) : "-")
                 + " tory=" + ((this.tory > 0)
                     ? ClassicColonyLayout.memberText(this.tory, this.tories) : "-")
@@ -222,8 +247,11 @@ final class ClassicColonyBand {
         final GoodsType bellType = spec.getGoodsType(BELLS);
         final int crosses = (crossType == null) ? 0 : colony.getTotalProductionOf(crossType);
         final int bells = (bellType == null) ? 0 : colony.getTotalProductionOf(bellType);
+        // The Tory penalty turns the SoL line red (fixer B after part X;
+        // V clip 049 #39267, appears and goes in the drop's frame).
         return new Model(colony.getSonsOfLiberty(), colony.getUnitCount(), fishUsed,
-                         used - fishUsed, stored, shortfall, crosses, bells, widths(a));
+                         used - fishUsed, stored, shortfall, crosses, bells, widths(a),
+                         colony.getProductionBonus() < 0);
     }
 
     /** The widths of corn, fish, crosses and bells (the pack's; 8 without it). */
@@ -300,7 +328,8 @@ final class ClassicColonyBand {
      * band picture is the chrome's, {@link ClassicColonyChrome#paintBand};
      * the figure row {@link ClassicColonyBuildings#paintFigureRow}'s): the
      * flag and «p% (n)» in white when the colony has members, the crown and
-     * its words ending at x 104 when it has Tories; the row's icons, a
+     * its words ending at x 104 when it has Tories, both words in dark red
+     * while the Tory penalty applies ({@link Model#penalty}); the row's icons, a
      * shortfall's corn each under the red X 055 (V #18955), the groups'
      * count labels (when «Beschriftung an Waren und Terrain» is on: I, the
      * option's meaning in the original).
@@ -317,6 +346,11 @@ final class ClassicColonyBand {
                          ClassicColonyBuildings.Assets a, BufferedImage flag, Model m,
                          boolean labels) {
         boolean flagDrawn = false;
+        // The whole line dark red while the Tory penalty applies (fixer B
+        // after part X; V clip 049 #39267: «26% (4) 74% (10)», glyphs in
+        // palette 4 where #39266 has 15; the icons unchanged).
+        final int ink = (m.penalty) ? ClassicColonyLayout.INK_TORY_PENALTY
+            : ClassicColonyLayout.INK_WHITE;
         if (m.sol > 0) {
             if (flag != null) {
                 g.drawImage(flag, ClassicColonyLayout.SOL_ICON_X,
@@ -325,7 +359,7 @@ final class ClassicColonyBand {
             }
             ClassicColonyChrome.text(g, c, ClassicColonyLayout.memberText(m.sol, m.rebels),
                 ClassicColonyLayout.SOL_TEXT_X, ClassicColonyLayout.SOL_Y,
-                ClassicColonyLayout.INK_WHITE);
+                ink);
         }
         if (m.tory > 0) {
             final BufferedImage crown = a.icon(ClassicColonyLayout.ICON_TORY);
@@ -336,7 +370,7 @@ final class ClassicColonyBand {
             final String s = ClassicColonyLayout.memberText(m.tory, m.tories);
             ClassicColonyChrome.text(g, c, s,
                 ClassicColonyLayout.toryTextX(ClassicColonyChrome.textWidth(c, s)),
-                ClassicColonyLayout.SOL_Y, ClassicColonyLayout.INK_WHITE);
+                ClassicColonyLayout.SOL_Y, ink);
         }
         final ClassicColonyLayout.BandRow r = m.row;
         final int[][] icons = {

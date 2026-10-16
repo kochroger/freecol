@@ -48,10 +48,19 @@ import net.sf.freecol.common.option.IntegerOption;
  *       paint, {@link #OPEN_DELAY_MS} after the menu row.</li>
  *   <li><b>Live (V).</b>  A flip acts at once, mid-turn (the accelerator's
  *       next slide, the next Spielzugende decision, the water's next step);
- *       the states carry over to the next opening and, through
- *       {@link ClassicPrefs}, to the next session.</li>
- *   <li><b>Close (V).</b>  Escape or a click outside; the screen under the
- *       box comes back exactly ({@link ClassicAdvisorLayer}).</li>
+ *       the states carry over to the next opening.  The game rows belong
+ *       to the game (fixer B after part X; V clip 052): a new game starts
+ *       with the defaults, a save keeps them ({@link #gameBits},
+ *       {@link #applyGameBits}); the report rows carry over to the next
+ *       session through {@link ClassicPrefs}.</li>
+ *   <li><b>Press and release (V clip 051 #6698 -&gt; #6707, clip 052
+ *       #9808 -&gt; #9815, #9841 -&gt; #9849, #9869 -&gt; #9876).</b>  The
+ *       bar jumps to the row at the press, the dot flips at the release,
+ *       the box stays open ({@link ClassicAdvisorBox}'s checkbox rule).</li>
+ *   <li><b>Close (V).</b>  Escape or a click outside: the bar goes at the
+ *       press, the box at the release (clip 052 #8823 -&gt; #8832, #10027
+ *       -&gt; #10033); the screen under the box comes back exactly
+ *       ({@link ClassicAdvisorLayer}).</li>
  *   <li><b>The rows.</b>  {@link ClassicPrefs#GAME_ROWS} and
  *       {@link ClassicPrefs#COLONY_ROWS}: a classic pref each, or one of the
  *       three FreeCol options ({@link ClassicPrefs#CLIENT_OPTIONS}), whose
@@ -263,6 +272,41 @@ final class ClassicOptionBoxes {
                 logger.log(Level.WARNING, "Classic options: no FreeCol option "
                     + name, e);
             }
+        }
+    }
+
+
+    // The game's own options (fixer B after part X, FIX-LIST must 12)
+
+    /**
+     * The rows of "Spieloptionen festlegen" as a game keeps them
+     * ({@code Player.classicOptions}): bit k for row k of
+     * {@link ClassicPrefs#GAME_ROWS} on.
+     *
+     * @param store The states.
+     * @return The bits.
+     */
+    static int gameBits(Store store) {
+        final List<String> keys = ClassicPrefs.GAME_ROWS;
+        int bits = 0;
+        for (int k = 0; k < keys.size(); k++) {
+            if (store.get(keys.get(k))) bits |= 1 << k;
+        }
+        return bits;
+    }
+
+    /**
+     * Set the rows of "Spieloptionen festlegen" to a game's own
+     * ({@link #gameBits}), each through the store as a flip of the box
+     * does.
+     *
+     * @param store The states.
+     * @param bits The game's bits.
+     */
+    static void applyGameBits(Store store, int bits) {
+        final List<String> keys = ClassicPrefs.GAME_ROWS;
+        for (int k = 0; k < keys.size(); k++) {
+            store.set(keys.get(k), (bits & (1 << k)) != 0);
         }
     }
 

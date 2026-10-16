@@ -2568,4 +2568,58 @@ public class InGameControllerTest extends FreeColTestCase {
         ServerTestHelper.newTurn();
         assertTrue(unit.isDisposed());
     }        
+
+    /**
+     * KAUFEN with Amsterdam's tools dearer than the original's 6 (the
+     * review of part X, play and regression: the market's own gold check
+     * refused the purchase after @BUYME1 had offered it, and the hammers
+     * stayed added for nothing): under the levi price the server buys at
+     * the original's price whatever the ask (the probe's two states: tools
+     * at 10 with 50 of 52 hammers, 146 for 180 gold; tools at 15 with 40,
+     * 276 for 280 gold), the tools first, and a refusal leaves the colony
+     * as it was.
+     */
+    public void testKaufenWithDearTools() {
+        final GoodsType hammers = spec().getGoodsType("model.goods.hammers");
+        final GoodsType tools = spec().getGoodsType("model.goods.tools");
+        final BuildingType press = spec().getBuildingType("model.building.printingPress");
+        // { tools' ask, hammers stored, gold, price }
+        final int[][] cases = { { 10, 50, 180, 13 * 2 + 6 * 20 },
+                                { 15, 40, 280, 13 * 12 + 6 * 20 } };
+        spec().setBoolean(GameOptions.ORIGINAL_BUILD_PRICE, true);
+        try {
+            for (int[] k : cases) {
+                ServerTestHelper.stopServerGame();
+                final Game game = ServerTestHelper.startServerGame(getTestMap(true));
+                final InGameController igc = ServerTestHelper.getInGameController();
+                final ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+                final Colony colony = createStandardColony(4);
+                colony.setBuildQueue(List.<net.sf.freecol.common.model.BuildableType>of(press));
+                colony.removeGoods(hammers);
+                colony.removeGoods(tools);
+                colony.addGoods(hammers, k[1]);
+                dutch.getMarket().getMarketData(tools).setCostToBuy(k[0]);
+                assertTrue("the market asks more", dutch.getMarket().getBidPrice(tools, 20)
+                           > 6 * 20);
+                assertEquals(k[3], colony.getPriceForBuilding());
+                // One gold short: refused, nothing changed.
+                dutch.setGold(k[3] - 1);
+                assertFalse(colony.canPayToFinishBuilding());
+                igc.payForBuilding(dutch, colony);
+                assertEquals(k[3] - 1, dutch.getGold());
+                assertEquals("no free hammers", k[1], colony.getGoodsCount(hammers));
+                assertEquals(0, colony.getGoodsCount(tools));
+                // Enough for the original's price: bought at it.
+                dutch.setGold(k[2]);
+                assertTrue(colony.canPayToFinishBuilding());
+                igc.payForBuilding(dutch, colony);
+                assertEquals("gold, ask " + k[0], k[2] - k[3], dutch.getGold());
+                assertEquals("hammers, ask " + k[0], 52, colony.getGoodsCount(hammers));
+                assertEquals("tools, ask " + k[0], 20, colony.getGoodsCount(tools));
+            }
+        } finally {
+            spec().setBoolean(GameOptions.ORIGINAL_BUILD_PRICE, false);
+            ServerTestHelper.stopServerGame();
+        }
+    }
 }

@@ -30,6 +30,11 @@ public final class ProductionUtils {
         if (colonyProductionBonus == 0) {
             return Stream.<Modifier>empty();
         }
+        // The original's Tory penalty in a building (levi, fixer B after
+        // part X): before the building's level factor.
+        final Modifier tory = OriginalProduction.toryModifier(buildingType, goodsType,
+                                                              colonyProductionBonus);
+        if (tory != null) return Stream.of(tory);
         final float rebelFactor = (buildingType != null) ? buildingType.getRebelFactor() : 1.0F;
         final int bonus = (int) Math.floor(colonyProductionBonus * rebelFactor);
         return createRebelProductionModifierStream(Modifier.COLONY_PRODUCTION_INDEX, goodsType, bonus);

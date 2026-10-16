@@ -229,6 +229,12 @@ final class ClassicColonyLayout {
     static final int INK_YELLOW = 14;
     /** White: the hover label, the SoL text, «Abb», the cursor. */
     static final int INK_WHITE = 15;
+    /**
+     * Dark red #AA0000: the whole SoL line «26% (4) 74% (10)» while the
+     * Tory penalty applies (V clip 049 #39267 -&gt; #40699, clip 048
+     * #111418, clip 050 #34423; the flag and the crown keep their colours).
+     */
+    static final int INK_TORY_PENALTY = 4;
     /** Blue: the port's and the right panel's captions, a pressed button. */
     static final int INK_CAPTION = 57;
     /** Dark blue: a warehouse number's last two digits. */

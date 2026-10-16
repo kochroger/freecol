@@ -119,10 +119,7 @@ final class ClassicBands {
      * @return The band, never empty.
      */
     static String docking(ClassicText t, Unit ship, Colony colony) {
-        final int row = (ship == null) ? -1
-            : ClassicFirstScene.shipRow(ship.getType().getId());
-        String type = cell(t, "UNIT", row);
-        if (type == null && ship != null) type = Messages.getName(ship.getType());
+        final String type = shipName(t, ship);
         final StringBuilder sb = new StringBuilder();
         for (String s : new String[] { type, label(t, MISC_DOCKS_IN),
                                        (colony == null) ? null : colony.getName() }) {
@@ -243,6 +240,20 @@ final class ClassicBands {
     }
 
     /** A NAMES.TXT row's first column, trimmed, or null. */
+    /**
+     * A ship's type as NAMES {@code @UNIT} names it ("Handelsschiff"),
+     * else FreeCol's name.
+     *
+     * @param t The original texts, or null.
+     * @param ship The ship, or null.
+     * @return The name, or null without a ship.
+     */
+    static String shipName(ClassicText t, Unit ship) {
+        if (ship == null) return null;
+        final String type = cell(t, "UNIT", ClassicFirstScene.shipRow(ship.getType().getId()));
+        return (type != null) ? type : Messages.getName(ship.getType());
+    }
+
     private static String cell(ClassicText t, String section, int row) {
         if (t == null || row < 0) return null;
         final List<String[]> rows = t.names(section);

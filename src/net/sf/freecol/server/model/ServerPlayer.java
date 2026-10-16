@@ -242,6 +242,10 @@ public class ServerPlayer extends Player implements TurnTaker {
         this.admin = admin;
         this.nationId = nation.getId();
         this.immigration = 0;
+        // A new game's game options are the original's defaults (the
+        // Classic UI's «Spieloptionen festlegen», fixer B after part X;
+        // V clip 052 #8093).
+        this.classicOptions = CLASSIC_OPTIONS_NEW_GAME;
         if (nation.isUnknownEnemy()) { // virtual "enemy privateer" player
             this.nationType = null;
             this.playerType = PlayerType.COLONIAL;

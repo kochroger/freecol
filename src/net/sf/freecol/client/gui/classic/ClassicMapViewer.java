@@ -2576,11 +2576,14 @@ final class ClassicMapViewer extends JPanel {
      * double-click), which also arms the TERRAIN-mode cursor keys.
      */
     private void onClick(MouseEvent e) {
-        if (inputBlocked()) {
+        final Tile tile = tileAt(e.getX(), e.getY());
+        // A click on the docked colony's own square opens it during its
+        // band's hold (fixer B after part X, I).
+        if (inputBlocked() && (this.gui == null || this.gui.isDialogShowing()
+                               || !this.gui.clickPassesHold(tile))) {
             ClassicFrameRecorder.event("click-blocked", "");
             return;
         }
-        final Tile tile = tileAt(e.getX(), e.getY());
         if (tile == null) return;
         requestFocusInWindow();
         clickOn(tile, this.freeColClient.getMyPlayer());

@@ -130,6 +130,7 @@ import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.common.model.UnitTypeChange;
 import net.sf.freecol.common.model.UnitWas;
 import net.sf.freecol.common.model.WorkLocation;
+import net.sf.freecol.common.option.BooleanOption;
 import net.sf.freecol.common.option.GameOptions;
 import net.sf.freecol.common.util.Introspector;
 import net.sf.freecol.common.util.LogBuilder;
@@ -3238,7 +3239,15 @@ public final class InGameController extends FreeColClientHolder {
             return false;
         }
         if (ff == null) {
-            // The player has postponed the selection.
+            // The player has postponed the selection.  Under the levi
+            // rule (GameOptions.ORIGINAL_FATHER_OFFER, fixer B after
+            // part X; clip 051) he declined it: the server draws a new
+            // offer at the next turn start.
+            if (getSpecification().hasOption(GameOptions.ORIGINAL_FATHER_OFFER,
+                    BooleanOption.class)
+                && getSpecification().getBoolean(GameOptions.ORIGINAL_FATHER_OFFER)) {
+                return askServer().chooseFoundingFather(ffs, null);
+            }
             return false;
         }
 

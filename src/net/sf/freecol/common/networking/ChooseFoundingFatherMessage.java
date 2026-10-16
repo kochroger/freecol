@@ -163,7 +163,9 @@ public class ChooseFoundingFatherMessage extends AttributeMessage {
         final FoundingFather ff = getFather(game);
 
         if (ff == null) {
-            return serverPlayer.clientError("No founding father selected");
+            // No father: the offer declined (the levi rule, the
+            // original's Escape, fixer B after part X), else an error.
+            return igc(freeColServer).declineFoundingFathers(serverPlayer);
         }        
 
         return igc(freeColServer)

@@ -795,4 +795,48 @@ public class ServerUnitTest extends FreeColTestCase {
             dutch.setAI(wasAI);
         }
     }
+
+    /**
+     * The original's docking lands its passengers with their moves (fixer
+     * B after part X, FIX-LIST must 8; V clip 051 #13459: the veteran
+     * sentried aboard since 1492 ashore, active, «Züge: 1»; clip 050
+     * #33331): under the levi rule each passenger goes ashore active with
+     * the moves he had; FreeCol's disembarking (and an AI's ship) takes
+     * them.
+     */
+    public void testDockingPassengersKeepTheirMoves() {
+        Game game = ServerTestHelper.startServerGame(getCoastTestMap(plains));
+        final Specification spec = game.getSpecification();
+        final Map map = game.getMap();
+        final ServerPlayer dutch = (ServerPlayer)game.getPlayerByNationId("model.nation.dutch");
+        final boolean wasAI = dutch.isAI();
+        dutch.setAI(false);
+        try {
+            final Colony colony = createStandardColony(1, 9, 7);
+            final Tile port = colony.getTile();
+            final Tile sea = map.getTile(10, 7);
+            spec.setBoolean(GameOptions.DISEMBARK_IN_COLONY, true);   // as levi (row 10), classic off
+            for (boolean rule : new boolean[] { true, false }) {
+                spec.setBoolean(GameOptions.DOCKING_ENDS_MOVES, rule);
+                final ServerUnit ship = new ServerUnit(game, sea, dutch,
+                    spec.getUnitType("model.unit.merchantman"));
+                final ServerUnit soldier = new ServerUnit(game, ship, dutch,
+                    spec.getUnitType("model.unit.veteranSoldier"));
+                soldier.setState(Unit.UnitState.SENTRY);
+                final int moves = soldier.getInitialMovesLeft();
+                soldier.setMovesLeft(moves);
+                ship.setMovesLeft(ship.getInitialMovesLeft());
+                ship.csMove(port, new java.util.Random(1), new ChangeSet());
+                assertSame("ashore, rule " + rule, port, soldier.getLocation());
+                assertEquals(Unit.UnitState.ACTIVE, soldier.getState());
+                assertEquals("moves, rule " + rule, (rule) ? moves : 0,
+                             soldier.getMovesLeft());
+                assertEquals(0, ship.getMovesLeft());
+            }
+        } finally {
+            spec.setBoolean(GameOptions.DOCKING_ENDS_MOVES, false);
+            spec.setBoolean(GameOptions.DISEMBARK_IN_COLONY, false);
+            dutch.setAI(wasAI);
+        }
+    }
 }

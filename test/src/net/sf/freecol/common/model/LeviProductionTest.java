@@ -54,6 +54,7 @@ public class LeviProductionTest extends FreeColTestCase {
         for (String id : Specification.ORIGINAL_PRODUCTION_OPTIONS) {
             levi().setBoolean(id, true);
         }
+        levi().setBoolean(GameOptions.ORIGINAL_TORY_PENALTY, true);
         levi().applyDifficultyLevel("model.difficulty.medium");
         super.tearDown();
     }
@@ -395,7 +396,9 @@ public class LeviProductionTest extends FreeColTestCase {
     }
 
     /**
-     * The penalty of the Tories stays FreeCol's for lumber (I: not seen):
+     * The penalty of the Tories stays FreeCol's for lumber (V clip 048 #111902
+     * «Holzfäller 5» against 049 #48833 6; 049 #39278 Base SE 14 -> 13, an
+     * expert on conifer with a road):
      * an expert lumberjack on mixed forest with a road at -1, 6 x 2 - 1 +
      * 2 = 13 (FreeCol 6 x 2 - 1 + 4 = 15).
      */
@@ -526,6 +529,35 @@ public class LeviProductionTest extends FreeColTestCase {
         assertEquals("047 #5375 expert", 8, r.menu(w, "expertSilverMiner", "silver"));
         levi().setBoolean(GameOptions.ORIGINAL_ROAD_SILVER, false);
         assertEquals("G15 deposit, FreeCol", 4, r.made(w, "silver"));
+    }
+
+    /**
+     * A river keeps its silver where the road's goes (the review of part
+     * X, mutation X6): tundra with a mineral deposit (silver 0, the
+     * deposit + 1), a minor river (+ 1) and a road, worked for silver:
+     * under the rule the road adds nothing (no silver deposit there) and
+     * the river its + 1 (FreeCol's river rule, I: no river square seen).
+     */
+    public void testARiverKeepsItsSilver() {
+        final Rig r = new Rig("plains");
+        final Tile t = r.square(Direction.W, "tundra");
+        r.resource(t, "minerals");
+        r.on("freeColonist", t, "silver");
+        rules(true);
+        final int bare = r.made(t, "silver");
+        t.addRiver(1, "0101");   // a minor river
+        r.colony.invalidateCache();
+        final int river = r.made(t, "silver");
+        improve(t, "road");
+        r.colony.invalidateCache();
+        final int both = r.made(t, "silver");
+        System.err.println(getName() + ": deposit " + bare + ", + river " + river
+            + ", + road " + both);
+        assertEquals("the deposit", 1, bare);
+        assertEquals("the river raises silver here", 2, river);
+        assertEquals("the road adds nothing, the river stays", river, both);
+        levi().setBoolean(GameOptions.ORIGINAL_ROAD_SILVER, false);
+        assertTrue("FreeCol: the road too", r.made(t, "silver") >= both);
     }
 
     /**
@@ -764,6 +796,115 @@ public class LeviProductionTest extends FreeColTestCase {
             assertEquals("cathedral, colonist " + on, 10,
                          potential(r, "cathedral", "crosses", "freeColonist"));
         }
+    }
+
+    // The Tory penalty (fixer B after part X, FIX-LIST must 7)
+
+    /** Colonists into the colony's houses (no liberty: all of them Tories). */
+    private static void colonists(Rig r, int n) {
+        final String[] houses = { "townHall", "carpenterHouse", "blacksmithHouse",
+                                  "tobacconistHouse", "weaverHouse", "distillerHouse",
+                                  "furTraderHouse" };
+        for (int i = 0; i < n; i++) r.in("freeColonist", houses[i / 3]);
+    }
+
+    /**
+     * On «Entdecker» the penalty starts at 10 Tories (V clip 049 #39267:
+     * «26% (4) 74% (10)» red, every worker 1 less; #40699 «72% (9)» white
+     * and all back; clip 048 #111418 / #112088, clip 050 #34423), FreeCol's
+     * very easy at 9; the very bad government one Tory later too (I).
+     */
+    public void testTheToryLimitsAreTheOriginals() {
+        final int[][] cases = {
+            // { colonists, levi's bonus, FreeCol's bonus }
+            { 9, 0, -1 }, { 10, -1, -1 }, { 13, -1, -2 }, { 14, -2, -2 } };
+        for (int[] k : cases) {
+            for (boolean on : new boolean[] { true, false }) {
+                levi().setBoolean(GameOptions.ORIGINAL_TORY_PENALTY, on);
+                final Rig r = new Rig("plains");
+                colonists(r, k[0]);
+                assertEquals(k[0], r.colony.getUnitCount());
+                assertEquals(k[0], r.colony.getToryCount());
+                r.colony.updateSoL();
+                r.colony.updateProductionBonus();
+                assertEquals(k[0] + " Tories, rule " + on, (on) ? k[1] : k[2],
+                             r.colony.getProductionBonus());
+            }
+        }
+        levi().setBoolean(GameOptions.ORIGINAL_TORY_PENALTY, true);
+        assertEquals(1, OriginalProduction.toryLimitOffset(levi()));
+        assertEquals(0, OriginalProduction.toryLimitOffset(spec("classic")));
+    }
+
+    /**
+     * In a building the worker loses the penalty before the building's
+     * level factor, after the expert's own (V clip 048 #111902 «Hämmer
+     * 4/6» for a colonist in the Sägewerk, «Rum 2/3» in the level 1 house;
+     * 049 #39266 -&gt; #39280 the Sägewerk's two workers 24 -&gt; 20); the
+     * other buildings of level 2 and 3 as that rule has it (I).  FreeCol:
+     * the penalty times the rebel-factor, before the expert's modifier.
+     */
+    public void testTheToryPenaltyInBuildings() {
+        // { building, good, unit, levi, FreeCol }
+        final Object[][] cases = {
+            { "distillerHouse", "rum", "freeColonist", 2, 2 },
+            { "distillerHouse", "rum", "masterDistiller", 5, 4 },
+            { "carpenterHouse", "hammers", "freeColonist", 2, 2 },
+            { "lumberMill", "hammers", "freeColonist", 4, 4 },
+            { "lumberMill", "hammers", "masterCarpenter", 10, 10 },
+            { "rumDistillery", "rum", "freeColonist", 4, 5 },
+            { "rumDistillery", "rum", "masterDistiller", 10, 10 },
+            { "rumFactory", "rum", "freeColonist", 6, 7 },
+        };
+        for (boolean on : new boolean[] { true, false }) {
+            levi().setBoolean(GameOptions.ORIGINAL_TORY_PENALTY, on);
+            for (Object[] k : cases) {
+                final Rig r = new Rig("plains");
+                r.in("freeColonist", "townHall");
+                final String b = (String) k[0];
+                if ("lumberMill".equals(b)) r.build("lumberMill");
+                if ("rumDistillery".equals(b) || "rumFactory".equals(b)) r.build("rumDistillery");
+                if ("rumFactory".equals(b)) r.build("rumFactory");
+                r.bonus(-1);
+                assertEquals(k[0] + " " + k[2] + ", rule " + on, (on) ? k[3] : k[4],
+                             potential(r, b, (String) k[1], (String) k[2]));
+            }
+        }
+        // The colony's own production: two expert carpenters in the
+        // Sägewerk, 24 -> 20 (V 049 #39266 -> #39280).
+        levi().setBoolean(GameOptions.ORIGINAL_TORY_PENALTY, true);
+        final Rig r = new Rig("plains");
+        r.build("lumberMill");
+        r.in("masterCarpenter", "lumberMill");
+        r.in("masterCarpenter", "lumberMill");
+        r.colony.addGoods(goods("lumber"), 100);
+        final Building mill = r.colony.getBuilding(levi().getBuildingType("model.building.lumberMill"));
+        assertEquals(24, made(r, mill, "hammers"));
+        r.bonus(-1);
+        assertEquals(20, made(r, mill, "hammers"));
+        // The squares keep FreeCol's -1 (testTheLumberPenaltyKeepsFreeColsRule).
+        assertEquals(2.0f, OriginalProduction.levelFactor(
+            levi().getBuildingType("model.building.lumberMill"), goods("hammers")), 0f);
+        assertEquals(3.0f, OriginalProduction.levelFactor(
+            levi().getBuildingType("model.building.rumFactory"), goods("rum")), 0f);
+        assertEquals(1.0f, OriginalProduction.levelFactor(
+            levi().getBuildingType("model.building.distillerHouse"), goods("rum")), 0f);
+        assertNull("no penalty: FreeCol's", OriginalProduction.toryModifier(
+            levi().getBuildingType("model.building.rumDistillery"), goods("rum"), 1));
+        final Modifier m = OriginalProduction.toryModifier(
+            levi().getBuildingType("model.building.rumDistillery"), goods("rum"), -2);
+        assertEquals(-4f, m.getValue(), 0f);
+        assertEquals(Modifier.EXPERT_PRODUCTION_INDEX + 1, m.getModifierIndex());
+    }
+
+    /** What a building makes of a good now (the production cache). */
+    private static int made(Rig r, Building b, String good) {
+        r.colony.invalidateCache();
+        int n = 0;
+        for (AbstractGoods ag : r.colony.getProductionInfo(b).getProduction()) {
+            if (ag.getType() == goods(good)) n += ag.getAmount();
+        }
+        return n;
     }
 
     private static int potential(Rig r, String building, String good, String type) {

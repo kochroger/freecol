@@ -283,6 +283,14 @@ public class ClassicGUI extends GUI {
      */
     private Colony dockingBand = null;
 
+    /**
+     * Who was aboard our ship that last moved into one of our colonies
+     * ({@link Aboard#of}), noted by the client's message thread before the
+     * move's update lands them, read by the docking on the event thread,
+     * or null.
+     */
+    private volatile Aboard dockingAboard = null;
+
     /** When Europe last got the keys back ({@link #focusEurope}), clock ns. */
     private long europeRaisedAt = 0L;
 
@@ -292,6 +300,9 @@ public class ClassicGUI extends GUI {
      * ({@link #bandTimeUp}, europe-voyage D1).  EDT only.
      */
     private final ClassicVoyages.BandEnd bandEnd = new ClassicVoyages.BandEnd();
+
+    /** The band shown now ({@link #showBand}), or null.  EDT only. */
+    private String bandShown = null;
 
     /** The tutorial tips' timer (W11), and the tips on their way (EDT). */
     private ClassicOneShot adviceTimer = null;
@@ -1425,6 +1436,7 @@ public class ClassicGUI extends GUI {
         // No colony report or docking of this game outlives it (part W).
         this.reportRun = null;
         this.dockingColony = this.dockingBand = null;
+        this.dockingAboard = null;
         this.bandEnd.reset();
         this.pendingTips.clear();
         this.colonyShown = null;
@@ -2011,10 +2023,9 @@ public class ClassicGUI extends GUI {
             this.imageLibrary, text, tiny, wood);
         this.mapViewer.setIconArt(tiny, text);
         applySessionOptions();
-        // What the options box set last for Autom. Sichern, Kampfanalyse and
-        // Tutortips (FreeCol options) holds in this session too (W14).
-        ClassicOptionBoxes.applyRemembered(getFreeColClient().getClientOptions(),
-                                           ClassicPrefs.get());
+        // The game's own options: a new game's defaults, a loaded game's
+        // saved ones (FIX-LIST must 12, V clip 052).
+        loadGameOptions();
         final ActionManager am = getFreeColClient().getActionManager();
         this.menuStrip = new ClassicMenuStrip(new ClassicMenuStrip.Host() {
                 @Override
@@ -2105,6 +2116,7 @@ public class ClassicGUI extends GUI {
             SwingUtilities::invokeLater, true, "ClassicDocking");
         this.reportRun = null;
         this.dockingColony = this.dockingBand = null;
+        this.dockingAboard = null;
         this.pendingTips.clear();
         this.turnPoll = new javax.swing.Timer(ClassicTurnFlow.POLL_MS, e -> {
                 if (turnFlow != null) {
@@ -3063,6 +3075,83 @@ public class ClassicGUI extends GUI {
         if (ClassicPrefs.WATER_CYCLING.equals(key) && this.waterCycle != null) {
             this.waterCycle.setEnabled(on);
         }
+        // A game row: the game keeps it (its save; FIX-LIST must 12).
+        final Player me = myPlayer();
+        if (me != null && ClassicPrefs.GAME_ROWS.contains(key)) {
+            markOptions(me, ClassicOptionBoxes.gameBits(gameStore()));
+        }
+    }
+
+    /**
+     * The store of the game rows without a follow-up: the prefs and the
+     * client's FreeCol options.
+     *
+     * @return The store.
+     */
+    private ClassicOptionBoxes.Store gameStore() {
+        final FreeColClient fcc = getFreeColClient();
+        return ClassicOptionBoxes.store(prefs(),
+            (fcc == null) ? null : fcc.getClientOptions(), null);
+    }
+
+    /**
+     * The game options of the game now shown (fixer B after part X, the
+     * colony review's FIX-LIST must 12; Roger 2026-10-16 "Bitte stellt die
+     * Spieloptionen bei jedem neuen Spiel so ein wie im Screenshot. Wenn
+     * man ein Spiel lädt, sollten natürlich auch die vom Spiel
+     * eingestellten Spieloptionen geladen werden."; V clip 052: the new
+     * game's defaults after clip 051 had switched Tutortips off, the saves'
+     * word 0x12): a new game's are the original's defaults (the server
+     * gives a new player {@code Player.CLASSIC_OPTIONS_NEW_GAME}), a
+     * loaded game's those saved with it; they go into the prefs and
+     * FreeCol's three options ({@link ClassicOptionBoxes#applyGameBits}).
+     * A save of an older build has none: the last ones set hold (the
+     * prefs' file and what the box remembered for FreeCol's three,
+     * {@link ClassicOptionBoxes#applyRemembered}), and the game keeps them
+     * from now on.  Then what a test script set
+     * ({@link ClassicPrefs#scripted()}).  EDT only; once per game view.
+     */
+    void loadGameOptions() {
+        final FreeColClient fcc = getFreeColClient();
+        final ClientOptions co = (fcc == null) ? null : fcc.getClientOptions();
+        final ClassicOptionBoxes.Store store = gameStore();
+        final Player me = myPlayer();
+        final int saved = (me == null) ? Player.CLASSIC_OPTIONS_UNKNOWN
+            : me.getClassicOptions();
+        if (saved >= 0) {
+            ClassicOptionBoxes.applyGameBits(store, saved);
+        } else {
+            ClassicOptionBoxes.applyRemembered(co, prefs());
+        }
+        for (Map.Entry<String, Boolean> e : ClassicPrefs.scripted().entrySet()) {
+            if (ClassicPrefs.isKnown(e.getKey())
+                || ClassicPrefs.CLIENT_OPTIONS.containsKey(e.getKey())) {
+                store.set(e.getKey(), e.getValue());
+            }
+        }
+        final int bits = ClassicOptionBoxes.gameBits(store);
+        if (me != null) markOptions(me, bits);
+        ClassicFrameRecorder.event("game-options", ((saved >= 0) ? "saved "
+                + Integer.toHexString(saved) : "none saved") + " -> "
+            + Integer.toHexString(bits));
+    }
+
+    /**
+     * Keep the game options on our player and, in a single player game, on
+     * the server's copy, whose state every save writes (as
+     * {@link #markTip}).
+     *
+     * @param me Our player.
+     * @param bits The game rows ({@link ClassicOptionBoxes#gameBits}).
+     */
+    void markOptions(Player me, int bits) {
+        me.setClassicOptions(bits);
+        final FreeColClient fcc = getFreeColClient();
+        final FreeColServer server = (fcc == null) ? null : fcc.getFreeColServer();
+        final Game sg = (server == null) ? null : server.getGame();
+        final Player sp = (sg == null) ? null
+            : sg.getFreeColGameObject(me.getId(), Player.class);
+        if (sp != null) sp.setClassicOptions(bits);
     }
 
     /**
@@ -4284,6 +4373,10 @@ public class ClassicGUI extends GUI {
      */
     @Override
     public void animateUnitMoveQueued(Unit unit, Tile srcTile, Tile dstTile) {
+        // Who is aboard a ship of ours that moves into our colony, before
+        // the update lands them (the docking's passengers, fixer B).
+        final Aboard a = Aboard.of(unit, dstTile, getMyPlayer());
+        if (a != null) this.dockingAboard = a;
         final ClassicMapViewer mv = this.mapViewer;
         if (mv == null || movesPref(unit, getMyPlayer()) == null) return;
         mv.moveQueued(unit, srcTile, dstTile);
@@ -4569,8 +4662,17 @@ public class ClassicGUI extends GUI {
      *       (V 047 #3568, 048 #37020); a docking that was the turn's last
      *       move keeps its band through our end and the AI phase (V 048
      *       #109748 -&gt; #110647; {@link ClassicVoyages.BandEnd#untilUnit}).
-     *       With Tutortips off every docking is such a one (I: a question
-     *       for Roger).</li>
+     *       With Tutortips off every docking is such a one (V clip 051
+     *       #13418: a game's first docking with the tips off, the band
+     *       only).  A click on the docked colony opens it meanwhile
+     *       ({@link #clickPassesHold}, I).</li>
+     *   <li>Such a docking whose passengers went ashore with their moves
+     *       (levi R5; {@link #passengersAshore}): the hold ends
+     *       {@link #DOCK_PASSENGER_FRAMES} frames after the band, so a
+     *       passenger comes up while the band is still there, which stays
+     *       its {@link #DOCK_BAND_ONLY_FRAMES} frames (V clip 051 #13459,
+     *       #13556; clip 050 #33331, #33427;
+     *       {@link #passengersAshoreBand}).</li>
      * </ul>
      *
      * @param colony The colony.
@@ -4578,6 +4680,9 @@ public class ClassicGUI extends GUI {
      */
     void shipDocks(Colony colony, Unit ship) {
         final boolean screen = dockTipDue();
+        // Who was aboard as it moved in (noted before the update landed them).
+        final Aboard aboard = this.dockingAboard;
+        this.dockingAboard = null;
         if (this.screens == null || this.dockTimer == null) {
             // No screen stack (a test without a view): the screen at once
             // when it is due, else nothing.
@@ -4594,8 +4699,18 @@ public class ClassicGUI extends GUI {
         if (!screen) {
             this.dockingBand = colony;
             final Game g = colony.getGame();
-            this.bandEnd.untilUnit((g == null || g.getTurn() == null) ? -1
-                                   : g.getTurn().getNumber());
+            final int turn = (g == null || g.getTurn() == null) ? -1
+                : g.getTurn().getNumber();
+            if (passengersAshore(colony, ship, aboard)) {
+                // Its passengers went ashore with their moves (levi R5,
+                // fixer B after part X): the next unit 41 frames after the
+                // band, the band its 138 frames or until our next unit.
+                ClassicFrameRecorder.event("dock", ship.getId() + " " + colony.getName()
+                    + " band=" + band + " (no screen, passengers ashore)");
+                passengersAshoreBand(colony, band, turn);
+                return;
+            }
+            this.bandEnd.untilUnit(turn);
             ClassicFrameRecorder.event("dock", ship.getId() + " " + colony.getName()
                 + " band=" + band + " (no screen)");
             this.dockTimer.schedule(waitClock().now() + ClassicVoyages.nanos(
@@ -4623,6 +4738,134 @@ public class ClassicGUI extends GUI {
                 }
             });
     }
+
+    /**
+     * Whether a click on a tile is taken while a docking's band holds the
+     * turn flow and the map's input (no passenger ashore, V clip 047
+     * #3430 -&gt; #3568: the next unit with the band's end): only on the
+     * docked colony's own square, which then opens its screen (fixer B
+     * after part X, the colony review's later item "every docking drops
+     * map input for 138 frames"; I: no clip shows a click in the band;
+     * the hand-over the band holds then waits for the screen).  Only
+     * while the player has the turn, and not while the reports run.  EDT
+     * only.
+     *
+     * @param tile The tile clicked, or null.
+     * @return True if the click goes through.
+     */
+    boolean clickPassesHold(Tile tile) {
+        final Colony c = this.dockingBand;
+        return c != null && tile != null && c.getTile() == tile
+            && this.dockingColony == null
+            && !(this.reportRun != null && this.reportRun.started)
+            && (this.turnFlow == null || this.turnFlow.playerHasTurn());
+    }
+
+    /**
+     * Who was aboard a ship of ours when it moved into one of our
+     * colonies: noted from the move's animation, which the server sends
+     * before the update that lands them ({@link #animateUnitMoveQueued}).
+     */
+    static final class Aboard {
+
+        /** The ship. */
+        final Unit ship;
+
+        /** The colony's square. */
+        final Tile tile;
+
+        /** The units aboard then. */
+        final List<Unit> units;
+
+        Aboard(Unit ship, Tile tile, List<Unit> units) {
+            this.ship = ship;
+            this.tile = tile;
+            this.units = units;
+        }
+
+        /**
+         * @param unit A unit that moves.
+         * @param dst Where to.
+         * @param me Our player, or null.
+         * @return Who is aboard it now when it is a ship of ours with
+         *     units aboard moving into a colony of ours, else null.
+         */
+        static Aboard of(Unit unit, Tile dst, Player me) {
+            if (unit == null || dst == null || me == null || unit.getOwner() != me
+                || !unit.isNaval() || unit.getUnitCount() == 0) return null;
+            final Colony c = dst.getColony();
+            if (c == null || c.getOwner() != me) return null;
+            return new Aboard(unit, dst, new ArrayList<>(unit.getUnitList()));
+        }
+    }
+
+    /**
+     * Whether a ship's passengers went ashore at its docking (the levi
+     * rule R5 lands them with their moves, fixer B after part X): one of
+     * those aboard when it moved in ({@link Aboard}) stands on the
+     * colony's square now and can take orders.
+     *
+     * @param colony The colony.
+     * @param ship The ship.
+     * @param aboard Who was aboard, or null.
+     * @return True if one is there.
+     */
+    static boolean passengersAshore(Colony colony, Unit ship, Aboard aboard) {
+        final Tile tile = (colony == null) ? null : colony.getTile();
+        if (tile == null || aboard == null || aboard.ship != ship
+            || aboard.tile != tile) return false;
+        for (Unit u : aboard.units) {
+            if (!u.isDisposed() && u.getLocation() == tile
+                && u.isCandidateForNextActiveUnit()) return true;
+        }
+        return false;
+    }
+
+    /**
+     * A docking whose passengers went ashore (FIX-LIST must 8, V clip 051
+     * #13418 -&gt; #13459 -&gt; #13556, clip 050 #33289 -&gt; #33331 -&gt;
+     * #33427): the hand-over the band holds comes
+     * {@link #DOCK_PASSENGER_FRAMES} frames after the band (the passenger
+     * is up and takes keys and clicks while the band is still there), and
+     * the band stays {@link #DOCK_BAND_ONLY_FRAMES} frames, then until our
+     * next unit is up as {@link ClassicVoyages.BandEnd#untilUnit} has it.
+     * The two steps on the docking's timer, one after the other.  EDT only.
+     *
+     * @param colony The colony.
+     * @param band The band's text.
+     * @param turn The turn now.
+     */
+    private void passengersAshoreBand(Colony colony, String band, int turn) {
+        this.dockTimer.schedule(waitClock().now() + ClassicVoyages.nanos(
+            ClassicColonyMoves.ms(DOCK_PASSENGER_FRAMES)), () -> {
+                if (this.dockingBand != colony) return;
+                this.dockingBand = null;
+                ClassicFrameRecorder.event("dock", colony.getName()
+                    + " passengers' hold over, the band stays its frames");
+                if (this.turnFlow != null) this.turnFlow.boxClosed();
+                if (this.dockTimer == null) return;
+                this.dockTimer.schedule(waitClock().now() + ClassicVoyages.nanos(
+                    ClassicColonyMoves.ms(DOCK_BAND_ONLY_FRAMES - DOCK_PASSENGER_FRAMES)),
+                    () -> {
+                        if (!band.equals(this.bandShown)) return;   // another band since
+                        this.bandEnd.untilUnit(turn);
+                        final ClassicTurnFlow f = this.turnFlow;
+                        if (f == null || (f.playerHasTurn() && !f.unitComingUp())) {
+                            clearBand();
+                        } else {
+                            ClassicFrameRecorder.event("dock", colony.getName()
+                                + " band's frames over, it stays until our next unit");
+                        }
+                    });
+            });
+    }
+
+    /**
+     * A docking whose passengers went ashore: the next unit, a passenger,
+     * this many frames after the band (V clip 051 #13418 -&gt; #13459, 41;
+     * clip 050 #33289 -&gt; #33331, 42).
+     */
+    static final int DOCK_PASSENGER_FRAMES = 41;
 
     /**
      * Whether a docking brings its colony screen (the review of part W,
@@ -5190,6 +5433,7 @@ public class ClassicGUI extends GUI {
      * @param ms How long, or 0 until {@link #clearBand}.
      */
     void showBand(String text, double ms) {
+        this.bandShown = text;
         if (this.menuStrip == null) return;
         if (this.bandTimer != null) this.bandTimer.cancel();
         this.bandEnd.reset();
@@ -5258,6 +5502,7 @@ public class ClassicGUI extends GUI {
      * ({@link ClassicTurnFlow#bandEnded}).  EDT only.
      */
     void clearBand() {
+        this.bandShown = null;
         if (this.bandTimer != null) this.bandTimer.cancel();
         this.bandEnd.reset();
         if (this.menuStrip == null || this.menuStrip.band() == null) return;
@@ -6551,12 +6796,29 @@ public class ClassicGUI extends GUI {
                 help[0] = -1;
                 again = true;
             } else if (chosen == ClassicAdvisorBox.Bar.DISMISSED) {
-                // Escape, or the game view went (abort): the server
-                // offers it again at the next turn start.
+                // Escape: no father now, and the next turn's offer is
+                // drawn anew (the levi rule; FIX-LIST must 10, V clip 051
+                // #12459 -> #14555: three new names of five; the
+                // controller tells the server).  The game view gone (an
+                // abort): nothing is sent, the server offers it again.
                 ClassicFrameRecorder.event("fathers-postponed", "");
+                if (gameViewUp() && myPlayer() != null) {
+                    p.handler.handle(null);
+                }
                 return;
             }
         }
+    }
+
+    /**
+     * Whether the in-game view is up (its map viewer): a box answered
+     * DISMISSED with it gone was aborted, not refused.  A test's GUI
+     * without a view says so itself.
+     *
+     * @return True if so.
+     */
+    boolean gameViewUp() {
+        return this.mapViewer != null;
     }
 
     /**

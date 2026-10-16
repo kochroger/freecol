@@ -794,6 +794,65 @@ public class ClassicColonyBandTest extends FreeColTestCase {
     }
 
     /**
+     * The Tory penalty's red line (fixer B after part X, FIX-LIST must 7):
+     * the whole SoL line in palette 4 while the colony's production bonus
+     * is below 0, else white; the flag and the crown unchanged.  Golden
+     * (clip 049, Base 1602, kept in
+     * {@code recordings/fixer-b-analysis/c049}): #39280 «26% (4) 74%
+     * (10)» red, #40710 «28% (4) 72% (9)» white, the line's rows y 129-141
+     * at 0 px; and the model from a colony: red only with the penalty.
+     */
+    public void testTheToryPenaltysRedLine() throws Exception {
+        final State s = ClassicColonyBuildingsTest.base1539();
+        s.in("veteranSoldier", "townHall");
+        s.finish();
+        final Colony col = s.colony;
+        setProductionBonus(col, -1);
+        final ClassicColonyBand.Model red = ClassicColonyBand.model(col, null);
+        assertTrue(red.toString(), red.penalty);
+        assertTrue(red.with(1, 2, 3, 0, 4, 5).penalty);
+        assertTrue(red.withSol(50).penalty);
+        setProductionBonus(col, 0);
+        assertFalse(ClassicColonyBand.model(col, null).penalty);
+        setProductionBonus(col, 1);
+        assertFalse(ClassicColonyBand.model(col, null).penalty);
+        final ClassicColonyGolden gold = ClassicColonyGolden.open(getName());
+        if (gold == null) return;
+        final File dir = new File(gold.recordings, "fixer-b-analysis/c049");
+        if (ClassicTerrainGoldenTest.frameFile(dir, 39280) == null) {
+            System.err.println(getName() + ": no clip 049 frames, skipped");
+            return;
+        }
+        final ClassicColonyBuildings.Assets a = ClassicColonyBuildings.Assets.load(gold.pack);
+        final ClassicColonyChrome.Assets c = ClassicColonyChrome.Assets.load(gold.pack);
+        final int[] w = ClassicColonyBand.widths(a);
+        // {frame, sol, population, penalty}
+        final int[][] cases = { { 39280, 26, 14, 1 }, { 40710, 28, 13, 0 } };
+        final StringBuilder report = new StringBuilder();
+        final StringBuilder fails = new StringBuilder();
+        for (int[] k : cases) {
+            final BufferedImage frame = javax.imageio.ImageIO.read(
+                ClassicTerrainGoldenTest.frameFile(dir, k[0]));
+            final ClassicColonyBand.Model m = new ClassicColonyBand.Model(k[1], k[2], 0, 0,
+                0, 0, 0, 0, w, k[3] == 1);
+            final BufferedImage img = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+            final Graphics2D g = img.createGraphics();
+            ClassicColonyChrome.paintBand(g, c);
+            ClassicColonyBand.paint(g, c, a, ClassicColonyBand.flag(gold.pack, a,
+                phaseOf(gold, frame)), m, true);
+            g.dispose();
+            final ClassicColonyGolden.Diff d = ClassicColonyGolden.compare("049 #" + k[0],
+                ClassicColonyGolden.pixels(img), ClassicColonyGolden.pixels(frame),
+                new java.awt.Rectangle(0, 129, 119, 13), gold.pointer(frame), null);
+            report.append("  ").append(d).append("  ").append(m).append('\n');
+            if (d.differing != 0) fails.append(' ').append(d.name).append(": ").append(d.differing);
+            assertTrue(d.name, d.compared > 1000);
+        }
+        System.err.println(getName() + ":\n" + report);
+        assertEquals("differing pixels:" + fails + "\n" + report, 0, fails.length());
+    }
+
+    /**
      * With {@code -Dclassic.colony.dump=<folder>}: our canvas and the
      * frame side by side, 3x (for the report's eyes; nothing is asserted).
      */

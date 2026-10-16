@@ -529,4 +529,70 @@ public class ServerPlayerTest extends FreeColTestCase {
             assertTrue(dutchBuyAmount > frenchBuyAmount);
         }
     }
+
+    /**
+     * The original's founding father offer after Escape (fixer B after
+     * part X, the colony review's FIX-LIST must 10; V clip 051: Escape at
+     * the end of 1494 on Adam Smith, La Salle, Paul Revere, Thomas
+     * Jefferson, William Brewster, and the end of 1495 offered Peter
+     * Minuit, Francisco Coronado, Hernando Cortez, Thomas Jefferson,
+     * William Brewster): under the levi rule a choice without a father
+     * drops the offer, so the next turn start draws a new one; without it
+     * (FreeCol) it is an error and the offer stays.  A father chosen is
+     * not undone by it.  Also through the client's message.
+     */
+    public void testDeclinedFathersAreDrawnAnew() {
+        Game game = ServerTestHelper.startServerGame(getTestMap());
+        InGameController igc = ServerTestHelper.getInGameController();
+        Colony colony = createStandardColony();
+        ServerPlayer dutch = (ServerPlayer)colony.getOwner();
+        assertTrue(dutch.canRecruitFoundingFather());
+        final List<net.sf.freecol.common.model.FoundingFather> offer = new ArrayList<>();
+        offer.add(spec().getFoundingFather("model.foundingFather.adamSmith"));
+        offer.add(spec().getFoundingFather("model.foundingFather.thomasJefferson"));
+        dutch.setOfferedFathers(offer);
+        try {
+            spec().setBoolean(GameOptions.ORIGINAL_FATHER_OFFER, false);
+            assertNotNull("FreeCol: an error", igc.declineFoundingFathers(dutch));
+            assertEquals(offer, dutch.getOfferedFathers());
+            spec().setBoolean(GameOptions.ORIGINAL_FATHER_OFFER, true);
+            assertNull(igc.declineFoundingFathers(dutch));
+            assertTrue("the offer dropped", dutch.getOfferedFathers().isEmpty());
+            dutch.csStartTurn(new Random(1), new ChangeSet());
+            assertFalse("a new draw at the turn start", dutch.getOfferedFathers().isEmpty());
+            // The client's message without a father declines it too.
+            new net.sf.freecol.common.networking.ChooseFoundingFatherMessage(
+                dutch.getOfferedFathers(), null)
+                .serverHandler(ServerTestHelper.getServer(), dutch);
+            assertTrue("declined by the message", dutch.getOfferedFathers().isEmpty());
+            dutch.csStartTurn(new Random(2), new ChangeSet());
+            final net.sf.freecol.common.model.FoundingFather chosen
+                = dutch.getOfferedFathers().get(0);
+            assertNull(igc.chooseFoundingFather(dutch, chosen));
+            assertNull("nothing to decline", igc.declineFoundingFathers(dutch));
+            assertEquals(chosen, dutch.getCurrentFather());
+        } finally {
+            spec().setBoolean(GameOptions.ORIGINAL_FATHER_OFFER, false);
+        }
+    }
+
+    /**
+     * A new game's players get the original's default game options
+     * ({@code Player.CLASSIC_OPTIONS_NEW_GAME}, fixer B after part X,
+     * FIX-LIST must 12; V clip 052 #8093), and a save keeps what the
+     * game has; a save without them reads as unknown.
+     */
+    public void testTheClassicGameOptionsOfANewGameAndASave() throws Exception {
+        Game game = ServerTestHelper.startServerGame(getTestMap());
+        ServerPlayer dutch = getServerPlayer(game, "model.nation.dutch");
+        assertEquals(Player.CLASSIC_OPTIONS_NEW_GAME, dutch.getClassicOptions());
+        assertEquals(0xF3, Player.CLASSIC_OPTIONS_NEW_GAME);
+        dutch.setClassicOptions(0x73);   // Tutortips off
+        Player copy = dutch.copy(game, ServerPlayer.class);
+        assertEquals(0x73, copy.getClassicOptions());
+        dutch.setClassicOptions(Player.CLASSIC_OPTIONS_UNKNOWN);
+        copy = dutch.copy(game, ServerPlayer.class);
+        assertEquals(Player.CLASSIC_OPTIONS_UNKNOWN, copy.getClassicOptions());
+        assertFalse("not written", dutch.serialize().contains("classicOptions"));
+    }
 }

@@ -143,6 +143,10 @@
       <xs:attribute name="classicWoodcuts" type="xs:int" use="optional"/>
       <!-- The Classic UI's tutorial tips seen in this game (a bit set, W13). -->
       <xs:attribute name="classicTips" type="xs:int" use="optional"/>
+      <!-- The Classic UI's game options of this game, the original's
+           eight rows of "Spieloptionen festlegen" (a bit set, fixer B
+           after part X). -->
+      <xs:attribute name="classicOptions" type="xs:int" use="optional"/>
       <!-- The Classic UI's unit cycle cursor (I2). -->
       <xs:attribute name="classicCycleCursor" type="xs:long" use="optional"/>
       <!-- The Classic UI's name for the New World, taken at its first

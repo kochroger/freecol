@@ -890,8 +890,16 @@ public class ServerUnit extends Unit implements TurnTaker {
         // Disembark in colony.
         if (isCarrier() && !isEmpty() && newTile.getColony() != null
             && getSpecification().getBoolean(GameOptions.DISEMBARK_IN_COLONY)) {
+            // The original's docking (levi rule R5, fixer B after part X):
+            // the passengers, sentried ones too, go ashore active with the
+            // moves they had (V clip 051 #13459: the soldier aboard since
+            // 1492 «Züge: 1»; clip 050 #33331).  FreeCol's disembarking
+            // takes their moves.
+            final boolean keepMoves = docksAndStops(newTile);
             for (Unit u : getUnitList()) {
+                final int moves = u.getMovesLeft();
                 ((ServerUnit)u).csMove(newTile, random, cs);
+                if (keepMoves && !u.isDisposed()) u.setMovesLeft(moves);
             }
             setMovesLeft(0);
         }

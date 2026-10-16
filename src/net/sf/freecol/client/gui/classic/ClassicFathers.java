@@ -50,9 +50,15 @@ import net.sf.freecol.common.model.Turn;
  *       ({@link ClassicPedia#fatherPage}); any key closes it, and the box
  *       comes back with the bar on row 1 (3 of 3 times).  Escape is
  *       "Nein" (Roger's rule: everywhere but the King's decisions): the
- *       box closes with no father, and the server offers the same choice
- *       again at the next turn start (the bells stay; I).  A click beside
- *       the box does nothing.</li>
+ *       box closes with no father, and the next turn start offers a new
+ *       draw (the levi rule {@code GameOptions.ORIGINAL_FATHER_OFFER},
+ *       fixer B after part X; V clip 051: Escape at #12459 on Adam Smith,
+ *       La Salle, Paul Revere, Thomas Jefferson, William Brewster, and the
+ *       end of 1495 #14555 brought Peter Minuit, Francisco Coronado,
+ *       Hernando Cortez, Thomas Jefferson, William Brewster; Roger
+ *       2026-10-16: his trick works; the bells stay, I).  Without the rule
+ *       the server offers the same choice again.  A click beside the box
+ *       does nothing.</li>
  *   <li><b>When.</b>  At our turn start, after the price messages of that
  *       turn's notices and before the others (choice 1: @COTTON came
  *       after it), and before the year flips.  Not after independence

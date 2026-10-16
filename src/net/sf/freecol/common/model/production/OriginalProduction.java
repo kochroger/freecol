@@ -21,8 +21,11 @@ package net.sf.freecol.common.model.production;
 
 import java.util.stream.Stream;
 
+import net.sf.freecol.common.model.AbstractGoods;
+import net.sf.freecol.common.model.BuildingType;
 import net.sf.freecol.common.model.GoodsType;
 import net.sf.freecol.common.model.Modifier;
+import net.sf.freecol.common.model.ProductionType;
 import net.sf.freecol.common.model.Resource;
 import net.sf.freecol.common.model.Specification;
 import net.sf.freecol.common.model.Tile;
@@ -46,13 +49,15 @@ import net.sf.freecol.common.option.GameOptions;
  *   <li>the colony's centre square ({@link #centerModifiers}):
  *       {@code TileProductionCalculator} for a colony's own centre only
  *       (V, seven colonies: clip 020 #2260, #14817, #123003, #134173,
- *       clip008 #4032, dago's Base, Fur City and Fur Town).  A native
+ *       clip008 #4032, dago's Base, Fur City and Fur Town; and the hills
+ *       of clip 051 #13792, 4 corn + 5 ore where FreeCol has 2 + 4).  A native
  *       settlement's land and the planners' site values
  *       ({@code Tile.getPotentialProduction}, {@code getMaximumPotential})
  *       stay FreeCol's;</li>
  *   <li>a road's lumber for an expert lumberjack, once
  *       ({@link #expertBonusDoubled}, {@code TileImprovementType}; V clip
- *       020 #75440 10 and #93178 6 on tropical forest with a road, dago's
+ *       020 #75440 10 and #93178 6 on tropical forest with a road, clip
+ *       049 #38577 Base SE 14 on conifer with a road (FreeCol 16), dago's
  *       Fur City S 14), and the Sons of Liberty bonus twice for lumber
  *       ({@link #rebelFactor}, {@code ProductionUtils}; I+: dago's Fur
  *       Town E 22, Base NE 30);</li>
@@ -64,7 +69,15 @@ import net.sf.freecol.common.option.GameOptions;
  *       21);</li>
  *   <li>no road silver without a silver deposit ({@link #roadRaises},
  *       {@code TileImprovement} and {@code TileProductionCalculator}; D
- *       the manual, p. 27).</li>
+ *       the manual, p. 27, and V clip 048 #47324, #57714: Silver City's
+ *       servant «Silber-Bergarbeiter 1/1» on a mountain with a road and no
+ *       deposit, where FreeCol makes 2);</li>
+ *   <li>the Tory penalty (fixer B after part X, its own option
+ *       {@code GameOptions.ORIGINAL_TORY_PENALTY}): one Tory later than
+ *       FreeCol's classic levels ({@link #toryLimitOffset}; V «Entdecker»
+ *       from 10 Tories, clip 049 #39267 and #40699), and in a building
+ *       before the building's level factor ({@link #toryModifier}; V the
+ *       Sägewerk, clip 048 #111902 and 049 #39270).</li>
  * </ul>
  * The Sons of Liberty percentage keeps FreeCol's rounding (down, as the
  * original's own pair in the saves shows, spec section 2.11).
@@ -94,6 +107,27 @@ public final class OriginalProduction {
     /** The source of the centre's extra yield. */
     public static final Specification.Source CENTER_SOURCE
         = new Specification.Source("model.source.originalColonyCenter");
+
+    /**
+     * How many Tories later than FreeCol's limits the original's penalty
+     * starts: on «Entdecker» at 10 Tories, FreeCol's classic «very easy»
+     * at 9 ({@code badGovernmentLimit} 8: more than 8).  V clip 049
+     * #39267 «26% (4) 74% (10)» red and every worker 1 less, #40699 «28%
+     * (4) 72% (9)» white and all back; clip 048 #111418 (10, red) and
+     * #112088 (9, white); clip 050 #34423 (10, red).  The other levels
+     * and the very bad government (-2) are not seen: FreeCol's limits
+     * with the same offset (I).
+     */
+    public static final int TORY_LIMIT_OFFSET = 1;
+
+    /**
+     * The index of the original's penalty in a building: after the
+     * expert's own modifier (30), so an expert loses what a colonist loses
+     * (V clip 049 #39270: the Sägewerk 24 -&gt; 20, two expert carpenters
+     * 12 -&gt; 10, I; a master distiller's x 2 of FreeCol before it would
+     * take him 4).
+     */
+    public static final int TORY_INDEX = Modifier.EXPERT_PRODUCTION_INDEX + 1;
 
 
     private OriginalProduction() {}
@@ -156,8 +190,12 @@ public final class OriginalProduction {
 
     /**
      * The extra factor of the Sons of Liberty bonus on a worked square:
-     * 2 for lumber under the levi rule (change 4), else 1.  A penalty (the
-     * Tories) keeps FreeCol's rule (I: not seen).
+     * 2 for lumber under the levi rule (change 4; I+, dago's Fur Town E 22
+     * and Base NE 30 at 100 %), else 1.  A penalty (the Tories) keeps
+     * FreeCol's rule, -1 for a colonist and an expert alike, not doubled
+     * (V clip 048 #111902 «Holzfäller 5» against 049 #48833 6; 049 #39278
+     * Base SE 14 -&gt; 13, an expert lumberjack on conifer with a road,
+     * COLONY08).
      *
      * @param goodsType The good.
      * @param bonus The colony's production bonus.
@@ -248,6 +286,84 @@ public final class OriginalProduction {
         final Resource r = tile.getResource();
         return r != null && r.getType() != null
             && SILVER_DEPOSIT.equals(r.getType().getId());
+    }
+
+    /**
+     * How many Tories later the penalty starts than the rules' limits
+     * ({@code badGovernmentLimit}, {@code veryBadGovernmentLimit}) say:
+     * {@link #TORY_LIMIT_OFFSET} under the levi rule, else 0 (FreeCol).
+     *
+     * @param spec The specification.
+     * @return The offset.
+     */
+    public static int toryLimitOffset(Specification spec) {
+        return (on(spec, GameOptions.ORIGINAL_TORY_PENALTY)) ? TORY_LIMIT_OFFSET : 0;
+    }
+
+    /**
+     * The Tory penalty of a worker in a building under the levi rule: the
+     * colony's penalty times the building's level factor
+     * ({@link #levelFactor}), at {@link #TORY_INDEX}, after the expert's
+     * own modifier: what the original takes from the worker's production
+     * before the building multiplies it (V clip 048 #111902 «Hämmer 4/6»
+     * for a colonist in the Sägewerk, «Rum 2/3» in the Schnapsbrennerei of
+     * level 1; 049 #39270 the Sägewerk 24 -&gt; 20).  FreeCol takes the
+     * penalty times the building's {@code rebel-factor} (2 only for the
+     * Sägewerk and the cathedral, 1.5 for the factories, else 1) before
+     * the expert's modifier.
+     *
+     * @param buildingType The building.
+     * @param goodsType The good made.
+     * @param bonus The colony's production bonus.
+     * @return The modifier, or null where FreeCol's rule holds (no
+     *     penalty, the option off, no building).
+     */
+    public static Modifier toryModifier(BuildingType buildingType,
+                                        GoodsType goodsType, int bonus) {
+        if (bonus >= 0 || buildingType == null || goodsType == null
+            || !on(goodsType.getSpecification(), GameOptions.ORIGINAL_TORY_PENALTY)) {
+            return null;
+        }
+        final float f = levelFactor(buildingType, goodsType);
+        final Modifier m = new Modifier(goodsType.getId(), (float)Math.floor(bonus * f),
+            Modifier.ModifierType.ADDITIVE, Specification.SOL_MODIFIER_SOURCE, TORY_INDEX);
+        return m;
+    }
+
+    /**
+     * A building's level factor for a good: what a worker makes in it
+     * over what he makes in the lowest level of its line that makes the
+     * good (the Sägewerk 6 / 3 = 2, a factory 9 / 3 = 3); the building's
+     * FreeCol {@code rebel-factor} where no level makes it.
+     *
+     * @param buildingType The building.
+     * @param goodsType The good.
+     * @return The factor.
+     */
+    public static float levelFactor(BuildingType buildingType, GoodsType goodsType) {
+        final int own = baseOutput(buildingType, goodsType);
+        int low = own;
+        for (BuildingType b = buildingType.getUpgradesFrom(); b != null;
+             b = b.getUpgradesFrom()) {
+            final int n = baseOutput(b, goodsType);
+            if (n > 0) low = n;
+        }
+        return (own > 0 && low > 0) ? (float)own / low : buildingType.getRebelFactor();
+    }
+
+    /**
+     * What a worker's production type of a building makes of a good.
+     *
+     * @param buildingType The building.
+     * @param goodsType The good.
+     * @return The amount, 0 for none.
+     */
+    private static int baseOutput(BuildingType buildingType, GoodsType goodsType) {
+        for (ProductionType pt : buildingType.getAvailableProductionTypes(false)) {
+            final AbstractGoods ag = pt.getOutput(goodsType);
+            if (ag != null && ag.getAmount() > 0) return ag.getAmount();
+        }
+        return 0;
     }
 
     /**

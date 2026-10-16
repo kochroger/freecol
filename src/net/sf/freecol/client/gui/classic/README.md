@@ -2598,9 +2598,15 @@ figures CC-nn through an explicit table (`ClassicFathers.IDS`).
   click closes it, the screen under it comes back in one paint, and the
   box comes again 264 ms later with the bar on row 1 (0.257-0.271 s; 3 of
   3 times). **Escape** closes the box with no father (G fixer, Roger's
-  rule "Esc = Nein" but at the King's; I): the server offers the same
-  choice again at the next turn start, the bells stay. A click beside the
-  box does nothing.
+  rule "Esc = Nein" but at the King's) and the next turn start offers a
+  new draw (levi game option `originalFatherOffer`, fixer B after part X;
+  V clip 051: Escape at #12459 on Adam Smith, La Salle, Paul Revere, Thomas
+  Jefferson, William Brewster, and #14555 brought Peter Minuit, Francisco
+  Coronado, Hernando Cortez, Jefferson, Brewster; the controller sends a
+  choice without a father, the server's `declineFoundingFathers` drops the
+  offer); the bells stay (I). Without the option FreeCol's: the same
+  choice again. A box aborted with the game view gone sends nothing. A
+  click beside the box does nothing.
 - **The page** (`ClassicPedia.fatherPage`): WOODPANL.PIK, the gold header
   LABELS @MISC 107 "COLONIZATION-ENZYKLOPÄDIE" and "(Name: Gründerväter)"
   (PEDIA @PEDIA 5) at glyph tops 5 and 13, `x = (322 - w) div 2`; the
@@ -2791,9 +2797,24 @@ colony box, which follows the same rules (I).
   `guiShowTutorial`) are set in the client's options.
 - **Kept (V for the next opening).** In `classic-options.properties`
   (`ClassicPrefs`): the classic prefs, and what the box set for the three
-  FreeCol rows (`remember`), put back into the client's options at the next
-  game view (`applyRemembered`), since FreeCol writes its own option file
-  only from its own dialog.
+  FreeCol rows (`remember`), since FreeCol writes its own option file only
+  from its own dialog.
+- **The game's own (fixer B after part X, FIX-LIST must 12; Roger
+  2026-10-16; V clip 052).** The eight game rows belong to the game, as in
+  the original: a new game starts with the defaults (Indianer on, Europäer
+  on, Beschleuniger off, Spielzugende off, Autom. Sichern on, Kampfanalyse
+  on, Farbwechsel on, Tutortips on; clip 052 #8093 after clip 051 had
+  switched Tutortips off), a save carries them (the original's header word
+  0x12). Ours: `Player.classicOptions` (bit k for row k, in the save; the
+  server gives a new player `CLASSIC_OPTIONS_NEW_GAME` = 0xF3), set into
+  the prefs and FreeCol's three options at each game view
+  (`ClassicGUI.loadGameOptions`, `ClassicOptionBoxes.applyGameBits`), each
+  flip kept on the player and its server copy (`markOptions`). A save of an
+  older build has none: the last values set hold (the file and
+  `applyRemembered`) and the game keeps them from then on. A script's
+  `pref` holds over the game's (`ClassicPrefs.scripted`). The ten colony
+  report rows stay the client's, across games (I: the original's word 0x14
+  is 0 in every save although all rows are on).
 - **The colony rows.** "Beschriftung an Gebäuden" (`buildingLabels`) shows
   the colony screen's production numbers on the buildings, "... an Waren
   und Terrain" (`goodsTerrainLabels`) those on the work tiles, the band's row
@@ -3847,13 +3868,26 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
 - **Production as the original** (part X, levi game options in the colony group, spec
   `freecol-spike-results\x-prep\production-rules.md`; `OriginalProduction` in the model, so the tile rows, the
   job menus, the band and the AI see the same numbers): the colony's own centre square + 2 food and + 1 of
-  its second good (`originalColonyCenter`; V clip 020 #2260 swamp, plowed 6 + 3, FreeCol 4 + 2; natives'
-  land untouched); an expert lumberjack gets a road's lumber once and the Sons of Liberty bonus counts twice
-  for lumber (`originalLumber`; V #75440 10 on tropical forest with a road, FreeCol 12; dago Fur Town 22);
-  the expert fisherman + 2, not + 3 (`originalFisherman`; V #46108 6, clip 048 #13896 12 on a fishery); the
-  horses take half the surplus rounded up (`originalHorseFood`; dago Fur City 1 of 1); a road raises silver
-  only on a silver deposit (`originalRoadSilver`; the manual, p. 27). The Sons of Liberty percentage keeps
-  FreeCol's rounding (down, as the original's own pair in the saves). Goldens: `LeviProductionTest`.
+  its second good (`originalColonyCenter`; V clip 020 #2260 swamp, plowed 6 + 3, FreeCol 4 + 2; V clip 051
+  #13792 hills 4 corn + 5 ore, FreeCol 2 + 4; natives' land untouched); an expert lumberjack gets a road's
+  lumber once (`originalLumber`; V #75440 10 on tropical forest with a road, FreeCol 12; V clip 049 #38577
+  Base SE 14 on conifer with a road, FreeCol 16) and the Sons of Liberty bonus counts twice for lumber
+  (**I+**: dago Fur Town E 22 and Base NE 30 at 100 %, two squares only; 50 % not seen); the expert
+  fisherman + 2, not + 3 (`originalFisherman`; V #46108 6, clip 048 #13896 12 on a fishery); the horses
+  take half the surplus rounded up (`originalHorseFood`; dago Fur City 1 of 1); a road raises silver only
+  on a silver deposit (`originalRoadSilver`; the manual, p. 27, and V clip 048 #47324 «Silber 1/1» on a
+  mountain with a road and no deposit, FreeCol 2); a river keeps its silver. The Sons of Liberty
+  percentage keeps FreeCol's rounding (down, as the original's own pair in the saves). Goldens:
+  `LeviProductionTest`.
+- **The Tory penalty as the original** (levi game option `originalToryPenalty`, fixer B after part X;
+  `OriginalProduction.toryLimitOffset`, `toryModifier`): on «Entdecker» it starts at 10 Tories (V clip
+  049 #39267 red with 10, #40699 white with 9; clip 048 #111418, #112088; clip 050 #34423), FreeCol's very
+  easy at 9; every level and the -2 one Tory later than FreeCol's (I). In a building a worker loses it
+  before the building's level factor, after the expert's own (a colonist in the Sägewerk 4, V 048 #111902;
+  its two experts 24 -> 20, V 049 #39266 -> #39280; the other level 2 and 3 buildings by the same rule, I:
+  a colonist in a Rumbrennerei 4, FreeCol 5); the squares keep FreeCol's -1 (V 049 #39278). While it
+  applies the band's whole SoL line «26% (4) 74% (10)» is dark red, palette 4 (`ClassicColonyBand`,
+  `ClassicColonyLayout.INK_TORY_PENALTY`; 0 px over 049 #39280 and #40710).
 - **The completed build** (levi game option `originalBuildCompletion`, R4): a building finished with
   nothing else queued is recorded by the server (`Colony.classicBuilt` and its turn, in the save) and
   stays the current build — the hammer panel keeps its name and its «(Benötigt …)» line, the list shows
@@ -4009,8 +4043,16 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   band holds the turn flow and the map's input for 138 frames and then stays until our next unit comes
   up, which comes with the hold's end (V 047 #3430 → #3568, 048 #36882 → #37020); a docking that was
   the turn's last move keeps the band through our end, the AI phase and the next turn's reports (V
-  048 #109748 → #110647). With Tutortips off no docking opens the screen (I: a question for Roger).
-  The map takes no key or click while a docking's band or the colony reports hold the turn flow. L and
+  048 #109748 → #110647). With Tutortips off no docking opens the screen (V clip 051 #13418: a game's
+  first docking with the tips off, the band only). **Passengers** (fixer B after part X, FIX-LIST must
+  8): under the same option they go ashore active with the moves they had, sentried ones too (the
+  server's `ServerUnit.csMove`; V clip 051 #13459 the veteran aboard since 1492 «Züge: 1», clip 050
+  #33331); then the hold ends 41 frames after the band (`DOCK_PASSENGER_FRAMES`), a passenger comes up
+  with the band still there, and the band stays its 138 frames (V 051 #13556, 050 #33427). Who was
+  aboard comes from the move's animation, which the server sends before the update that lands them
+  (`ClassicGUI.Aboard`, `animateUnitMoveQueued`). The map takes no key or click while a docking's band
+  without passengers or the colony reports hold the turn flow, except a click on the docked colony,
+  which opens it (`clickPassesHold`, I). L and
   U stay unmapped on the screen. FreeCol's path planner does not know R5: a goto or trade route
   through an own colony stops there for the turn and goes on the next (no stall), so it takes more
   turns than FreeCol estimates. Recorder `dock`, `colony-carrier docked`.
@@ -6772,7 +6814,9 @@ start. Read: `moveAccelerator` (each slide start), `showNativeMoves` and
 the water cycle, W6c; the box also switches it at once), `endTurnPrompt` (the
 idle decision, W5/W17), the two label rows (each colony screen paint), the
 report rows (each notice). The SPIEL option boxes set them all (W14, "Option
-boxes"); the script's `pref` command does too.
+boxes"); the script's `pref` command does too. The eight game rows follow the
+game shown (a new game's defaults, a save's own: "Option boxes", fixer B
+after part X); a script's `pref` is held over them at each game view.
 
 The sandbox launcher, the copied tools and today's baseline are outside the
 repo, in `C:\Users\koch_\freecol-spike-results\m1` (`W1.md`).

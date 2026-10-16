@@ -76,6 +76,8 @@ public class LeviRulesTest extends FreeColTestCase {
         CHANGED.put(GameOptions.ORIGINAL_FISHERMAN, Boolean.TRUE);         // the original's (X, 5)
         CHANGED.put(GameOptions.ORIGINAL_HORSE_FOOD, Boolean.TRUE);        // the original's (X, 6)
         CHANGED.put(GameOptions.ORIGINAL_ROAD_SILVER, Boolean.TRUE);       // the original's (X, 7)
+        CHANGED.put(GameOptions.ORIGINAL_TORY_PENALTY, Boolean.TRUE);      // the original's (fixer B, must 7)
+        CHANGED.put(GameOptions.ORIGINAL_FATHER_OFFER, Boolean.TRUE);      // the original's (fixer B, must 10)
         CHANGED.put(GameOptions.CANCEL_KEEPS_MOVE, Boolean.TRUE);          // house rules
         CHANGED.put(GameOptions.REVENGE_MODE, Boolean.FALSE);
         CHANGED.put(GameOptions.LAST_COLONY_DEFEAT, Boolean.TRUE);
@@ -466,6 +468,34 @@ public class LeviRulesTest extends FreeColTestCase {
     }
 
     /**
+     * The original's Tory penalty and father offer (fixer B after part X,
+     * FIX-LIST must 7 and 10): on in levi, off in classic and freecol
+     * (from Specification.fixGameOptions), in the colony and the map
+     * group, with their names.  The effects: {@code LeviProductionTest}
+     * (the penalty), {@code ServerPlayerTest} (the offer).
+     */
+    public void testOriginalToryAndFatherRules() {
+        final String[][] rows = {
+            { GameOptions.ORIGINAL_TORY_PENALTY, GameOptions.GAMEOPTIONS_COLONY,
+              "Tory penalty as in the original" },
+            { GameOptions.ORIGINAL_FATHER_OFFER, GameOptions.GAMEOPTIONS_MAP,
+              "Declined founding fathers: a new offer" } };
+        for (String[] r : rows) {
+            assertTrue(r[0], spec(LEVI).getBoolean(r[0]));
+            assertFalse(r[0], spec("classic").getBoolean(r[0]));
+            assertFalse(r[0], spec("freecol").getBoolean(r[0]));
+            assertNotNull(r[0], spec(LEVI).getOptionGroup(r[1]).getOption(r[0]));
+            assertEquals(r[2], Messages.getName(r[0]));
+        }
+        // The difficulty levels' limits stay classic's: the rule adds its
+        // offset (OriginalProduction.TORY_LIMIT_OFFSET).
+        assertEquals(spec("classic").getInteger(GameOptions.BAD_GOVERNMENT_LIMIT),
+                     spec(LEVI).getInteger(GameOptions.BAD_GOVERNMENT_LIMIT));
+        assertEquals(spec("classic").getInteger(GameOptions.VERY_BAD_GOVERNMENT_LIMIT),
+                     spec(LEVI).getInteger(GameOptions.VERY_BAD_GOVERNMENT_LIMIT));
+    }
+
+    /**
      * A save from before part V (its specification without the two
      * options) gets them through Specification.fixGameOptions: on for a
      * levi game, off for classic (the review of part V, regression L2);
@@ -481,7 +511,9 @@ public class LeviRulesTest extends FreeColTestCase {
                                GameOptions.ORIGINAL_LUMBER,
                                GameOptions.ORIGINAL_FISHERMAN,
                                GameOptions.ORIGINAL_HORSE_FOOD,
-                               GameOptions.ORIGINAL_ROAD_SILVER };
+                               GameOptions.ORIGINAL_ROAD_SILVER,
+                               GameOptions.ORIGINAL_TORY_PENALTY,
+                               GameOptions.ORIGINAL_FATHER_OFFER };
         for (String rules : new String[] { LEVI, "classic" }) {
             final java.io.StringWriter sw = new java.io.StringWriter();
             try (net.sf.freecol.common.io.FreeColXMLWriter xw

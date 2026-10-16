@@ -61,8 +61,21 @@ import net.sf.freecol.common.io.FreeColDirectories;
  * ({@link #CLIENT_OPTIONS}): Autom. Sichern = {@code autosavePeriod} 1/0,
  * Kampfanalyse = {@code guiShowPreCombat}, Tutortips =
  * {@code guiShowTutorial}; all three default on, as in the original.  What
- * the box sets for them is also remembered here ({@link #remember}), so it
- * holds in the next session ({@link ClassicOptionBoxes#applyRemembered}).
+ * the box sets for them is also remembered here ({@link #remember}).
+ *
+ * <p>The eight rows of "Spieloptionen festlegen" belong to the game, as in
+ * the original (fixer B after part X, the colony review's FIX-LIST must
+ * 12; V clip 052: a new game has the defaults although clip 051 ended with
+ * Tutortips off, and every save carries the switches, header word 0x12):
+ * the game keeps them ({@code Player.classicOptions}, in the save), and at
+ * each game view they are set here and in FreeCol's three options
+ * ({@link ClassicOptionBoxes#applyGameBits}): a new game's defaults, a
+ * loaded game's own.  A save of an older build has none: it gets the
+ * values this file holds (the last ones set, with
+ * {@link ClassicOptionBoxes#applyRemembered}), as before.  The file thus
+ * mirrors the game shown.  The ten report rows and the hidden pref stay
+ * the client's, across games (I: the original's word 0x14 is 0 in every
+ * save although all ten rows are on).
  *
  * <p>The colony report options (no clip shows the box; every default on,
  * I: Roger's games show the labels and the reports):
@@ -284,6 +297,14 @@ final class ClassicPrefs {
     /** The shared instance, bound to the user config directory. */
     private static ClassicPrefs shared = null;
 
+    /**
+     * What a test script set with {@code pref} ({@link #scripted(String,
+     * boolean)}): set again over a game's own options at each game view,
+     * so a script's {@code pref} before {@code waitGame} still holds
+     * (fixer B after part X: the game options belong to the game now).
+     */
+    private static final Map<String, Boolean> SCRIPTED = new LinkedHashMap<>();
+
     /** The file, or null (in memory only). */
     private final File file;
 
@@ -320,6 +341,30 @@ final class ClassicPrefs {
             shared = new ClassicPrefs((dir == null) ? null : new File(dir, FILE_NAME));
         }
         return shared;
+    }
+
+    /**
+     * Note what a test script set ({@code pref}, the script driver).
+     *
+     * @param key A pref or a {@link #CLIENT_OPTIONS} name.
+     * @param value The value.
+     */
+    static synchronized void scripted(String key, boolean value) {
+        SCRIPTED.put(key, value);
+    }
+
+    /**
+     * What test scripts set, in their order.
+     *
+     * @return A copy.
+     */
+    static synchronized Map<String, Boolean> scripted() {
+        return new LinkedHashMap<>(SCRIPTED);
+    }
+
+    /** Forget what test scripts set (a test's clean-up). */
+    static synchronized void clearScripted() {
+        SCRIPTED.clear();
     }
 
     /**

@@ -653,6 +653,8 @@ final class ClassicTestHarness {
 
         @Override
         public void pref(String name, boolean value) {
+            // Held over a game's own options at each game view (fixer B).
+            ClassicPrefs.scripted(name, value);
             if (ClassicPrefs.isKnown(name)) {
                 ClassicPrefs.get().set(name, value);
                 return;

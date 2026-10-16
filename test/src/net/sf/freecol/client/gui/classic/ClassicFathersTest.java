@@ -100,7 +100,7 @@ public class ClassicFathersTest extends FreeColTestCase {
     }
 
     /** A classic GUI without a client: its game, player and prefs are the test's. */
-    private static final class FatherGUI extends ClassicGUI {
+    private static class FatherGUI extends ClassicGUI {
 
         final Game game;
         final Player me;
@@ -481,14 +481,24 @@ public class ClassicFathersTest extends FreeColTestCase {
     /**
      * Escape in the father box (G review: Roger's rule, Escape is "Nein"
      * everywhere but at the King's decisions): the box closes with no
-     * father, the handler is not called and nothing is held; the server
-     * offers the same choice again at the next turn start, and then a
-     * father is taken.
+     * father and nothing is held; the handler hears "none" (null), which
+     * the controller sends to the server as a refusal under the levi rule
+     * (fixer B after part X, FIX-LIST must 10; V clip 051: the next offer
+     * is drawn anew, {@code ServerPlayerTest.testDeclinedFathersAreDrawnAnew})
+     * and keeps as a postponement without it; at the next turn start a
+     * father is taken.  A box aborted with the game view gone says
+     * nothing.
      */
     public void testEscapePostponesTheChoice() {
         final Game game = getStandardGame();
         final Player dutch = game.getPlayerByNationId("model.nation.dutch");
-        final FatherGUI gui = new FatherGUI(game, dutch);
+        final boolean[] view = { true };
+        final FatherGUI gui = new FatherGUI(game, dutch) {
+                @Override
+                boolean gameViewUp() {
+                    return view[0];
+                }
+            };
         final ScriptPrompter keys = new ScriptPrompter();
         gui.prompter = keys;
         final List<FoundingFather> ffs = fathers(spec(), "adamSmith", "laSalle",
@@ -498,14 +508,25 @@ public class ClassicFathersTest extends FreeColTestCase {
         keys.then("DOWN", "ESC", "ENTER");
         gui.askFathers(gui.takePendingFathers());
         assertEquals(1, keys.boxes.size());               // not asked again now
-        assertTrue(chosen.isEmpty());
+        assertEquals("none chosen: the refusal", java.util.Collections.singletonList(null),
+                     chosen);
         assertFalse(gui.holdTurnStart());
-        // The next turn start: the same offer, now a father is taken.
-        gui.showChooseFoundingFatherDialog(ffs, chosen::add);
+        // The next turn start: a new offer (the server's draw), a father taken.
+        chosen.clear();
+        final List<FoundingFather> next = fathers(spec(), "peterMinuit",
+            "franciscoDeCoronado", "hernanCortes", "thomasJefferson", "williamBrewster");
+        gui.showChooseFoundingFatherDialog(next, chosen::add);
         keys.then("DOWN", "ENTER");
         gui.askFathers(gui.takePendingFathers());
-        assertEquals(List.of(spec().getFoundingFather("model.foundingFather.laSalle")),
+        assertEquals(List.of(spec().getFoundingFather("model.foundingFather.franciscoDeCoronado")),
                      chosen);
+        // The game view gone while the box was open: no answer at all.
+        chosen.clear();
+        view[0] = false;
+        gui.showChooseFoundingFatherDialog(next, chosen::add);
+        keys.then("ESC");
+        gui.askFathers(gui.takePendingFathers());
+        assertTrue(chosen.isEmpty());
     }
 
     /**

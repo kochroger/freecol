@@ -3136,6 +3136,15 @@ public final class Specification implements OptionContainer {
             ret |= checkOp(id, GameOptions.GAMEOPTIONS_COLONY,
                            originalProductionDefault(getId()), BooleanOption.class);
         }
+        // The original's Tory penalty and father offer (levi, fixer B
+        // after part X): without them FreeCol's thresholds and offer; a
+        // levi save from before the rules gets the levi rules' values.
+        ret |= checkOp(GameOptions.ORIGINAL_TORY_PENALTY,
+                       GameOptions.GAMEOPTIONS_COLONY,
+                       originalProductionDefault(getId()), BooleanOption.class);
+        ret |= checkOp(GameOptions.ORIGINAL_FATHER_OFFER,
+                       GameOptions.GAMEOPTIONS_MAP,
+                       originalProductionDefault(getId()), BooleanOption.class);
         ret |= checkOp(GameOptions.REVENGE_MODE,
                        GameOptions.GAMEOPTIONS_VICTORY_CONDITIONS,
                        Boolean.TRUE, BooleanOption.class);

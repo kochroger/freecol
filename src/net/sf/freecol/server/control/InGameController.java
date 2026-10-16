@@ -67,6 +67,7 @@ import net.sf.freecol.common.model.IndianSettlement;
 import net.sf.freecol.common.model.Location;
 import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Market;
+import net.sf.freecol.common.model.MarketData;
 import net.sf.freecol.common.model.Market.Access;
 import net.sf.freecol.common.model.ModelMessage;
 import net.sf.freecol.common.model.ModelMessage.MessageType;
@@ -101,6 +102,7 @@ import net.sf.freecol.common.model.Unit.UnitState;
 import net.sf.freecol.common.model.UnitLocation;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.common.model.WorkLocation;
+import net.sf.freecol.common.option.BooleanOption;
 import net.sf.freecol.common.option.GameOptions;
 import net.sf.freecol.common.networking.ChangeSet;
 import net.sf.freecol.common.networking.ChangeSet.See;
@@ -1281,6 +1283,37 @@ public final class InGameController extends Controller {
                 + ff.getId());
         }
         serverPlayer.updateCurrentFather(ff);
+        return null;
+    }
+
+    /**
+     * Decline the founding fathers offered (the levi rule
+     * {@code GameOptions.ORIGINAL_FATHER_OFFER}, fixer B after part X):
+     * the offer is dropped, so the next turn start draws a new one, as the
+     * original does after Escape on its choice box (V clip 051: the end of
+     * 1494's Adam Smith, La Salle, Paul Revere, Thomas Jefferson, William
+     * Brewster declined; the end of 1495's offer Peter Minuit, Francisco
+     * Coronado, Hernando Cortez, Thomas Jefferson, William Brewster: a
+     * new draw per type, two of them the same again).  The bells stay.
+     * Without the rule a choice without a father is an error, as FreeCol
+     * has it.
+     *
+     * @param serverPlayer The {@code ServerPlayer} declining.
+     * @return Null, or an error {@code ChangeSet}.
+     */
+    public ChangeSet declineFoundingFathers(ServerPlayer serverPlayer) {
+        final Specification spec = getGame().getSpecification();
+        if (!spec.hasOption(GameOptions.ORIGINAL_FATHER_OFFER, BooleanOption.class)
+            || !spec.getBoolean(GameOptions.ORIGINAL_FATHER_OFFER)) {
+            return serverPlayer.clientError("No founding father selected");
+        }
+        if (!serverPlayer.canRecruitFoundingFather()
+            || serverPlayer.getCurrentFather() != null) {
+            return null;   // nothing offered, or one already chosen
+        }
+        serverPlayer.clearOfferedFathers();
+        logger.finest(serverPlayer.getId() + " declined the founding fathers in "
+            + getGame().getTurn());
         return null;
     }
 
@@ -3356,19 +3389,50 @@ public final class InGameController extends Controller {
         // Save the correct final gold for the player, as we are going to
         // use buy() below, but it deducts the normal uninflated price for
         // the goods being bought.  We restore this correct amount later.
+        final int goldBefore = serverPlayer.getGold();
         int savedGold = serverPlayer.modifyGold(-price);
         serverPlayer.modifyGold(price);
+        // The original's price (levi, part X) charges 6 a tool whatever
+        // Amsterdam asks: the market's own gold check in buyInEurope must
+        // not refuse a purchase the price covers (the review of part X:
+        // tools at an ask of 7 or more refused it after @BUYME1 offered
+        // it).  The gold is set back to savedGold at the end anyway.
+        final Specification spec = getGame().getSpecification();
+        if (spec.hasOption(GameOptions.ORIGINAL_BUILD_PRICE, BooleanOption.class)
+            && spec.getBoolean(GameOptions.ORIGINAL_BUILD_PRICE)) {
+            final Market market = serverPlayer.getMarket();
+            int lift = 0;
+            for (AbstractGoods ag : required) {
+                if (!ag.getType().isStorable() || market == null) continue;
+                final MarketData md = market.getMarketData(ag.getType());
+                final int ask = (md == null) ? MarketData.MAXIMUM_PRICE
+                    : Math.max(md.getCostToBuy(), MarketData.MAXIMUM_PRICE);
+                lift += ag.getAmount() * ask;
+            }
+            serverPlayer.modifyGold(lift);
+        }
 
         ChangeSet cs = new ChangeSet();
         GoodsContainer container = colony.getGoodsContainer();
         container.saveState();
+        // The goods bought first, then the rest (the hammers): a purchase
+        // that fails leaves the colony as it was (the review of part X: the
+        // hammers stayed added and nothing was restored).
+        final List<AbstractGoods> order = new ArrayList<>();
         for (AbstractGoods ag : required) {
+            if (ag.getType().isStorable()) order.add(ag);
+        }
+        for (AbstractGoods ag : required) {
+            if (!ag.getType().isStorable()) order.add(ag);
+        }
+        for (AbstractGoods ag : order) {
             GoodsType type = ag.getType();
             int amount = ag.getAmount();
             if (type.isStorable()) {
                 // The boycott is checked above.
-                if ((amount = serverPlayer.buyInEurope(random, container,
-                                                       type, amount)) < 0) {
+                if (serverPlayer.buyInEurope(random, container, type, amount) < 0) {
+                    container.restoreState();
+                    serverPlayer.setGold(goldBefore);
                     return serverPlayer.clientError("Can not buy " + amount
                         + " " + type + " for " + build);
                 }

@@ -164,8 +164,12 @@ public class GameOptions {
      * The original's docking (part W, build spec M4.12 rule R5; clip008
      * #29957 -&gt; #32928): a ship of a human player that sails into one of
      * its own colonies has no moves left there; it sails on next turn.
-     * FreeCol charges only the move's cost.  On in the "levi" rules (and a
-     * levi save from before the rule).  AI players never (I: the original's
+     * FreeCol charges only the move's cost.  Its passengers go ashore
+     * active with the moves they had (fixer B after part X, FIX-LIST must
+     * 8: clip 051 #13459, the soldier sentried aboard since 1492 ashore
+     * with «Züge: 1»; clip 050 #33331 the Waffenschmied); FreeCol's
+     * disembarking takes their moves.  On in the "levi" rules (and a levi
+     * save from before the rule).  AI players never (I: the original's
      * computer ships are not seen docking).
      */
     public static final String DOCKING_ENDS_MOVES
@@ -223,6 +227,33 @@ public class GameOptions {
      */
     public static final String ORIGINAL_ROAD_SILVER
         = "model.option.originalRoadSilver";
+
+    /**
+     * The original's Tory penalty (fixer B after part X, the colony
+     * review's FIX-LIST must 7; clip 049 #39267 and #40699, clip 048
+     * #111418 and #112088, clip 050 #34423): on «Entdecker» the penalty
+     * starts at 10 Tories, not at FreeCol's 9 (one Tory later on every
+     * level, the very bad government too: FreeCol's ratios with the same
+     * offset, I), and in a building each worker loses the penalty before
+     * the building's level factor (a colonist in a Sägewerk 6 -&gt; 4, two
+     * expert carpenters 24 -&gt; 20; FreeCol takes only 1 from a colonist
+     * in most level 2 and 3 buildings).  On in the "levi" rules (and a
+     * levi save from before the rule).
+     */
+    public static final String ORIGINAL_TORY_PENALTY
+        = "model.option.originalToryPenalty";
+
+    /**
+     * The original's founding father offer after Escape (fixer B after
+     * part X, the colony review's FIX-LIST must 10; Roger 2026-10-16 and
+     * clip 051 #12219 -&gt; #14555: Escape on the choice box, and the next
+     * turn's offer has three new names of five): a choice declined
+     * draws a new offer at the next turn start.  FreeCol offers the same
+     * fathers again.  On in the "levi" rules (and a levi save from before
+     * the rule).
+     */
+    public static final String ORIGINAL_FATHER_OFFER
+        = "model.option.originalFatherOffer";
 
     /** Do missionaries provide extra benefits. */
     public static final String ENHANCED_MISSIONARIES

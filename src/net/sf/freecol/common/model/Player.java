@@ -215,6 +215,31 @@ public class Player extends FreeColGameObject implements Nameable {
     protected volatile int classicTips = 0;
 
     /**
+     * The Classic UI's game options (the original's eight rows of
+     * «Spieloptionen festlegen»), bit k for row k on, as the original
+     * keeps them in each save (fixer B after part X, the colony review's
+     * FIX-LIST must 12; clip 052: a new game has the defaults, a save
+     * carries the switches); {@link #CLASSIC_OPTIONS_UNKNOWN} in a save
+     * of an older build.  A new player gets
+     * {@link #CLASSIC_OPTIONS_NEW_GAME}.  Written by the client's view on
+     * the event thread, read by the server's save.
+     */
+    protected volatile int classicOptions = CLASSIC_OPTIONS_UNKNOWN;
+
+    /** {@link #classicOptions} of a save that has none. */
+    public static final int CLASSIC_OPTIONS_UNKNOWN = -1;
+
+    /**
+     * {@link #classicOptions} of a new game, the original's defaults (V
+     * clip 052 #8093 and Roger's screenshot of 2026-10-16; clip 051
+     * #6563): row 0 Bewegungen der Indianer zeigen on, 1 Bewegungen der
+     * anderen Europäer zeigen on, 2 Bewegungsbeschleuniger off, 3
+     * Spielzugende off, 4 Autom. Sichern on, 5 Kampfanalyse on, 6
+     * Farbwechsel für Wasser on, 7 Tutortips on.
+     */
+    public static final int CLASSIC_OPTIONS_NEW_GAME = 0xF3;
+
+    /**
      * The Classic UI's unit cycle cursor: a place in the original's unit
      * list, -1 for the head, else twice the cycle's rank of a unit (plus one
      * for just past it).  Where the cycle goes on after a load, and where
@@ -547,6 +572,27 @@ public class Player extends FreeColGameObject implements Nameable {
      */
     public void setClassicTips(int classicTips) {
         this.classicTips = classicTips;
+    }
+
+    /**
+     * Gets the Classic UI's game options of this game.
+     *
+     * @return A bit set, bit k for row k of the original's
+     *     «Spieloptionen festlegen» on; {@link #CLASSIC_OPTIONS_UNKNOWN}
+     *     in a save without them.
+     */
+    public int getClassicOptions() {
+        return classicOptions;
+    }
+
+    /**
+     * Sets the Classic UI's game options of this game.
+     *
+     * @param classicOptions The bit set, or
+     *     {@link #CLASSIC_OPTIONS_UNKNOWN}.
+     */
+    public void setClassicOptions(int classicOptions) {
+        this.classicOptions = classicOptions;
     }
 
     /**
@@ -4304,6 +4350,7 @@ public class Player extends FreeColGameObject implements Nameable {
         this.pacificSighted |= o.getPacificSighted();
         // The unit cycle cursor is the client's own (the server's copy only
         // mirrors it for the save): an update in flight never moves it.
+        // So are the game options of the Classic UI (classicOptions).
         this.admin = o.isAdmin();
         this.ai = o.isAI();
         this.ready = o.getReady();
@@ -4359,6 +4406,7 @@ public class Player extends FreeColGameObject implements Nameable {
     private static final String BAN_MISSIONS_TAG = "banMissions";
     private static final String CLASSIC_CYCLE_CURSOR_TAG = "classicCycleCursor";
     private static final String CLASSIC_LAND_NAME_TAG = "classicLandName";
+    private static final String CLASSIC_OPTIONS_TAG = "classicOptions";
     private static final String CLASSIC_TIPS_TAG = "classicTips";
     private static final String CLASSIC_WOODCUTS_TAG = "classicWoodcuts";
     private static final String CURRENT_FATHER_TAG = "currentFather";
@@ -4448,6 +4496,10 @@ public class Player extends FreeColGameObject implements Nameable {
 
             if (classicTips != 0) {
                 xw.writeAttribute(CLASSIC_TIPS_TAG, classicTips);
+            }
+
+            if (classicOptions >= 0) {
+                xw.writeAttribute(CLASSIC_OPTIONS_TAG, classicOptions);
             }
 
             if (classicCycleCursor >= 0) {
@@ -4643,6 +4695,8 @@ public class Player extends FreeColGameObject implements Nameable {
         classicWoodcuts = xr.getAttribute(CLASSIC_WOODCUTS_TAG, 0);
 
         classicTips = xr.getAttribute(CLASSIC_TIPS_TAG, 0);
+
+        classicOptions = xr.getAttribute(CLASSIC_OPTIONS_TAG, CLASSIC_OPTIONS_UNKNOWN);
 
         setClassicCycleCursor(xr.getAttribute(CLASSIC_CYCLE_CURSOR_TAG, -1L));
 

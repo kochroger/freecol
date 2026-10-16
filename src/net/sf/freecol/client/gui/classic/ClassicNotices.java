@@ -27,9 +27,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import net.sf.freecol.common.model.Colony;
+import net.sf.freecol.common.model.Europe;
 import net.sf.freecol.common.model.FreeColObject;
 import net.sf.freecol.common.model.GoodsType;
 import net.sf.freecol.common.model.IndianSettlement;
+import net.sf.freecol.common.model.ModelMessage;
 import net.sf.freecol.common.model.Ownable;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.StringTemplate;
@@ -64,6 +67,10 @@ import net.sf.freecol.common.model.UnitType;
  *       #20177: @BURIAL1, V): @LOSTCITY1-3, 5-7 and 9, @BURIAL1-3, and
  *       @SCREWED for a burial ground (with the tribe's chief, I).</li>
  *   <li>A unit that cannot found a colony: @ONLYCOL (I).</li>
+ *   <li>A ship repaired: @REFIT with the admiral, «Handelsschiff:
+ *       Reparaturen in Amsterdam abgeschlossen.» (fixer B after part X; V
+ *       clip 049 #16294; the box's place not measured, and the original
+ *       then opens Europe by itself, #16513, which is not built).</li>
  * </ul>
  * A rule whose value is missing (a tribe or nation the original does not
  * have) gives FreeCol's words instead.
@@ -139,7 +146,17 @@ final class ClassicNotices {
          * NAMES {@code @JOB} column 1 of the unit type FreeCol's
          * {@code %skill%} names ("Baumwollpflanzer"; part O B2).
          */
-        SKILL_JOB1
+        SKILL_JOB1,
+        /**
+         * NAMES {@code @UNIT}: the type of the ship the message is from
+         * ("Handelsschiff"; fixer B after part X, @REFIT).
+         */
+        SHIP,
+        /**
+         * Where a ship was repaired: our port ("Amsterdam") for Europe,
+         * else the colony's name (fixer B after part X, @REFIT).
+         */
+        REPAIR_PLACE
     }
 
     /** One notice in the original's words. */
@@ -247,6 +264,11 @@ final class ClassicNotices {
             "COUNTRY", Value.COUNTRY, "STRING0", Value.HOME_PORT,
             "STRING1", Value.UNIT_JOB2));
         RULES.put("buildColony.badUnit", new Rule("ONLYCOL", Who.NONE));
+        // A ship repaired (fixer B after part X; V clip 049 #16294:
+        // «Handelsschiff: Reparaturen in Amsterdam abgeschlossen.» with the
+        // admiral MSS0; the box's place not measured, I).
+        RULES.put("model.unit.unitRepaired", new Rule("REFIT", Who.ADMIRAL,
+            "STRING0", Value.SHIP, "STRING1", Value.REPAIR_PLACE));
         RULES.put("model.lostCityRumour.burialGround.description",
             new Rule("SCREWED", Who.CHIEF, "STRING0", Value.TRIBE));
         RULES.put("model.lostCityRumour.expeditionVanishes.description",
@@ -769,6 +791,17 @@ final class ClassicNotices {
             return replacement(template, "%money%");
         case HOME_PORT:
             return ClassicTips.homePort(t, me);
+        case SHIP: {
+            final String id = (template instanceof ModelMessage)
+                ? ((ModelMessage) template).getSourceId() : null;
+            final Unit ship = (id == null || me == null || me.getGame() == null) ? null
+                : me.getGame().getFreeColGameObject(id, Unit.class);
+            return (ship == null || !ship.isNaval()) ? null : ClassicBands.shipName(t, ship);
+        }
+        case REPAIR_PLACE:
+            return (display instanceof Europe) ? ClassicTips.homePort(t, me)
+                : (display instanceof Colony) ? ((Colony) display).getName()
+                : null;
         case UNIT_JOB2:
             return (display instanceof Unit && me != null)
                 ? ClassicTips.unrestValues(t, me, (Unit) display).get("STRING1")

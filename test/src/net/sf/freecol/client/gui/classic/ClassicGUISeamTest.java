@@ -1817,7 +1817,7 @@ public class ClassicGUISeamTest extends FreeColTestCase {
      * A classic GUI without a client, with prefs of its own (in memory, so
      * no test writes the user's classic-options.properties) and a game.
      */
-    private static final class PrefsGUI extends ClassicGUI {
+    private static class PrefsGUI extends ClassicGUI {
 
         final ClassicPrefs mine = new ClassicPrefs(null);
         final Game game;
@@ -1835,6 +1835,67 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         @Override
         protected Game getGame() {
             return this.game;
+        }
+    }
+
+    /**
+     * The game options belong to the game (fixer B after part X, FIX-LIST
+     * must 12; Roger 2026-10-16; V clip 052): a new game starts with the
+     * original's defaults whatever the last game set, a loaded game gets
+     * its own, a save of an older build the last ones set (kept in the
+     * game from then on); a flip in the box goes into the game; a test
+     * script's {@code pref} holds over the game's.
+     */
+    public void testTheGameKeepsItsOptions() {
+        final Game game = getStandardGame();
+        final Player dutch = game.getPlayerByNationId("model.nation.dutch");
+        final PrefsGUI gui = new PrefsGUI(game) {
+                @Override
+                Player myPlayer() {
+                    return dutch;
+                }
+            };
+        try {
+            ClassicPrefs.clearScripted();
+            // The last game: the accelerator on, Tutortips off.
+            gui.mine.set(ClassicPrefs.MOVE_ACCELERATOR, true);
+            gui.mine.remember(ClassicPrefs.TUTOR_TIPS, false);
+            // A new game: the defaults.
+            dutch.setClassicOptions(Player.CLASSIC_OPTIONS_NEW_GAME);
+            gui.loadGameOptions();
+            assertFalse(gui.mine.is(ClassicPrefs.MOVE_ACCELERATOR));
+            assertEquals(Boolean.TRUE, gui.mine.remembered(ClassicPrefs.TUTOR_TIPS));
+            assertEquals(Player.CLASSIC_OPTIONS_NEW_GAME, dutch.getClassicOptions());
+            // A flip in the box goes into the game (its save).
+            final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+            final ClassicAdvisorBox.Request r = gui.optionBox(ClassicOptionBoxes.GAME_SECTION);
+            if (t != null && r != null) {
+                r.toggles.toggled(7, false);   // Tutortips
+                assertEquals(0x73, dutch.getClassicOptions());
+                r.toggles.toggled(7, true);
+                assertEquals(Player.CLASSIC_OPTIONS_NEW_GAME, dutch.getClassicOptions());
+            }
+            // A loaded game: its own (clip 051's end, Tutortips off).
+            dutch.setClassicOptions(0x73);
+            gui.loadGameOptions();
+            assertEquals(Boolean.FALSE, gui.mine.remembered(ClassicPrefs.TUTOR_TIPS));
+            assertEquals(0x73, dutch.getClassicOptions());
+            // A save of an older build: the last ones set, kept from now on.
+            dutch.setClassicOptions(Player.CLASSIC_OPTIONS_UNKNOWN);
+            gui.mine.set(ClassicPrefs.END_TURN_PROMPT, true);
+            gui.loadGameOptions();
+            assertTrue(gui.mine.is(ClassicPrefs.END_TURN_PROMPT));
+            assertEquals(0x7B, dutch.getClassicOptions());
+            // A script's pref holds over a new game's defaults.
+            ClassicPrefs.scripted(ClassicPrefs.TUTOR_TIPS, false);
+            ClassicPrefs.scripted(ClassicPrefs.END_TURN_PROMPT, false);
+            dutch.setClassicOptions(Player.CLASSIC_OPTIONS_NEW_GAME);
+            gui.loadGameOptions();
+            assertEquals(Boolean.FALSE, gui.mine.remembered(ClassicPrefs.TUTOR_TIPS));
+            assertFalse(gui.mine.is(ClassicPrefs.END_TURN_PROMPT));
+            assertEquals(0x73, dutch.getClassicOptions());
+        } finally {
+            ClassicPrefs.clearScripted();
         }
     }
 
@@ -3531,6 +3592,25 @@ public class ClassicGUISeamTest extends FreeColTestCase {
                                            pioneer.getTile(), false));
         onEdt(() -> gui3.showReportTurnPanel(List.of(result)));
         assertEquals(List.of("woodcut 13", "message combat.unitDemoted.ours"), gui3.order);
+        // An attack noted in one game is not the next one's (the review of
+        // part X, mutation X3): the next game view forgets it, and its first
+        // turn report without a fight brings no woodcut 13.
+        final WoodcutGUI gui5 = new WoodcutGUI(game, dutch);
+        onEdt(() -> gui5.animateUnitAttack(brave, pioneer, brave.getTile(),
+                                           pioneer.getTile(), false));
+        dutch.setClassicWoodcuts(0);
+        final java.lang.reflect.Method load = ClassicGUI.class.getDeclaredMethod("loadWoodcuts");
+        load.setAccessible(true);
+        onEdt(() -> {
+                try {
+                    load.invoke(gui5);
+                } catch (ReflectiveOperationException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        assertFalse(gui5.woodcutShown(ClassicWoodcut.RAID));
+        onEdt(() -> gui5.showReportTurnPanel(List.of(price)));
+        assertEquals(List.of("message model.market.priceIncrease"), gui5.order);
     }
 
     /**
@@ -4307,6 +4387,12 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         // A 3 without 4 or 5 is a real one: kept.
         final int real = ClassicWoodcut.bit(ClassicWoodcut.NATIVES) | ClassicWoodcut.bit(ClassicWoodcut.DISCOVERY);
         assertEquals(real, ClassicWoodcut.correctedRecord(real, dutch));
+        // An older build's record of 3 with the Incas' 5 only (no other
+        // tribe met): its 3 goes too (the review of part X, mutation X2).
+        final int inca = ClassicWoodcut.bit(ClassicWoodcut.NATIVES)
+            | ClassicWoodcut.bit(ClassicWoodcut.INCAS) | ClassicWoodcut.bit(ClassicWoodcut.DISCOVERY);
+        assertEquals(inca & ~ClassicWoodcut.bit(ClassicWoodcut.NATIVES),
+                     ClassicWoodcut.correctedRecord(inca, dutch));
         // The game view's load reads the save's record so: 3 comes again.
         dutch.setClassicWoodcuts(old);
         final WoodcutGUI gui = new WoodcutGUI(game, dutch);
