@@ -870,6 +870,40 @@ public class ClassicAdvisorLayerTest extends TestCase {
     }
 
     /**
+     * A box that closes by itself (the colony's other reports after a
+     * zoom, part W; the review of part W, regression L4, R01): it answers
+     * as a notice at its time, not before; a key before its time closes it
+     * sooner; the next one comes after it as usual.
+     */
+    public void testABoxThatClosesByItself() throws Exception {
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request.builder("flash")
+            .freeColText("a a").closeAfter(100.0).build();
+        final Answer a = ask(r);
+        flush();
+        assertTrue(up());
+        this.clock.advanceMs(99.9);
+        runTimer();
+        assertTrue("not before its time", up());
+        this.clock.advanceMs(0.2);
+        runTimer();
+        assertFalse("gone by itself", up());
+        assertEquals(0, a.get());
+        // A key before its time closes it sooner.
+        this.clock.advanceMs(ClassicAdvisorLayer.CHAIN_MS);
+        final Answer b = ask(ClassicAdvisorBox.Request.builder("flash")
+            .freeColText("a a").closeAfter(100.0).build());
+        flush();
+        assertTrue(up());
+        this.clock.advanceMs(30.0);
+        key(KeyEvent.VK_SPACE);
+        assertFalse(up());
+        assertEquals(0, b.get());
+        this.clock.advanceMs(100.0);
+        runTimer();
+        assertFalse(edt(() -> this.layer.isBusy()));
+    }
+
+    /**
      * A box due at a set time (the landing box after its key, build spec
      * W8b): it comes then; a new portrait's palette goes in the lead
      * before it, or at once with what is left of the lead (at least a

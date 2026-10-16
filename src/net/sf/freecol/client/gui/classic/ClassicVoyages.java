@@ -284,9 +284,34 @@ final class ClassicVoyages {
         /** Its end after a unit came up is scheduled. */
         private boolean afterUnit = false;
 
+        /**
+         * The turn a band that stays until our next unit was shown in
+         * ({@link #untilUnit}), or -1.
+         */
+        private int untilTurn = -1;
+
         /** A band was shown or taken away: nothing pending. */
         void reset() {
             this.expired = this.afterUnit = false;
+            this.untilTurn = -1;
+        }
+
+        /**
+         * A band that has no time of its own and stays until our next unit
+         * comes up (a docking without its colony screen, part W final fixer,
+         * the review's fidelity M2: V clip 047 #3430 -&gt; #3568, clip 048
+         * #36882 -&gt; #37020, the unit with the band's end): as an expired
+         * band, but the poll takes it away only in a later turn of ours, so
+         * a docking that was the turn's last move keeps its band through
+         * our end, the AI phase and the next turn start's reports (V clip
+         * 048 #109748 -&gt; #110647).
+         *
+         * @param turn The turn now.
+         */
+        void untilUnit(int turn) {
+            this.expired = true;
+            this.afterUnit = false;
+            this.untilTurn = turn;
         }
 
         /**
@@ -323,7 +348,21 @@ final class ClassicVoyages {
          * @return True to take an expired band away now.
          */
         boolean poll(boolean playerHasTurn, boolean unitComing) {
-            return this.expired && !this.afterUnit && playerHasTurn && !unitComing;
+            return poll(playerHasTurn, unitComing, -1);
+        }
+
+        /**
+         * The poll, for a turn with no unit up; a band that stays until our
+         * next unit ({@link #untilUnit}) only in a later turn than its own.
+         *
+         * @param playerHasTurn Whether the player has the turn now.
+         * @param unitComing Whether a unit is on its way up.
+         * @param turn The turn now.
+         * @return True to take an expired band away now.
+         */
+        boolean poll(boolean playerHasTurn, boolean unitComing, int turn) {
+            return this.expired && !this.afterUnit && playerHasTurn && !unitComing
+                && (this.untilTurn < 0 || turn != this.untilTurn);
         }
 
         /** @return Whether a band is kept past its time (tests, the recorder). */

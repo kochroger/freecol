@@ -70,7 +70,6 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
             s.setBoolean(GameOptions.ORIGINAL_BUILD_PRICE, false);
             s.setBoolean(GameOptions.ORIGINAL_BUILD_COMPLETION, false);
         }
-
         ClassicColonyPanel.forgetFigureOrders();
         ClassicColonyPanel.forgetSelections();
         ClassicColonyPanel.setTileCursor(ClassicColonyLayout.CENTRE_TILE);
@@ -86,6 +85,16 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
 
     private static BuildingType building(Specification s, String id) {
         return s.getBuildingType("model.building." + id);
+    }
+
+    /**
+     * Whether a colony's completion record is of this turn (R4's turn; the
+     * screen asks it no more since part W: only the zoom dissolves).
+     */
+    private static boolean completedThisTurn(Colony colony) {
+        return ClassicColonyBuild.completed(colony) != null && colony.getGame() != null
+            && colony.getGame().getTurn() != null
+            && colony.getClassicBuiltTurn() == colony.getGame().getTurn().getNumber();
     }
 
 
@@ -480,7 +489,7 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         assertEquals(press.getId(), s.colony.getClassicBuilt());
         assertEquals(s.game.getTurn().getNumber(), s.colony.getClassicBuiltTurn());
         assertSame(press, ClassicColonyBuild.current(s.colony));
-        assertTrue(ClassicColonyBuild.completedThisTurn(s.colony));
+        assertTrue(completedThisTurn(s.colony));
         final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
         if (t != null) {
             final ClassicColonyRight.Hammer h = ClassicColonyRight.hammer(s.colony, t);
@@ -1018,7 +1027,7 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         s.colony.addGoods(goods(spec, "hammers"), 52);
         s.colony.addGoods(goods(spec, "tools"), 20);
         newTurn(s);
-        assertTrue(ClassicColonyBuild.completedThisTurn(s.colony));
+        assertTrue(completedThisTurn(s.colony));
         // A founding's opening in that turn: neither.
         s.panel.opened(ClassicColonyRight.Opening.FOUNDING);
         assertNull(s.panel.dissolve());
@@ -1031,7 +1040,7 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
         // The next turn: neither.
         s.game.setTurn(new net.sf.freecol.common.model.Turn(
             s.game.getTurn().getNumber() + 1));
-        assertFalse(ClassicColonyBuild.completedThisTurn(s.colony));
+        assertFalse(completedThisTurn(s.colony));
         assertSame("still the current build", press, ClassicColonyBuild.current(s.colony));
         s.panel.opened(ClassicColonyRight.Opening.OTHER);
         assertNull(s.panel.dissolve());
@@ -1166,7 +1175,7 @@ public class ClassicColonyBuildTest extends FreeColTestCase {
      * (the same id) finishes a building in the same turn each dissolve it
      * at the zoom; an opening from the map in that turn does not (I).
      */
-    public void testTheCompletionsShownPerGame() throws Exception {
+    public void testTheZoomDissolvesInEveryGame() throws Exception {
         String id = null;
         for (int k = 0; k < 2; k++) {
             final Scene s = scene(true);

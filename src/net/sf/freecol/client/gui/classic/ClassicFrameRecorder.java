@@ -142,7 +142,12 @@ import javax.swing.JComponent;
  * (children of the HUD pane, {@link ClassicScreenStack}; events
  * {@code screen-push <kind> <name>}, {@code screen-pop <kind> <why>},
  * {@code screen-replace <old> -> <new>}, {@code colony-open <name> [founding]
- * <mode>});
+ * [zoom <how>] [docked <unit>] <mode>}; part W: {@code colony-reports},
+ * {@code colony-report}, {@code colony-zoom}, {@code dock},
+ * {@code colony-carrier ... docked}, {@code colony-exit},
+ * {@code colony-pedia}, {@code pedia}, {@code pedia-missing},
+ * {@code colony-food-short}, and {@code view-jump report} before a colony's
+ * first report);
  * the map's index hint is off meanwhile.  Not in the copy:
  * the first scene (the frame's glass pane) and the Swing popups
  * ({@link ClassicDialog} and the other JDialogs), whose opening and closing

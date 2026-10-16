@@ -1835,11 +1835,16 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
      */
     public void testTheExitOnTheRelease() throws Exception {
         final Scene s = scene(2, true);
+        s.panel.blink().arm();   // as the shown screen's addNotify
         mouse(s.panel, MouseEvent.MOUSE_PRESSED, 312, 190);
         assertFalse(s.panel.leaving());
+        assertFalse("the press stops the blink (V clip 042 #17662)",
+                    s.panel.blink().isArmed());
         mouse(s.panel, MouseEvent.MOUSE_RELEASED, 200, 190);
         paint(s.panel);
         assertFalse("released elsewhere", s.panel.leaving());
+        assertTrue("the blink goes on (I; the review of part W, R12)",
+                   s.panel.blink().isArmed());
         assertTrue(s.events.toString(), s.events.isEmpty());
         final BufferedImage before = s.panel.canvas();
         click(s.panel, 312, 190);
@@ -1868,12 +1873,16 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
      */
     public void testTheExitByEscape() throws Exception {
         final Scene s = scene(2, true);
+        s.panel.blink().arm();   // as the shown screen's addNotify
         action(s.panel, "classic_closeColony");
         assertFalse("a release alone", s.panel.leaving());
         action(s.panel, "classic_escapeDown");
         assertFalse("the press alone", s.panel.leaving());
+        assertTrue(s.panel.blink().isArmed());
         action(s.panel, "classic_closeColony");
         assertTrue(s.panel.leaving());
+        assertFalse("the screen stands still until the map (the review of part W, R11)",
+                    s.panel.blink().isArmed());
         assertEquals("[later 428]", s.events.toString());
         s.later.get(0).run();
         assertEquals("[later 428, closed]", s.events.toString());
@@ -1922,6 +1931,48 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         final int[] w2 = tile(3);
         drag(s.panel, o2[0], o2[1], w2[0], w2[1]);
         assertEquals(1, s.boxes.shortOf.size());
+    }
+
+    /**
+     * The same trigger from a job menu (V clip 020 #18949: it was J2 that
+     * moved the farmer into the smithy; the review of part W, regression
+     * L7, R13): the pick that makes the food short tells the GUI, once.
+     */
+    public void testAJobMenuPickThatMakesTheFoodShort() throws Exception {
+        final Scene s = scene(4, true);
+        final List<Unit> all = s.colony.getUnitList();
+        final Unit farmer = all.get(0);
+        farmer.setLocation(tileOf(s.colony, Direction.S));
+        farmer.changeWorkType(ClassicColonyJobs.goodsOf(spec(), 0));
+        for (int i = 1; i < all.size(); i++) {
+            all.get(i).setLocation(building(s.colony, "carpenterHouse"));
+        }
+        s.colony.invalidateCache();
+        paint(s.panel);
+        final int made = s.colony.getFoodProduction(), eaten = s.colony.getFoodConsumption();
+        final int his = farmer.getWorkTile().getMaximumPotential(
+            ClassicColonyJobs.goodsOf(spec(), 0), farmer.getType());
+        if (made < eaten || made - his >= eaten) {
+            System.err.println(getName() + ": the test map's food does not suit ("
+                + made + " made, " + eaten + " eaten, " + his + " his), skipped");
+            return;
+        }
+        final int[] f = at(s.panel, farmer);
+        click(s.panel, f[0], f[1]);           // select
+        final int before = s.boxes.asked.size();
+        click(s.panel, f[0], f[1]);           // J2, Escape: no change
+        assertEquals(before + 1, s.boxes.asked.size());
+        final String[] rows = s.boxes.asked.get(before).plainRows();
+        int smith = -1;
+        for (int i = 0; i < rows.length; i++) if (rows[i].startsWith("Schmied")) smith = i;
+        assertTrue(Arrays.toString(rows), smith >= 0);
+        assertTrue(s.boxes.shortOf.isEmpty());
+        paint(s.panel);
+        s.boxes.answers.add(smith);
+        click(s.panel, f[0], f[1]);           // J2: «Schmied»
+        assertTrue(s.api.log.toString(), farmer.getLocation() instanceof Building);
+        assertTrue(s.colony.getFoodProduction() < s.colony.getFoodConsumption());
+        assertEquals(List.of(s.colony), s.boxes.shortOf);
     }
 
     /**

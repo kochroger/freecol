@@ -152,21 +152,6 @@ final class ClassicColonyBuild {
         return (b != null) ? b : completed(colony);
     }
 
-    /**
-     * Whether a colony's completion of this turn is still to be shown
-     * (the dissolve and the ÄNDERN blink, target 4-5): its completed
-     * building's turn is the game's.
-     *
-     * @param colony The colony.
-     * @return True if so.
-     */
-    static boolean completedThisTurn(Colony colony) {
-        final BuildingType bt = completed(colony);
-        return bt != null && colony.getGame() != null && colony.getGame().getTurn() != null
-            && colony.getClassicBuiltTurn() == colony.getGame().getTurn().getNumber();
-    }
-
-
     // The build list
 
     /** One row of the build list. */

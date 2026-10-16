@@ -329,6 +329,14 @@ public class ClassicScreenStackTest extends FreeColTestCase {
             super.shipDocked(colony, shownNanos);
         }
 
+        /** Tutortips on (part W: a docking's screen only while @TUTORIAL12 is due). */
+        boolean tips = false;
+
+        @Override
+        boolean tipsOn() {
+            return this.tips;
+        }
+
         Rig rig;
 
         HostGUI(Game game, Player me, FakeClock clock) {
@@ -1205,11 +1213,12 @@ public class ClassicScreenStackTest extends FreeColTestCase {
     /**
      * Part W (build spec M4.11, M4.12): the colony screen a report's zoom
      * opens (a building's @BUILT: hammer mode, ÄNDERN blinking), and a
-     * ship's docking: the band «<Typ> Legt an in <Kolonie>» (LABELS
-     * {@code @MISC} 8, V clip008 #29957), the turn flow held meanwhile, the
-     * colony screen 64 frames later (V #30021) with the ship selected and
-     * the white cursor on it (V #30022), the band gone with it; the
-     * player's close lets a zoom's colony reports go on.
+     * game's first docking (@TUTORIAL12 due, Tutortips on): the band
+     * «<Typ> Legt an in <Kolonie>» (LABELS {@code @MISC} 8, V clip008
+     * #29957), the turn flow held and the map's input dead meanwhile (the
+     * review of part W, play L3), the colony screen 64 frames later (V
+     * #30021) with the ship selected and the white cursor on it (V
+     * #30022), the band gone with it.
      */
     public void testTheZoomAndTheDocking() throws Exception {
         final FakeClock clock = new FakeClock();
@@ -1220,6 +1229,8 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         final Player dutch = colony.getOwner();
         final Unit ship = new ServerUnit(game, colony.getTile(), dutch, merchantman);
         final HostGUI gui = new HostGUI(game, dutch, clock);
+        gui.tips = true;
+        dutch.setClassicTips(0);
         gui.host();
         // The zoom of a building's @BUILT.
         final boolean[] up = new boolean[1];
@@ -1258,7 +1269,8 @@ public class ClassicScreenStackTest extends FreeColTestCase {
         final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
         if (t != null) assertEquals("Handelsschiff Legt an in " + colony.getName(), gui.bands.get(0));
         assertTrue("the turn flow waits", edt(gui::turnBlocked));
-        final ClassicOneShot timer = edt(gui::colonyTimer);
+        assertTrue("the map takes nothing", edt(gui::turnInputBlocked));
+        final ClassicOneShot timer = edt(gui::dockTimer);
         assertTrue(edt(timer::isScheduled));
         assertEquals(clock.now + Math.round(ClassicColonyLayout.frames(64) * 1e6),
                      edt(timer::dueNanos).longValue());
@@ -1278,6 +1290,295 @@ public class ClassicScreenStackTest extends FreeColTestCase {
                 return null;
             });
         assertFalse(edt(gui::screenHosted));
+        assertFalse(edt(gui::turnInputBlocked));
+        ClassicColonyPanel.setTileCursor(ClassicColonyLayout.CENTRE_TILE);
+    }
+
+    /** Advance the fake clock and run the turn flow's due stages and posts (EDT). */
+    private static void advance(FakeClock clock, ClassicTurnFlow flow, ClassicGuiFlowHost host,
+                                double ms) throws Exception {
+        clock.advanceMs(ms);
+        edt(() -> {
+                flow.runDue();
+                host.runPosted();
+                return null;
+            });
+    }
+
+    /**
+     * Every docking after the first (the review of part W, fidelity M2: V
+     * clip 047 #3430 -&gt; #3568, clip 048 #146248, the band only): no
+     * colony screen, no @TUTORIAL12; the band holds the turn flow and the
+     * map's input 138 frames, the hand-over it held comes with their end
+     * (V 047 #3568), the band stays until that unit is up and goes 2
+     * frames after it; with Tutortips off the first docking too (I).
+     */
+    public void testALaterDockingShowsTheBandOnly() throws Exception {
+        final FakeClock clock = new FakeClock();
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Colony colony = createStandardColony(2, 9, 7);
+        final Player dutch = colony.getOwner();
+        final Unit ship = new ServerUnit(game, colony.getTile(), dutch, merchantman);
+        ship.setMovesLeft(0);
+        final Unit next = new ServerUnit(game, colony.getTile(), dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        final HostGUI gui = new HostGUI(game, dutch, clock);
+        gui.tips = true;
+        dutch.setClassicTips(1 << ClassicTips.DOCK);   // @TUTORIAL12 shown
+        gui.host();
+        final ClassicGuiFlowHost fh = new ClassicGuiFlowHost(gui, dutch, clock);
+        final ClassicTurnFlow flow = new ClassicTurnFlow(fh, clock, fh.posted::add, false);
+        edt(() -> {
+                gui.useTurnFlow(flow);
+                return null;
+            });
+        assertFalse(edt(gui::dockTipDue));
+        // The ship's last move: the hand-over to the next unit, then the
+        // controller's request for the colony screen.
+        fh.active = ship;
+        assertTrue(edt(() -> flow.unitChosen(next, ship)));
+        gui.showColonyPanel(colony, ship);
+        flush();
+        assertEquals(1, gui.bands.size());
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t != null) assertEquals("Handelsschiff Legt an in " + colony.getName(), gui.bands.get(0));
+        assertFalse("no screen", edt(gui::screenHosted));
+        assertTrue("the turn flow waits", edt(gui::turnBlocked));
+        assertTrue("the map takes nothing", edt(gui::turnInputBlocked));
+        final ClassicOneShot dt = edt(gui::dockTimer);
+        assertEquals(138, ClassicGUI.DOCK_BAND_ONLY_FRAMES);
+        assertEquals(clock.now + Math.round(ClassicColonyLayout.frames(138) * 1e6),
+                     edt(dt::dueNanos).longValue());
+        // The hand-over's 500 ms run out under the band: held.
+        advance(clock, flow, fh, 600);
+        assertEquals(0, fh.count("activate " + next.getId()));
+        assertTrue(flow.pending().held);
+        // The band's frames are over: the next unit at once.
+        clock.now = edt(dt::dueNanos);
+        assertTrue(edt(dt::runIfDue));
+        flush();
+        edt(() -> {
+                fh.runPosted();
+                return null;
+            });
+        assertEquals(1, fh.count("activate " + next.getId()));
+        assertFalse(edt(gui::turnBlocked));
+        assertFalse(edt(gui::turnInputBlocked));
+        assertEquals("the band stays until the unit is up", 0, gui.bandsCleared);
+        final ClassicOneShot bt = edt(gui::bandTimer);
+        assertTrue(edt(bt::isScheduled));
+        assertEquals(clock.now + ClassicVoyages.nanos(ClassicVoyages.BAND_AFTER_UNIT_MS),
+                     edt(bt::dueNanos).longValue());
+        clock.now = edt(bt::dueNanos);
+        assertTrue(edt(bt::runIfDue));
+        flush();
+        assertEquals("2 frames after the unit", 1, gui.bandsCleared);
+        assertTrue("no @TUTORIAL12", gui.docked.isEmpty());
+        assertTrue(gui.colonyShownAt.isEmpty());
+        // Tutortips off: the first docking shows the band only too.
+        gui.tips = false;
+        dutch.setClassicTips(0);
+        assertFalse(edt(gui::dockTipDue));
+        gui.showColonyPanel(colony, ship);
+        flush();
+        assertEquals(2, gui.bands.size());
+        assertTrue(edt(gui::turnBlocked));
+        clock.now = edt(dt::dueNanos);
+        assertTrue(edt(dt::runIfDue));
+        flush();
+        assertFalse(edt(gui::screenHosted));
+        assertFalse(edt(gui::turnBlocked));
+        assertTrue(gui.docked.isEmpty());
+        edt(() -> {
+                flow.dispose();
+                return null;
+            });
+    }
+
+    /**
+     * The player closes the docked ship's colony screen: the hand-over it
+     * held runs its 500 ms from the close (V clip008 #32928 -&gt; #32963;
+     * the review of part W, regression L5, R06), not at once and not
+     * never; the same for any colony screen the player closes while it
+     * holds a hand-over.
+     */
+    public void testTheDockedScreensCloseRunsTheHandOverFromIt() throws Exception {
+        final FakeClock clock = new FakeClock();
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Colony colony = createStandardColony(2, 9, 7);
+        final Player dutch = colony.getOwner();
+        final Unit ship = new ServerUnit(game, colony.getTile(), dutch, merchantman);
+        ship.setMovesLeft(0);
+        final Unit next = new ServerUnit(game, colony.getTile(), dutch,
+            spec().getUnitType("model.unit.freeColonist"));
+        final HostGUI gui = new HostGUI(game, dutch, clock);
+        gui.tips = true;
+        dutch.setClassicTips(0);
+        gui.host();
+        final ClassicGuiFlowHost fh = new ClassicGuiFlowHost(gui, dutch, clock);
+        final ClassicTurnFlow flow = new ClassicTurnFlow(fh, clock, fh.posted::add, false);
+        edt(() -> {
+                gui.useTurnFlow(flow);
+                return null;
+            });
+        fh.active = ship;
+        assertTrue(edt(() -> flow.unitChosen(next, ship)));
+        gui.showColonyPanel(colony, ship);
+        flush();
+        final ClassicOneShot dt = edt(gui::dockTimer);
+        clock.now = edt(dt::dueNanos);
+        assertTrue(edt(dt::runIfDue));
+        flush();
+        assertTrue("the docked screen", edt(gui::colonyHosted));
+        advance(clock, flow, fh, 2000);
+        assertTrue("held under the screen", flow.pending().held);
+        assertEquals(0, fh.count("activate " + next.getId()));
+        final ClassicColonyPanel docked = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
+        edt(() -> {
+                escape(docked);
+                return null;
+            });
+        assertFalse(edt(gui::screenHosted));
+        assertFalse("re-based at the close", flow.pending().held);
+        advance(clock, flow, fh, 499.9);
+        assertEquals("not before 500 ms", 0, fh.count("activate " + next.getId()));
+        advance(clock, flow, fh, 0.2);
+        assertEquals(1, fh.count("activate " + next.getId()));
+        edt(() -> {
+                flow.dispose();
+                return null;
+            });
+        ClassicColonyPanel.setTileCursor(ClassicColonyLayout.CENTRE_TILE);
+    }
+
+    /**
+     * The zoom's screen on the real path: the player's close lets the
+     * colony reports go on with the next colony's, and the turn flow is
+     * free after the last (the review of part W, regression L2, R40).
+     */
+    public void testTheZoomsScreenCloseLetsTheReportsGoOn() throws Exception {
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t == null) return;
+        final FakeClock clock = new FakeClock();
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Colony base = createStandardColony(2, 9, 7);
+        final Colony other = createStandardColony(1, 9, 3);
+        final Player dutch = base.getOwner();
+        dutch.setClassicTips(0);
+        final HostGUI gui = new HostGUI(game, dutch, clock);
+        gui.host();
+        final List<String> asked = new ArrayList<>();
+        gui.prompter = r -> {
+            asked.add(r.id);
+            return ("report BUILT".equals(r.id)) ? ClassicColonyReports.ROW_ZOOM : 0;
+        };
+        final net.sf.freecol.common.model.BuildingType press
+            = spec().getBuildingType("model.building.printingPress");
+        final List<ClassicColonyReports.Report> in = new ArrayList<>();
+        in.add(ClassicColonyReports.of(t, new net.sf.freecol.common.model.ModelMessage(
+            net.sf.freecol.common.model.ModelMessage.MessageType.BUILDING_COMPLETED,
+            "model.colony.buildingReady", base).addName("%colony%", base.getName())
+            .addNamed("%building%", press), game));
+        in.add(ClassicColonyReports.of(t, new net.sf.freecol.common.model.ModelMessage(
+            net.sf.freecol.common.model.ModelMessage.MessageType.MISSING_GOODS,
+            "model.colony.classicNeedTools", other, press).addName("%colony%", other.getName())
+            .addNamed("%buildable%", press).addAmount("%amount%", 20)
+            .addAmount("%number%", 3).addNamed("%goodsType%",
+                spec().getGoodsType("model.goods.tools")), game));
+        edt(() -> {
+                gui.addReports(ClassicColonyReports.grouped(in), true);
+                return null;
+            });
+        assertEquals(List.of("report BUILT"), asked);
+        final ClassicOneShot zt = edt(gui::zoomTimer);
+        clock.now = edt(zt::dueNanos);
+        assertTrue(edt(zt::runIfDue));
+        flush();
+        assertTrue("the zoom's screen", edt(gui::colonyHosted));
+        assertTrue(edt(gui::turnBlocked));
+        final ClassicColonyPanel zoomed = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
+        assertSame(base, zoomed.colony());
+        edt(() -> {
+                escape(zoomed);
+                return null;
+            });
+        flush();
+        assertEquals(List.of("report BUILT", "report NEEDTOOLS"), asked);
+        assertNull("the run is over", edt(gui::reportRun));
+        assertFalse(edt(gui::turnBlocked));
+        assertFalse(edt(gui::turnInputBlocked));
+        ClassicColonyPanel.setTileCursor(ClassicColonyLayout.CENTRE_TILE);
+    }
+
+    /**
+     * A colony tip whose moment falls into the exit's 30 frames is dropped,
+     * not marked, and comes at its next trigger (the review of part W,
+     * play L4: @TUTORIAL12 came for a moment, went with the screen and
+     * never came again in that game).
+     */
+    public void testATipInTheExitIsDroppedNotMarked() throws Exception {
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (t == null) return;
+        final FakeClock clock = new FakeClock();
+        final Game game = getStandardGame();
+        final Map map = getCoastTestMap(spec().getTileType("model.tile.plains"), true);
+        game.changeMap(map);
+        final Colony colony = createStandardColony(2, 9, 7);
+        final Player dutch = colony.getOwner();
+        final Unit ship = new ServerUnit(game, colony.getTile(), dutch, merchantman);
+        final HostGUI gui = new HostGUI(game, dutch, clock);
+        gui.tips = true;
+        dutch.setClassicTips(0);
+        gui.host();
+        final List<String> asked = new ArrayList<>();
+        gui.prompter = r -> {
+            asked.add(r.id);
+            return 0;
+        };
+        gui.showColonyPanel(colony, ship);
+        flush();
+        final ClassicOneShot dt = edt(gui::dockTimer);
+        clock.now = edt(dt::dueNanos);
+        assertTrue(edt(dt::runIfDue));
+        flush();
+        assertEquals(List.of(colony), gui.docked);
+        final List<ClassicGUI.Tip> tips = edt(gui::pendingTips);
+        assertEquals(1, tips.size());
+        assertEquals(ClassicTips.DOCK, tips.get(0).k);
+        // The player leaves at once: the screen waits its 30 frames.
+        final ClassicColonyPanel cp = edt(() -> (ClassicColonyPanel) gui.hostedScreen());
+        final List<Runnable> later = new ArrayList<>();
+        edt(() -> {
+                cp.setLater((ms, r) -> later.add(r));
+                cp.getActionMap().get("classic_escapeDown").actionPerformed(
+                    new java.awt.event.ActionEvent(cp, java.awt.event.ActionEvent.ACTION_PERFORMED,
+                                                   "esc"));
+                cp.getActionMap().get("classic_closeColony").actionPerformed(
+                    new java.awt.event.ActionEvent(cp, java.awt.event.ActionEvent.ACTION_PERFORMED,
+                                                   "esc"));
+                return null;
+            });
+        assertTrue(cp.leaving());
+        clock.now = tips.get(0).due;
+        edt(() -> {
+                gui.runTips(clock.now);
+                return null;
+            });
+        assertTrue("no tip box", asked.isEmpty());
+        assertFalse("not marked", ClassicGUI.tipShown(dutch, ClassicTips.DOCK));
+        assertTrue(edt(gui::pendingTips).isEmpty());
+        edt(() -> {
+                later.get(0).run();
+                return null;
+            });
+        assertFalse(edt(gui::screenHosted));
+        assertTrue("the next docking is a first one again", edt(gui::dockTipDue));
         ClassicColonyPanel.setTileCursor(ClassicColonyLayout.CENTRE_TILE);
     }
 }

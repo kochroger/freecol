@@ -1365,6 +1365,31 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertEquals(1, r.count("activate " + c.getId()));
     }
 
+    /**
+     * Only a hand-over runs its pause again from a screen's close: our
+     * turn's first unit that a screen held comes at the close at once,
+     * as after a box's (the review of part W, regression L5, R17).
+     */
+    public void testAScreenClosedRunsAHeldTurnStartAtOnce() {
+        final Unit a = ship(5, 5);
+        final Rig r = new Rig(this.game);
+        r.flow.endTurnNow("key");
+        r.flow.tick();                          // the AI phase
+        r.host.turn = 2;
+        r.host.myTurn = true;
+        r.host.current = r.host.me;
+        assertTrue(r.flow.unitChosen(a, null));
+        assertEquals(ClassicTurnFlow.Kind.TURN_START, r.flow.pending().kind);
+        r.host.blocked = true;                  // a colony screen
+        r.advanceMs(1000);
+        assertTrue(r.flow.pending().held);
+        assertEquals(0, r.count("activate " + a.getId()));
+        r.host.blocked = false;
+        r.flow.screenClosed();
+        assertEquals("at the close", 1, r.count("activate " + a.getId()));
+        assertNull(r.flow.pending());
+    }
+
     /** No unit left while a hand-over waits: it is dropped for the end. */
     public void testEndCancelsHandOver() {
         final Unit a = ship(5, 5), b = ship(7, 5);

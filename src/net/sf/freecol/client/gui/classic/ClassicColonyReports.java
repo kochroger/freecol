@@ -75,7 +75,12 @@ import net.sf.freecol.common.model.UnitType;
  *       its own rule.</li>
  *   <li>{@code @SPOIL1} (V clip 048 #5690): FreeCol's
  *       {@code model.colony.warehouseWaste}, goods thrown away at the
- *       store's capacity, under every rule.</li>
+ *       store's capacity, under every rule; {@code @SPOIL3} without the
+ *       warehouse sentence when the warehouse cannot grow, and
+ *       {@code @SPOIL2} / {@code @SPOIL4} once for several goods of one
+ *       colony (SRC, I: the variants' rule as @CARGOREADY's; FreeCol sends
+ *       one message per good; the review of part W, play L7 and fidelity
+ *       L2).</li>
  *   <li>{@code @DEPLETION} with the frontiersman MSS3 (V clip 048
  *       #115237, box (77,124,166,40)): FreeCol's
  *       {@code model.colonyTile.resourceExhausted}.</li>
@@ -87,19 +92,31 @@ import net.sf.freecol.common.model.UnitType;
  * {@code @FOOD1} «Der Nahrungsvorrat in … ist erschöpft» carries the rows
  * too (V clip 046 #89692, after a food party emptied the store), but
  * FreeCol sends nothing when a colony's food store runs empty: not built.
+ * Before a colony's first box the map jumps to the colony when it is not
+ * in view, the box {@link #JUMP_FRAMES} later (the review of part W,
+ * fidelity M1: V clip 048 #135474 -&gt; #135504 -&gt; #135526, #118895
+ * -&gt; #118906 -&gt; #118915, clip 046 #116539 -&gt; #116549; nothing
+ * moves when it is in view, 046 #66519, 048 #19552, #110271).
  * «Zur Kolonie zoomen.» opens the colony screen {@link #ZOOM_FRAMES} after
  * the box closed (V 20 to 28), in the mode of spec §0.1 decision 8
- * ({@link Report#opening}); the map jumps to the colony at once (V clip
- * 046 #116708 -&gt; #116710).  The same colony's other reports of the turn
+ * ({@link Report#opening}).  The same colony's other reports of the turn
  * come first as boxes without rows that close by themselves after a time
  * that grows with their words ({@link #flashFrames}; V clip 040 #85 061 -
  * #85 184, clip 048 #128660, #135687), the other colonies' after the
- * screen closed (I).  A new load's report brings @TUTORIAL6 after its box
- * whatever row closed it, a zoom's screen after the tip (V clip 046
- * #116708 -&gt; #116740 -&gt; #116872 -&gt; #116896).  The reports of a
- * turn come after its other notices, grouped by colony in the order they
- * came ({@link #grouped}; the manual p.10: the European issues first, then
- * each colony's; I for the grouping).
+ * screen closed (V 048 #115205 -&gt; #115237: Base's screen closed, the
+ * map on Silver City, its @DEPLETION).  A new load's report brings
+ * @TUTORIAL6 after its box whatever row closed it, a zoom's screen after
+ * the tip (V clip 046 #116708 -&gt; #116740 -&gt; #116872 -&gt; #116896).
+ * The reports of a turn come after its other notices, grouped by colony in
+ * the order they came, a colony's Sons of Liberty first ({@link #grouped};
+ * the manual p.10: the European issues first, then each colony's; V clip
+ * 048 #106927 @SONSUP -&gt; #107109 @NEEDTOOLS, FreeCol's order the other
+ * way round; I for the grouping and the rest of the order).  Their lines
+ * break by the boxes' measure (W − 6, {@code ClassicTextLayout}): the
+ * original's own rule is not known, so a long line with a long colony name
+ * can break one word differently (V clip 020 @ORE #96400, clip 040
+ * #85132, clip 048 @NEEDTOOLS0 #135526; no width rule fits the 819 clean
+ * line ends of playthroughs 3 and 4: the review of part W, fidelity L1).
  */
 final class ClassicColonyReports {
 
@@ -138,6 +155,14 @@ final class ClassicColonyReports {
      * -&gt; #85 208 23).
      */
     static final int ZOOM_FRAMES = 23;
+
+    /**
+     * A colony's first report after the map jumped to it: 9 frames (V clip
+     * 048 #118906 -&gt; #118915, #115228 -&gt; #115237, clip 046 #116540
+     * -&gt; #116549; 5 to 8 in 048 #24867/#24870 -&gt; #24875; 21 and 22 in
+     * 048 #135504 -&gt; #135526, #140096 -&gt; #140117: I).
+     */
+    static final int JUMP_FRAMES = 9;
 
     /**
      * A report without rows after a zoom stays for a time that grows with
@@ -330,7 +355,11 @@ final class ClassicColonyReports {
                 ClassicColonyRight.Opening.ORE, null, g, 0, m);
         }
         if (STORE_WASTE.equals(id)) {
-            // «{%NUMBER0} Tonnen {%STRING1} wurden weggeworfen» (V clip 048 #5690).
+            // «{%NUMBER0} Tonnen {%STRING1} wurden weggeworfen» (V clip 048
+            // #5690), with the hint of a bigger warehouse while it can grow,
+            // else @SPOIL3 without it (SRC, I: as @CARGOREADY1/2).  Its zoom
+            // opens in house mode (V 048 #5690 -> #5884/#5887 after a visit
+            // that ended in hammer mode; the review of part W, fidelity M3).
             final GoodsType g = goodsOf(spec, m, "%goods%");
             final String name = (g == null) ? null
                 : ClassicTips.cargoName(t, ClassicTips.cargoRow(g.getId()));
@@ -338,8 +367,8 @@ final class ClassicColonyReports {
             if (name == null || waste <= 0) return null;
             v.put("STRING1", name);
             v.put("NUMBER0", Integer.toString(waste));
-            return new Report(Kind.SPOILED, "SPOIL1", colony, v,
-                ClassicColonyRight.Opening.OTHER, null, g, 0, m);
+            return new Report(Kind.SPOILED, (storeCanGrow(colony)) ? "SPOIL1" : "SPOIL3",
+                colony, v, ClassicColonyRight.Opening.ORE, null, g, 0, m);
         }
         if (RESOURCE_EXHAUSTED.equals(id)) {
             // «Mine erschöpft in der Nähe von %STRING0.» (V clip 048 #115237).
@@ -373,9 +402,7 @@ final class ClassicColonyReports {
             amount = number(m, "%amount%");
         } else {
             level = colony.getWarehouseCapacity();
-            final Building store = colony.getWarehouse();
-            variant = (STORE_FULL.equals(id)) ? 0
-                : (store != null && store.getType().getUpgradesTo() != null) ? 1 : 2;
+            variant = (STORE_FULL.equals(id)) ? 0 : (storeCanGrow(colony)) ? 1 : 2;
             amount = -1;
         }
         if (amount < 0) amount = colony.getGoodsCount(g);
@@ -408,6 +435,24 @@ final class ClassicColonyReports {
      */
     static ClassicAdvisorBox.Request request(ClassicText t, Report r, boolean rows,
                                              String title) {
+        return request(t, r, rows, title, 0L);
+    }
+
+    /**
+     * A report's box ({@link #request(ClassicText, Report, boolean,
+     * String)}), with its rows at a set moment: a colony's first box
+     * {@link #JUMP_FRAMES} after the map jumped to it.
+     *
+     * @param t The pack's texts, or null.
+     * @param r The report.
+     * @param rows Whether it carries its two rows.
+     * @param title The stopgap's window title.
+     * @param showAt When a box with rows is to appear (the box layer's
+     *     clock), or 0 for as soon as it can.
+     * @return The request, or null without the texts.
+     */
+    static ClassicAdvisorBox.Request request(ClassicText t, Report r, boolean rows,
+                                             String title, long showAt) {
         final ClassicText.Message m = (t == null || r == null) ? null : t.message(r.section);
         final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText(
             "report " + r.section, m, r.values);
@@ -418,6 +463,7 @@ final class ClassicColonyReports {
             if (go == null || zoom == null) return null;
             b.rows(ClassicAdvisorBox.literal(go), ClassicAdvisorBox.literal(zoom))
                 .defaultRow(ROW_CONTINUE).cancelRow(ROW_CONTINUE);
+            if (showAt != 0L) b.showAt(showAt);
             return b.stopgap(title, null).build();
         }
         // 7 frames after the box before (the zoom's or the last of these),
@@ -457,8 +503,12 @@ final class ClassicColonyReports {
 
     /**
      * The reports of a turn in the order the player sees them: grouped by
-     * colony, the colonies in the order of their first report, each
-     * colony's in the order they came (class comment; I).
+     * colony, the colonies in the order of their first report (I); in each
+     * colony its Sons of Liberty first, the rest in the order they came (V
+     * clip 048 #106927 @SONSUP -&gt; #107109 @NEEDTOOLS; @NEEDTOOLS before
+     * @CARGOREADY as FreeCol's, V 048 #110271 -&gt; #110402, #128314 -&gt;
+     * #128660, #135526 -&gt; #135687; I for the rest), and the goods it
+     * threw away in one box when there are several ({@link #spoiled}).
      *
      * @param reports The reports in FreeCol's order.
      * @return The groups, one list per colony.
@@ -471,7 +521,60 @@ final class ClassicColonyReports {
                 by.computeIfAbsent(r.colony, c -> new ArrayList<>()).add(r);
             }
         }
-        return new ArrayList<>(by.values());
+        final List<List<Report>> out = new ArrayList<>();
+        for (List<Report> g : by.values()) {
+            final List<Report> sons = new ArrayList<>(), rest = new ArrayList<>();
+            for (Report r : spoiled(g)) {
+                ((r.kind == Kind.SONS) ? sons : rest).add(r);
+            }
+            sons.addAll(rest);
+            out.add(sons);
+        }
+        return out;
+    }
+
+    /**
+     * A colony's goods thrown away: one {@code @SPOIL1} / {@code @SPOIL3}
+     * per good as FreeCol sends them, but several goods in one turn as one
+     * {@code @SPOIL2} («Ein Teil unserer Waren wurde weggeworfen.» with the
+     * warehouse sentence) or, when the warehouse cannot grow,
+     * {@code @SPOIL4}, where the first of them stood (SRC, I: GAME.TXT's
+     * sections, no clip shows them).
+     *
+     * @param g One colony's reports.
+     * @return Its reports with the goods thrown away merged.
+     */
+    static List<Report> spoiled(List<Report> g) {
+        int n = 0;
+        for (Report r : g) if (r.kind == Kind.SPOILED) n++;
+        if (n < 2) return g;
+        final List<Report> out = new ArrayList<>();
+        boolean merged = false;
+        for (Report r : g) {
+            if (r.kind != Kind.SPOILED) {
+                out.add(r);
+            } else if (!merged) {
+                merged = true;
+                final Map<String, String> v = new LinkedHashMap<>();
+                v.put("STRING0", r.colony.getName());
+                out.add(new Report(Kind.SPOILED, (storeCanGrow(r.colony)) ? "SPOIL2" : "SPOIL4",
+                    r.colony, v, ClassicColonyRight.Opening.ORE, null, null, 0, r.message));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Whether a colony's warehouse can still grow (the variant of
+     * {@code @CARGOREADY1/2} and {@code @SPOIL1/3}, as the server's
+     * {@code ServerColony.originalCargoReady}).
+     *
+     * @param colony The colony.
+     * @return True if its store building has an upgrade.
+     */
+    static boolean storeCanGrow(Colony colony) {
+        final Building store = (colony == null) ? null : colony.getWarehouse();
+        return store != null && store.getType().getUpgradesTo() != null;
     }
 
     /**

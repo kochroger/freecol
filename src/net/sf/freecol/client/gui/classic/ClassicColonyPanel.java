@@ -501,6 +501,12 @@ final class ClassicColonyPanel extends JPanel {
     private boolean pressedExit = false;
 
     /**
+     * Whether that press stopped a running blink: a release beside the
+     * exit starts it again (I); a screen not shown has none to resume.
+     */
+    private boolean exitStoppedBlink = false;
+
+    /**
      * Escape pressed on this screen (not on a box over it), until its
      * release, which exits (M4.11: the exit acts on the release; a box
      * closed by the Escape press leaves its release to nobody).
@@ -796,12 +802,14 @@ final class ClassicColonyPanel extends JPanel {
         this.pressedExit = false;
         if (exitPressed && !this.leaving) {
             // The exit acts on the release on it (M4.11 target 3); a
-            // release elsewhere does nothing, the blink goes on (I).
+            // release elsewhere does nothing, the blink the press stopped
+            // goes on (I).
             if (ClassicColonyLayout.EXIT.contains(vx, vy)) {
                 exit("click");
-            } else if (isDisplayable()) {
+            } else if (this.exitStoppedBlink) {
                 this.blink.arm();
             }
+            this.exitStoppedBlink = false;
             return;
         }
         if (this.leaving) {
@@ -969,6 +977,7 @@ final class ClassicColonyPanel extends JPanel {
         // toggle due at #17662 never comes); the release on it exits.
         if (ClassicColonyLayout.EXIT.contains(vx, vy)) {
             this.pressedExit = true;
+            this.exitStoppedBlink = this.blink.isArmed();
             this.blink.stop();
             hideHover();
             return;

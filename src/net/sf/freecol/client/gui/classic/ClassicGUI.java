@@ -251,20 +251,37 @@ public class ClassicGUI extends GUI {
     private ClassicOneShot europeCloseTimer = null;
 
     /**
-     * The colony reports' zoom and a ship's docking band: the colony screen
-     * at its time (part W, build spec M4.11, M4.12).
+     * The colony reports' zoom: the colony screen at its time (part W,
+     * build spec M4.11).  A timer of its own: one shared with the docking
+     * dropped the task scheduled first, and its hold stayed for good (the
+     * review of part W, play L1 and regression L1).
      */
-    private ClassicOneShot colonyTimer = null;
+    private ClassicOneShot zoomTimer = null;
+
+    /**
+     * A ship's docking: its colony screen after the band, or the end of a
+     * band's hold (M4.12, {@link #shipDocks}).
+     */
+    private ClassicOneShot dockTimer = null;
 
     /** The colony reports of a turn still to be asked (part W, M4.11), or null.  EDT only. */
     private ReportRun reportRun = null;
 
     /**
      * The colony whose docking band shows until its screen comes (M4.12:
-     * «Handelsschiff Legt an in Base», 64 frames), or null; the turn flow
-     * waits meanwhile.  EDT only.
+     * «Handelsschiff Legt an in Base», 64 frames; a game's first docking,
+     * while {@code @TUTORIAL12} is due), or null; the turn flow waits
+     * meanwhile.  EDT only.
      */
     private Colony dockingColony = null;
+
+    /**
+     * The colony of a docking without its screen (every later docking, the
+     * review of part W, fidelity M2): its band holds the turn flow
+     * {@link #DOCK_BAND_ONLY_FRAMES} frames, then stays until our next
+     * unit comes up; or null.  EDT only.
+     */
+    private Colony dockingBand = null;
 
     /** When Europe last got the keys back ({@link #focusEurope}), clock ns. */
     private long europeRaisedAt = 0L;
@@ -1400,14 +1417,14 @@ public class ClassicGUI extends GUI {
         this.voyageChain = null;
         for (ClassicOneShot t : new ClassicOneShot[] {
                 this.voyageTimer, this.bandTimer, this.tipTimer, this.adviceTimer,
-                this.europeCloseTimer, this.colonyTimer }) {
+                this.europeCloseTimer, this.zoomTimer, this.dockTimer }) {
             if (t != null) t.close();
         }
         this.voyageTimer = this.bandTimer = this.tipTimer = this.adviceTimer = null;
-        this.europeCloseTimer = this.colonyTimer = null;
+        this.europeCloseTimer = this.zoomTimer = this.dockTimer = null;
         // No colony report or docking of this game outlives it (part W).
         this.reportRun = null;
-        this.dockingColony = null;
+        this.dockingColony = this.dockingBand = null;
         this.bandEnd.reset();
         this.pendingTips.clear();
         this.colonyShown = null;
@@ -2082,10 +2099,12 @@ public class ClassicGUI extends GUI {
             SwingUtilities::invokeLater, true, "ClassicTips");
         this.europeCloseTimer = new ClassicOneShot(waitClock(),
             SwingUtilities::invokeLater, true, "ClassicEuropeClose");
-        this.colonyTimer = new ClassicOneShot(waitClock(),
-            SwingUtilities::invokeLater, true, "ClassicColonyFlow");
+        this.zoomTimer = new ClassicOneShot(waitClock(),
+            SwingUtilities::invokeLater, true, "ClassicColonyZoom");
+        this.dockTimer = new ClassicOneShot(waitClock(),
+            SwingUtilities::invokeLater, true, "ClassicDocking");
         this.reportRun = null;
-        this.dockingColony = null;
+        this.dockingColony = this.dockingBand = null;
         this.pendingTips.clear();
         this.turnPoll = new javax.swing.Timer(ClassicTurnFlow.POLL_MS, e -> {
                 if (turnFlow != null) {
@@ -2711,15 +2730,44 @@ public class ClassicGUI extends GUI {
             this.tipTimer = new ClassicOneShot(waitClock(),
                 SwingUtilities::invokeLater, false, "ClassicEuropeTip");
         }
-        if (this.colonyTimer == null) {
-            this.colonyTimer = new ClassicOneShot(waitClock(),
-                SwingUtilities::invokeLater, false, "ClassicColonyFlow");
+        if (this.zoomTimer == null) {
+            this.zoomTimer = new ClassicOneShot(waitClock(),
+                SwingUtilities::invokeLater, false, "ClassicColonyZoom");
+        }
+        if (this.dockTimer == null) {
+            this.dockTimer = new ClassicOneShot(waitClock(),
+                SwingUtilities::invokeLater, false, "ClassicDocking");
+        }
+        if (this.bandTimer == null) {
+            this.bandTimer = new ClassicOneShot(waitClock(),
+                SwingUtilities::invokeLater, false, "ClassicBand");
         }
     }
 
-    /** @return The zoom's and the docking's timer (tests), or null. */
-    ClassicOneShot colonyTimer() {
-        return this.colonyTimer;
+    /** @return The colony reports' zoom timer (tests), or null. */
+    ClassicOneShot zoomTimer() {
+        return this.zoomTimer;
+    }
+
+    /** @return The docking's timer (tests), or null. */
+    ClassicOneShot dockTimer() {
+        return this.dockTimer;
+    }
+
+    /** @return The timed bands' timer (tests), or null. */
+    ClassicOneShot bandTimer() {
+        return this.bandTimer;
+    }
+
+    /**
+     * Use a turn flow of the caller's (tests: a flow on a host of their
+     * own, so the GUI's holds and a colony screen's close reach it).  EDT
+     * only.
+     *
+     * @param flow The flow, or null.
+     */
+    void useTurnFlow(ClassicTurnFlow flow) {
+        this.turnFlow = flow;
     }
 
     /** @return Europe's close timer (tests), or null. */
@@ -3667,12 +3715,17 @@ public class ClassicGUI extends GUI {
 
     /**
      * Whether the map must ignore keys and clicks because the player waits
-     * (build spec W5d, {@link ClassicTurnFlow#isInputBlocked}).
+     * (build spec W5d, {@link ClassicTurnFlow#isInputBlocked}), also while
+     * the colony reports or a docking's band hold the turn flow with no
+     * pause pending (the review of part W, play L3: the idle end's pause
+     * had fired inside the docking's band, and a click on the colony opened
+     * a screen that the docking then replaced).
      *
      * @return True while blocked.
      */
     boolean turnInputBlocked() {
-        return this.turnFlow != null && this.turnFlow.isInputBlocked();
+        return (this.turnFlow != null && this.turnFlow.isInputBlocked())
+            || colonyFlowHolds();
     }
 
     /**
@@ -3807,10 +3860,23 @@ public class ClassicGUI extends GUI {
         if (this.menuStrip != null && this.menuStrip.isMenuOpen()) return true;
         // The colony reports under way, between their boxes, the zoom and
         // the screen it opened (part W, M4.11); a ship's docking band
-        // until its colony screen (M4.12).
-        if (this.reportRun != null && this.reportRun.started) return true;
-        if (this.dockingColony != null) return true;
+        // until its colony screen, or a later docking's band its frames
+        // (M4.12).
+        if (colonyFlowHolds()) return true;
         return classicScreenUp();
+    }
+
+    /**
+     * Whether the colony reports or a docking hold the turn flow now with
+     * no box or screen up (part W): a report run under way, a docking's
+     * band.  The map takes no key or click meanwhile either
+     * ({@link #turnInputBlocked}).  EDT only.
+     *
+     * @return True if so.
+     */
+    private boolean colonyFlowHolds() {
+        return (this.reportRun != null && this.reportRun.started)
+            || this.dockingColony != null || this.dockingBand != null;
     }
 
     /**
@@ -4436,10 +4502,11 @@ public class ClassicGUI extends GUI {
                 + colony.getName());
             return null;
         }
-        // A ship of ours docked (M4.12): its band, then its screen with it
-        // selected.  The controller asks for the screen after a keyboard
-        // move that left the ship no moves (the levi rule R5: every
-        // docking) and after a goto's arrival.
+        // A ship of ours docked (M4.12): its band, then (a game's first
+        // docking) its screen with it selected, else the band alone.  The
+        // controller asks for the screen after a keyboard move that left
+        // the ship no moves (the levi rule R5: every docking) and after a
+        // goto's arrival.
         if (docks(unit, colony, myPlayer())) {
             SwingUtilities.invokeLater(() -> shipDocks(colony, unit));
             return null;
@@ -4473,43 +4540,107 @@ public class ClassicGUI extends GUI {
      * A ship of ours docked in our colony (build spec M4.12, clip008
      * {@code 01-shipcolony.md} §1, §8 A1-A3): the yellow band «Handelsschiff
      * Legt an in Base» (LABELS {@code @MISC} 8, without «Holl.»; V clip008
-     * #29957, clip 020 #44590) in the menu strip for
-     * {@link #DOCK_BAND_FRAMES} frames, then the colony screen with the
-     * ship selected and the white cursor on it (V #30021/#30022), and the
-     * first time {@code @TUTORIAL12} 542 ms later (V #30059).  Meanwhile
-     * the turn flow waits; the ship, with no moves left (rule R5), is
+     * #29957) in the menu strip; the ship, with no moves left (rule R5), is
      * under the colony's sprite already (V #29964).  EDT only.
+     * <ul>
+     *   <li>While {@code @TUTORIAL12} is due ({@link #dockTipDue}: a game's
+     *       first docking; V clip008 #29957, clip 046 #86751 -&gt; #86815,
+     *       a goto's arrival with no key between): the band
+     *       {@link #DOCK_BAND_FRAMES} frames while the turn flow waits,
+     *       then the colony screen with the ship selected and the white
+     *       cursor on it (V #30021/#30022), and the tip 542 ms later (V
+     *       #30059).</li>
+     *   <li>Every later docking (the review of part W, fidelity M2: V clip
+     *       047 #3430, clip 048 #12837, #36882, #78919, #109748, #146248, a
+     *       hand move, clip 020 #44590): no screen; the band holds the
+     *       turn flow {@link #DOCK_BAND_ONLY_FRAMES} frames and then stays
+     *       until our next unit comes up, which comes with the hold's end
+     *       (V 047 #3568, 048 #37020); a docking that was the turn's last
+     *       move keeps its band through our end and the AI phase (V 048
+     *       #109748 -&gt; #110647; {@link ClassicVoyages.BandEnd#untilUnit}).
+     *       With Tutortips off every docking is such a one (I: a question
+     *       for Roger).</li>
+     * </ul>
      *
      * @param colony The colony.
      * @param ship The ship.
      */
     void shipDocks(Colony colony, Unit ship) {
-        if (this.screens == null || this.colonyTimer == null) {
-            openColonyScreen(colony, ship, ClassicColonyRight.Opening.OTHER, null, true);
+        final boolean screen = dockTipDue();
+        if (this.screens == null || this.dockTimer == null) {
+            // No screen stack (a test without a view): the screen at once
+            // when it is due, else nothing.
+            if (screen) {
+                openColonyScreen(colony, ship, ClassicColonyRight.Opening.OTHER, null, true);
+            }
             return;
         }
         final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
         final String band = ClassicBands.docking(t, ship, colony);
-        this.dockingColony = colony;
+        // A docking replaces one still under way (the timer drops its task).
+        this.dockingColony = this.dockingBand = null;
         showBand(band, 0.0);
+        if (!screen) {
+            this.dockingBand = colony;
+            final Game g = colony.getGame();
+            this.bandEnd.untilUnit((g == null || g.getTurn() == null) ? -1
+                                   : g.getTurn().getNumber());
+            ClassicFrameRecorder.event("dock", ship.getId() + " " + colony.getName()
+                + " band=" + band + " (no screen)");
+            this.dockTimer.schedule(waitClock().now() + ClassicVoyages.nanos(
+                ClassicColonyMoves.ms(DOCK_BAND_ONLY_FRAMES)), () -> {
+                    if (this.dockingBand != colony) return;
+                    this.dockingBand = null;
+                    ClassicFrameRecorder.event("dock", colony.getName()
+                        + " band's hold over, the band stays until our next unit");
+                    // A hand-over the band held comes now (V 047 #3568).
+                    if (this.turnFlow != null) this.turnFlow.boxClosed();
+                });
+            return;
+        }
+        this.dockingColony = colony;
         ClassicFrameRecorder.event("dock", ship.getId() + " " + colony.getName()
             + " band=" + band);
-        this.colonyTimer.schedule(waitClock().now() + ClassicVoyages.nanos(
+        this.dockTimer.schedule(waitClock().now() + ClassicVoyages.nanos(
             ClassicColonyMoves.ms(DOCK_BAND_FRAMES)), () -> {
                 if (this.dockingColony != colony) return;
                 this.dockingColony = null;
                 if (!openColonyScreen(colony, ship, ClassicColonyRight.Opening.OTHER,
                                       null, true)) {
                     clearBand();
+                    if (this.turnFlow != null) this.turnFlow.boxClosed();
                 }
             });
     }
 
     /**
+     * Whether a docking brings its colony screen (the review of part W,
+     * fidelity M2): only while {@code @TUTORIAL12} is due, Tutortips on
+     * and the tip not shown in this game (V: the screen and the tip at a
+     * game's first docking only, clip008 #29957, clip 046 #86751; I: with
+     * Tutortips off no docking opens the screen).
+     *
+     * @return True if so.
+     */
+    boolean dockTipDue() {
+        final Player me = myPlayer();
+        return me != null && tipsOn() && !tipShown(me, ClassicTips.DOCK);
+    }
+
+    /**
      * The docking band to the colony screen: 64 frames (V clip008 #29957
-     * -&gt; #30021, the band first, the rest #30022).
+     * -&gt; #30021, the band first, the rest #30022; clip 046 #86751 -&gt;
+     * #86815).
      */
     static final int DOCK_BAND_FRAMES = 64;
+
+    /**
+     * A docking without its screen: the band holds the turn flow 138
+     * frames, our next unit comes with its end (V clip 047 #3430 -&gt;
+     * #3568, no key between; clip 048 #36882 -&gt; #37020; with boxes in
+     * between later: 048 #12837 -&gt; #13013, #146248 -&gt; #146490).
+     */
+    static final int DOCK_BAND_ONLY_FRAMES = 138;
 
     /**
      * Put a colony screen up now, as the original opens it (class comment
@@ -5057,11 +5188,13 @@ public class ClassicGUI extends GUI {
     /**
      * The poll: an expired band whose turn is shown with no unit coming up
      * (a turn with nothing to move: its idle pause, the Spielzugende mode)
-     * goes now (I: never recorded).  EDT only.
+     * goes now (I: never recorded); a docking's band only in a later turn
+     * than its own ({@link ClassicVoyages.BandEnd#untilUnit}).  EDT only.
      */
     private void expiredBandCheck() {
         final ClassicTurnFlow f = this.turnFlow;
-        if (f != null && this.bandEnd.poll(f.playerHasTurn(), f.unitComingUp())) {
+        if (f != null && this.bandEnd.poll(f.playerHasTurn(), f.unitComingUp(),
+                                           turnNumber())) {
             clearBand();
         }
     }
@@ -5839,26 +5972,56 @@ public class ClassicGUI extends GUI {
 
     /**
      * Ask the colony reports in turn (class comment of
-     * {@link ClassicColonyReports}): each with its rows; a new load's
+     * {@link ClassicColonyReports}): the map shows each colony before its
+     * first box ({@link #reportJump}); each with its rows; a new load's
      * report brings @TUTORIAL6 after its box (once per game); «Zur Kolonie
-     * zoomen.» jumps the map to the colony, shows the same colony's others
-     * without rows, closing by themselves, then its screen
-     * {@link ClassicColonyReports#ZOOM_FRAMES} after the last box (the
-     * tip's, if it came), and the next colony's reports come after that
-     * screen closed.  EDT only.
+     * zoomen.» shows the same colony's others without rows, closing by
+     * themselves, then its screen {@link ClassicColonyReports#ZOOM_FRAMES}
+     * after the last box (the tip's, if it came), and the next colony's
+     * reports come after that screen closed.  A throw inside ends the run,
+     * so the turn start is not held for good (the review of part W, play
+     * L2 and regression L6; as the arrival chain's, H REVIEW2 L1).  EDT
+     * only.
      *
      * @param run The run.
      */
     void runReports(ReportRun run) {
         if (this.reportRun != run || run.zoomed != null) return;
+        try {
+            askReports(run);
+        } catch (RuntimeException e) {
+            logger.log(Level.WARNING, "ClassicGUI: the colony reports failed;"
+                + " the turn goes on.", e);
+            run.zoomed = null;
+            finishReports(run);
+        }
+    }
+
+    /**
+     * The body of {@link #runReports}.  EDT only.
+     *
+     * @param run The run.
+     */
+    private void askReports(ReportRun run) {
         final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
         final String title = Messages.message(TURN_REPORT);
         while (run.next < run.groups.size()) {
             final List<ClassicColonyReports.Report> g = run.groups.get(run.next++);
+            if (g.isEmpty()) continue;
+            // The map shows the colony before its first box, when it is not
+            // in view (the review of part W, fidelity M1: V clip 048 #135474
+            // -> #135504 -> #135526, #118895 -> #118906 -> #118915, clip 046
+            // #116539 -> #116549; nothing moves when it is in view, 046
+            // #66519, 048 #19552, #110271); also for the next colony after a
+            // zoom's screen closed (048 #115205 -> #115228 -> #115237).
+            final long jumped = (reportJump(g.get(0).colony)) ? waitClock().now() : 0L;
             for (int i = 0; i < g.size(); i++) {
                 final ClassicColonyReports.Report r = g.get(i);
+                final long showAt = (i == 0 && jumped != 0L)
+                    ? jumped + ClassicVoyages.nanos(ClassicColonyMoves.ms(
+                        ClassicColonyReports.JUMP_FRAMES)) : 0L;
                 final ClassicAdvisorBox.Request q = ClassicColonyReports.request(t, r,
-                    true, title);
+                    true, title, showAt);
                 if (q == null) {
                     // No pack: FreeCol's words, as before.
                     final Game game = getGame();
@@ -5904,10 +6067,26 @@ public class ClassicGUI extends GUI {
     }
 
     /**
-     * «Zur Kolonie zoomen.» chosen: the map jumps to the colony at once, by
-     * the view rule of a unit coming up (V clip 046 #116708 -&gt; #116710,
-     * the view centred on Base; clip 020's colony was in view already).
-     * EDT only.
+     * A colony's reports are due: the map jumps to it by the view rule of
+     * a unit coming up when it is not in view, and its first box comes
+     * {@link ClassicColonyReports#JUMP_FRAMES} later (the review of part W,
+     * fidelity M1; the original's box comes before the player chooses, so
+     * the jump does not wait for the zoom row).  EDT only.
+     *
+     * @param colony The colony.
+     * @return True if the view moved.
+     */
+    boolean reportJump(Colony colony) {
+        final ClassicMapViewer mv = this.mapViewer;
+        return mv != null && colony != null && colony.getTile() != null
+            && mv.jumpTo(colony.getTile(), "report");
+    }
+
+    /**
+     * «Zur Kolonie zoomen.» chosen: the view rule once more (the colony
+     * was put in view before its first box, {@link #reportJump}, so this
+     * moves nothing unless the player moved the view in between).  EDT
+     * only.
      *
      * @param colony The colony.
      */
@@ -5922,7 +6101,9 @@ public class ClassicGUI extends GUI {
      * «Zur Kolonie zoomen.»: the colony's screen
      * {@link ClassicColonyReports#ZOOM_FRAMES} after the last box closed
      * (V clip 020 #18336 -&gt; #18359), in the report's mode (spec §0.1
-     * decision 8).  EDT only.
+     * decision 8), on a timer of its own (a docking's cannot drop it).
+     * Without a screen (a test without a view, a failed open) the run goes
+     * on.  EDT only.
      *
      * @param run The run.
      * @param r The report.
@@ -5936,14 +6117,20 @@ public class ClassicGUI extends GUI {
             + " in " + Math.max(0L, (due - waitClock().now()) / 1_000_000L) + " ms");
         final Runnable open = () -> {
             if (this.reportRun != run || run.zoomed != r.colony) return;
-            if (!openColonyScreen(r.colony, null, r.opening, r.built, false)) {
-                // No screen (a test without a view): the run goes on.
+            boolean up = false;
+            try {
+                up = openColonyScreen(r.colony, null, r.opening, r.built, false);
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "ClassicGUI: the zoom's colony screen failed.", e);
+            }
+            if (!up) {
+                // No screen: the run goes on.
                 run.zoomed = null;
                 runReports(run);
             }
         };
-        if (this.colonyTimer != null) {
-            this.colonyTimer.schedule(due, open);
+        if (this.zoomTimer != null) {
+            this.zoomTimer.schedule(due, open);
         } else {
             SwingUtilities.invokeLater(open);
         }
@@ -6297,24 +6484,42 @@ public class ClassicGUI extends GUI {
      * Colonopedia's page of a tile's terrain over the screen
      * ({@link ClassicPedia#terrainPage}; V clip 020 #76921 REGENWALD,
      * #78325 TROPENWALD: the white cursor's tile), until a key or a click;
-     * the colony screen again after it (V #77167).  EDT only.
+     * the colony screen again after it (V #77167).  A water type the
+     * original lacks (FreeCol's great river) shows the ocean's page
+     * ({@link #pediaType}).  EDT only.
      *
      * @param tile The tile.
      */
     void showTerrainPage(Tile tile) {
-        if (tile == null || tile.getType() == null) return;
+        final TileType type = pediaType((tile == null) ? null : tile.getType());
+        if (type == null) return;
         final ClassicPackFiles pack = ClassicPackFiles.runtime();
         final BufferedImage page = terrainPageImage(pack, ClassicText.load(pack),
-                                                    tile.getType(), this.imageLibrary);
+                                                    type, this.imageLibrary);
         if (page == null) {
             ClassicFrameRecorder.event("pedia-missing", "terrain " + tile.getId());
             return;
         }
-        ClassicFrameRecorder.event("pedia", "terrain " + tile.getType().getId()
+        ClassicFrameRecorder.event("pedia", "terrain " + type.getId()
             + " " + tile.getId());
         this.colonyPrompter.ask(ClassicAdvisorBox.Request.builder("pedia terrain")
-            .freeColText(Messages.getName(tile.getType())).picture(page)
-            .stopgap(Messages.getName(tile.getType()), null).build());
+            .freeColText(Messages.getName(type)).picture(page)
+            .stopgap(Messages.getName(type), null).build());
+    }
+
+    /**
+     * The terrain type whose Colonopedia page a tile shows: its own, or
+     * for a water type the original has no page of (FreeCol's great river,
+     * {@code model.tile.greatRiver}; its generators put none on the map,
+     * the review of part W, regression L9) the ocean's.
+     *
+     * @param type The tile's type, or null.
+     * @return The type of the page, or null.
+     */
+    static TileType pediaType(TileType type) {
+        if (type == null || !type.isWater() || ClassicPedia.terrainEntry(type) >= 0) return type;
+        final TileType ocean = type.getSpecification().getTileType("model.tile.ocean");
+        return (ocean != null) ? ocean : type;
     }
 
     /**
@@ -10032,10 +10237,15 @@ public class ClassicGUI extends GUI {
 
     /**
      * @param colony A colony.
-     * @return Whether its screen is up (hosted).
+     * @return Whether its screen is up (hosted) and the player is not
+     *     leaving it: a colony tip due in the exit's 30 frames is dropped,
+     *     not marked, and comes at its next trigger (the review of part W,
+     *     play L4: it came for a moment and went with the screen, never to
+     *     come again in that game).
      */
     boolean colonyScreenOpen(Colony colony) {
-        return colonyHosted() && this.colonyShown == colony;
+        final ClassicColonyPanel p = this.colonyPanel;
+        return colonyHosted() && this.colonyShown == colony && p != null && !p.leaving();
     }
 
     /** @return When the box layer's last box closed, or {@code Long.MIN_VALUE}. */
@@ -10187,7 +10397,7 @@ public class ClassicGUI extends GUI {
      * @param nowNanos Now ({@link #waitClock}).
      */
     void unitUp(Unit unit, long nowNanos) {
-        bandAfterUnit();   // an expired departure band goes now (D1)
+        bandAfterUnit();   // an expired band goes now (D1; a docking's, M4.12)
         // Its tip came at its switch already: none at its activation.
         final boolean tipped = unit != null && unit == this.switchTipUnit;
         this.switchTipUnit = null;

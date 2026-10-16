@@ -2027,8 +2027,9 @@ the owner of popups, re-framing on Alt+Enter, the focus); most bugs with Europe 
 - **Not yet as the original** (named by the Q review): the adviser keys F2-F10 are off over colony and
   Europe like every HUD key, while the original's keyboard card says they work «at any time (even when
   not on the map)» (manual.txt l.23; on P the screens' windows did not have them either). The colony
-  opens at the founding, a click, a goto arrival, at every docking after its band and from the «Zur
-  Kolonie zoomen.» row of the turn reports since part W ("Into and out of the colony" below).
+  opens at the founding, a click, a goto arrival, at a game's first docking after its band (while
+  `@TUTORIAL12` is due; every later docking shows the band only) and from the «Zur Kolonie zoomen.»
+  row of the turn reports since part W ("Into and out of the colony" below).
 - **Recorder.** The screens are children of the recorded HUD pane, so colony and Europe are filmed
   frame by frame; the map's index hint is off while one is up (`ClassicMapViewer.indexHint`). Events
   `screen-push <kind> <name>`, `screen-pop <kind> <why>` (`why`: player, auto, replaced, close,
@@ -3034,7 +3035,7 @@ options box's row = FreeCol's `model.option.guiShowTutorial`). FreeCol's own
 | 14 | soldier | a soldier on land | at the switch |
 | 3 | frontiersman | before the first colony, a unit that can found one where it may (natives' land too), a resource on one of the 8 tiles around (not on its own: LF turn 8); `%STRING0` the goods ("Felle" for game and beaver) | at the switch |
 | 4 | colonist, `@x=10` | the screen of a colony just founded opened (`colonyScreenShown`); `%STRING0` the colonist's goods, `%STRING1` the goods his tile gives him most of (I) | +514 ms (V c8 #4032 -> #4068) |
-| 12 | colonist | **seam** `shipDocked` for D10 (FreeCol opens no screen on a docking) | +542 ms (V c8 #30022 -> #30059) |
+| 12 | colonist | a game's first docking opened its colony screen (`shipDocked`, part W: only while this tip is due; every later docking shows the band only) | +542 ms (V c8 #30022 -> #30059) |
 | 17 | none | the first Europe screen (H3, `europeTip`, its own timer) | +557 ms |
 
 - **At the switch:** the unit tips come 457 ms after the last change of the
@@ -3851,38 +3852,58 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   (`ClassicColonyReports.of`, from `ClassicGUI.showMessagePopup`): `@BUILT` «Kolonie Base produziert
   {Verlag}.» (FreeCol's `buildingReady` / `unitReady`, the NAMES name — no longer FreeCol's
   «Druckerei»), `@NEEDTOOLS` / `@NEEDTOOLS0`, `@ORE` and its siblings (`noInput`; `@LUMBER` seen),
-  `@CARGOREADY0-2`, `@SPOIL1` (`warehouseWaste`), `@DEPLETION` (`resourceExhausted`, the frontiersman
-  MSS3), `@SONSUP` / `@SONSDOWN` (`soLIncrease` / `soLDecrease`, the soldier MSS1 at the right); else
-  MSS5 at (130, box y − 62), the rows «Runde fortsetzen.» (the bar, Escape) and «Zur Kolonie zoomen.»
-  (LABELS.TXT:49/50). `@FOOD1` has the rows too (clip 046 #89692) but FreeCol sends nothing when a
-  food store runs empty: not built. They run when the turn flow holds after the ships' arrivals (a
-  report after the Europe screen, V #69), grouped by colony in the order they came (I). «Zur Kolonie
-  zoomen.»: the map jumps to the colony at once (the view rule; V clip 046 #116708 → #116710), the
-  same colony's other reports come as boxes without rows that close by themselves after a time from
-  their words — 31 + 0.44 frames per character (I: the line through 63, 52, 60 and 117 frames for 64,
-  63, 58 and 194 characters, clip 040 #85 061 – #85 184, clip 048 #128660, #135687), the next 7 frames
-  after the last close — then its screen 23 frames after the last box closed (V 20 to 28; `colony-zoom`),
-  in the mode of spec §0.1 decision 8: a building's @BUILT in hammer mode with the dissolve and ÄNDERN's
-  blink (the only way to them now), @NEEDTOOLS in hammer mode, @ORE in the house mode, the others the
-  last visit's. The other colonies' reports follow when that screen closes. Without the pack: FreeCol's
-  notices. Recorder: `colony-reports`, `colony-report`, `colony-zoom`.
+  `@CARGOREADY0-2`, `@SPOIL1` (`warehouseWaste`; `@SPOIL3` without the warehouse sentence when the
+  warehouse cannot grow, `@SPOIL2` / `@SPOIL4` once for several goods of a colony: GAME.TXT, I),
+  `@DEPLETION` (`resourceExhausted`, the frontiersman MSS3), `@SONSUP` / `@SONSDOWN` (`soLIncrease` /
+  `soLDecrease`, the soldier MSS1 at the right); else MSS5 at (130, box y − 62), the rows «Runde
+  fortsetzen.» (the bar, Escape) and «Zur Kolonie zoomen.» (LABELS.TXT:49/50). `@FOOD1` has the rows
+  too (clip 046 #89692; its zoom opens in house mode, #89988) but FreeCol sends nothing when a food
+  store runs empty: not built. They run when the turn flow holds after the ships' arrivals (a report
+  after the Europe screen, V #69), grouped by colony in the order they came (I), a colony's Sons of
+  Liberty first (V clip 048 #106927 @SONSUP → #107109 @NEEDTOOLS; FreeCol's order is the other way
+  round; one case, I for the rest). **Before a colony's first box the map jumps to the colony when it
+  is not in view** (the view rule of a unit coming up), the box 9 frames later (V clip 048 #135474 →
+  #135504 → #135526, #118895 → #118906 → #118915, clip 046 #116539 → #116549; 5–9 frames in five
+  cases, 21–22 in two: I); nothing moves when it is in view (V 046 #66519, 048 #19552, #110271); after
+  a zoom the next colony's jump comes when that screen closed (V 048 #115205 → #115228 → #115237).
+  The box comes before the player chooses, so the jump does not wait for «Zur Kolonie zoomen.» (part
+  W's first build jumped only on that row; the frames it cited, 046 #116708 → #116710, show no change:
+  the view had been on Base since #116540). «Zur Kolonie zoomen.»: the same colony's other reports come
+  as boxes without rows that close by themselves after a time from their words — 31 + 0.44 frames per
+  character (I: the line through 63, 52, 60 and 117 frames for 64, 63, 58 and 194 characters, clip 040
+  #85 061 – #85 184, clip 048 #128660, #135687), the next 7 frames after the last close — then its
+  screen 23 frames after the last box closed (V 20 to 28; `colony-zoom`), in the mode of spec §0.1
+  decision 8: a building's @BUILT in hammer mode with the dissolve and ÄNDERN's blink (the only way to
+  them now), @NEEDTOOLS in hammer mode, @ORE and @SPOIL in the house mode (V 048 #5690 → #5884/#5887
+  after a visit that ended in hammer mode), the others the last visit's. The other colonies' reports
+  follow when that screen closes. The run has its own timer (a docking's band cannot drop it) and ends
+  at any throw inside, so the turn start is never held for good. Without the pack: FreeCol's notices.
+  Their lines break by the boxes' measure (W − 6); the original's own line-break rule is not known: a
+  long line with a long colony name can break one word differently (three cases seen: clip 020 @ORE
+  #96400, clip 040 #85132, clip 048 @NEEDTOOLS0 #135526; no width rule fits all 819 clean line ends of
+  playthroughs 3 and 4). Recorder: `colony-reports`, `colony-report`, `colony-zoom`, `view-jump report`.
 - **The levi rules behind them** (game option `model.option.originalColonyReports`, on in levi, off in
   classic/freecol and their saves; `ServerColony`): @NEEDTOOLS every turn a build has all its hammers
   but too few tools (`model.colony.classicNeedTools`, V clip 020 #35, #69, #75, #85, #91);
   @CARGOREADY when a good's stock passes a multiple of 100 (`classicCargoReady0`; at the store's
   capacity 1 while the warehouse can grow, else 2; V clip 020 #236, clip 040 #84 666); FreeCol's
-  `warehouseFull` / `warehouseOverfull` are not sent then.
+  `warehouseFull`, `warehouseOverfull` and `warehouseSoonFull` («… wird seine Kapazität … im nächsten
+  Zug überschreiten», a box every such turn, the original has none) are not sent then.
 - **Tips** (`ClassicTips`): `@TUTORIAL6` 33 frames after a new load's report closed, whatever row
   (V clip 020 #109608 → #109641 «Runde fortsetzen.»; clip 046 #116708 → #116740 «Zur Kolonie
   zoomen.», the zoom's screen 24 frames after the tip's close; the good, the colony, its stock, the
   home port), asked in the run of the reports;
-  `@TUTORIAL16`, no portrait, 44 frames after a change on the screen made the colony's food run short
-  (V #18949 → #18993; I: the first shortfall; `colony-food-short`).
+  `@TUTORIAL16`, no portrait, 44 frames after a change on the screen (a drop or a job menu's pick) made
+  the colony's food run short (V #18949 → #18993; I: the first shortfall; `colony-food-short`). A
+  colony tip whose moment falls into the exit's 30 frames is dropped, not marked, and comes at its next
+  trigger.
 - **The exit**: Escape (the manual's key card) and «Abb» act on the release, nothing pressed shows; the
-  blink stops at the press, the map comes **30 frames after the release** (`ClassicColonyMoves.
-  EXIT_MAP_FRAMES`; V clip 042 #17658 → #17689 +31, clip 043 #8090 → #8119 +29, #8690 → #8722,
-  the abandon #35574 → #35605 +31; clip 020's 15 exits 7 – 56 frames after the press). A box's
-  Escape does not exit. Recorder `colony-exit`.
+  blink stops at the press (a release beside «Abb» starts it again, I), the map comes **30 frames after
+  the release** (`ClassicColonyMoves.EXIT_MAP_FRAMES`; V clip 042 #17658 → #17689 +31, clip 043 #8090
+  → #8119 +29, #8690 → #8722, the abandon #35574 → #35605 +31; clip 020's 15 exits 7 – 56 frames after
+  the press). A box's Escape does not exit. A hand-over that any colony screen held (the docked ship's;
+  also a colonist who walked in with his last move, which FreeCol opens too) comes 500 ms after the
+  player's close (V clip008 #32928 → #32963, seen once). Recorder `colony-exit`.
 - **F1** (and F1 in the job menu J2, «(F1 für Hilfe)»; the key is I, the pages came 143 and 103 frames
   after a J2 closed, V clip 020 #76921, #78325): the Colonopedia page of the white cursor's tile, else
   the selected colonist's work tile (`colony-pedia`, `pedia`), until a key or a click; the screen again
@@ -3893,22 +3914,46 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   plow's or the road's bonus «Pflügen/Fluß: +1» / «Straße/Fluß: +2» green, the resource «Bestes Holz:
   +4» gold after its marker, «Experte: x2» green; the farmer's expert «+3» as the original's page
   writes it, the rule is +2); «Bewegungskosten» and «Verteidigungs- oder Geländebonus»; PEDIA
-  `@TERRAINk`. 0 px on clip 020 #78325, #76922, #121397 and the NADELWALD of clips 048 #15234 and 046 #11119 (the arrow excused, the river at the frame's cycling
-  phase: ours stands still, I). Only forests are seen; the other types follow the same rules (I).
+  `@TERRAINk`. 0 px on clip 020 #78325, #76922, #121397 and the NADELWALD of clips 048 #15234 and 046
+  #11119 (the arrow excused, the river at the frame's cycling phase: ours stands still, I). Only
+  forests are seen; the other types follow the same rules (I); FreeCol's great river (a water type the
+  original lacks; FreeCol's generators put none on the map) shows the ocean's page. **Not built**
+  (the manual's colony key card and p.22): «Load most valuable cargo L», «Unload cargo U» (L and U do
+  nothing), the right click = Colonopedia on a unit, a building, a good or the build list (Roger used
+  it in clip 046: the «Sägewerk» page #71579, the «Felle» page in Europe #106993; on our screen a
+  right press acts as a left one), F1 for a building, a good or a unit (only the terrain pages exist).
 - **Docking** (M4.12, clip008 `01-shipcolony.md`; game option `model.option.dockingEndsMoves`, on in
   levi: a human player's ship that enters its colony has no moves left, R5): FreeCol's controller then
   asks for the colony screen (a keyboard move or a goto's arrival), and `ClassicGUI.shipDocks` shows
-  the band «Handelsschiff Legt an in Base» (LABELS `@MISC` 8, no «Holl.»; V clip008 #29957, clip 020
-  #44590) in the menu strip for 64 frames while the turn flow waits, then the screen with the ship
-  selected and the white cursor on it (V #30021/#30022), `@TUTORIAL12` the first time 542 ms later;
-  after the player closes it the held hand-over runs again from the close. L and U stay unmapped on
-  the screen. Recorder `dock`, `colony-carrier docked`.
-- **Tests**: `ClassicColonyReportsTest` (the reports of FreeCol's messages, the boxes and their groups,
-  18 boxes against clip 020, 040 and 046-048 frames 0 px but the two named wrap residues, the run with its zoom,
-  flashes and tips), `ClassicPediaTerrainTest` (the rows, the picture's frames, five pages 0 px),
-  `ClassicScreenStackTest.testTheZoomAndTheDocking`, `ClassicColonyMovesTest` (the exit's time, F1,
-  @TUTORIAL16), `ServerColonyTest.testOriginalNeedTools` / `testOriginalCargoReady`,
-  `ServerUnitTest.testDockingEndsMoves`, `LeviRulesTest.testOriginalFlowRules`.
+  the band «Handelsschiff Legt an in Base» (LABELS `@MISC` 8, no «Holl.»; V clip008 #29957) in the
+  menu strip. **A game's first docking** (while `@TUTORIAL12` is due: Tutortips on, the tip not shown;
+  V clip008 #29957, clip 046 #86751 → #86815, a goto's arrival with no key between): the band for 64
+  frames while the turn flow waits, then the screen with the ship selected and the white cursor on it
+  (V #30021/#30022), `@TUTORIAL12` 542 ms later; after the player closes it the held hand-over runs
+  again from the close. **Every later docking** (V clip 047 #3430, clip 048 #12837, #36882, #78919,
+  #109748, #146248 — a hand move —, clip 020 #44590): no screen, also not for a goto's arrival; the
+  band holds the turn flow and the map's input for 138 frames and then stays until our next unit comes
+  up, which comes with the hold's end (V 047 #3430 → #3568, 048 #36882 → #37020); a docking that was
+  the turn's last move keeps the band through our end, the AI phase and the next turn's reports (V
+  048 #109748 → #110647). With Tutortips off no docking opens the screen (I: a question for Roger).
+  The map takes no key or click while a docking's band or the colony reports hold the turn flow. L and
+  U stay unmapped on the screen. FreeCol's path planner does not know R5: a goto or trade route
+  through an own colony stops there for the turn and goes on the next (no stall), so it takes more
+  turns than FreeCol estimates. Recorder `dock`, `colony-carrier docked`.
+- **Tests**: `ClassicColonyReportsTest` (the reports of FreeCol's messages, the boxes and their groups
+  with the order and the @SPOIL variants, 18 boxes against clip 020, 040 and 046-048 frames 0 px but
+  the two named wrap residues, the run with its jump before the box, zoom, flashes and tips, its
+  wiring: added reports, a zoom without a screen, a throw, the turn start's hold after the arrivals,
+  the zoom and the docking on their own timers), `ClassicPediaTerrainTest` (the rows, the picture's
+  frames, five pages 0 px, a page for every tile type), `ClassicScreenStackTest`
+  (`testTheZoomAndTheDocking`, `testALaterDockingShowsTheBandOnly`,
+  `testTheDockedScreensCloseRunsTheHandOverFromIt`, `testTheZoomsScreenCloseLetsTheReportsGoOn`,
+  `testATipInTheExitIsDroppedNotMarked`, on a real turn flow), `ClassicColonyMovesTest` (the exit's
+  time and blink, F1, @TUTORIAL16 by a drop and by a job menu), `ClassicAdvisorLayerTest
+  .testABoxThatClosesByItself`, `ClassicTurnFlowTest.testAScreenClosedRunsAHeldTurnStartAtOnce`,
+  `ClassicVoyagesTest.testBandEnd`, `ServerColonyTest.testOriginalNeedTools` /
+  `testOriginalCargoReady` / `testOriginalStoreAndQueueWarnings`, `ServerUnitTest.testDockingEndsMoves`,
+  `LeviRulesTest.testOriginalFlowRules`.
 
 ### Moving colonists (`ClassicColonyMoves`, `ClassicColonyJobs`; build spec M4.8, part U)
 

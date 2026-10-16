@@ -233,14 +233,18 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
             MessageType.WAREHOUSE_CAPACITY, "model.colony.warehouseOverfull", base,
             goods("rum")).addNamed("%goods%", goods("rum")).addName("%colony%", "Base"),
             game).section);
-        // Goods thrown away: @SPOIL1 (clip 048 #5690), the colonist.
+        // Goods thrown away: @SPOIL1 (clip 048 #5690), the colonist; its
+        // zoom in house mode (V #5690 -> #5884/#5887 after a visit that
+        // ended in hammer mode; the review of part W, fidelity M3).
         r = ClassicColonyReports.of(t, waste(base, goods("sugar"), 2), game);
         assertEquals("SPOIL1", r.section);
         assertEquals(ClassicColonyReports.Kind.SPOILED, r.kind);
         assertEquals("Zucker", r.values.get("STRING1"));
         assertEquals("2", r.values.get("NUMBER0"));
-        assertEquals(ClassicColonyRight.Opening.OTHER, r.opening);
+        assertEquals(ClassicColonyRight.Opening.ORE, r.opening);
         assertSame(ClassicAdvisorBox.Portrait.COLONIST, ClassicColonyReports.portrait(r.kind));
+        assertTrue(ClassicColonyReports.request(t, r, true, "t").plainText()
+                   .contains("Lagerhaus"));
         assertNull("nothing thrown away", ClassicColonyReports.of(t,
             waste(base, goods("sugar"), 0), game));
         // A worked-out mine: @DEPLETION with the frontiersman (#115237).
@@ -261,6 +265,26 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
             .addAmount("%number%", 2), game));
         assertFalse(ClassicColonyReports.isReportId("model.colony.famineFeared"));
         assertNull(ClassicColonyReports.of(null, built(base, press), game));
+        // At the largest warehouse (it cannot grow): @SPOIL3, without the
+        // warehouse sentence (GAME.TXT; the review of part W, play L7 and
+        // fidelity L2), house mode too; FreeCol's capacity warning as
+        // @CARGOREADY2 there.
+        assertTrue(ClassicColonyReports.storeCanGrow(base));
+        base.getWarehouse().upgrade();
+        base.getWarehouse().upgrade();
+        assertNull(base.getWarehouse().getType().getUpgradesTo());
+        assertFalse(ClassicColonyReports.storeCanGrow(base));
+        r = ClassicColonyReports.of(t, waste(base, goods("sugar"), 7), game);
+        assertEquals("SPOIL3", r.section);
+        assertEquals(ClassicColonyRight.Opening.ORE, r.opening);
+        final String spoil3 = ClassicColonyReports.request(t, r, true, "t").plainText();
+        assertTrue(spoil3, spoil3.contains("7 Tonnen Zucker"));
+        assertFalse(spoil3, spoil3.contains("Lagerhaus"));
+        assertEquals("CARGOREADY2", ClassicColonyReports.of(t, new ModelMessage(
+            MessageType.WAREHOUSE_CAPACITY, "model.colony.warehouseOverfull", base,
+            goods("rum")).addNamed("%goods%", goods("rum")).addName("%colony%", "Base"),
+            game).section);
+        assertFalse(ClassicColonyReports.storeCanGrow(null));
     }
 
     /**
@@ -323,6 +347,40 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
         assertEquals("[BUILT Base, CARGOREADY0 Base]", g.get(0).toString());
         assertEquals("[NEEDTOOLS Silver City, CARGOREADY0 Silver City]", g.get(1).toString());
         assertTrue(ClassicColonyReports.grouped(null).isEmpty());
+        // A colony's Sons of Liberty first (V clip 048 #106927 @SONSUP ->
+        // #107109 @NEEDTOOLS, FreeCol's order the other way round), the
+        // rest in theirs; several goods thrown away in one turn as one
+        // @SPOIL2 where the first stood (GAME.TXT, I), one good alone as
+        // @SPOIL1.
+        final List<ClassicColonyReports.Report> in2 = new ArrayList<>();
+        in2.add(ClassicColonyReports.of(t, needTools(a, building("printingPress"), 20, 3), game));
+        in2.add(ClassicColonyReports.of(t, waste(a, goods("sugar"), 2), game));
+        in2.add(ClassicColonyReports.of(t, waste(b, goods("furs"), 4), game));
+        in2.add(ClassicColonyReports.of(t, cargo(a, 0, goods("rum"), 200, 103), game));
+        in2.add(ClassicColonyReports.of(t, waste(a, goods("cotton"), 5), game));
+        in2.add(ClassicColonyReports.of(t, sons(a, 20, 30), game));
+        in2.add(ClassicColonyReports.of(t, sons(b, 40, 30), game));
+        final List<List<ClassicColonyReports.Report>> g2 = ClassicColonyReports.grouped(in2);
+        assertEquals("[SONSUP Base, NEEDTOOLS Base, SPOIL2 Base, CARGOREADY0 Base]",
+                     g2.get(0).toString());
+        assertEquals("[SONSDOWN Silver City, SPOIL1 Silver City]", g2.get(1).toString());
+        final ClassicColonyReports.Report two = g2.get(0).get(2);
+        assertEquals(ClassicColonyReports.Kind.SPOILED, two.kind);
+        assertEquals(ClassicColonyRight.Opening.ORE, two.opening);
+        assertEquals("Base", two.values.get("STRING0"));
+        final String spoil2 = ClassicColonyReports.request(t, two, true, "t").plainText();
+        assertTrue(spoil2, spoil2.contains("Ein Teil unserer Waren wurde weggeworfen."));
+        assertTrue(spoil2, spoil2.contains("Lagerhaus"));
+        // The warehouse at its last level: @SPOIL4, without the sentence.
+        a.getWarehouse().upgrade();
+        a.getWarehouse().upgrade();
+        final ClassicColonyReports.Report four = ClassicColonyReports.spoiled(List.of(
+            ClassicColonyReports.of(t, waste(a, goods("sugar"), 2), game),
+            ClassicColonyReports.of(t, waste(a, goods("cotton"), 3), game))).get(0);
+        assertEquals("SPOIL4", four.section);
+        final String spoil4 = ClassicColonyReports.request(t, four, true, "t").plainText();
+        assertTrue(spoil4, spoil4.contains("Ein Teil unserer Waren wurde weggeworfen."));
+        assertFalse(spoil4, spoil4.contains("Lagerhaus"));
     }
 
     /**
@@ -571,12 +629,46 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
             super.zoomJump(colony);
         }
 
+        /**
+         * The colonies out of view (the map jumps to them before their
+         * first report, once), and those the map jumped to (fidelity M1).
+         */
+        final java.util.Set<Colony> outOfView = new java.util.HashSet<>();
+        final List<Colony> reportJumps = new ArrayList<>();
+
+        @Override
+        boolean reportJump(Colony colony) {
+            if (!this.outOfView.remove(colony)) return false;
+            this.reportJumps.add(colony);
+            return true;
+        }
+
+        /** Whether a colony screen comes up (false: no view, a failed open). */
+        boolean screenUp = true;
+
+        /** Whether our ships' arrivals hold the turn start. */
+        boolean arrivals = false;
+
+        @Override
+        boolean holdForArrivals() {
+            return this.arrivals;
+        }
+
+        @Override
+        java.awt.Image iconOf(net.sf.freecol.common.model.FreeColObject d) {
+            return null;   // no image resources in the test
+        }
+
+        /** The box id the prompter throws at (L2), or null. */
+        String throwAt = null;
+
         RunGUI(Game game, Player me) {
             super(null);
             this.game = game;
             this.me = me;
             this.prompter = r -> {
                 this.asked.add(r);
+                if (r.id.equals(this.throwAt)) throw new IllegalStateException("test: " + r.id);
                 final Integer a = this.answers.get(r.id);
                 return (a == null) ? 0 : a;
             };
@@ -612,8 +704,9 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
                                  ClassicColonyRight.Opening how, BuildingType built,
                                  boolean docked) {
             this.opened.add(colony.getName() + " " + how + " "
-                + ((built == null) ? "-" : built.getSuffix()));
-            return true;
+                + ((built == null) ? "-" : built.getSuffix())
+                + ((docked) ? " docked" : ""));
+            return this.screenUp;
         }
 
         List<String> askedIds() {
@@ -741,7 +834,7 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
         final boolean[] blocked = new boolean[1];
         edt(() -> blocked[0] = g2.turnBlocked());
         assertTrue("the run holds the turn flow", blocked[0]);
-        final ClassicOneShot timer = gui.colonyTimer();
+        final ClassicOneShot timer = gui.zoomTimer();
         assertTrue(timer.isScheduled());
         assertEquals(gui.clock.now + ClassicVoyages.nanos(
             ClassicColonyLayout.frames(23)), timer.dueNanos());
@@ -794,7 +887,7 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
             });
         assertEquals("[report CARGOREADY1, TUTORIAL6]", gui.askedIds().toString());
         assertEquals(List.of(a), gui.jumps);
-        final ClassicOneShot t4 = gui.colonyTimer();
+        final ClassicOneShot t4 = gui.zoomTimer();
         assertTrue(t4.isScheduled());
         assertEquals(gui.clock.now + ClassicVoyages.nanos(ClassicColonyLayout.frames(23)),
                      t4.dueNanos());
@@ -811,5 +904,309 @@ public class ClassicColonyReportsTest extends FreeColTestCase {
                 g5.addReports(cargoOnly, true);
             });
         assertEquals("[report CARGOREADY1]", gui.askedIds().toString());
+    }
+
+    /**
+     * The map shows each colony before its first report (the review of
+     * part W, fidelity M1: V clip 048 #135474 view on Base -&gt; #135504 on
+     * Silver City -&gt; #135526 its @NEEDTOOLS0, #118906 -&gt; #118915 nine
+     * frames): a colony out of view gets the jump and its first box
+     * {@link ClassicColonyReports#JUMP_FRAMES} later, its next boxes and a
+     * colony in view nothing of the kind (V 046 #66519, 048 #19552); after
+     * a zoom the next colony's jump comes when that screen went (V 048
+     * #115205 -&gt; #115228 -&gt; #115237).
+     */
+    public void testTheMapShowsTheColonyBeforeItsReports() throws Exception {
+        final ClassicText t = texts("testTheMapShowsTheColonyBeforeItsReports");
+        if (t == null) return;
+        final Game game = getStandardGame();
+        game.changeMap(getTestMap(true));
+        final Colony a = colony("Base", 5, 8);
+        final Colony b = colony("Silver City", 10, 4);
+        final Player dutch = a.getOwner();
+        dutch.setClassicTips(0);
+        final BuildingType press = building("printingPress");
+        final Building smith = b.getBuilding(building("blacksmithHouse"));
+        final List<ClassicColonyReports.Report> in = new ArrayList<>();
+        in.add(ClassicColonyReports.of(t, built(a, press), game));
+        in.add(ClassicColonyReports.of(t, needTools(a, press, 20, 3), game));
+        in.add(ClassicColonyReports.of(t, needTools(b, press, 20, 3), game));
+        in.add(ClassicColonyReports.of(t, noInput(b, smith, goods("ore")), game));
+        final List<List<ClassicColonyReports.Report>> groups = ClassicColonyReports.grouped(in);
+        assertEquals(9, ClassicColonyReports.JUMP_FRAMES);
+        final long nine = ClassicVoyages.nanos(ClassicColonyLayout.frames(9));
+
+        // Base out of view, Silver City in view; every box «Runde fortsetzen.».
+        final RunGUI g1 = new RunGUI(game, dutch);
+        g1.outOfView.add(a);
+        edt(() -> {
+                g1.installScreens(null);
+                g1.addReports(groups, true);
+            });
+        assertEquals("[report BUILT, report NEEDTOOLS, report NEEDTOOLS, report ORE]",
+                     g1.askedIds().toString());
+        assertEquals("the map jumped to Base only", List.of(a), g1.reportJumps);
+        assertEquals("Base's first box 9 frames after the jump", g1.clock.now + nine,
+                     g1.asked.get(0).showAtNanos);
+        assertEquals("its next box: no jump", 0L, g1.asked.get(1).showAtNanos);
+        assertEquals("Silver City in view: as soon as it can", 0L, g1.asked.get(2).showAtNanos);
+        assertEquals(0L, g1.asked.get(3).showAtNanos);
+        assertTrue("no zoom row chosen", g1.jumps.isEmpty());
+
+        // Both out of view, the zoom on Base's first: Silver City's jump
+        // only after Base's screen went.
+        final RunGUI g2 = new RunGUI(game, dutch);
+        g2.outOfView.add(a);
+        g2.outOfView.add(b);
+        g2.answers.put("report BUILT", ClassicColonyReports.ROW_ZOOM);
+        edt(() -> {
+                g2.installScreens(null);
+                g2.addReports(groups, true);
+            });
+        assertEquals(List.of(a), g2.reportJumps);
+        assertEquals("[report BUILT, report NEEDTOOLS (flash)]", g2.askedIds().toString());
+        final ClassicOneShot zt = g2.zoomTimer();
+        g2.clock.now = zt.dueNanos();
+        assertTrue(zt.runIfDue());
+        flush();
+        assertEquals("[Base BUILT_BUILDING printingPress]", g2.opened.toString());
+        assertEquals("not before the screen went", List.of(a), g2.reportJumps);
+        g2.clock.now += 1_000_000_000L;
+        final long closed = g2.clock.now;
+        edt(() -> g2.reportScreenGone(a));
+        flush();
+        assertEquals(List.of(a, b), g2.reportJumps);
+        assertEquals("[report BUILT, report NEEDTOOLS (flash), report NEEDTOOLS, report ORE]",
+                     g2.askedIds().toString());
+        assertEquals(closed + nine, g2.asked.get(2).showAtNanos);
+        assertNull(g2.reportRun());
+    }
+
+    /**
+     * The run's wiring (the review of part W, regression L2, L3 and play
+     * L2): reports that come while a run is on its way join it and come
+     * after the zoom's screen (R20); a zoom whose screen does not come up
+     * (no view, a failed open) lets the run go on at once (R42); a throw
+     * inside the run ends it, so the turn flow is free again.
+     */
+    public void testTheRunsWiring() throws Exception {
+        final ClassicText t = texts("testTheRunsWiring");
+        if (t == null) return;
+        final Game game = getStandardGame();
+        game.changeMap(getTestMap(true));
+        final Colony a = colony("Base", 5, 8);
+        final Colony b = colony("Silver City", 10, 4);
+        final Player dutch = a.getOwner();
+        dutch.setClassicTips(0);
+        final BuildingType press = building("printingPress");
+        final Building smith = b.getBuilding(building("blacksmithHouse"));
+        final List<List<ClassicColonyReports.Report>> baseOnly = ClassicColonyReports.grouped(
+            List.of(ClassicColonyReports.of(t, built(a, press), game)));
+        final List<List<ClassicColonyReports.Report>> silverOnly = ClassicColonyReports.grouped(
+            List.of(ClassicColonyReports.of(t, needTools(b, press, 20, 3), game)));
+
+        // 1. Added to a run on its way: after the zoom's screen.
+        final RunGUI g1 = new RunGUI(game, dutch);
+        g1.answers.put("report BUILT", ClassicColonyReports.ROW_ZOOM);
+        edt(() -> {
+                g1.installScreens(null);
+                g1.addReports(baseOnly, true);
+            });
+        assertSame(a, g1.reportRun().zoomed);
+        edt(() -> g1.addReports(silverOnly, true));
+        assertEquals("[report BUILT]", g1.askedIds().toString());
+        final ClassicOneShot t1 = g1.zoomTimer();
+        g1.clock.now = t1.dueNanos();
+        assertTrue(t1.runIfDue());
+        flush();
+        assertEquals("[Base BUILT_BUILDING printingPress]", g1.opened.toString());
+        edt(() -> g1.reportScreenGone(a));
+        flush();
+        assertEquals("[report BUILT, report NEEDTOOLS]", g1.askedIds().toString());
+        assertNull(g1.reportRun());
+
+        // 2. No screen for the zoom: the run goes on at once.
+        final RunGUI g2 = new RunGUI(game, dutch);
+        g2.screenUp = false;
+        g2.answers.put("report BUILT", ClassicColonyReports.ROW_ZOOM);
+        final List<List<ClassicColonyReports.Report>> both = new ArrayList<>(baseOnly);
+        both.addAll(silverOnly);
+        edt(() -> {
+                g2.installScreens(null);
+                g2.addReports(both, true);
+            });
+        final ClassicOneShot t2 = g2.zoomTimer();
+        g2.clock.now = t2.dueNanos();
+        assertTrue(t2.runIfDue());
+        flush();
+        assertEquals("[Base BUILT_BUILDING printingPress]", g2.opened.toString());
+        assertEquals("[report BUILT, report NEEDTOOLS]", g2.askedIds().toString());
+        assertNull("the run is over", g2.reportRun());
+        final boolean[] blocked = new boolean[1];
+        edt(() -> blocked[0] = g2.turnBlocked());
+        assertFalse(blocked[0]);
+
+        // 3. A throw in the run's second box: the run ends there.
+        final RunGUI g3 = new RunGUI(game, dutch);
+        g3.throwAt = "report NEEDTOOLS";
+        final List<List<ClassicColonyReports.Report>> three = ClassicColonyReports.grouped(
+            List.of(ClassicColonyReports.of(t, built(a, press), game),
+                    ClassicColonyReports.of(t, needTools(b, press, 20, 3), game),
+                    ClassicColonyReports.of(t, noInput(b, smith, goods("ore")), game)));
+        edt(() -> {
+                g3.installScreens(null);
+                g3.addReports(three, true);
+            });
+        assertEquals("[report BUILT, report NEEDTOOLS]", g3.askedIds().toString());
+        assertNull("the run ended at the throw", g3.reportRun());
+        edt(() -> blocked[0] = g3.turnBlocked() || g3.turnInputBlocked());
+        assertFalse("the turn flow and the map are free", blocked[0]);
+        // A later run comes as usual.
+        g3.throwAt = null;
+        edt(() -> g3.addReports(silverOnly, true));
+        assertEquals("[report BUILT, report NEEDTOOLS, report NEEDTOOLS]",
+                     g3.askedIds().toString());
+        assertNull(g3.reportRun());
+    }
+
+    /**
+     * The turn start's reports with a real turn flow (the review of part
+     * W, regression L3): FreeCol's turn report while our new turn is not
+     * shown yet: its notices now, its colony reports parked for the hold
+     * (R02: held; R03: taken out of the notices), the hold asks our ships'
+     * arrivals first (R36) and the reports after them, holding meanwhile;
+     * the same messages outside a turn start come at once.
+     */
+    public void testTheTurnStartsReports() throws Exception {
+        final ClassicText t = texts("testTheTurnStartsReports");
+        if (t == null) return;
+        final Game game = getStandardGame();
+        game.changeMap(getTestMap(true));
+        final Colony a = colony("Base", 5, 8);
+        final Player dutch = a.getOwner();
+        dutch.setClassicTips(0);
+        final BuildingType press = building("printingPress");
+        final ModelMessage famine = new ModelMessage(MessageType.WARNING,
+            "model.colony.famineFeared", a).addName("%colony%", "Base")
+            .addAmount("%number%", 2);
+        final RunGUI gui = new RunGUI(game, dutch);
+        final ClassicGuiFlowHost host = new ClassicGuiFlowHost(gui, dutch, gui.clock);
+        final ClassicTurnFlow flow = new ClassicTurnFlow(host, gui.clock, host.posted::add,
+                                                         false);
+        final boolean[] b = new boolean[1];
+        edt(() -> {
+                gui.installScreens(null);
+                gui.useTurnFlow(flow);
+                host.myTurn = false;           // the AI phase
+                flow.tick();
+                host.myTurn = true;            // our new turn, not shown yet
+                b[0] = flow.isWaiting();
+            });
+        assertTrue(b[0]);
+        gui.arrivals = true;
+        edt(() -> gui.showReportTurnPanel(List.of(built(a, press), famine)));
+        flush();
+        assertEquals("the notice now, the report at the hold",
+                     "[message model.colony.famineFeared]", gui.askedIds().toString());
+        assertNotNull(gui.reportRun());
+        assertFalse(gui.reportRun().started);
+        edt(() -> b[0] = gui.holdTurnStart());
+        assertTrue("our ships' arrivals hold first", b[0]);
+        flush();
+        assertEquals("the reports wait for the arrivals", 1, gui.asked.size());
+        assertNotNull(gui.reportRun());
+        assertFalse(gui.reportRun().started);
+        gui.arrivals = false;
+        edt(() -> b[0] = gui.holdTurnStart());
+        assertTrue("then the reports hold", b[0]);
+        flush();
+        assertEquals("[message model.colony.famineFeared, report BUILT]",
+                     gui.askedIds().toString());
+        assertNull(gui.reportRun());
+        edt(() -> b[0] = gui.holdTurnStart());
+        assertFalse(b[0]);
+        // Outside a turn start: a notice batch at once; the turn report
+        // too while the flow shows our turn.
+        edt(() -> gui.showModelMessages(List.of(built(a, building("lumberMill")))));
+        flush();
+        assertEquals(3, gui.asked.size());
+        assertEquals("report BUILT", gui.asked.get(2).id);
+        final ClassicTurnFlow shown = new ClassicTurnFlow(host, gui.clock, host.posted::add,
+                                                          false);
+        edt(() -> {
+                flow.dispose();
+                gui.useTurnFlow(shown);
+                b[0] = shown.isWaiting();
+                gui.showReportTurnPanel(List.of(built(a, building("lumberMill"))));
+            });
+        flush();
+        assertFalse(b[0]);
+        assertEquals(4, gui.asked.size());
+        assertEquals("report BUILT", gui.asked.get(3).id);
+        edt(() -> shown.dispose());
+    }
+
+    /**
+     * The zoom and a docking on timers of their own (the review of part W,
+     * play L1 and regression L1: on one shared timer the task scheduled
+     * second dropped the first, whose hold then stayed for good): a
+     * docking's band and a zoom in either order each come at their time,
+     * and nothing holds the turn flow afterwards; a docking without its
+     * screen (the tip shown) neither.
+     */
+    public void testTheZoomAndTheDockingKeepTheirTimes() throws Exception {
+        final ClassicText t = texts("testTheZoomAndTheDockingKeepTheirTimes");
+        if (t == null) return;
+        final Game game = getStandardGame();
+        game.changeMap(getCoastTestMap(spec().getTileType("model.tile.plains"), true));
+        final Colony a = colony("Base", 2, 9);
+        final Colony b = colony("Silver City", 2, 4);
+        final Player dutch = a.getOwner();
+        final Unit ship = new ServerUnit(game, b.getTile(), dutch,
+            spec().getUnitType("model.unit.merchantman"));
+        final List<List<ClassicColonyReports.Report>> zoomOn = ClassicColonyReports.grouped(
+            List.of(ClassicColonyReports.of(t, built(a, building("printingPress")), game)));
+        for (int order = 0; order < 3; order++) {
+            dutch.setClassicTips((order == 2) ? (1 << ClassicTips.DOCK) : 0);
+            final RunGUI gui = new RunGUI(game, dutch);
+            gui.answers.put("report BUILT", ClassicColonyReports.ROW_ZOOM);
+            edt(() -> {
+                    final javax.swing.JLayeredPane pane = new javax.swing.JLayeredPane();
+                    pane.setLayout(null);
+                    pane.setSize(1280, 800);
+                    final javax.swing.JPanel map = new javax.swing.JPanel();
+                    pane.add(map, javax.swing.JLayeredPane.DEFAULT_LAYER);
+                    gui.installScreens(new ClassicScreenStack(pane, List.of(map), null, null));
+                });
+            if (order == 1) {
+                edt(() -> gui.addReports(zoomOn, true));
+                gui.clock.now += 5_000_000L;
+                edt(() -> gui.shipDocks(b, ship));
+            } else {
+                edt(() -> gui.shipDocks(b, ship));
+                gui.clock.now += 5_000_000L;
+                edt(() -> gui.addReports(zoomOn, true));
+            }
+            final ClassicOneShot zt = gui.zoomTimer(), dt = gui.dockTimer();
+            assertTrue("order " + order, zt.isScheduled());
+            assertTrue("order " + order, dt.isScheduled());
+            assertTrue(zt.dueNanos() < dt.dueNanos());
+            gui.clock.now = zt.dueNanos();
+            assertTrue(zt.runIfDue());
+            flush();
+            assertTrue("the docking still due, order " + order, dt.isScheduled());
+            gui.clock.now = dt.dueNanos();
+            assertTrue(dt.runIfDue());
+            flush();
+            assertEquals("order " + order, (order == 2) ? "[Base BUILT_BUILDING printingPress]"
+                         : "[Base BUILT_BUILDING printingPress, Silver City OTHER - docked]",
+                         gui.opened.toString());
+            edt(() -> gui.reportScreenGone(a));
+            flush();
+            final boolean[] blocked = new boolean[1];
+            edt(() -> blocked[0] = gui.turnBlocked() || gui.turnInputBlocked());
+            assertFalse("nothing holds, order " + order, blocked[0]);
+            assertNull(gui.reportRun());
+        }
     }
 }

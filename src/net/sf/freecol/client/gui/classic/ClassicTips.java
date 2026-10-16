@@ -78,7 +78,10 @@ import net.sf.freecol.common.model.Unit;
  *   <li>{@code @TUTORIAL12} (colonist): {@link #DOCK_TIP_MS} after the
  *       colony screen a ship's docking opened (V: clip008 #30022 -&gt;
  *       #30059); {@code %STRING0} the colony.  The docking is part W's
- *       (build spec M4.12, {@code ClassicGUI.shipDocks}).</li>
+ *       (build spec M4.12, {@code ClassicGUI.shipDocks}): only a docking
+ *       while this tip is due opens the screen, a game's first; every
+ *       later one shows the band only (the review of part W, fidelity
+ *       M2).</li>
  *   <li>{@code @TUTORIAL6} (admiral): {@link #CARGO_TIP_MS} after a new
  *       load's report closed, whatever row (part W, {@link #CARGO}).</li>
  *   <li>{@code @TUTORIAL16} (no portrait): {@link #FOOD_TIP_MS} after a

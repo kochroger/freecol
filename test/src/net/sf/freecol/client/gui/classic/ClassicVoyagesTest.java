@@ -334,6 +334,21 @@ public class ClassicVoyagesTest extends FreeColTestCase {
         e.reset();                                // a new band
         assertFalse(e.poll(true, false));
         assertEquals(2 * ClassicAdvisorLayer.FRAME_MS, ClassicVoyages.BAND_AFTER_UNIT_MS);
+        // A docking's band (part W final fixer, fidelity M2): until our next
+        // unit; the poll takes it only in a later turn (V clip 048 #109748
+        // -> #110647: through our end, the AI phase and the reports).
+        e.untilUnit(7);
+        assertTrue(e.expired());
+        assertFalse("its own turn, no unit coming", e.poll(true, false, 7));
+        assertFalse("the AI phase", e.poll(false, false, 8));
+        assertFalse("our next turn's first unit coming", e.poll(true, true, 8));
+        assertTrue("our next turn without a unit", e.poll(true, false, 8));
+        assertTrue("the unit up", e.unitUp(true));
+        assertFalse("scheduled already", e.poll(true, false, 8));
+        e.reset();
+        assertFalse(e.expired());
+        assertFalse(e.timeUp(false));             // a departure band again: any turn
+        assertTrue(e.poll(true, false, 7));
     }
 
     /**

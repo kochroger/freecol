@@ -527,4 +527,110 @@ public class ServerColonyTest extends FreeColTestCase {
             }
         }
     }
+
+    /** The turn's warnings of a colony, under the original's reports or FreeCol's. */
+    private static String warnings(ServerColony colony, Specification spec, boolean original) {
+        spec.setBoolean(GameOptions.ORIGINAL_COLONY_REPORTS, original);
+        try {
+            final ChangeSet cs = new ChangeSet();
+            colony.csNewTurnWarnings(new java.util.Random(1), new LogBuilder(0), cs);
+            return cs.toString();
+        } finally {
+            spec.setBoolean(GameOptions.ORIGINAL_COLONY_REPORTS, false);
+        }
+    }
+
+    /**
+     * The original's reports and FreeCol's other warnings (the review of
+     * part W): FreeCol's warning of a store full next turn is not sent
+     * under the original's reports (play L6: the original has no such
+     * report, GAME.TXT has only @SPOIL1-4 after the fact), under FreeCol's
+     * it is; goods thrown away at the capacity are reported under both,
+     * and the new load of that turn names the stock kept, the capacity
+     * (regression L7, R15); the population queue keeps FreeCol's warning
+     * under both rules, only the build queue's becomes the original's
+     * @NEEDTOOLS (R16: every shipped population build needs one good, so
+     * FreeCol's warning there cannot come; a colonist that also needs
+     * tools shows it).
+     */
+    public void testOriginalStoreAndQueueWarnings() {
+        Game game = ServerTestHelper.startServerGame(getTestMap(plains));
+        final Specification spec = game.getSpecification();
+        final GoodsType cotton = spec.getGoodsType("model.goods.cotton");
+        final GoodsType tools = spec.getGoodsType("model.goods.tools");
+        final ServerColony colony = (ServerColony)createStandardColony(4);
+        final GoodsContainer gc = colony.getGoodsContainer();
+        final int limit = colony.getWarehouseCapacity();
+        // A cotton planter: the stock grows every turn.
+        Unit planter = null;
+        for (Unit u : colony.getUnitList()) {
+            if (u.getLocation() instanceof net.sf.freecol.common.model.ColonyTile) {
+                planter = u;
+                break;
+            }
+        }
+        assertNotNull(planter);
+        planter.changeWorkType(cotton);
+        colony.invalidateCache();
+        final int net = colony.getNetProductionOf(cotton);
+        assertTrue("cotton grows: " + net, net > 0);
+
+        // A store full next turn.
+        colony.removeGoods(cotton);
+        colony.addGoods(cotton, limit - 1);
+        gc.saveState();
+        String levi = warnings(colony, spec, true), freecol = warnings(colony, spec, false);
+        assertTrue(freecol, freecol.contains("model.colony.warehouseSoonFull"));
+        assertFalse(levi, levi.contains("model.colony.warehouseSoonFull"));
+
+        // Over the capacity: the waste under both, the new load with the
+        // capacity as its stock.
+        colony.removeGoods(cotton);
+        colony.addGoods(cotton, limit - 20);
+        gc.saveState();
+        colony.addGoods(cotton, 40);
+        levi = warnings(colony, spec, true);
+        assertTrue(levi, levi.contains("model.colony.warehouseWaste"));
+        final java.util.regex.Matcher ready = java.util.regex.Pattern.compile(
+            "classicCargoReady\\d\\[[^\\]]*%amount%=[A-Z]+:(\\d+)").matcher(levi);
+        assertTrue(levi, ready.find());
+        assertEquals("the stock kept", String.valueOf(limit), ready.group(1));
+        colony.removeGoods(cotton);
+        colony.addGoods(cotton, limit - 20);
+        gc.saveState();
+        colony.addGoods(cotton, 40);
+        freecol = warnings(colony, spec, false);
+        assertTrue(freecol, freecol.contains("model.colony.warehouseWaste"));
+        assertFalse(freecol, freecol.contains("classicCargoReady"));
+        colony.removeGoods(cotton);
+
+        // The population queue: FreeCol's warning under both rules (the
+        // build queue empty: no @NEEDTOOLS of its own).
+        colony.setBuildQueue(java.util.List.<net.sf.freecol.common.model.BuildableType>of());
+        final UnitType born = colony.getPopulationQueue().get(0);
+        final java.util.List<AbstractGoods> was
+            = new java.util.ArrayList<>(born.getRequiredGoodsList());
+        try {
+            final java.util.List<AbstractGoods> two = new java.util.ArrayList<>(was);
+            two.add(new AbstractGoods(tools, 20));
+            born.setRequiredGoods(two);
+            for (AbstractGoods ag : was) {
+                colony.removeGoods(ag.getType());
+                colony.addGoods(ag.getType(), ag.getAmount());
+            }
+            colony.removeGoods(tools);
+            colony.invalidateCache();
+            gc.saveState();
+            freecol = warnings(colony, spec, false);
+            levi = warnings(colony, spec, true);
+            final String key = born.getNameKey();
+            assertTrue(freecol, freecol.contains("buildableNeedsGoods")
+                       && freecol.contains(key));
+            assertTrue(levi, levi.contains("buildableNeedsGoods") && levi.contains(key));
+            assertFalse("no @NEEDTOOLS for the population queue: " + levi,
+                        levi.contains("classicNeedTools"));
+        } finally {
+            born.setRequiredGoods(was);
+        }
+    }
 }

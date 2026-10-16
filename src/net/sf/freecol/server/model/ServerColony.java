@@ -174,7 +174,12 @@ public class ServerColony extends Colony implements TurnTaker {
         }
     }
 
-    /** FreeCol's warnings of a store that the original's new loads replace. */
+    /**
+     * FreeCol's warnings of a store that the original's new loads replace;
+     * its warning of a store full next turn
+     * ({@code model.colony.warehouseSoonFull}) is not sent under the
+     * original's reports either ({@link #csNewTurnWarnings}).
+     */
     static final List<String> STORE_WARNINGS = List.of(
         "model.colony.warehouseFull", "model.colony.warehouseOverfull");
 
@@ -734,8 +739,13 @@ public class ServerColony extends Colony implements TurnTaker {
                 if (ready != null) cs.addMessage(owner, ready);
             }
 
-            // No problem this turn, but what about the next?
-            if (!(exportData.getExported()
+            // No problem this turn, but what about the next?  Not under the
+            // original's reports (levi, part W final fixer, the review's
+            // play L6): the original warns of no store before it overflows
+            // (GAME.TXT has only @SPOIL1-4, after the fact), and FreeCol's
+            // box came every such turn before the original's reports.
+            if (!original
+                && !(exportData.getExported()
                   && hasAbility(Ability.EXPORT)
                   && owner.canTrade(type, Market.Access.CUSTOM_HOUSE))
                 && amount <= limit) {

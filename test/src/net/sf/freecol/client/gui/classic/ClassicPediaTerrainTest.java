@@ -138,6 +138,20 @@ public class ClassicPediaTerrainTest extends FreeColTestCase {
         final List<String> plains = rows(t, spec().getTileType("model.tile.plains"));
         assertEquals("Farmer: 5 | Pflügen/Fluß: +1 | Experte: +3 | Weizen: +2/4 @91",
                      plains.get(0));
+        // Every tile type has a page: a water type the original lacks
+        // (FreeCol's great river) the ocean's, the others their own (the
+        // review of part W, regression L9: the great river had none).
+        final TileType ocean = spec().getTileType("model.tile.ocean");
+        final TileType great = spec().getTileType("model.tile.greatRiver");
+        assertNotNull(great);
+        assertEquals(-1, ClassicPedia.terrainEntry(great));
+        assertSame(ocean, ClassicGUI.pediaType(great));
+        assertNull(ClassicGUI.pediaType(null));
+        for (TileType type : spec().getTileTypeList()) {
+            final TileType page = ClassicGUI.pediaType(type);
+            assertTrue(type.getId(), ClassicPedia.terrainEntry(page) >= 0);
+            if (type != great) assertSame(type, page);
+        }
     }
 
     /**
