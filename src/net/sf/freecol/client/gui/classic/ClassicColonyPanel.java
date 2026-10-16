@@ -1318,7 +1318,18 @@ final class ClassicColonyPanel extends JPanel {
      * The colonist figure at a canvas point (as the last paint drew them):
      * the workers of the buildings and the units at the fence (in the draw
      * order, the first drawn wins where they overlap, target 10), then the
-     * tiles' workers.
+     * tiles' workers.  A tile's worker answers a press anywhere in his
+     * tile's 24x24 square, not only on his figure (part Y4, Roger
+     * 2026-10-16: a click on the tile's square must be enough to open the
+     * colonist's menu): the first click selects him, a click on him
+     * selected opens J2, a drag from anywhere in the square moves him.  V
+     * beside the figure: clip 020 #79104 -&gt; J2 #79143 (tile + (11,16),
+     * left of his shadow), #50297 -&gt; #50310 (+ (12,12)), #22063 -&gt;
+     * #22064 (+ (12,13)), clip 046 #98141 -&gt; #98152 (+ (13,12)); a tile
+     * worker's press frames the whole tile (clip 042 #5829); I: a press in
+     * the square's left 0-10 or top 0-8 px, never seen.  The right button
+     * keeps the tile's terrain page ({@link #rightPressAt} looks at the
+     * tile first).
      *
      * @param vx The x.
      * @param vy The y.
@@ -1338,7 +1349,7 @@ final class ClassicColonyPanel extends JPanel {
         }
         for (ClassicColonyTiles.Cell c : this.tiles.cells) {
             if (c == null || c.worker == null || c.worker.unit == null) continue;
-            bounds.add(c.worker.bounds());
+            bounds.add(ClassicColonyLayout.tileCell(c.index));
             hits.add(new Hit(c.worker.unit, ClassicColonyMoves.Place.TILE, c.index,
                              c.worker.key));
         }

@@ -4132,7 +4132,15 @@ seen on the frames, I = our choice where no clip shows it.
   release or the drag's start, which select him (V dago-colony2 #7520 →
   #7532, clip 042 #11157 → #11168, #3374). Where figures overlap, the first
   drawn wins (as the buildings, I). A press on a figure of the band's row
-  only selects (I).
+  only selects (I). **A tile worker answers his whole 24×24 square** (part Y4,
+  Roger 2026-10-16: "ein Klick auf das Feld-Quadrat muss reichen"): the first
+  click selects him, a click on him selected opens J2, a drag from anywhere
+  in the square moves him (`ClassicColonyPanel.hitAt`, `ClassicColonyLayout.tileCell`;
+  V presses beside his figure that opened J2: clip 020 #79104 → #79143 at
+  tile + (11,16), #50297 → #50310, #22063 → #22064, clip 046 #98141 → #98152;
+  a tile worker's press frames the whole tile, clip 042 #5829; I: a press in
+  the square's left 0–10 or top 0–8 px, never seen). The right button on his
+  square still asks the tile's terrain page.
 - **The drag**: the first motion starts it, the arrow is hidden, his own
   figure follows as the ghost at the hotspot − (1,8) with a black silhouette
   2 px left (V dago), no hover label; the source keeps its figure.

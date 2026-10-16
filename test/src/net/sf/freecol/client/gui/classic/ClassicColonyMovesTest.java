@@ -1118,6 +1118,57 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
     }
 
     /**
+     * Part Y4 (Roger 2026-10-16: "ein Klick auf das Feld-Quadrat muss
+     * reichen, um das Menü des Kolonisten zu öffnen"): a tile's worker
+     * answers a press anywhere in his tile's 24x24 square, not only on his
+     * figure at tile + (14,6): the first click (here in the square's
+     * top-left corner, I: never seen) selects him with the white cursor on
+     * his tile, the next (left of his shadow, tile + (11,16) as clip 020
+     * #79104 -&gt; J2 #79143) opens J2 on his own tile; a drag from the
+     * square's corner moves him into a building; the right button there
+     * still asks the tile's terrain page.
+     */
+    public void testATileWorkerAnswersHisWholeSquare() throws Exception {
+        final Scene s = scene(3, true);
+        final List<Unit> us = s.colony.getUnitList();
+        final Unit worker = us.get(1);
+        us.get(0).setLocation(building(s.colony, "townHall"));
+        worker.setLocation(tileOf(s.colony, Direction.S));
+        worker.changeWorkType(ClassicColonyJobs.goodsOf(spec(), 0));
+        us.get(2).setLocation(building(s.colony, "carpenterHouse"));
+        s.colony.invalidateCache();
+        paint(s.panel);
+        final Rectangle sq = ClassicColonyLayout.tileCell(7);   // S
+        assertSame(worker, s.panel.hitAt(sq.x, sq.y).unit);
+        assertSame(worker, s.panel.hitAt(sq.x + 23, sq.y + 23).unit);
+        assertSame(worker, s.panel.hitAt(sq.x + 11, sq.y + 16).unit);
+        assertNull("not the next square", s.panel.hitAt(sq.x + 24, sq.y + 12));
+        assertNull("an empty square", s.panel.hitAt(ClassicColonyLayout.tileCell(3).x + 5,
+                                                    ClassicColonyLayout.tileCell(3).y + 5));
+        s.panel.select(us.get(0));
+        click(s.panel, sq.x + 1, sq.y + 1);
+        assertSame("the first click selects him", worker, s.panel.selected());
+        assertEquals(7, ClassicColonyPanel.tileCursor());
+        assertTrue("no menu yet", s.boxes.asked.isEmpty());
+        assertSame("no move", tileOf(s.colony, Direction.S), worker.getLocation());
+        click(s.panel, sq.x + 11, sq.y + 16);   // Escape
+        assertEquals("J2", 1, s.boxes.asked.size());
+        assertTrue(s.boxes.asked.get(0).plainText(),
+                   s.boxes.asked.get(0).plainText().contains(":"));
+        assertSame("still on his tile", tileOf(s.colony, Direction.S), worker.getLocation());
+        // The right button on his square: the tile's terrain page, as before.
+        s.panel.rightPressAt(sq.x + 1, sq.y + 1);
+        s.panel.rightReleaseAt(sq.x + 1, sq.y + 1);
+        assertEquals(List.of(tileOf(s.colony, Direction.S).getWorkTile()), s.boxes.pages);
+        assertTrue(s.boxes.skills.isEmpty());
+        // A drag from the square's corner: into the Rathaus.
+        final int[] hall = slotOf(s.panel, building(s.colony, "townHall"));
+        drag(s.panel, sq.x + 2, sq.y + 21, hall[0], hall[1]);
+        assertSame(s.api.log.toString(), building(s.colony, "townHall"), worker.getLocation());
+        ClassicColonyPanel.setTileCursor(ClassicColonyLayout.CENTRE_TILE);
+    }
+
+    /**
      * Abandoning (target 8; V #35379 → #35606): the last colonist dropped on
      * the fence, J1 → Späher → @ABANDON2 (the only colony) with MSS5, the
      * bar and Escape on «Niemals!»; «Niemals!» changes nothing; «Ja» puts
