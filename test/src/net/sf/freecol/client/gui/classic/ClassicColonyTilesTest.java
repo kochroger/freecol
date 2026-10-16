@@ -421,6 +421,20 @@ public class ClassicColonyTilesTest extends FreeColTestCase {
         assertEquals(0, m.placeOf(farmer));
         assertEquals(2, m.placeOf(planter));
         assertEquals(-1, m.placeOf(null));
+        // A colonist with no job (the square's production as FreeCol
+        // chooses it): what the square makes, with no sign (the review of
+        // part Y, regression: this path was not pinned).
+        farmer.setWorkType(null);
+        s.tile(Direction.NW).updateProductionType();
+        s.colony.invalidateCache();
+        final ClassicColonyTiles.Cell idle
+            = ClassicColonyTiles.model(s.colony, text, assets()).cell(0);
+        assertEquals(farmer, idle.worker.unit);
+        assertEquals("what the square makes", 1, idle.rows.size());
+        assertEquals("no sign", -1, idle.zero);
+        assertTrue(idle.rows.get(0).toString().startsWith("022"));
+        farmer.changeWorkType(classic().getGoodsType("model.goods.grain"));
+        s.colony.invalidateCache();
         final ClassicColonyTiles.Cell c = m.cell(ClassicColonyLayout.CENTRE_TILE);
         assertNull(c.worker);
         assertEquals(57, c.rows.get(0).row.y);
@@ -660,6 +674,60 @@ public class ClassicColonyTilesTest extends FreeColTestCase {
     }
 
     /**
+     * The screen draws the colony's sprite on the centre and its overhang
+     * in the W and E cells (the review of part Y, fidelity; V clip 020
+     * #2260's E): a 21-px sprite at cell x - 2 covers W's source columns
+     * 14-15 and E's 0-2; no other cell gets any of it.
+     */
+    public void testTheScreenDrawsTheOverhang() throws Exception {
+        if (!ClassicColonyTiles.Art.load(ClassicPackFiles.runtime(), null).indexed()) {
+            System.err.println(getName() + ": no index sheets, skipped");
+            return;
+        }
+        final State s = base(1539);
+        final String key = net.sf.freecol.client.gui.ImageLibrary.getSettlementKey(s.colony);
+        final BufferedImage huts = new BufferedImage(21, 16, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 16; y++) for (int x = 0; x < 21; x++) huts.setRGB(x, y, 0xFF123456);
+        final net.sf.freecol.client.gui.ImageLibrary lib
+            = new net.sf.freecol.client.gui.ImageLibrary(1f, new net.sf.freecol.common.resources.ImageCache() {
+                @Override
+                public BufferedImage getScaledImage(String k, float scale, boolean grayscale) {
+                    return (key.equals(k)) ? huts
+                        : new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+                }
+
+                @Override
+                public BufferedImage getSizedImage(String k, java.awt.Dimension size,
+                                                   boolean grayscale, int seed) {
+                    return new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+                }
+            });
+        ClassicColonyPanel.forgetFigureOrders();
+        ClassicColonyPanel.setTileCursor(ClassicColonyPanel.CURSOR_OFF_TILES);
+        final ClassicColonyPanel p = new ClassicColonyPanel(
+            ClassicColonyBuildingsTest.client(s.game, s.owner), lib, s.colony, null, null,
+            ClassicSlide.SYSTEM, false);
+        final BufferedImage img = p.canvas();
+        for (int slot = 0; slot < 9; slot++) {
+            if (slot == ClassicColonyLayout.CENTRE_TILE) continue;
+            final Rectangle r = ClassicColonyLayout.tileCell(slot);
+            int hut = 0;
+            for (int y = 0; y < 24; y++) {
+                for (int x = 0; x < 24; x++) {
+                    final int sx = ClassicColonyTiles.enlargedSourceX(x);
+                    final boolean want = (slot == 3 && sx >= 14) || (slot == 5 && sx <= 2);
+                    final boolean is = (img.getRGB(r.x + x, r.y + y) & 0xFFFFFF) == 0x123456;
+                    assertEquals(ClassicColonyLayout.TILE_NAMES[slot] + " " + x + "," + y,
+                                 want, is);
+                    if (is) hut++;
+                }
+            }
+            assertEquals(ClassicColonyLayout.TILE_NAMES[slot],
+                         (slot == 3) ? 3 * 24 : (slot == 5) ? 5 * 24 : 0, hut);
+        }
+    }
+
+    /**
      * The screen knows when its 3x3 map holds water that cycles (a palette
      * step then paints it again): Base's swamp centre does, a colony among
      * plains does not.
@@ -803,6 +871,44 @@ public class ClassicColonyTilesTest extends FreeColTestCase {
         for (int y = 0; y < 24; y++) {
             for (int x = 0; x < 24; x++) {
                 assertEquals(x + "," + y, 0x123456, kept.getRGB(x, y) & 0xFFFFFF);
+            }
+        }
+        // Its overhang in the neighbours (the review of part Y): columns 0-1
+        // in W's source columns 14-15 (its x 21-23), columns 18-20 in E's
+        // source columns 0-2 (its x 0-4); the rest their own terrain, and
+        // no other cell is reached.
+        assertEquals(0, ClassicColonyTiles.spriteDx(centre));
+        assertEquals(16, ClassicColonyTiles.spriteDx(centre - 1));
+        assertEquals(-16, ClassicColonyTiles.spriteDx(centre + 1));
+        for (int slot : new int[] { 0, 1, 2, 6, 7, 8 }) {
+            assertEquals(ClassicColonyTiles.NO_SPRITE, ClassicColonyTiles.spriteDx(slot));
+        }
+        final BufferedImage west = art.tile(c.getMap(), far, centre - 1, sprite, 16, 0, null);
+        final BufferedImage east = art.tile(c.getMap(), far, centre + 1, sprite, -16, 0, null);
+        final BufferedImage plainW = art.tile(c.getMap(), far, centre - 1, null, 0, null);
+        final BufferedImage plainE = art.tile(c.getMap(), far, centre + 1, null, 0, null);
+        for (int y = 0; y < 24; y++) {
+            for (int x = 0; x < 24; x++) {
+                final int sx = ClassicColonyTiles.enlargedSourceX(x);
+                assertEquals("W " + x + "," + y, (sx >= 14) ? 0x123456
+                             : plainW.getRGB(x, y) & 0xFFFFFF, west.getRGB(x, y) & 0xFFFFFF);
+                assertEquals("E " + x + "," + y, (sx <= 2) ? 0x123456
+                             : plainE.getRGB(x, y) & 0xFFFFFF, east.getRGB(x, y) & 0xFFFFFF);
+            }
+        }
+        // The fallback without the index sheets: the overhang alike.
+        final ClassicColonyTiles.Art fallback
+            = ClassicColonyTiles.Art.load(null, ClassicColonyBuildingsTest.library());
+        assertFalse(fallback.indexed());
+        final BufferedImage fbW = fallback.tile(c.getMap(), far, centre - 1, sprite, 16, 0, null);
+        final BufferedImage fbE = fallback.tile(c.getMap(), far, centre + 1, sprite, -16, 0, null);
+        for (int y = 0; y < 24; y++) {
+            for (int x = 0; x < 24; x++) {
+                final int sx = ClassicColonyTiles.enlargedSourceX(x);
+                assertEquals("fallback W " + x + "," + y, sx >= 14,
+                             (fbW.getRGB(x, y) & 0xFFFFFF) == 0x123456);
+                assertEquals("fallback E " + x + "," + y, sx <= 2,
+                             (fbE.getRGB(x, y) & 0xFFFFFF) == 0x123456);
             }
         }
         // A palette green (0x44): the green's shades at the centre's
@@ -1050,6 +1156,18 @@ public class ClassicColonyTilesTest extends FreeColTestCase {
                 }
             }
             assertTrue(k[1] + ": " + marker, marker > 20);
+            // Beside the colony, its sprite handed over for the overhang
+            // (an empty one here): the marker still apart, unscaled (the
+            // review of part Y).
+            final BufferedImage none = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+            final BufferedImage beside = art.tile(map, t, k[0], none,
+                                                  ClassicColonyTiles.spriteDx(k[0]), 0, null);
+            for (int y = 0; y < 24; y++) {
+                for (int x = 0; x < 24; x++) {
+                    assertEquals(k[1] + " beside at " + x + "," + y, img.getRGB(x, y),
+                                 beside.getRGB(x, y));
+                }
+            }
         }
         // The colony's own tile with a resource and its sprite: the map's
         // cell, the marker in it, enlarged (I).
@@ -1472,6 +1590,65 @@ public class ClassicColonyTilesTest extends FreeColTestCase {
         assertEquals(6906, equal);
         assertEquals(70, opaque);
         assertEquals(70, same);
+    }
+
+    /**
+     * Golden (the review of part Y, fidelity): the colony's huts overhang
+     * into the 3x3's E as on the map.  ICONS.SS.003 is 21 px wide, drawn
+     * at cell x - 2, so its columns 18-19 fall into E's columns 0-1 (V
+     * clip 020 #1700, Base's E x 112-113, y 121-127); the original's 3x3
+     * of Base #2260 shows them enlarged and shaded at E's x 0-2.  Ours,
+     * the pack's sprite pasted into E by {@link ClassicColonyTiles.Art#tile}
+     * at -16 and enlarged at E's slot, equals the frame on every pixel
+     * that comes from the sprite (before: none of them, the roof cut off
+     * at the centre's edge).
+     */
+    public void testTheHutsOverhangIntoTheEastAsClip020() throws Exception {
+        final ClassicColonyGolden gold = ClassicColonyGolden.open(getName());
+        if (gold == null) return;
+        final ClassicColonyTiles.Art art = ClassicColonyTiles.Art.load(gold.pack, null);
+        final ClassicIndexSheet icons = gold.pack.indexSheet(ClassicColonyBand.ICONS_SS);
+        if (!art.indexed() || icons == null) {
+            System.err.println(getName() + ": no index sheets, skipped");
+            return;
+        }
+        final int f = 3, w = icons.width(f), h = icons.height(f);
+        assertEquals("the huts' width", 21, w);
+        assertTrue(h <= 16);
+        final byte[] px = icons.pixels(f);
+        final BufferedImage huts = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                final int v = px[y * w + x] & 0xFF;
+                if (v != ClassicIndexSheet.TRANSPARENT) {
+                    huts.setRGB(x, y, 0xFF000000 | art.palette().rgb(0, v));
+                }
+            }
+        }
+        final State s = base(1539);
+        final Tile c = s.colony.getTile();
+        final int e = ClassicColonyLayout.CENTRE_TILE + 1;
+        final BufferedImage ours = art.tile(c.getMap(), c, e, huts,
+                                            ClassicColonyTiles.spriteDx(e), 0, null);
+        final BufferedImage frame = gold.frame(2260);
+        final java.awt.image.IndexColorModel cm
+            = (java.awt.image.IndexColorModel) frame.getColorModel();
+        final int ox = ClassicHud.settlementOffset(w) + ClassicColonyTiles.spriteDx(e);
+        int sprite = 0, same = 0;
+        for (int y = 0; y < 24; y++) {
+            for (int x = 0; x < 24; x++) {
+                final int sx = ClassicColonyTiles.enlargedSourceX(x) - ox;
+                final int sy = ClassicColonyTiles.enlargedSourceY(y);
+                if (sx < 0 || sx >= w || sy >= h
+                    || (px[sy * w + sx] & 0xFF) == ClassicIndexSheet.TRANSPARENT) continue;
+                sprite++;
+                final int want = cm.getRGB(frame.getRaster().getSample(224 + 48 + x, 32 + 24 + y, 0));
+                if ((ours.getRGB(x, y) & 0xFFFFFF) == (want & 0xFFFFFF)) same++;
+            }
+        }
+        System.err.println(getName() + ": the huts in E " + same + " of " + sprite);
+        assertTrue("the huts reach E: " + sprite, sprite >= 20);
+        assertEquals(sprite, same);
     }
 
 

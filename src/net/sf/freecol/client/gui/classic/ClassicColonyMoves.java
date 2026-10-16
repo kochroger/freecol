@@ -41,7 +41,10 @@ import java.util.List;
  *   <tr><td>building &rarr; tile</td><td><b>Farmer</b>, whatever the tile
  *       or the expert (C5, C10, dago D3; levi, R2)</td></tr>
  *   <tr><td>tile &rarr; tile</td><td><b>his work kept</b>, even at 0 (C14
- *       #50256; levi, R3)</td></tr>
+ *       #50256; levi, R3; V clip 053 the lumber, the furs, the silver
+ *       kept), but the food work follows the square ({@link #keptJob}): a
+ *       Fischer onto land is a Farmer (V clip 053), a Farmer onto water a
+ *       Fischer (I)</td></tr>
  *   <tr><td>tile &rarr; building</td><td>the building's work (C4,
  *       C15)</td></tr>
  *   <tr><td>fence &rarr; building</td><td>the building's work, the role's
@@ -202,6 +205,36 @@ final class ClassicColonyMoves {
         default:
             return Action.NOTHING;
         }
+    }
+
+    /**
+     * The work a colonist does after a move from tile to tile (R3,
+     * {@link Action#TILE_KEEP_JOB}: the drag, and the click on an empty
+     * tile): his own, but the food work follows the square, food being one
+     * good in the original («Nahrungsmittel», the same corn on land and
+     * water).  A Fischer moved onto land is a Farmer there (V clip 053, the
+     * verifier's item 16: the convert working SW, the ocean, with food
+     * #3500, dragged onto NE, the Nadel-Wald, #3610 - #3763: corn and no
+     * sign #3920, his menu «Konvertierte Indianer(Farmer)» #9740 before
+     * any pick; the trapper, Fischer 2/2 on NW, the ocean, #25812, dragged
+     * onto NE #25936 - #26039: corn, «(Farmer)» 2/2 #26045, #26274); a
+     * Farmer moved onto water a Fischer (I: by symmetry, as a colonist
+     * from a building becomes one there; no clip shows it, named for
+     * Roger).  Every other work is kept (V clip 053: the lumber, the furs,
+     * the silver), also on water where it makes nothing (I: no clip shows
+     * a land work dragged onto water).  Ours kept the fish on land, which
+     * since part Y3's rule made nothing there under the red sign (the
+     * review of part Y, fidelity; Z-ITEMS Z1 item 4).
+     *
+     * @param job His work's NAMES {@code @JOB} index (0 Farmer ... 8
+     *     Fischer), or -1.
+     * @param water Whether the target tile is water.
+     * @return The index of the work he does there.
+     */
+    static int keptJob(int job, boolean water) {
+        if (job == 0 && water) return ClassicColonyLayout.JOB_FISHERMAN;
+        if (job == ClassicColonyLayout.JOB_FISHERMAN && !water) return 0;
+        return job;
     }
 
     /**

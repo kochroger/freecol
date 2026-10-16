@@ -110,7 +110,10 @@ public class GameOptions {
      * (part U, build spec M4.8 rules R2 and R3; clip 020 C5, C10, C14 and
      * dago D3): one dragged from a building onto a work tile becomes a
      * Farmer whatever the tile or his expertise, one dragged from tile to
-     * tile keeps his job even where it makes nothing.  FreeCol lets the
+     * tile keeps his job even where it makes nothing, but a food job
+     * follows the square (the review of part Y: a Fischer onto land a
+     * Farmer, V clip 053; a Farmer onto water a Fischer, I; the client's
+     * {@code ClassicColonyMoves.keptJob}).  FreeCol lets the
      * colony choose the work for the tile.  And (part Y3) a colonist whose
      * job his field's square cannot make makes nothing there (V clip 020
      * #48767, #50256, clip 046 #98141: his job's icon under the red sign,

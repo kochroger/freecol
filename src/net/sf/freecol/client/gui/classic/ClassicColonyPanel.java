@@ -1697,7 +1697,10 @@ final class ClassicColonyPanel extends JPanel {
             break;
         }
         case TILE_KEEP_JOB: {
-            final GoodsType had = u.getWorkType();
+            // His work, the food work following the square: a Fischer
+            // onto land a Farmer (V clip 053), a Farmer onto water a
+            // Fischer (I; ClassicColonyMoves.keptJob).
+            final GoodsType had = keptWork(u.getWorkType(), ct);
             ok = igc.work(u, ct);
             if (ok && had != null && u.getWorkType() != had) ok = igc.changeWorkType(u, had);
             break;
@@ -1718,6 +1721,24 @@ final class ClassicColonyPanel extends JPanel {
         refresh();
         foodCheck(shortBefore);
         return ok;
+    }
+
+    /**
+     * The work a colonist keeps on a move from tile to tile
+     * ({@link ClassicColonyMoves#keptJob}).
+     *
+     * @param had His work, or null.
+     * @param ct The target tile.
+     * @return The work he does there, or null.
+     */
+    private GoodsType keptWork(GoodsType had, ColonyTile ct) {
+        if (had == null || ct == null) return had;
+        final int job = ClassicColonyLayout.jobOf(had.getId());
+        final boolean water = ct.getWorkTile() != null && !ct.getWorkTile().isLand();
+        final int kept = ClassicColonyMoves.keptJob(job, water);
+        final GoodsType g = (kept == job) ? had
+            : ClassicColonyJobs.goodsOf(this.colony.getSpecification(), kept);
+        return (g == null) ? had : g;
     }
 
     /**
@@ -3604,7 +3625,8 @@ final class ClassicColonyPanel extends JPanel {
      * A tile's terrain: our map's art of it enlarged to 24 as the original
      * ({@link ClassicColonyTiles.Art#tile}, part Y5), with the colony's
      * sprite on the centre as the map draws it (its flag in the owner's
-     * colours).
+     * colours), its overhang in the W and E cells (the review of part Y,
+     * V clip 020 #2260's E).
      *
      * @param g The canvas, clipped to the cell.
      * @param c The cell.
@@ -3612,8 +3634,9 @@ final class ClassicColonyPanel extends JPanel {
      */
     private boolean paintGround(Graphics2D g, ClassicColonyTiles.Cell c) {
         if (c.tile == null) return false;
+        final int dx = ClassicColonyTiles.spriteDx(c.index);
         BufferedImage settlement = null;
-        if (c.index == ClassicColonyLayout.CENTRE_TILE && this.lib != null) {
+        if (dx != ClassicColonyTiles.NO_SPRITE && this.lib != null) {
             final BufferedImage art = this.lib.getScaledSettlementImage(this.colony);
             if (art != null) {
                 settlement = ClassicHud.fitSettlement(
@@ -3622,7 +3645,7 @@ final class ClassicColonyPanel extends JPanel {
         }
         final boolean[] cycles = { false };
         final BufferedImage img = this.tileArt.tile(c.tile.getMap(), c.tile, c.index, settlement,
-            this.waterPhase.getAsInt(), cycles);
+            (dx == ClassicColonyTiles.NO_SPRITE) ? 0 : dx, this.waterPhase.getAsInt(), cycles);
         if (img == null) return false;
         final Rectangle r = c.bounds();
         g.drawImage(img, r.x, r.y, null);

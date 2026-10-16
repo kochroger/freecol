@@ -1606,6 +1606,32 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertNotSame(first, after);
         r.advanceMs(500);
         assertEquals(1, r.count("activate " + after.getId()));
+        // ... and one fortified or sentried in that screen: still on the
+        // map and usable, but no longer due, so the turn start's own due
+        // check passes it over too (the review of part Y, regression: that
+        // half of the check was not pinned).
+        for (String what : new String[] { "fortify", "sentry" }) {
+            final BaseScene z = new BaseScene();
+            nextTurn(z.r, 2);
+            z.r.flow.tick();
+            assertTrue(what, z.r.flow.unitChosen(z.b, null));
+            assertEquals(what, ClassicTurnFlow.Kind.TURN_START, z.r.flow.pending().kind);
+            final Unit up = z.r.flow.pending().unit;
+            z.r.host.blocked = true;
+            z.r.advanceMs(400);
+            assertTrue(what, z.r.flow.pending().held);
+            z.deal(what, up);
+            assertFalse(what, up.isInColony());
+            z.r.host.blocked = false;
+            z.r.flow.screenClosed();
+            assertEquals(what, 0, z.r.count("activate " + up.getId()));
+            assertNotNull(what, z.r.flow.pending());
+            final Unit next = z.r.flow.pending().unit;
+            assertNotSame(what, up, next);
+            z.r.advanceMs(500);
+            assertEquals(what, 1, z.r.count("activate " + next.getId()));
+            assertEquals(what, 0, z.r.count("activate " + up.getId()));
+        }
 
         // Under a box: the held stage at the box's close.
         final BaseScene t = new BaseScene();
@@ -1736,9 +1762,16 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertTrue(ClassicGUI.refusesActivation(null));
         f.r.flow.unitRefused(f.b);
         assertSame(f.c, f.r.flow.pending().unit);
-        f.r.flow.unitRefused(f.b);                 // a pause pending: nothing
-        assertSame(f.c, f.r.flow.pending().unit);
-        f.r.advanceMs(500);
+        // A pause pending: nothing, the same pause runs on, no second
+        // hand-over (the review of part Y, regression: the guard was not
+        // pinned).
+        final ClassicTurnFlow.Pending armed = f.r.flow.pending();
+        f.r.advanceMs(300);
+        f.r.flow.unitRefused(f.b);
+        assertSame("the same pause", armed, f.r.flow.pending());
+        f.r.flow.unitRefused(f.a);
+        assertSame("the same pause", armed, f.r.flow.pending());
+        f.r.advanceMs(200);
         assertEquals(1, f.r.count("activate " + f.c.getId()));
         assertEquals(0, f.r.count("activate " + f.b.getId()));
     }

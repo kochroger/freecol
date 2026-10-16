@@ -3626,7 +3626,12 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   each tile as our map composes it in palette indices (`ClassicTerrainComposer`
   over the pack's index sheets), the colony's sprite on the centre where the map
   draws it (its flag in the owner's colours, pasted as indices; a colour the
-  palette lacks kept unshaded), without the tile's resource marker and rumour;
+  palette lacks kept unshaded) and its overhang into the W and E cells as on the
+  map (the review of part Y: the 21-px huts at cell x − 2 put their columns 18–19
+  into E's columns 0–1, V clip 020 #1700, and the 3×3's E #2260 shows them
+  enlarged at its x 0–2, 29 of 29 px; ours cut the roof off at the centre's edge
+  before; the stockade's, fort's and fortress's columns 0 and 20 into W and E
+  alike, I), without the tile's resource marker and rumour;
   the 16 px enlarged to 24 as the original (`ClassicColonyTiles.enlarge`):
   target (x, y) shows source (floor(2x/3), floor((2y + 1)/3)) (ours before:
   floor((2d + 1)/3) in x too, a column off), shaded in its colour ramp by the
@@ -3667,7 +3672,14 @@ one with **B**; hosted in the main window in place of the map (M4.0; until part 
   (`model.option.originalDropJobs`, `ColonyTile.getBestProductionType`,
   `OriginalProduction.makesNothing`; V the band's food row unchanged, clip 020
   #48657 → #48767, #50148 → #50297); the classic and freecol rules keep FreeCol's
-  fallback (the colony gets that good, the tile shows the sign). The job menu lists
+  fallback (the colony gets that good, the tile shows the sign). He gets there by
+  a job picked in the menu, by a drag from field to field that keeps his job
+  (R3; a food job follows the square, see «The drop»), and also when the square
+  changes under him: a pioneer clearing a forest that a lumberjack or fur trapper
+  works (`Tile.changeType`: the job is kept, he makes nothing and shows the
+  sign; I: what the original does there is unseen, named for Roger; the AI's
+  workers are rearranged by its own colony plan later, the soak of part Y saw two
+  such fur trappers on cleared land, gone at the next look). The job menu lists
   all nine tile jobs, zero rows included, as the original (V 117 menus, clip 042
   #3033, 020 J2 #103, 046 #98153); the totem ICONS.SS.108 at tile + (8,4) on
   native land the player would have to buy (none after Peter Minuit); an enemy at
@@ -4169,7 +4181,13 @@ seen on the frames, I = our choice where no clip shows it.
   2 px left (V dago), no hover label; the source keeps its figure.
 - **The drop** (`ClassicColonyMoves.resolve`): building → building the target's
   work; building → tile **Farmer** (R2), tile → tile **his work kept**, even at
-  0 (R3), both only with the levi option `model.option.originalDropJobs`
+  0 (R3; V clip 053 the lumber, the furs, the silver), but a food job follows the
+  square (`ClassicColonyMoves.keptJob`, the review of part Y): a Fischer onto land
+  is a **Farmer** (V clip 053 #3500 → #3920 the convert from the ocean onto the
+  Nadel-Wald, corn and no sign, «Konvertierte Indianer(Farmer)» #9740; #25812 →
+  #26045 the trapper), a Farmer onto water a **Fischer** (I, by symmetry; no clip),
+  any other job kept on water too, making nothing there (I); both only with the
+  levi option `model.option.originalDropJobs`
   (FreeCol's rules: the colony chooses the work); building or fence → an
   ocean tile with docks **Fischer** (I); tile → building and fence → building
   the building's work (the role's goods back to the warehouse: the server's

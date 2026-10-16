@@ -123,6 +123,19 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
                 (ClassicColonyMoves.Place) c[0], (ClassicColonyMoves.Place) c[1],
                 (Boolean) c[2], (Boolean) c[3], (Boolean) c[4]));
         }
+        // Tile to tile: the work kept, the food work following the square
+        // (the review of part Y: a Fischer onto land a Farmer, V clip 053;
+        // a Farmer onto water a Fischer, I).
+        final int fisher = ClassicColonyLayout.JOB_FISHERMAN;
+        assertEquals(0, ClassicColonyMoves.keptJob(fisher, false));
+        assertEquals(fisher, ClassicColonyMoves.keptJob(0, true));
+        assertEquals(fisher, ClassicColonyMoves.keptJob(fisher, true));
+        assertEquals(0, ClassicColonyMoves.keptJob(0, false));
+        for (int job = 1; job < fisher; job++) {
+            assertEquals(job + " on land", job, ClassicColonyMoves.keptJob(job, false));
+            assertEquals(job + " on water", job, ClassicColonyMoves.keptJob(job, true));
+        }
+        assertEquals(-1, ClassicColonyMoves.keptJob(-1, true));
     }
 
     /** The pioneer's tools (V #254 «(60 Werkzeuge)», 75 → 15 at #121100; dago-colony2). */
@@ -1579,6 +1592,85 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         assertEquals("a Fischer on the water", ClassicColonyJobs.goodsOf(spec(),
             ClassicColonyLayout.JOB_FISHERMAN), u.getWorkType());
         assertEquals(1, s.boxes.asked.size());
+    }
+
+    /**
+     * The food work follows the square on a move from tile to tile (the
+     * review of part Y, fidelity: since part Y3 a work the square cannot
+     * make makes nothing, so a kept fish on land made 0 under the red
+     * sign; {@link ClassicColonyMoves#keptJob}): a Fischer dragged from the
+     * ocean onto the plains is a Farmer there, corn and no sign (V clip
+     * 053 #3500 -&gt; #3920, #25812 -&gt; #26045); clicked onto the ocean
+     * again, a Fischer (I, by symmetry); a lumberjack dragged onto the
+     * ocean keeps his lumber and makes nothing, the sign (R3; I on water).
+     */
+    public void testTheFoodWorkFollowsTheSquare() throws Exception {
+        final Scene s = scene(3, true);
+        final Tile c = s.colony.getTile();
+        c.getNeighbourOrNull(Direction.E).setType(spec().getTileType("model.tile.ocean"));
+        c.getNeighbourOrNull(Direction.SE).setType(spec().getTileType("model.tile.ocean"));
+        addBuilding(s, "docks");
+        final GoodsType fish = ClassicColonyJobs.goodsOf(spec(), ClassicColonyLayout.JOB_FISHERMAN);
+        final GoodsType grain = ClassicColonyJobs.goodsOf(spec(), 0);
+        final List<Unit> us = s.colony.getUnitList();
+        final Unit fisher = us.get(0), cutter = us.get(1);
+        for (Unit x : us) assertTrue(x.setLocation(building(s.colony, "townHall")));
+        assertTrue(fisher.setLocation(tileOf(s.colony, Direction.E)));
+        fisher.changeWorkType(fish);
+        assertTrue(cutter.setLocation(tileOf(s.colony, Direction.N)));
+        cutter.changeWorkType(lumber);
+        s.colony.invalidateCache();
+        paint(s.panel);
+        assertTrue("he fishes", made(tileOf(s.colony, Direction.E), fish) > 0);
+        // The Fischer onto W, the plains: a Farmer, corn, no sign.
+        int[] a = at(s.panel, fisher);
+        final int[] w = tile(3);
+        drag(s.panel, a[0], a[1], w[0], w[1]);
+        assertSame(s.api.log.toString(), tileOf(s.colony, Direction.W), fisher.getLocation());
+        assertEquals("a Farmer on land " + s.api.log, grain, fisher.getWorkType());
+        assertTrue("corn", made(tileOf(s.colony, Direction.W), grain) > 0);
+        ClassicColonyTiles.Model m = tilesModel(s);
+        assertFalse("a row", m.cell(3).rows.isEmpty());
+        assertEquals("no sign", -1, m.cell(3).zero);
+        // He stays selected: a click on the empty ocean E takes him there,
+        // a Fischer again (I).
+        assertSame(fisher, s.panel.selected());
+        final int[] e = tile(5);
+        click(s.panel, e[0], e[1]);
+        assertSame(s.api.log.toString(), tileOf(s.colony, Direction.E), fisher.getLocation());
+        assertEquals("a Fischer on the water " + s.api.log, fish, fisher.getWorkType());
+        assertTrue("fish", made(tileOf(s.colony, Direction.E), fish) > 0);
+        assertEquals("no sign", -1, tilesModel(s).cell(5).zero);
+        // Any other work is kept, on the water too: nothing, the sign.
+        a = at(s.panel, cutter);
+        final int[] se = tile(8);
+        drag(s.panel, a[0], a[1], se[0], se[1]);
+        assertSame(s.api.log.toString(), tileOf(s.colony, Direction.SE), cutter.getLocation());
+        assertEquals("R3: still the lumberjack", lumber, cutter.getWorkType());
+        assertEquals(0, made(tileOf(s.colony, Direction.SE), lumber));
+        assertEquals(0, made(tileOf(s.colony, Direction.SE), fish));
+        m = tilesModel(s);
+        assertEquals("the lumber under the sign",
+                     ClassicColonyLayout.goodsIcon(lumber.getId()), m.cell(8).zero);
+        assertTrue("no box", s.boxes.asked.isEmpty());
+    }
+
+    /** What a work tile makes of a good now (the server's production). */
+    private static int made(ColonyTile ct, GoodsType g) {
+        ct.getColony().invalidateCache();
+        int n = 0;
+        for (net.sf.freecol.common.model.AbstractGoods ag
+                 : ct.getProductionInfo().getProduction()) {
+            if (ag.getType() == g) n += ag.getAmount();
+        }
+        return n;
+    }
+
+    /** The 3x3 map's model of a scene's colony now. */
+    private static ClassicColonyTiles.Model tilesModel(Scene s) {
+        s.colony.invalidateCache();
+        return ClassicColonyTiles.model(s.colony, ClassicText.load(ClassicPackFiles.runtime()),
+            ClassicColonyBuildings.Assets.load(ClassicPackFiles.runtime()));
     }
 
     /**

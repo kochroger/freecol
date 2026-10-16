@@ -467,7 +467,8 @@ final class ClassicColonyTiles {
      * {@code freecol-spike-results/y/prep/3x3-scaler.md}): each tile as our
      * map composes it in palette indices (the pack's TERRAIN and PHYS0
      * index sheets, {@link ClassicTerrainComposer}) with the colony's
-     * sprite on the centre where the map draws it, but without its
+     * sprite on the centre where the map draws it, its overhang in the W
+     * and E cells (the review of part Y), but without its
      * resource marker and rumour; the 16 px enlarged to 24 as the original
      * ({@link #enlarge}: its geometry and its fixed shade pattern); the
      * markers over that unscaled at tile + (4,4) with no shades (V the
@@ -534,7 +535,7 @@ final class ClassicColonyTiles {
         }
 
         /**
-         * A tile's 24x24 picture now.
+         * A tile's 24x24 picture now, the sprite given standing on it.
          *
          * @param map The map.
          * @param t The tile.
@@ -549,7 +550,40 @@ final class ClassicColonyTiles {
          */
         BufferedImage tile(net.sf.freecol.common.model.Map map, Tile t, int slot,
                            BufferedImage settlement, int phase, boolean[] cycles) {
-            if (indexed()) return indexedTile(map, t, slot, settlement, phase, cycles);
+            return tile(map, t, slot, settlement, 0, phase, cycles);
+        }
+
+        /**
+         * A tile's 24x24 picture now.  A sprite wider than the 16-px cell
+         * overhangs into the tiles beside its own as on the map (the
+         * colony's 21-px huts at cell x - 2, {@link
+         * ClassicHud#settlementOffset}): its columns past the cell's edges
+         * are pasted into the W and E neighbours' cells before the
+         * enlargement, as into its own (the review of part Y, fidelity: V
+         * clip 020 #1700, Base's E x 112-113, y 121-127 hold ICONS.SS.003's
+         * columns 18-19, rows 1-7, and the 3x3's E #2260 shows them
+         * enlarged and shaded at its x 0-2; before, ours cut the huts' roof
+         * off at the centre's edge; the stockade's, fort's and fortress's
+         * columns 0 and 20 into W and E alike, I).  The neighbours keep
+         * their markers apart, drawn over the cell unscaled (I where a
+         * marker meets the overhang: never seen).
+         *
+         * @param map The map.
+         * @param t The tile.
+         * @param slot Its cell in the 3x3 map, 0-8.
+         * @param settlement The sprite on this tile or beside it, or null.
+         * @param spriteDx Where the sprite's own cell lies from this one:
+         *     0 on it, 16 when this cell is its W neighbour, -16 its E.
+         * @param phase The water's cycling phase.
+         * @param cycles Set to true when the tile holds a cycling index.
+         * @return The picture, or null without any art.
+         */
+        BufferedImage tile(net.sf.freecol.common.model.Map map, Tile t, int slot,
+                           BufferedImage settlement, int spriteDx, int phase,
+                           boolean[] cycles) {
+            if (indexed()) {
+                return indexedTile(map, t, slot, settlement, spriteDx, phase, cycles);
+            }
             final int cell = ClassicTerrainComposer.CELL;
             final int[] rgb = new int[cell * cell];
             if (this.lib != null && t.getType() != null) {
@@ -570,8 +604,9 @@ final class ClassicColonyTiles {
             }
             if (settlement != null) {
                 // Where the map draws it: centred, a wider sprite
-                // overhanging both sides (ClassicHud.settlementOffset).
-                final int ox = ClassicHud.settlementOffset(settlement.getWidth());
+                // overhanging both sides (ClassicHud.settlementOffset),
+                // into a neighbour's cell from its own.
+                final int ox = ClassicHud.settlementOffset(settlement.getWidth()) + spriteDx;
                 for (int y = 0; y < Math.min(cell, settlement.getHeight()); y++) {
                     for (int x = 0; x < settlement.getWidth(); x++) {
                         final int p = settlement.getRGB(x, y);
@@ -589,16 +624,17 @@ final class ClassicColonyTiles {
          * #enlarge}), the markers over it, the palette at the phase.
          */
         private BufferedImage indexedTile(net.sf.freecol.common.model.Map map, Tile t,
-                                          int slot, BufferedImage settlement, int phase,
-                                          boolean[] cycles) {
+                                          int slot, BufferedImage settlement, int spriteDx,
+                                          int phase, boolean[] cycles) {
             final int cell = ClassicTerrainComposer.CELL, size = ClassicColonyLayout.TILE;
             final byte[] idx = new byte[cell * cell];
             // The markers apart, but on the colony's own tile, where the
             // map draws its sprite over them (I: never seen, they stay in
             // the cell as the map composes it, mostly under the sprite).
             final List<Integer> markers = new ArrayList<>();
-            this.composer.composeCell((settlement == null) ? source(map, markers::add)
-                                      : source(map), t.getX(), t.getY(), idx, 0, cell);
+            final boolean own = settlement != null && spriteDx == 0;
+            this.composer.composeCell((own) ? source(map) : source(map, markers::add),
+                                      t.getX(), t.getY(), idx, 0, cell);
             // The sprite as indices (V: the colony's sprite and its flag are
             // enlarged and shaded with the terrain, Silver City's centre
             // #123003 row 0, 24 of 24 px; the four nations' flag fills are
@@ -607,7 +643,7 @@ final class ClassicColonyTiles {
             // colour, unshaded.
             int[] fixed = null;
             if (settlement != null) {
-                final int ox = ClassicHud.settlementOffset(settlement.getWidth());
+                final int ox = ClassicHud.settlementOffset(settlement.getWidth()) + spriteDx;
                 for (int y = 0; y < Math.min(cell, settlement.getHeight()); y++) {
                     for (int x = 0; x < settlement.getWidth(); x++) {
                         final int p = settlement.getRGB(x, y);
@@ -959,6 +995,26 @@ final class ClassicColonyTiles {
         if (o >= lo && o <= hi) return o;
         o = s - d;
         return (o >= lo && o <= hi) ? o : s;
+    }
+
+    /** {@link #spriteDx} of a cell the colony's sprite does not reach. */
+    static final int NO_SPRITE = Integer.MIN_VALUE;
+
+    /**
+     * Where the colony's sprite lies from a cell of the 3x3 map, for
+     * {@link Art#tile}: 0 on the centre, 16 from W, -16 from E (its
+     * overhang: a sprite is at most 22 px wide, {@link
+     * ClassicHud#fitSettlement}, and 16 high, so it reaches no other cell).
+     *
+     * @param slot The cell, 0-8.
+     * @return The offset, or {@link #NO_SPRITE}.
+     */
+    static int spriteDx(int slot) {
+        final int c = ClassicColonyLayout.CENTRE_TILE;
+        if (slot == c) return 0;
+        if (slot == c - 1) return ClassicTerrainComposer.CELL;
+        if (slot == c + 1) return -ClassicTerrainComposer.CELL;
+        return NO_SPRITE;
     }
 
     /**
