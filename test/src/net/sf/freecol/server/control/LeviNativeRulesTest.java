@@ -19,7 +19,10 @@
 
 package net.sf.freecol.server.control;
 
+import java.util.List;
+
 import net.sf.freecol.common.model.Colony;
+import net.sf.freecol.common.model.CombatModel.CombatEffectType;
 import net.sf.freecol.common.model.Direction;
 import net.sf.freecol.common.model.Game;
 import net.sf.freecol.common.model.GoodsType;
@@ -28,6 +31,7 @@ import net.sf.freecol.common.model.Map;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Role;
 import net.sf.freecol.common.model.Specification;
+import net.sf.freecol.common.model.Stance;
 import net.sf.freecol.common.model.Tension;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.UnitType;
@@ -43,7 +47,8 @@ import net.sf.freecol.util.test.FreeColTestUtils;
 /**
  * The levi rules for the natives of part Z (Z-ITEMS Z2; M3 spec A2, A3),
  * headless on the server, each with its option on and off: the
- * original's tribute ({@code model.option.originalTribute}, Z2.2).
+ * original's tribute ({@code model.option.originalTribute}, Z2.2) and its
+ * native war ({@code model.option.originalNativeWar}, Z2.3).
  */
 public class LeviNativeRulesTest extends FreeColTestCase {
 
@@ -61,6 +66,7 @@ public class LeviNativeRulesTest extends FreeColTestCase {
     protected void tearDown() throws Exception {
         if (this.changed != null) {
             this.changed.setBoolean(GameOptions.ORIGINAL_TRIBUTE, false);
+            this.changed.setBoolean(GameOptions.ORIGINAL_NATIVE_WAR, false);
         }
         ServerTestHelper.stopServerGame();
         super.tearDown();
@@ -231,5 +237,91 @@ public class LeviNativeRulesTest extends FreeColTestCase {
         assertSame(s.near, InGameController.tributeColony(s.dutch, s.village.getTile()));
         assertSame(s.far, InGameController.tributeColony(s.dutch,
                                                          s.game.getMap().getTile(13, 8)));
+    }
+
+
+    // Z2.3: the original's native war
+
+    /** The brave type. */
+    private static final UnitType braveType = spec().getUnitType("model.unit.brave");
+
+    /** The scene with the war rule set, and a brave of the tribe east of the soldier. */
+    private ServerUnit brave(Scene s, boolean warRule) {
+        s.game.getSpecification().setBoolean(GameOptions.ORIGINAL_NATIVE_WAR, warRule);
+        final Tile east = s.soldier.getTile().getNeighbourOrNull(Direction.E);
+        return new ServerUnit(s.game, east, s.arawak, braveType);
+    }
+
+    /** What our player is told of a change set ({@code ChangeSet.build}). */
+    private static String toldTo(ChangeSet cs, Player p) {
+        return String.valueOf(cs.build(p));
+    }
+
+    /**
+     * Our attack on natives at peace (Z2.3, Roger's decision F2, built as
+     * the original): under the levi rule no war in either direction, the
+     * tribe's tension rises (FreeCol's amounts); without it FreeCol's war
+     * both ways.  In the Classic UI (FreeCol.getClassic) the attacker is
+     * not told «… hat uns den Krieg erklärt!» even then (Roger's event
+     * #15, frame_065184); FreeCol's own UI keeps its notice.
+     */
+    public void testOurAttackOnNativesStartsNoWar() {
+        final boolean saved = net.sf.freecol.FreeCol.getClassic();
+        try {
+            for (boolean rule : new boolean[] { true, false }) {
+                for (boolean classic : new boolean[] { true, false }) {
+                    net.sf.freecol.FreeCol.setClassic(classic);
+                    final Scene s = scene(false);
+                    final ServerUnit brave = brave(s, rule);
+                    assertEquals(Stance.PEACE, s.dutch.getStance(s.arawak));
+                    final int tension0 = s.arawak.getTension(s.dutch).getValue();
+                    final ChangeSet cs = new ChangeSet();
+                    s.dutch.csCombat(s.soldier, brave, new java.util.ArrayList<>(List.of(
+                        CombatEffectType.WIN, CombatEffectType.SLAUGHTER_UNIT)),
+                        new java.util.Random(1), cs);
+                    final String what = "rule=" + rule + " classic=" + classic;
+                    final Stance want = (rule) ? Stance.PEACE : Stance.WAR;
+                    assertEquals(what, want, s.dutch.getStance(s.arawak));
+                    assertEquals(what, want, s.arawak.getStance(s.dutch));
+                    assertTrue(what + " the anger rises",
+                               s.arawak.getTension(s.dutch).getValue() > tension0);
+                    assertEquals(what, !rule && !classic,
+                                 toldTo(cs, s.dutch).contains(Stance.WAR.getStanceChangeKey()));
+                }
+            }
+        } finally {
+            net.sf.freecol.FreeCol.setClassic(saved);
+        }
+    }
+
+    /**
+     * The natives' attack on our unit at peace (Z2.3, the M3 verifier's
+     * smaller correction 1: ServerPlayer.csCombat's European defender):
+     * under the levi rule no war either; without it FreeCol's war.
+     */
+    public void testTheNativesRaidStartsNoWar() {
+        for (boolean rule : new boolean[] { true, false }) {
+            final Scene s = scene(false);
+            final ServerUnit brave = brave(s, rule);
+            final ChangeSet cs = new ChangeSet();
+            s.arawak.csCombat(brave, s.soldier, new java.util.ArrayList<>(List.of(
+                CombatEffectType.LOSE, CombatEffectType.SLAUGHTER_UNIT)),
+                new java.util.Random(1), cs);
+            final Stance want = (rule) ? Stance.PEACE : Stance.WAR;
+            assertEquals("rule=" + rule, want, s.dutch.getStance(s.arawak));
+            assertEquals("rule=" + rule, want, s.arawak.getStance(s.dutch));
+        }
+    }
+
+    /**
+     * The natives may still go to war on their own when their tension
+     * passes hateful (FreeCol's AI, {@code AIPlayer.determineStance}), with
+     * or without the rule.
+     */
+    public void testTheNativesStillGoToWarWhenHateful() {
+        assertEquals(Stance.WAR, Stance.PEACE.getStanceFromTension(
+            new Tension(Tension.TENSION_MAX)));
+        assertEquals(Stance.PEACE, Stance.PEACE.getStanceFromTension(
+            new Tension(Tension.Level.HATEFUL.getLimit())));
     }
 }

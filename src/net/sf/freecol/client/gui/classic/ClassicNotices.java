@@ -35,7 +35,9 @@ import net.sf.freecol.common.model.IndianSettlement;
 import net.sf.freecol.common.model.ModelMessage;
 import net.sf.freecol.common.model.Ownable;
 import net.sf.freecol.common.model.Player;
+import net.sf.freecol.common.model.Settlement;
 import net.sf.freecol.common.model.StringTemplate;
+import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
 
@@ -253,6 +255,9 @@ final class ClassicNotices {
     /** The levi tribute's goods (part Z, Z2.2; @EXTORTSTUFF). */
     static final String TRIBUTE_GOODS = "scoutSettlement.tributeGoods";
 
+    /** FreeCol's notice that another nation declared war on us (part Z, Z2.3). */
+    static final String WAR_DECLARED = "model.player.stance.war.declared";
+
     /** FreeCol's notices in the original's words (class comment). */
     static final Map<String, Rule> RULES = new HashMap<>();
     static {
@@ -302,6 +307,12 @@ final class ClassicNotices {
             "STRING0", Value.TITLE, "STRING1", Value.TRIBE));
         RULES.put("scoutSettlement.tributeLaugh", new Rule("EXTORTLAUGH",
             ClassicVillageBox.TRIBUTE_CHAIN_MS, Who.CHIEF, "STRING0", Value.TRIBE));
+        // Part Z, Z2.3: a tribe's own declaration of war (its tension
+        // turned hateful; under the levi rule an attack starts none) in
+        // GAME.TXT's @INDIANWAR words with the chief (SRC: never seen;
+        // the chief, I); a European's keeps FreeCol's words (no tribe).
+        RULES.put(WAR_DECLARED, new Rule("INDIANWAR", Who.CHIEF,
+            "STRING0", Value.TRIBE));
         RULES.put("scoutSettlement.tributeNo", new Rule("EXTORTNO",
             ClassicVillageBox.TRIBUTE_CHAIN_MS, Who.CHIEF,
             "STRING0", Value.TITLE, "STRING1", Value.LEADER, "STRING2", Value.TRIBE));
@@ -349,6 +360,15 @@ final class ClassicNotices {
     static final List<String> DROPPED = Arrays.asList(SCOUT_MEETING);
 
     /**
+     * FreeCol's notices of a won fight to the winner, «Sieg bei …» (their
+     * keys with or without the loser's type: {@code
+     * combat.unitSlaughtered.enemy.brave}).  After our attack on natives
+     * they never come (part Z, Z2.3, {@link #isOurWinOverNatives}).
+     */
+    static final List<String> WIN_NOTICES = Arrays.asList("combat.unitSlaughtered.enemy",
+        "combat.unitDemoted.enemy", "combat.unitDemotedToUnarmed.enemy");
+
+    /**
      * The results of speaking to a chief that @CHIEFHOWDY comes before
      * (part O B3, Roger's D-B3b): not before @CHIEFKILL (I: a "peaceful
      * village" greeting before the killing makes no sense; V for
@@ -379,6 +399,47 @@ final class ClassicNotices {
      */
     static boolean dropped(String id) {
         return id != null && DROPPED.contains(id);
+    }
+
+    /**
+     * Whether an attack goes against natives: the settlement on the
+     * target, else its defender, belongs to a native player (part Z,
+     * Z2.3).
+     *
+     * @param attacker The attacking unit, or null.
+     * @param tile The target tile, or null.
+     * @return True for an attack on natives.
+     */
+    static boolean attacksNatives(Unit attacker, Tile tile) {
+        if (attacker == null || tile == null) return false;
+        final Settlement s = tile.getSettlement();
+        final Unit defender = (s != null) ? null : tile.getDefendingUnit(attacker);
+        final Player p = (s != null) ? s.getOwner()
+            : (defender != null) ? defender.getOwner() : null;
+        return p != null && p.isIndian();
+    }
+
+    /**
+     * Whether a notice is FreeCol's «Sieg bei …» of an attack of ours on
+     * natives (part Z, Z2.3; Roger's test, events #14 and #17: «Sieg bei
+     * Grasland … hat Krieger (Irokesen) abgeschlachtet!»): a win notice
+     * ({@link #WIN_NOTICES}) whose source, the winner, is one of the
+     * units that attacked natives.  The original shows no result box when
+     * our attack on natives wins (V ×5: playthrough-4 048 #30249, #55062,
+     * #61284, #66085).  A convert, a destroyed village and a tribe's end
+     * keep their notices (B5).
+     *
+     * @param m The notice, or null.
+     * @param attackers The ids of our units that attacked natives.
+     * @return True if it is dropped.
+     */
+    static boolean isOurWinOverNatives(ModelMessage m, Set<String> attackers) {
+        if (m == null || attackers == null || m.getId() == null
+            || !attackers.contains(m.getSourceId())) return false;
+        for (String w : WIN_NOTICES) {
+            if (m.getId().equals(w) || m.getId().startsWith(w + ".")) return true;
+        }
+        return false;
     }
 
     /**

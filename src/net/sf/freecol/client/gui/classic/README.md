@@ -2439,6 +2439,29 @@ Roger's decisions of 2026-10-13: the original everywhere.
   furs 28, 46, 64), at most 100, to our colony nearest to the village.
   The anger rises (FreeCol's amount). Classic and freecol: FreeCol's
   gold and words (without the question).
+- **Our attack on natives** (part Z, Z2.3; M3 spec A3 with the verifier's
+  smaller correction 1; Roger's test events #14, #15, #17: «Sieg bei
+  Grasland …» twice and «Irokesen hat uns den Krieg erklärt!»): the
+  original shows no result box when our attack on natives wins (V ×5:
+  048 #30249, #55062, #61284, #66085) and no war notice (048 #30193 ->
+  #30249 -> #30540). FreeCol's win notices of it (`combat.unitSlaughtered.enemy*`,
+  `combat.unitDemoted.enemy*`, `combat.unitDemotedToUnarmed.enemy`, from
+  the attacker) are dropped: `ClassicGUI.confirmPreCombat`, the last step
+  before every attack is sent, notes our attacks on natives, and the
+  first popup after it drops their win notices and forgets them
+  (`dropOurWinsOverNatives`, recorder `notice-dropped … (our win over
+  natives)`); a convert, a destroyed village and a tribe's end keep their
+  notices (B5). The war: under the levi rule `model.option.originalNativeWar`
+  (Roger's decision F2 is open; built as the original, I) an attack
+  between a European and natives is no declaration of war in either
+  direction (`ServerPlayer.csCombat`; also the natives' raid on a
+  European defender), only the fight's tension (FreeCol's amounts); the
+  natives' AI still declares war when its tension passes hateful, and
+  that notice is GAME.TXT's `@INDIANWAR` with the chief (SRC, never
+  seen). Without the rule (classic, freecol) the war stays FreeCol's, but
+  in the Classic UI (`FreeCol.getClassic()`) the attacker gets no notice
+  of the natives' side of it (as at a treaty breach). Not changed: a
+  burial ground's war (`ServerUnit.csNativeBurialGround`, A7's K-F8).
 - **Learning** (`askLearn`, the learn question of `moveLearnSkill`):
   after the village box's «Mit den Ureinwohnern leben»,
   `@LEARNSTAY` with the chief (the tribe, @JOB column 1 of the skill), the

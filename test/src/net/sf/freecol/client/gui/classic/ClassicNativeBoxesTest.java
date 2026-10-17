@@ -851,4 +851,53 @@ public class ClassicNativeBoxesTest extends FreeColTestCase {
             assertEquals(0, u.getMovesLeft());
         }
     }
+
+
+    // Part Z, Z2.3: no «Sieg bei …» after our attack on natives
+
+    /**
+     * FreeCol's win notice of our attack on natives is not shown (Roger's
+     * test, events #14 and #17, frame_064810 and frame_069337: «Sieg bei
+     * Grasland … hat Krieger (Irokesen) abgeschlachtet!»; the original
+     * shows no result box, V ×5): the dragoon attacks the village through
+     * FreeCol's real controller ({@code confirmPreCombat} notes the
+     * attack), then the server's notices come as one popup: the win
+     * notice is dropped, a convert's notice is shown; a later popup's win
+     * notice of the same unit (the natives attacked it) is shown again.
+     */
+    public void testOurWinOverNativesIsNotShown() throws Exception {
+        final ClassicText t = pack("testOurWinOverNativesIsNotShown");
+        if (t == null) return;
+        final Rig r = rig();
+        final Unit u = atVillage(r, "iroquois", "model.unit.freeColonist",
+                                 "model.role.dragoon");
+        r.keys.press("ENTER");
+        r.igc().moveDirection(u, Direction.S, true);
+        flush();
+        assertEquals(List.of("attack"), r.api.log);
+        final Player iroquois = getServerPlayer(r.game, "model.nation.iroquois");
+        final net.sf.freecol.common.model.ModelMessage win
+            = new net.sf.freecol.common.model.ModelMessage(
+                net.sf.freecol.common.model.ModelMessage.MessageType.COMBAT_RESULT,
+                "combat.unitSlaughtered.enemy.brave", u)
+            .addDefaultId("combat.unitSlaughtered.enemy")
+            .addName("%location%", "Grasland").addName("%unit%", "Dragoner")
+            .addStringTemplate("%enemyNation%", iroquois.getNationLabel())
+            .addName("%enemyUnit%", "Krieger");
+        final net.sf.freecol.common.model.ModelMessage convert
+            = new net.sf.freecol.common.model.ModelMessage(
+                net.sf.freecol.common.model.ModelMessage.MessageType.COMBAT_RESULT,
+                "combat.newConvertFromAttack", u)
+            .addStringTemplate("%nation%", iroquois.getNationLabel())
+            .addStringTemplate("%unit%", u.getLabel());
+        r.keys.boxes.clear();
+        SwingUtilities.invokeAndWait(() -> r.gui.showModelMessages(List.of(win, convert)));
+        flush();
+        assertEquals(List.of("message combat.newConvertFromAttack"), r.asked());
+        r.keys.boxes.clear();
+        SwingUtilities.invokeAndWait(() -> r.gui.showModelMessages(List.of(win)));
+        flush();
+        assertEquals("the attack forgotten", List.of("message combat.unitSlaughtered.enemy.brave"),
+                     r.asked());
+    }
 }

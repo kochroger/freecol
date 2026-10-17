@@ -395,6 +395,16 @@
              most 100, after a question. -->
         <booleanOption id="model.option.originalTribute"
                        defaultValue="true"/>
+        <!-- The original's native war (part Z, Z2.3; Roger's decision F2
+             is open, the default is the original): an attack between a
+             European and natives starts no war, only anger.  The original
+             shows no war notice after our attack on natives (048 #30193 ->
+             #30540), and Sioux villages were «glücklich» years after
+             attacks (048 #44105, #54996); that there is no war state is a
+             guess.  The natives may still declare war when their tension
+             turns hateful.  FreeCol (classic, freecol): war at once. -->
+        <booleanOption id="model.option.originalNativeWar"
+                       defaultValue="true"/>
         <!-- The original's sailing time between Europe and the New
              World: two turns each way (landfall: off the map in 1503,
              in Amsterdam at the start of 1505; clip008: off the map in

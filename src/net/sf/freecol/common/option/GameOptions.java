@@ -287,6 +287,20 @@ public class GameOptions {
     public static final String ORIGINAL_TRIBUTE
         = "model.option.originalTribute";
 
+    /**
+     * The original's native war (part Z, Z-ITEMS Z2.3; Roger's decision
+     * F2, open: the default is the original): an attack between a
+     * European and natives is no declaration of war, only anger (V: no
+     * war notice after our attack on natives in five clips, 048 #30193
+     * -&gt; #30540; Sioux villages «glücklich» years after attacks, 048
+     * #44105, #54996; that there is no war state is I).  FreeCol: any
+     * such attack is war at once.  The natives may still declare war when
+     * their tension turns hateful.  On in the "levi" rules (and a levi
+     * save from before the rule).
+     */
+    public static final String ORIGINAL_NATIVE_WAR
+        = "model.option.originalNativeWar";
+
     /** Do missionaries provide extra benefits. */
     public static final String ENHANCED_MISSIONARIES
         = "model.option.enhancedMissionaries";

@@ -3145,10 +3145,13 @@ public final class Specification implements OptionContainer {
         ret |= checkOp(GameOptions.ORIGINAL_FATHER_OFFER,
                        GameOptions.GAMEOPTIONS_MAP,
                        originalProductionDefault(getId()), BooleanOption.class);
-        // The original's tribute (levi, part Z): without it FreeCol's
-        // gold; a levi save from before the rule gets the levi rules'
-        // value.
+        // The original's tribute and native war (levi, part Z): without
+        // them FreeCol's gold and war; a levi save from before the rules
+        // gets the levi rules' values.
         ret |= checkOp(GameOptions.ORIGINAL_TRIBUTE,
+                       GameOptions.GAMEOPTIONS_MAP,
+                       originalNativesDefault(getId()), BooleanOption.class);
+        ret |= checkOp(GameOptions.ORIGINAL_NATIVE_WAR,
                        GameOptions.GAMEOPTIONS_MAP,
                        originalNativesDefault(getId()), BooleanOption.class);
         ret |= checkOp(GameOptions.REVENGE_MODE,
@@ -3272,9 +3275,10 @@ public final class Specification implements OptionContainer {
 
     /**
      * The value the original's native rules of part Z
-     * ({@code GameOptions.ORIGINAL_TRIBUTE}) get in rules or a save that
+     * ({@code GameOptions.ORIGINAL_TRIBUTE},
+     * {@code GameOptions.ORIGINAL_NATIVE_WAR}) get in rules or a save that
      * lack them ({@link #fixGameOptions}): on for the "levi" rules (a game
-     * of Roger's begun before part Z gets the original's tribute), off for
+     * of Roger's begun before part Z gets the original's tribute and war), off for
      * any other.
      *
      * @param specId The specification's id.

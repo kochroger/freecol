@@ -2721,8 +2721,19 @@ outer:  for (Effect effect : effects) {
         } else if (isEuropean() && defenderPlayer.isEuropean()) {
             csChangeStance(Stance.WAR, defenderPlayer, true, cs);
         } else { // At least one player is non-European
+            // The levi rule of the original's native war (part Z, Z2.3):
+            // an attack between a European and natives is no declaration
+            // of war, only anger (the tension below and the combat's own).
+            final boolean noWar = originalNativeWar(getSpecification());
             if (isEuropean()) {
-                csChangeStance(Stance.WAR, defenderPlayer, true, cs);
+                // In the Classic UI the attacker gets no notice of the
+                // natives' side of the war he started (part Z, Z2.3, as at
+                // a treaty breach: the original shows none after an attack
+                // on natives, V 048 #30193 -> #30249 -> #30540).
+                if (!noWar) {
+                    csChangeStance(Stance.WAR, defenderPlayer, true,
+                                   !FreeCol.getClassic(), cs);
+                }
             } else if (isIndian()) {
                 if (result == CombatEffectType.WIN) {
                     attackerTension -= Tension.TENSION_ADD_MINOR;
@@ -2731,7 +2742,13 @@ outer:  for (Effect effect : effects) {
                 }
             }
             if (defenderPlayer.isEuropean()) {
-                ((ServerPlayer)defenderPlayer).csChangeStance(Stance.WAR, this, true, cs);
+                // The natives' raid: no war under the levi rule either
+                // (the M3 verifier's smaller correction 1; the original's
+                // @INDIANSURPRISE has the chief deny the blame, V 048
+                // #63172, I).
+                if (!noWar) {
+                    ((ServerPlayer)defenderPlayer).csChangeStance(Stance.WAR, this, true, cs);
+                }
             } else if (defenderPlayer.isIndian()) {
                 if (result == CombatEffectType.WIN) {
                     defenderTension += Tension.TENSION_ADD_MINOR;
@@ -2797,6 +2814,29 @@ outer:  for (Effect effect : effects) {
      * @param loser The {@code Unit} that dies.
      * @return An amount to raise tension by.
      */
+    /**
+     * Whether the original's native war applies (levi {@code
+     * model.option.originalNativeWar}, part Z, Z-ITEMS Z2.3; Roger's
+     * decision F2, open, built as the original): an attack between a
+     * European and natives is no declaration of war, in either direction.
+     * The original shows no war notice after our attack on natives (V 048
+     * #30193 WHACKINDIANS «Ja» -&gt; the analysis #30249 -&gt; a Tupi gift
+     * #30540), and Sioux villages greeted us «glücklich» in 1567-1569
+     * after attacks from 1562 on (V 048 #44105, #54996); that there is no
+     * war state then is a guess (I).  The tension the fight raises stays
+     * FreeCol's, and the natives' AI may still go to war when it turns
+     * hateful ({@code AIPlayer.determineStance}).
+     *
+     * @param spec The {@code Specification}.
+     * @return True under the rule.
+     */
+    static boolean originalNativeWar(Specification spec) {
+        return spec != null
+            && spec.hasOption(GameOptions.ORIGINAL_NATIVE_WAR,
+                net.sf.freecol.common.option.BooleanOption.class)
+            && spec.getBoolean(GameOptions.ORIGINAL_NATIVE_WAR);
+    }
+
     private int getSlaughterTension(Unit loser) {
         // Tension rises faster when units die.
         Settlement settlement = loser.getSettlement();

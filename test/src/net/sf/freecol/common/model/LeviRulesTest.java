@@ -79,6 +79,7 @@ public class LeviRulesTest extends FreeColTestCase {
         CHANGED.put(GameOptions.ORIGINAL_TORY_PENALTY, Boolean.TRUE);      // the original's (fixer B, must 7)
         CHANGED.put(GameOptions.ORIGINAL_FATHER_OFFER, Boolean.TRUE);      // the original's (fixer B, must 10)
         CHANGED.put(GameOptions.ORIGINAL_TRIBUTE, Boolean.TRUE);          // the original's (Z2.2)
+        CHANGED.put(GameOptions.ORIGINAL_NATIVE_WAR, Boolean.TRUE);       // the original's (Z2.3)
         CHANGED.put(GameOptions.CANCEL_KEEPS_MOVE, Boolean.TRUE);          // house rules
         CHANGED.put(GameOptions.REVENGE_MODE, Boolean.FALSE);
         CHANGED.put(GameOptions.LAST_COLONY_DEFEAT, Boolean.TRUE);
@@ -504,7 +505,8 @@ public class LeviRulesTest extends FreeColTestCase {
      */
     public void testOriginalNativeRules() {
         final String[][] rows = {
-            { GameOptions.ORIGINAL_TRIBUTE, "Tribute as in the original" } };
+            { GameOptions.ORIGINAL_TRIBUTE, "Tribute as in the original" },
+            { GameOptions.ORIGINAL_NATIVE_WAR, "Native war as in the original" } };
         for (String[] r : rows) {
             assertTrue(r[0], spec(LEVI).getBoolean(r[0]));
             assertFalse(r[0], spec("classic").getBoolean(r[0]));
@@ -537,7 +539,8 @@ public class LeviRulesTest extends FreeColTestCase {
                                GameOptions.ORIGINAL_ROAD_SILVER,
                                GameOptions.ORIGINAL_TORY_PENALTY,
                                GameOptions.ORIGINAL_FATHER_OFFER,
-                               GameOptions.ORIGINAL_TRIBUTE };
+                               GameOptions.ORIGINAL_TRIBUTE,
+                               GameOptions.ORIGINAL_NATIVE_WAR };
         for (String rules : new String[] { LEVI, "classic" }) {
             final java.io.StringWriter sw = new java.io.StringWriter();
             try (net.sf.freecol.common.io.FreeColXMLWriter xw

@@ -155,6 +155,60 @@ public class ClassicNativeNoticesTest extends FreeColTestCase {
     }
 
     /**
+     * A tribe's own declaration of war (Z2.3; under the levi rule an
+     * attack starts none, the tribe may still declare it when its tension
+     * passes hateful): FreeCol's «Schlechte Neuigkeiten, Eure Exzellenz,
+     * Sioux hat uns den Krieg erklärt!» in GAME.TXT's @INDIANWAR words
+     * with the chief (SRC: never seen); a European's declaration keeps
+     * FreeCol's words.  The win notice of our attack on natives is a win
+     * notice by its key ({@link ClassicNotices#WIN_NOTICES}), from the
+     * attacker only.
+     */
+    public void testTheWarNoticesOfTheNatives() {
+        final ClassicText t = pack("testTheWarNoticesOfTheNatives");
+        if (t == null) return;
+        final World w = new World();
+        final ModelMessage sioux = new ModelMessage(ModelMessage.MessageType.FOREIGN_DIPLOMACY,
+            ClassicNotices.WAR_DECLARED, w.sioux)
+            .addStringTemplate("%nation%", w.sioux.getNationLabel());
+        final ClassicAdvisorBox.Request r = ClassicNotices.request(t, "message "
+            + sioux.getId(), sioux, Messages.message(sioux), w.sioux, w.dutch, "x", null);
+        assertEquals("INDIANWAR", r.id);
+        assertEquals(ClassicAdvisorBox.Portrait.chief(SIOUX).sprite, r.portrait.sprite);
+        assertTrue(r.plainText(), r.plainText().contains("Wir Sioux"));
+        assertTrue(r.plainText(), r.plainText().contains("KRIEG"));
+        final Player france = w.game.getPlayerByNationId("model.nation.french");
+        final ModelMessage french = new ModelMessage(ModelMessage.MessageType.FOREIGN_DIPLOMACY,
+            ClassicNotices.WAR_DECLARED, france)
+            .addStringTemplate("%nation%", france.getNationLabel());
+        assertEquals("message " + ClassicNotices.WAR_DECLARED, ClassicNotices.request(t,
+            "message " + french.getId(), french, Messages.message(french), france, w.dutch,
+            "x", null).id);
+        // The win notices, by key and source.
+        final java.util.Set<String> ours = java.util.Set.of(w.soldier.getId());
+        for (String id : new String[] { "combat.unitSlaughtered.enemy.brave",
+                                        "combat.unitSlaughtered.enemy",
+                                        "combat.unitDemoted.enemy.armedBrave",
+                                        "combat.unitDemotedToUnarmed.enemy" }) {
+            final ModelMessage m = new ModelMessage(ModelMessage.MessageType.COMBAT_RESULT,
+                                                    id, w.soldier);
+            assertTrue(id, ClassicNotices.isOurWinOverNatives(m, ours));
+            assertFalse(id, ClassicNotices.isOurWinOverNatives(m, java.util.Set.of()));
+        }
+        for (String id : new String[] { "combat.unitSlaughtered.ours.freeColonist",
+                                        "combat.newConvertFromAttack",
+                                        "combat.destroySettlement.enemy",
+                                        "combat.unitPromoted" }) {
+            assertFalse(id, ClassicNotices.isOurWinOverNatives(new ModelMessage(
+                ModelMessage.MessageType.COMBAT_RESULT, id, w.soldier), ours));
+        }
+        // An attack on natives: a village's owner, else the defender's.
+        assertTrue(ClassicNotices.attacksNatives(w.soldier, w.siouxCamp.getTile()));
+        assertFalse(ClassicNotices.attacksNatives(w.soldier,
+            w.soldier.getTile().getNeighbourOrNull(net.sf.freecol.common.model.Direction.W)));
+    }
+
+    /**
      * FreeCol's question before a tribute (Z2.2; Roger's event #12,
      * frame_064125) is never shown: its four versions answer «yes» at
      * once, no box; another confirm still asks.

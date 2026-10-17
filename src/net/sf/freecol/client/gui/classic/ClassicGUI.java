@@ -6636,6 +6636,9 @@ public class ClassicGUI extends GUI {
      *       is dropped ({@link ClassicOptionBoxes#reportsShown},
      *       {@link ClassicPrefs#REPORTS}), on top of FreeCol's own message
      *       options.</li>
+     *   <li>FreeCol's win notice of our attack on natives («Sieg bei …»)
+     *       is dropped: the original shows none (part Z, Z2.3,
+     *       {@link #dropOurWinsOverNatives}).</li>
      *   <li>Each notice is a box in the original's words where GAME.TXT
      *       has it ({@link ClassicNotices}, master plan N1).</li>
      *   <li>The turn report asks a pending father offer after its price
@@ -6654,6 +6657,8 @@ public class ClassicGUI extends GUI {
      */
     private void showMessagePopup(List<ModelMessage> all, String titleKey) {
         final List<ModelMessage> messages = noticesShown(all);
+        // Our attack on natives won: no «Sieg bei …» (part Z, Z2.3).
+        dropOurWinsOverNatives(messages);
         // The woodcut a notice brings (N17) comes also when the notice
         // itself is not shown (I), before the shown ones.
         final Game game = getGame();
@@ -9105,6 +9110,56 @@ public class ClassicGUI extends GUI {
                                        FreeColGameObject defender,
                                        Tile tile) {
         return true;
+    }
+
+    /**
+     * Our units that attacked natives since the last notices (part Z,
+     * Z2.3; {@link #confirmPreCombat}, {@link ClassicNotices#isOurWinOverNatives}).
+     * EDT only.
+     */
+    private final Set<String> nativeAttackers = new HashSet<>();
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The last step before the controller sends an attack ({@code
+     * moveAttack}, {@code moveAttackSettlement}, the scout's attack, the
+     * ranged attack): an attack of ours on natives is noted, so that
+     * FreeCol's «Sieg bei …» for it is not shown (part Z, Z2.3; Roger's
+     * test, events #14 and #17, frame_064810 and frame_069337; the
+     * original shows no result box when our attack on natives wins, V ×5:
+     * playthrough-4 048 #30249, #55062, #61284, #66085; the next box is
+     * @INDIANSLAVES, @EXTINCT or nothing).
+     */
+    @Override
+    public boolean confirmPreCombat(Unit attacker, Tile tile) {
+        final boolean attack = super.confirmPreCombat(attacker, tile);
+        if (attack && ClassicNotices.attacksNatives(attacker, tile)) {
+            this.nativeAttackers.add(attacker.getId());
+        }
+        return attack;
+    }
+
+    /**
+     * Take FreeCol's win notices of our attacks on natives out of the
+     * notices to show ({@link #confirmPreCombat}), and forget the attacks:
+     * the notices of an attack come in the first popup after it.  Each one
+     * dropped is a recorder line {@code notice-dropped <id> (our win over
+     * natives)}.  EDT only.
+     *
+     * @param messages The notices to show; changed.
+     */
+    void dropOurWinsOverNatives(List<ModelMessage> messages) {
+        if (this.nativeAttackers.isEmpty()) return;
+        for (Iterator<ModelMessage> it = messages.iterator(); it.hasNext();) {
+            final ModelMessage m = it.next();
+            if (ClassicNotices.isOurWinOverNatives(m, this.nativeAttackers)) {
+                ClassicFrameRecorder.event("notice-dropped", m.getId()
+                    + " (our win over natives)");
+                it.remove();
+            }
+        }
+        this.nativeAttackers.clear();
     }
 
     /**
