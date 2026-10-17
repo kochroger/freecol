@@ -247,8 +247,9 @@ final class ClassicNotices {
             "STRING0", Value.TRIBE, "STRING1", Value.NATION_ABBREV));
         RULES.put("scoutSettlement.speakDie", new Rule("CHIEFKILL", Who.CHIEF,
             "STRING0", Value.TRIBE));
-        RULES.put("info.noMoreSkill", new Rule("LEARNALREADY", Who.CHIEF,
-            "STRING0", Value.TRIBE));
+        // Part Z, Z2.1: after the village box, 20 frames after its close.
+        RULES.put("info.noMoreSkill", new Rule("LEARNALREADY",
+            ClassicVillageBox.ALREADY_CHAIN_MS, Who.CHIEF, "STRING0", Value.TRIBE));
         RULES.put("learnSkill.leave", new Rule("LEARNMAD", Who.CHIEF));
         RULES.put("learnSkill.die", new Rule("CHIEFKILL", Who.CHIEF,
             "STRING0", Value.TRIBE));
@@ -565,7 +566,9 @@ final class ClassicNotices {
      * N13), {@code %STRING0} the tribe, {@code %STRING1} NAMES {@code @JOB}
      * column 1 of the skill («Zuckerpflanzer», «Pelzjäger»; the template
      * adds «Meister-»), its two rows from the file, the bar on row 1 (no
-     * {@code @default}), Escape on row 2 «Im Moment nicht, danke.».
+     * {@code @default}), Escape on row 2 «Im Moment nicht, danke.»; 19
+     * frames after the village box's close (part Z, Z2.1, V playthrough-1
+     * #9008 -&gt; #9027, {@link ClassicVillageBox#STAY_CHAIN_MS}).
      *
      * @param t The pack's texts, or null.
      * @param is The village.
@@ -586,7 +589,7 @@ final class ClassicNotices {
         final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText("LEARNSTAY",
             m, values);
         return (b == null) ? null : b.portrait(ClassicAdvisorBox.Portrait.chief(tribe))
-            .defaultRow(0).cancelRow(1);
+            .defaultRow(0).cancelRow(1).chain(ClassicVillageBox.STAY_CHAIN_MS);
     }
 
     /**

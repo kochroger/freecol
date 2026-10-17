@@ -60,7 +60,8 @@ import net.sf.freecol.common.option.GameOptions;
  *   @DONTKNOWSHIPS (admiral), an empty trader at a village @TRADENOCARGO
  *   (the chief), a ship of the rebels past the edge @EUROPENOTLEAVE
  *   (admiral), an expert at a contacted village @LEARNMASTER and a petty
- *   criminal there @LEARNCRIMINAL (the chief, {@link #learnRefusal}).  A
+ *   criminal there @LEARNCRIMINAL (the chief, {@link #learnRefusal}; after
+ *   the village box, part Z, {@link #isLearnRefusal}).  A
  *   refused move the original has no words for (into the sea
  *   without our ship, onto a full ship, off the map, an empty ship onto
  *   land) is consumed silently.  Legal moves, a move without moves left
@@ -278,10 +279,11 @@ final class ClassicIllegalMoves {
      *       tribe (NAMES {@code @TRIBES}; I: never recorded);</li>
      *   <li>any other (a convert): the controller's, as before.</li>
      * </ul>
-     * The refusal costs nothing (class comment).  I: in the original the
-     * expert first gets the village's two-row box (clip008 #23034, D11,
-     * not built) and this answer after «Mit den Ureinwohnern leben»; ours
-     * comes at once, in place of that box.
+     * The refusal costs nothing (class comment).  The original first gives
+     * the village's two-row box and this answer after «Mit den
+     * Ureinwohnern leben» (clip008 #23034; V playthrough-4 048 #20572 then
+     * @LEARNCRIMINAL #20695): {@link ClassicGUI}'s key asks the box first
+     * (part Z, Z2.1, {@link #isLearnRefusal}).
      *
      * @param unit The colonist.
      * @param to The village's tile, or null.
@@ -304,6 +306,19 @@ final class ClassicIllegalMoves {
         return new Verdict("LEARNMASTER", ClassicNotices.Who.CHIEF, tribe, null,
             freeCol, false, new String[][] {
                 { "STRING1", "JOB", Integer.toString(row) } });
+    }
+
+    /**
+     * Whether a refusal is the chief's answer to a colonist who cannot
+     * learn ({@link #learnRefusal}): the village box comes before it
+     * (part Z, Z2.1).
+     *
+     * @param v The refusal, or null.
+     * @return True for @LEARNMASTER and @LEARNCRIMINAL.
+     */
+    static boolean isLearnRefusal(Verdict v) {
+        return v != null && ("LEARNMASTER".equals(v.section)
+                             || "LEARNCRIMINAL".equals(v.section));
     }
 
     /**
@@ -500,6 +515,25 @@ final class ClassicIllegalMoves {
      */
     static ClassicAdvisorBox.Request request(ClassicText t, Verdict v,
                                              long showAtNanos, String title) {
+        return request(t, v, showAtNanos, title, -1.0);
+    }
+
+    /**
+     * A refusal's box ({@link #request(ClassicText, Verdict, long, String)})
+     * after the box before it: the chief's refusal after the village box
+     * (part Z, Z2.1).
+     *
+     * @param t The pack's texts, or null.
+     * @param v The refusal, with a section.
+     * @param showAtNanos When the box should be on screen, 0 for at once.
+     * @param title The stopgap's window title.
+     * @param chainMs The least time after the box before (ms), or a
+     *     negative value for the layer's.
+     * @return The box.
+     */
+    static ClassicAdvisorBox.Request request(ClassicText t, Verdict v,
+                                             long showAtNanos, String title,
+                                             double chainMs) {
         final ClassicText.Message m = (t == null || v.freeColOnly) ? null
             : t.message(v.section);
         final Map<String, String> values = names(t, v);
@@ -509,6 +543,7 @@ final class ClassicIllegalMoves {
             b = ClassicAdvisorBox.Request.builder(v.section)
                 .freeColText(Messages.message(v.freeCol));
         }
+        if (chainMs >= 0.0) b.chain(chainMs);
         return b.portrait(ClassicNotices.portrait(v.who, v.tribe))
             .showAt(showAtNanos).stopgap(title, null).build();
     }

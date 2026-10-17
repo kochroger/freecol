@@ -2376,7 +2376,45 @@ Roger's decisions of 2026-10-13: the original everywhere.
   chain). Tests: `ClassicFirstContactOrderTest` (the client with its own
   game, every reply over XML through the client's handlers),
   `ClassicNativeBoxesTest.testAContactInTheNativesTurn`.
+- **The village box** (part Z, Z2.1; `ClassicVillageBox`, M3 spec A1
+  with the verifier's W2; Roger's test of 2026-10-16, events #11 and #16:
+  FreeCol's mood sentence and «Einen Tribut fordern / Angriff /
+  Abbrechen»): every unit entering a village gets the original's box, no
+  portrait, the prompt by the village's mood, the rows from NAMES
+  @ACTIONS at x + 9, the bar on row 1, Escape on «Handlung abbrechen»,
+  h = 6 lines + 8 rows + 18 centred. The scout «Mit dem Häuptling
+  sprechen / Zoll fordern / Dorf angreifen / Handlung abbrechen»
+  (playthrough-1 #46977 (42,66,236,68); 046 #114127 @VILLAGESAVAGE
+  (42,63,236,74)); a colonist, expert, criminal or pioneer «Mit den
+  Ureinwohnern leben / Handlung abbrechen» (playthrough-1 #8480
+  (42,74,236,52)); a soldier, dragoon or artillery «Dorf angreifen / Zoll
+  fordern / Handlung abbrechen», **the bar on «Dorf angreifen», so Enter
+  attacks** (Roger's decision F4, built as the original: 045 #30725, 048
+  #44568, war-french #16955; the alternative is the bar on «Handlung
+  abbrechen»); the missionary «Mission gründen / Indianer aufwiegeln /
+  Handlung abbrechen» (playthrough-3 #107633), with another nation's
+  mission «Span. Mission der Ketzerei beschuldigen» in row 1's place (047
+  #9331); a wagon train or a ship with goods «Mit Dorf handeln / Handlung
+  abbrechen» (playthrough-3 #124831), then FreeCol's trade session until
+  M6. `%STRING0` is @LEVELS column 2 at the tribe's level («ein Lager»,
+  «ein Dorf», «eine Stadt»), a capital's «eine Hauptstadt» (I; V in
+  @LOOT), `{%STRING1}` the tribe. The mood (I, one table): the village's
+  alarm HAPPY and CONTENT @VILLAGEHAPPY (@VILLAGESAVAGE for the Arawak),
+  DISPLEASED @VILLAGEMEDIUM, ANGRY @VILLAGEBAD, HATEFUL or at war
+  @VILLAGEWAR (never seen). The colonist's and the trader's box are new
+  before the server is asked (`GUI.confirmNativeSettlementEntry`, called
+  by `moveLearnSkill` and `moveTrade`; FreeCol asked nothing), so their
+  cancel sends nothing; an expert's or criminal's key gets the box before
+  the chief's refusal (`illegalMoveKey`). The answers 18-20 frames after
+  the box's close (the chief's palette 3 of them): @LEARNMASTER and
+  @LEARNCRIMINAL 18 (048 #20677 -> #20695), @LEARNALREADY 20 (#44164 ->
+  #44184), @LEARNSTAY 19 (playthrough-1 #9008 -> #9027). Without the
+  pack, or for a tribe the original does not have, FreeCol's box as
+  before. Recorder `village-box <unit> <tag> <rows> <bar> chosen= action=`.
+  Not offered: «Feindliches Dorf betreten» and the scout's «Indianer
+  aufwiegeln» (never seen).
 - **Learning** (`askLearn`, the learn question of `moveLearnSkill`):
+  after the village box's «Mit den Ureinwohnern leben»,
   `@LEARNSTAY` with the chief (the tribe, @JOB column 1 of the skill), the
   bar on «Dann will ich ein Meister-... werden.», Escape «Im Moment
   nicht, danke.»; its «no», Escape included, brings `@LEARNLATER` 250 ms
@@ -2426,8 +2464,8 @@ no rule is added.
 | move | the same, contacted and at peace, without de Witt | @TRADEMERCANTILISM in FreeCol's words (`%STRING0` unknown) | none |
 | move | ship at an uncontacted village (`NO_ACCESS_CONTACT`) | @DONTKNOWSHIPS | admiral |
 | move | empty ship or wagon train at a village (`NO_ACCESS_GOODS`) | @TRADENOCARGO | the chief |
-| move | an expert at a contacted village (`NO_ACCESS_SKILL`; `%STRING1` his `@JOB` name, V clip008 #24727 «Meister-Pelzjäger»; I: the original's two-row village box before it, D11) | @LEARNMASTER | the chief |
-| move | a petty criminal at a contacted village (`NO_ACCESS_SKILL`; `%STRING0` the tribe) | @LEARNCRIMINAL | the chief |
+| move | an expert at a contacted village (`NO_ACCESS_SKILL`; `%STRING1` his `@JOB` name, V clip008 #24727 «Meister-Pelzjäger»; after the village box's «Mit den Ureinwohnern leben», part Z, Z2.1, V 048 #20572 -> #20695) | @LEARNMASTER | the chief |
+| move | a petty criminal at a contacted village (`NO_ACCESS_SKILL`; `%STRING0` the tribe; after the village box, as @LEARNMASTER) | @LEARNCRIMINAL | the chief |
 | move | the rebels' ship past the edge (no Europe) | @EUROPENOTLEAVE | admiral |
 | move | into the sea without our ship, onto a full ship, off the map, an empty ship onto land | nothing | |
 | B | a ship | @SEACOLONY | frontiersman |

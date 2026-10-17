@@ -9967,12 +9967,75 @@ public class ClassicGUI extends GUI {
         return b.build();
     }
 
-    // The village boxes.  Only their cancel is seen here: the original
-    // ends the turn 756 ms after a cancelled village box instead of 485
-    // (build spec W5a, delta W5a).  The boxes themselves are W8's; a
-    // cancel keeps the unit's move (Roger's house rule), as FreeCol does.
-    // The first village entry's woodcut comes before them when no key
-    // brought it (W9: a goto, a click; the key's is villageEntryKey).
+    // The village boxes (part Z, Z2.1; ClassicVillageBox): the original's
+    // box for every unit, its prompt by the village's mood, its rows from
+    // NAMES @ACTIONS, the bar on row 1.  Without the pack, or at a village
+    // of a tribe the original does not have, FreeCol's box as before.  A
+    // cancel keeps the unit's move (Roger's house rule), as FreeCol does,
+    // and the original ends the turn 756 ms after a cancelled village box
+    // instead of 485 (build spec W5a, delta W5a).  The first village
+    // entry's woodcut comes before them when no key brought it (W9: a
+    // goto, a click; the key's is villageEntryKey).
+
+    /** No original village box: FreeCol's box instead ({@link #villageBox}). */
+    static final int NO_VILLAGE_BOX = Integer.MIN_VALUE;
+
+    /**
+     * The original's village box ({@link ClassicVillageBox}), asked on the
+     * event thread.
+     *
+     * @param is The village.
+     * @param kind The unit's kind of box.
+     * @param canEstablish For a missionary: no mission there yet.
+     * @param canDenounce For a missionary: another nation's mission there.
+     * @param unit The unit, or null (for the recorder).
+     * @return The NAMES {@code @ACTIONS} row taken, -1 for «Handlung
+     *     abbrechen» and Escape, or {@link #NO_VILLAGE_BOX}.
+     */
+    int villageBox(IndianSettlement is, ClassicVillageBox.Kind kind,
+                   boolean canEstablish, boolean canDenounce, Unit unit) {
+        final ClassicAdvisorBox.Request r = villageRequest(is, kind, canEstablish,
+                                                           canDenounce, 0L);
+        if (r == null) return NO_VILLAGE_BOX;
+        final int[] rows = ClassicVillageBox.rows(kind, canEstablish, canDenounce);
+        final int chosen = onEventThread(() -> this.prompter.ask(r),
+                                         ClassicAdvisorBox.Bar.DISMISSED);
+        final int act = ClassicVillageBox.action(r, rows, chosen);
+        ClassicFrameRecorder.event("village-box", ClassicVillageBox.event(
+            (unit == null) ? null : unit.getId(), r) + " chosen=" + chosen
+            + " action=" + act);
+        return act;
+    }
+
+    /**
+     * The original's village box ({@link #villageBox}) as a request.
+     *
+     * @param is The village, or null.
+     * @param kind The unit's kind of box.
+     * @param canEstablish For a missionary: no mission there yet.
+     * @param canDenounce For a missionary: another nation's mission there.
+     * @param showAtNanos When it should be on screen, 0 for at once.
+     * @return The box, or null for FreeCol's.
+     */
+    ClassicAdvisorBox.Request villageRequest(IndianSettlement is,
+                                             ClassicVillageBox.Kind kind,
+                                             boolean canEstablish,
+                                             boolean canDenounce,
+                                             long showAtNanos) {
+        final Player me = myPlayer();
+        if (is == null || me == null) return null;
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final Unit missionary = is.getMissionary();
+        final String missionNation = (kind == ClassicVillageBox.Kind.MISSIONARY
+            && canDenounce && missionary != null)
+            ? ClassicVillageBox.nationAbbrev(t, missionary.getOwner()) : null;
+        final ClassicAdvisorBox.Builder b = ClassicVillageBox.builder(t,
+            ClassicVillageBox.moodTag(is, me), tribeIndex(is.getOwner()),
+            is.isCapital(), ClassicVillageBox.rows(kind, canEstablish, canDenounce),
+            missionNation);
+        return (b == null) ? null
+            : b.showAt(showAtNanos).stopgap(colony(is.getTile()), null).build();
+    }
 
     /**
      * {@inheritDoc}
@@ -9981,7 +10044,10 @@ public class ClassicGUI extends GUI {
      * moved into it attacks (part N6, I: the original demands tribute
      * from villages only, NAMES.TXT @ACTIONS "Zoll fordern"; FreeCol's
      * tribute from a colony is FreeCol's).  At peace the treaty question
-     * comes next ({@link #confirmHostileAction}).
+     * comes next ({@link #confirmHostileAction}).  At a village the
+     * original's box (part Z, Z2.1): «Dorf angreifen» (the bar's: Enter
+     * attacks, Roger's decision F4 built as the original), «Zoll fordern»,
+     * «Handlung abbrechen».
      */
     @Override
     public net.sf.freecol.common.model.Constants.ArmedUnitSettlementAction
@@ -9994,11 +10060,31 @@ public class ClassicGUI extends GUI {
                 .ArmedUnitSettlementAction.SETTLEMENT_ATTACK;
         }
         villageWoodcut(settlement);
-        return villageChoice(settlement,
-                             super.getArmedUnitSettlementChoice(settlement));
+        final int act = (settlement instanceof IndianSettlement)
+            ? villageBox((IndianSettlement) settlement, ClassicVillageBox.Kind.ARMED,
+                         false, false, getActiveUnit())
+            : NO_VILLAGE_BOX;
+        if (act == NO_VILLAGE_BOX) {
+            return villageChoice(settlement,
+                                 super.getArmedUnitSettlementChoice(settlement));
+        }
+        return villageChoice(settlement, (act == ClassicVillageBox.ATTACK)
+            ? net.sf.freecol.common.model.Constants.ArmedUnitSettlementAction
+                .SETTLEMENT_ATTACK
+            : (act == ClassicVillageBox.TRIBUTE)
+            ? net.sf.freecol.common.model.Constants.ArmedUnitSettlementAction
+                .SETTLEMENT_TRIBUTE
+            : null);
     }
 
-    /** {@inheritDoc} */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The menu of FreeCol's trade session: the original's village box
+     * «Mit Dorf handeln» comes before the session opens
+     * ({@link #confirmNativeSettlementEntry}); the session's own rows stay
+     * FreeCol's until the original's trade chain (M6).
+     */
     @Override
     public net.sf.freecol.common.model.Constants.TradeAction
         getIndianSettlementTradeChoice(
@@ -10010,26 +10096,86 @@ public class ClassicGUI extends GUI {
                 settlement, template, canBuy, canSell, canGift));
     }
 
-    /** {@inheritDoc} */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The original's box (part Z, Z2.1): «Mission gründen» (or, with
+     * another nation's mission there, «Span. Mission der Ketzerei
+     * beschuldigen»), «Indianer aufwiegeln», «Handlung abbrechen».
+     */
     @Override
     public net.sf.freecol.common.model.Constants.MissionaryAction
         getMissionaryChoice(Unit unit,
             net.sf.freecol.common.model.IndianSettlement is,
             boolean canEstablish, boolean canDenounce) {
         villageWoodcut(is);
-        return villageChoice(is, super.getMissionaryChoice(unit, is, canEstablish,
-                                                           canDenounce));
+        final int act = villageBox(is, ClassicVillageBox.Kind.MISSIONARY,
+                                   canEstablish, canDenounce, unit);
+        if (act == NO_VILLAGE_BOX) {
+            return villageChoice(is, super.getMissionaryChoice(unit, is,
+                canEstablish, canDenounce));
+        }
+        return villageChoice(is, (act == ClassicVillageBox.ESTABLISH)
+            ? net.sf.freecol.common.model.Constants.MissionaryAction
+                .MISSIONARY_ESTABLISH_MISSION
+            : (act == ClassicVillageBox.DENOUNCE)
+            ? net.sf.freecol.common.model.Constants.MissionaryAction
+                .MISSIONARY_DENOUNCE_HERESY
+            : (act == ClassicVillageBox.INCITE)
+            ? net.sf.freecol.common.model.Constants.MissionaryAction
+                .MISSIONARY_INCITE_INDIANS
+            : null);
     }
 
-    /** {@inheritDoc} */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The original's box (part Z, Z2.1): «Mit dem Häuptling sprechen»
+     * (the bar's), «Zoll fordern», «Dorf angreifen», «Handlung abbrechen».
+     */
     @Override
     public net.sf.freecol.common.model.Constants.ScoutIndianSettlementAction
         getScoutIndianSettlementChoice(
             net.sf.freecol.common.model.IndianSettlement is,
             String numberString) {
         villageWoodcut(is);
-        return villageChoice(is, super.getScoutIndianSettlementChoice(is,
-                                                                      numberString));
+        final int act = villageBox(is, ClassicVillageBox.Kind.SCOUT, false, false,
+                                   getActiveUnit());
+        if (act == NO_VILLAGE_BOX) {
+            return villageChoice(is, super.getScoutIndianSettlementChoice(is,
+                numberString));
+        }
+        return villageChoice(is, (act == ClassicVillageBox.SPEAK)
+            ? net.sf.freecol.common.model.Constants.ScoutIndianSettlementAction
+                .SCOUT_SETTLEMENT_SPEAK
+            : (act == ClassicVillageBox.TRIBUTE)
+            ? net.sf.freecol.common.model.Constants.ScoutIndianSettlementAction
+                .SCOUT_SETTLEMENT_TRIBUTE
+            : (act == ClassicVillageBox.ATTACK)
+            ? net.sf.freecol.common.model.Constants.ScoutIndianSettlementAction
+                .SCOUT_SETTLEMENT_ATTACK
+            : null);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The original's box before the server is asked (part Z, Z2.1): a
+     * colonist «Mit den Ureinwohnern leben» (then the chief's offer
+     * @LEARNSTAY, or @LEARNALREADY), a wagon train or a ship with goods
+     * «Mit Dorf handeln» (then FreeCol's trade session); «Handlung
+     * abbrechen» and Escape send nothing and keep the move.  The base GUI
+     * asked nothing.
+     */
+    @Override
+    public boolean confirmNativeSettlementEntry(Unit unit, IndianSettlement is) {
+        if (unit == null || is == null) return true;
+        villageWoodcut(is);
+        final ClassicVillageBox.Kind kind = (unit.isCarrier())
+            ? ClassicVillageBox.Kind.TRADE : ClassicVillageBox.Kind.COLONIST;
+        final int act = villageBox(is, kind, false, false, unit);
+        if (act == NO_VILLAGE_BOX) return true;
+        return villageChoice(is, (act < 0) ? null : Boolean.TRUE) != null;
     }
 
     /**
@@ -10327,8 +10473,55 @@ public class ClassicGUI extends GUI {
             colonyVisit(unit, direction, at);
             return true;
         }
+        if (ClassicIllegalMoves.isLearnRefusal(v)) {
+            villageRefusal(unit, direction, v, at);
+            return true;
+        }
         this.prompter.ask(refusalRequest(v, at));
         return true;
+    }
+
+    /**
+     * An expert or a petty criminal moved into a village (part Z, Z2.1;
+     * {@link ClassicIllegalMoves#learnRefusal}): the original's village box
+     * first, «Mit den Ureinwohnern leben» brings the chief's refusal
+     * (@LEARNMASTER, @LEARNCRIMINAL) 18 frames after its close (V
+     * playthrough-4 048 #20572, closed #20677, @LEARNCRIMINAL #20695; the
+     * M3 verifier's W5; clip008 #23034 then #24727 for @LEARNMASTER),
+     * «Handlung abbrechen» and Escape nothing; the first entry's woodcut
+     * before the box.  The controller never sees the order: the move is
+     * kept either way (Roger's house rule).  Without the original's
+     * village box the refusal at once, as before.  EDT only.
+     *
+     * @param unit The colonist.
+     * @param direction The direction of the village.
+     * @param v The refusal.
+     * @param showAtNanos When the first box should be on screen, 0 for at once.
+     */
+    private void villageRefusal(Unit unit, Direction direction,
+                                ClassicIllegalMoves.Verdict v, long showAtNanos) {
+        final Tile to = (unit == null || !unit.hasTile()) ? null
+            : unit.getTile().getNeighbourOrNull(direction);
+        final IndianSettlement is = (to == null) ? null : to.getIndianSettlement();
+        final ClassicAdvisorBox.Request box = villageRequest(is,
+            ClassicVillageBox.Kind.COLONIST, false, false, showAtNanos);
+        if (box == null) {
+            this.prompter.ask(refusalRequest(v, showAtNanos));
+            return;
+        }
+        villageWoodcut(is);
+        final int[] rows = ClassicVillageBox.rows(ClassicVillageBox.Kind.COLONIST,
+                                                  false, false);
+        final int chosen = this.prompter.ask(box);
+        final int act = ClassicVillageBox.action(box, rows, chosen);
+        ClassicFrameRecorder.event("village-box", ClassicVillageBox.event(
+            unit.getId(), box) + " chosen=" + chosen + " action=" + act
+            + ((act == ClassicVillageBox.LIVE) ? " then " + v.section : ""));
+        if (act == ClassicVillageBox.LIVE) {
+            this.prompter.ask(refusalRequest(v, 0L, ClassicVillageBox.ANSWER_CHAIN_MS));
+        } else {
+            villageChoice(is, null);
+        }
     }
 
     /**
@@ -10463,8 +10656,23 @@ public class ClassicGUI extends GUI {
      */
     ClassicAdvisorBox.Request refusalRequest(ClassicIllegalMoves.Verdict v,
                                              long showAtNanos) {
+        return refusalRequest(v, showAtNanos, -1.0);
+    }
+
+    /**
+     * A refusal's box ({@link ClassicIllegalMoves#request}) from the pack,
+     * after the box before it.
+     *
+     * @param v The refusal, with a section.
+     * @param showAtNanos When it should be on screen, 0 for at once.
+     * @param chainMs The least time after the box before (ms), or a
+     *     negative value for the layer's.
+     * @return The box.
+     */
+    ClassicAdvisorBox.Request refusalRequest(ClassicIllegalMoves.Verdict v,
+                                             long showAtNanos, double chainMs) {
         return ClassicIllegalMoves.request(ClassicText.load(ClassicPackFiles.runtime()),
-            v, showAtNanos, Messages.message("classic.dialog.messages"));
+            v, showAtNanos, Messages.message("classic.dialog.messages"), chainMs);
     }
 
     /**

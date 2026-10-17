@@ -2021,8 +2021,11 @@ public final class InGameController extends FreeColClientHolder {
      */
     private boolean moveLearnSkill(Unit unit, Direction direction) {
         // Refresh knowledge of settlement skill.  It may have been
-        // learned by another player.
+        // learned by another player.  The Classic UI's village box comes
+        // first (part Z, Z2.1); its cancel sends nothing.
         if (askClearGotoOrders(unit)
+            && getGUI().confirmNativeSettlementEntry(unit, (IndianSettlement)
+                getSettlementAt(unit.getTile(), direction))
             && askServer().askSkill(unit, direction)) {
             IndianSettlement is
                 = (IndianSettlement)getSettlementAt(unit.getTile(), direction);
@@ -2243,6 +2246,10 @@ public final class InGameController extends FreeColClientHolder {
             showNegotiationDialog(unit, settlement, agreement,
                 agreement.getSendMessage(player, settlement), direction);
         } else if (settlement instanceof IndianSettlement) {
+            // The Classic UI's village box first (part Z, Z2.1); its
+            // cancel opens no session.
+            if (!getGUI().confirmNativeSettlementEntry(unit,
+                    (IndianSettlement)settlement)) return false;
             askServer().newNativeTradeSession(unit, (IndianSettlement)settlement);
             changeView(unit, false); // Will be deselected on losing moves
 

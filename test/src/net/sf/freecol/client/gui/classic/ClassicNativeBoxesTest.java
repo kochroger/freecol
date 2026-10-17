@@ -43,10 +43,13 @@ import net.sf.freecol.common.model.TileType;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
 import net.sf.freecol.common.networking.AskSkillMessage;
+import net.sf.freecol.common.networking.AttackMessage;
 import net.sf.freecol.common.networking.ChangeSet;
 import net.sf.freecol.common.networking.Connection;
+import net.sf.freecol.common.networking.DemandTributeMessage;
 import net.sf.freecol.common.networking.FirstContactMessage;
 import net.sf.freecol.common.networking.LearnSkillMessage;
+import net.sf.freecol.common.networking.ScoutIndianSettlementMessage;
 import net.sf.freecol.common.networking.ServerAPI;
 import net.sf.freecol.common.option.GameOptions;
 import net.sf.freecol.server.FreeColServer;
@@ -114,6 +117,44 @@ public class ClassicNativeBoxesTest extends FreeColTestCase {
         public boolean learnSkill(Unit unit, Direction direction) {
             return handle("learnSkill",
                 new LearnSkillMessage(unit, direction).serverHandler(this.server, this.player));
+        }
+
+        // Part Z, Z2.1: the village boxes' actions.
+
+        @Override
+        public boolean attack(Unit unit, Direction direction) {
+            return handle("attack",
+                new AttackMessage(unit, direction).serverHandler(this.server, this.player));
+        }
+
+        @Override
+        public boolean demandTribute(Unit unit, Direction direction) {
+            return handle("demandTribute", new DemandTributeMessage(unit, direction)
+                .serverHandler(this.server, this.player));
+        }
+
+        @Override
+        public boolean scoutSettlement(Unit unit, Direction direction) {
+            return handle("scoutSettlement", new ScoutIndianSettlementMessage(unit,
+                direction).serverHandler(this.server, this.player));
+        }
+
+        @Override
+        public boolean scoutSpeakToChief(Unit unit, IndianSettlement is) {
+            this.log.add("scoutSpeakToChief");   // its result is the handler's
+            return true;
+        }
+
+        @Override
+        public boolean missionary(Unit unit, Direction direction, boolean denounce) {
+            this.log.add("missionary " + ((denounce) ? "denounce" : "establish"));
+            return true;
+        }
+
+        @Override
+        public boolean newNativeTradeSession(Unit unit, IndianSettlement is) {
+            this.log.add("newNativeTradeSession");   // FreeCol's session behind it
+            return true;
         }
 
         @Override
@@ -370,16 +411,31 @@ public class ClassicNativeBoxesTest extends FreeColTestCase {
 
     /**
      * The colonist moves onto the village (FreeCol's {@code moveLearnSkill},
-     * Roger's house rule {@code cancelKeepsMove} on): @LEARNSTAY with the
-     * chief, the bar on «Dann will ich ein Meister-Baumwollpflanzer
-     * werden.»; Enter learns and @LEARNDONE follows (before: no word at
-     * all), the village keeps the skill it taught (D-B3c); Down Enter and
-     * Escape bring @LEARNLATER and keep the colonist and his moves; Down Up
-     * Enter learns.
+     * Roger's house rule {@code cancelKeepsMove} on): first the village box
+     * (part Z, Z2.1, @VILLAGESAVAGE for the Arawak, «Mit den Ureinwohnern
+     * leben / Handlung abbrechen», the bar on row 1; V playthrough-1 #8480
+     * then @LEARNSTAY #9027); its «Handlung abbrechen» and Escape send
+     * nothing and keep the move.  After «leben» @LEARNSTAY with the chief,
+     * 19 frames after the box's close, the bar on «Dann will ich ein
+     * Meister-Baumwollpflanzer werden.»; Enter learns and @LEARNDONE
+     * follows (before: no word at all), the village keeps the skill it
+     * taught (D-B3c); Down Enter and Escape bring @LEARNLATER and keep the
+     * colonist and his moves; Down Up Enter learns.
      */
     public void testLearningThroughTheController() throws Exception {
         final ClassicText t = pack("testLearningThroughTheController");
-        for (String keys : new String[] { "ENTER", "DOWN ENTER", "ESC", "DOWN UP ENTER" }) {
+        if (t == null) return;
+        final String[][][] cases = {
+            // the village box's keys, @LEARNSTAY's keys
+            { { "ENTER" }, { "ENTER" } },
+            { { "ENTER" }, { "DOWN", "ENTER" } },
+            { { "ENTER" }, { "ESC" } },
+            { { "ENTER" }, { "DOWN", "UP", "ENTER" } },
+            { { "DOWN", "ENTER" } },
+            { { "ESC" } },
+        };
+        for (String[][] keys : cases) {
+            final String what = java.util.Arrays.deepToString(keys);
             final Rig r = rig();
             final Specification spec = r.game.getSpecification();
             final boolean rule = spec.getBoolean(GameOptions.CANCEL_KEEPS_MOVE);
@@ -390,37 +446,50 @@ public class ClassicNativeBoxesTest extends FreeColTestCase {
                     .getNeighbourOrNull(Direction.S).getSettlement();
                 final int moves = u.getMovesLeft();
                 assertTrue(moves > 0);
-                r.keys.press(keys.split(" "));
+                r.keys.press("ENTER").pressEach(keys);
                 r.igc().moveDirection(u, Direction.S, true);
                 flush();
-                final boolean learn = keys.endsWith("ENTER") && !"DOWN ENTER".equals(keys);
+                final boolean live = keys.length > 1;
+                final boolean learn = live && keys[1][keys[1].length - 1].equals("ENTER")
+                    && keys[1].length != 2;
                 if (learn) {
-                    assertEquals(keys + " " + r.api.log, List.of("askSkill", "learnSkill"),
+                    assertEquals(what + " " + r.api.log, List.of("askSkill", "learnSkill"),
                                  r.api.log);
-                    assertSame(keys, cottonPlanter, u.getType());
-                    assertEquals(keys, 0, u.getMovesLeft());
-                    assertNull(keys, is.getLearnableSkill());
+                    assertSame(what, cottonPlanter, u.getType());
+                    assertEquals(what, 0, u.getMovesLeft());
+                    assertNull(what, is.getLearnableSkill());
                     assertSame("the village keeps it", cottonPlanter, is.getTaughtSkill());
                 } else {
-                    assertEquals(keys, List.of("askSkill"), r.api.log);
-                    assertSame(keys, colonist, u.getType());
+                    assertEquals(what, (live) ? List.of("askSkill") : List.of(), r.api.log);
+                    assertSame(what, colonist, u.getType());
                     assertEquals("the refusal keeps the move", moves, u.getMovesLeft());
-                    assertSame(keys, cottonPlanter, is.getLearnableSkill());
+                    assertSame(what, cottonPlanter, is.getLearnableSkill());
                 }
-                if (t == null) continue;
-                assertEquals(keys, List.of("LEARNSTAY", (learn) ? "LEARNDONE" : "LEARNLATER"),
-                             r.asked());
-                final ClassicAdvisorBox.Request stay = r.keys.boxes.get(0);
+                final ClassicAdvisorBox.Request box = r.keys.boxes.get(0);
+                assertEquals(ClassicVillageBox.SAVAGE, box.id);
+                assertEquals(List.of("Mit den Ureinwohnern leben", "Handlung abbrechen"),
+                             List.of(box.plainRows()));
+                assertEquals(0, box.defaultRow);
+                assertEquals(1, box.escapeAnswer());
+                assertSame(ClassicAdvisorBox.Portrait.NONE, box.portrait);
+                if (!live) {
+                    assertEquals(what, List.of(ClassicVillageBox.SAVAGE), r.asked());
+                    continue;
+                }
+                assertEquals(what, List.of(ClassicVillageBox.SAVAGE, "LEARNSTAY",
+                                           (learn) ? "LEARNDONE" : "LEARNLATER"), r.asked());
+                final ClassicAdvisorBox.Request stay = r.keys.boxes.get(1);
                 assertEquals("IND2A0.SS.000", stay.portrait.sprite);
                 assertEquals(2, stay.rows.size());
                 assertEquals(0, stay.defaultRow);
                 assertEquals(1, stay.escapeAnswer());
+                assertEquals(ClassicVillageBox.STAY_CHAIN_MS, stay.chainMs);
                 assertTrue(stay.plainRows()[0], stay.plainRows()[0]
                     .contains("Meister-Baumwollpflanzer"));
                 assertTrue(stay.plainText(), stay.plainText().contains("Araukaner"));
-                final ClassicAdvisorBox.Request after = r.keys.boxes.get(1);
+                final ClassicAdvisorBox.Request after = r.keys.boxes.get(2);
                 assertEquals("IND2A0.SS.000", after.portrait.sprite);
-                assertEquals(keys, (learn) ? ClassicNotices.DONE_CHAIN_MS
+                assertEquals(what, (learn) ? ClassicNotices.DONE_CHAIN_MS
                              : ClassicNotices.LATER_CHAIN_MS, after.chainMs);
                 if (learn) {
                     assertTrue(after.plainText(),
@@ -492,5 +561,262 @@ public class ClassicNativeBoxesTest extends FreeColTestCase {
         assertEquals(1, keys.boxes.size());
         assertEquals("confirm " + ClassicGUI.LEARN_QUESTION, keys.boxes.get(0).id);
         assertEquals(Messages.message("learnSkill.yes"), keys.boxes.get(0).plainRows()[0]);
+    }
+
+
+    // Part Z, Z2.1: the village box for every unit
+
+    /**
+     * A village that has taught already: the village box, then after
+     * «Mit den Ureinwohnern leben» the chief's @LEARNALREADY, 20 frames
+     * after the box's close (V playthrough-4 048 #44105, closed #44164,
+     * @LEARNALREADY #44184); before part Z it came at once, without the
+     * box.  The move is kept (Roger's house rule).
+     */
+    public void testAVillageThatTaughtAnswersAfterTheBox() throws Exception {
+        final ClassicText t = pack("testAVillageThatTaughtAnswersAfterTheBox");
+        if (t == null) return;
+        final Rig r = rig();
+        final Specification spec = r.game.getSpecification();
+        final boolean rule = spec.getBoolean(GameOptions.CANCEL_KEEPS_MOVE);
+        spec.setBoolean(GameOptions.CANCEL_KEEPS_MOVE, true);
+        try {
+            final Unit u = learner(r);
+            final IndianSettlement is = u.getTile().getNeighbourOrNull(Direction.S)
+                .getIndianSettlement();
+            is.setLearnableSkill(null);
+            final int moves = u.getMovesLeft();
+            r.keys.press("ENTER");
+            r.igc().moveDirection(u, Direction.S, true);
+            flush();
+            assertEquals(List.of("askSkill"), r.api.log);
+            assertEquals(List.of(ClassicVillageBox.SAVAGE, "LEARNALREADY"), r.asked());
+            final ClassicAdvisorBox.Request already = r.keys.boxes.get(1);
+            assertEquals("IND2A0.SS.000", already.portrait.sprite);
+            assertEquals(ClassicVillageBox.ALREADY_CHAIN_MS, already.chainMs);
+            assertEquals(moves, u.getMovesLeft());
+        } finally {
+            spec.setBoolean(GameOptions.CANCEL_KEEPS_MOVE, rule);
+        }
+    }
+
+    /**
+     * A village of a tribe at (5,8), met, at peace, and a unit of ours
+     * north of it (the active unit).
+     *
+     * @param r The rig.
+     * @param nation The tribe's nation suffix.
+     * @param type The unit's type id.
+     * @param role The unit's role id, or null.
+     * @return The unit.
+     */
+    private Unit atVillage(Rig r, String nation, String type, String role) {
+        final ServerPlayer tribe = getServerPlayer(r.game, "model.nation." + nation);
+        final IndianSettlement is = new FreeColTestCase.IndianSettlementBuilder(r.game)
+            .player(tribe).settlementTile(r.game.getMap().getTile(5, 8))
+            .skillToTeach(cottonPlanter.getId()).capital(false).build();
+        Player.makeContact(tribe, r.dutch);
+        is.setContacted(r.dutch);
+        final Tile at = is.getTile().getNeighbourOrNull(Direction.N);
+        final Unit u = (role == null)
+            ? new ServerUnit(r.game, at, r.dutch, spec().getUnitType(type))
+            : new ServerUnit(r.game, at, r.dutch, spec().getUnitType(type),
+                             spec().getRole(role));
+        r.active = u;
+        return u;
+    }
+
+    /**
+     * The armed unit's box through the controller ({@code
+     * moveAttackSettlement}): @VILLAGEHAPPY for the Iroquois (Roger's event
+     * #11 had FreeCol's «Einen Tribut fordern / Angriff / Abbrechen»), the
+     * rows «Dorf angreifen / Zoll fordern / Handlung abbrechen», the bar on
+     * «Dorf angreifen» (Roger's decision F4, built as the original: Enter
+     * attacks, with no question, V landfall #26161), «ein Dorf der
+     * Irokesen»; «Handlung abbrechen» and Escape send nothing and keep the
+     * move.
+     */
+    public void testTheArmedUnitsVillageBox() throws Exception {
+        final ClassicText t = pack("testTheArmedUnitsVillageBox");
+        if (t == null) return;
+        for (String keys : new String[] { "ENTER", "ESC", "DOWN DOWN ENTER" }) {
+            final Rig r = rig();
+            final Unit u = atVillage(r, "iroquois", "model.unit.freeColonist",
+                                     "model.role.dragoon");
+            assertEquals(Unit.MoveType.ATTACK_SETTLEMENT, u.getMoveType(Direction.S));
+            final int moves = u.getMovesLeft();
+            r.keys.press(keys.split(" "));
+            r.igc().moveDirection(u, Direction.S, true);
+            flush();
+            final ClassicAdvisorBox.Request box = r.keys.boxes.get(0);
+            assertEquals(keys, ClassicVillageBox.HAPPY, box.id);
+            assertEquals(List.of("Dorf angreifen", "Zoll fordern", "Handlung abbrechen"),
+                         List.of(box.plainRows()));
+            assertEquals(0, box.defaultRow);
+            assertEquals(2, box.escapeAnswer());
+            assertTrue(box.plainText(), box.plainText().startsWith(
+                "Ihre Expedition hat ein Dorf der Irokesen erreicht."));
+            if ("ENTER".equals(keys)) {
+                assertEquals(keys, List.of("attack"), r.api.log);
+                assertEquals("no question before it", 1, r.keys.boxes.size());
+            } else {
+                assertEquals(keys, List.of(), r.api.log);
+                assertEquals(keys, List.of(ClassicVillageBox.HAPPY), r.asked());
+                assertEquals("the move kept", moves, u.getMovesLeft());
+            }
+        }
+    }
+
+    /**
+     * The scout's box ({@code moveScoutIndianSettlement}): four rows «Mit
+     * dem Häuptling sprechen / Zoll fordern / Dorf angreifen / Handlung
+     * abbrechen», the bar on row 1 (V playthrough-1 #46977); Enter
+     * speaks, row 3 attacks, Escape sends nothing more.
+     */
+    public void testTheScoutsVillageBox() throws Exception {
+        final ClassicText t = pack("testTheScoutsVillageBox");
+        if (t == null) return;
+        for (String keys : new String[] { "ENTER", "DOWN DOWN ENTER", "ESC" }) {
+            final Rig r = rig();
+            final Unit u = atVillage(r, "apache", "model.unit.freeColonist",
+                                     "model.role.scout");
+            final Player apache = getServerPlayer(r.game, "model.nation.apache");
+            r.dutch.putNationSummary(apache,   // the server's, at the scout's move
+                new net.sf.freecol.common.model.NationSummary(apache, r.dutch));
+            assertEquals(Unit.MoveType.ENTER_INDIAN_SETTLEMENT_WITH_SCOUT,
+                         u.getMoveType(Direction.S));
+            r.keys.press(keys.split(" "));
+            r.igc().moveDirection(u, Direction.S, true);
+            flush();
+            final ClassicAdvisorBox.Request box = r.keys.boxes.get(0);
+            assertEquals(ClassicVillageBox.HAPPY, box.id);
+            assertEquals(List.of("Mit dem Häuptling sprechen", "Zoll fordern",
+                                 "Dorf angreifen", "Handlung abbrechen"),
+                         List.of(box.plainRows()));
+            assertEquals(0, box.defaultRow);
+            assertEquals(3, box.escapeAnswer());
+            assertTrue(box.plainText(), box.plainText().contains("ein Lager der Apachen"));
+            assertEquals(keys, ("ENTER".equals(keys))
+                ? List.of("scoutSettlement", "scoutSpeakToChief")
+                : ("ESC".equals(keys)) ? List.of("scoutSettlement")
+                : List.of("scoutSettlement", "attack"), r.api.log);
+        }
+    }
+
+    /**
+     * The missionary's box ({@code getMissionaryChoice}): «Mission gründen
+     * / Indianer aufwiegeln / Handlung abbrechen» (V playthrough-3
+     * #107633); with a Spanish mission there «Span. Mission der Ketzerei
+     * beschuldigen» in row 1's place (V playthrough-4 047 #9331); Enter
+     * takes row 1, Escape nothing.
+     */
+    public void testTheMissionarysVillageBox() throws Exception {
+        final ClassicText t = pack("testTheMissionarysVillageBox");
+        if (t == null) return;
+        for (boolean spanish : new boolean[] { false, true }) {
+            for (String keys : new String[] { "ENTER", "ESC" }) {
+                final Rig r = rig();
+                final Unit u = atVillage(r, "sioux", "model.unit.jesuitMissionary",
+                                         "model.role.missionary");
+                final IndianSettlement is = u.getTile().getNeighbourOrNull(Direction.S)
+                    .getIndianSettlement();
+                if (spanish) {
+                    final ServerPlayer spain = getServerPlayer(r.game, "model.nation.spanish");
+                    is.setContacted(spain);
+                    is.setMissionary(new ServerUnit(r.game, null, spain,
+                        spec().getUnitType("model.unit.jesuitMissionary")));
+                }
+                assertEquals(Unit.MoveType.ENTER_INDIAN_SETTLEMENT_WITH_MISSIONARY,
+                             u.getMoveType(Direction.S));
+                r.keys.press(keys.split(" "));
+                r.igc().moveDirection(u, Direction.S, true);
+                flush();
+                final String what = keys + " spanish=" + spanish;
+                final ClassicAdvisorBox.Request box = r.keys.boxes.get(0);
+                assertEquals(what, ClassicVillageBox.HAPPY, box.id);
+                assertEquals(what, List.of((spanish) ? "Span. Mission der Ketzerei beschuldigen"
+                                           : "Mission gründen", "Indianer aufwiegeln",
+                                           "Handlung abbrechen"), List.of(box.plainRows()));
+                assertEquals(0, box.defaultRow);
+                assertEquals(2, box.escapeAnswer());
+                assertEquals(what, ("ENTER".equals(keys))
+                    ? List.of("missionary " + ((spanish) ? "denounce" : "establish"))
+                    : List.of(), r.api.log);
+            }
+        }
+    }
+
+    /**
+     * A wagon train with goods ({@code moveTrade}): «Mit Dorf handeln /
+     * Handlung abbrechen» before FreeCol's session opens (V playthrough-3
+     * #124831); Escape opens none and keeps the move.
+     */
+    public void testTheTradersVillageBox() throws Exception {
+        final ClassicText t = pack("testTheTradersVillageBox");
+        if (t == null) return;
+        for (String keys : new String[] { "ENTER", "ESC" }) {
+            final Rig r = rig();
+            final Unit u = atVillage(r, "iroquois", "model.unit.wagonTrain", null);
+            u.addGoods(spec().getGoodsType("model.goods.tradeGoods"), 100);
+            assertEquals(Unit.MoveType.ENTER_SETTLEMENT_WITH_CARRIER_AND_GOODS,
+                         u.getMoveType(Direction.S));
+            final int moves = u.getMovesLeft();
+            r.keys.press(keys.split(" "));
+            r.igc().moveDirection(u, Direction.S, true);
+            flush();
+            final ClassicAdvisorBox.Request box = r.keys.boxes.get(0);
+            assertEquals(ClassicVillageBox.HAPPY, box.id);
+            assertEquals(List.of("Mit Dorf handeln", "Handlung abbrechen"),
+                         List.of(box.plainRows()));
+            assertEquals(1, box.escapeAnswer());
+            if ("ENTER".equals(keys)) {
+                assertEquals(List.of("newNativeTradeSession"), r.api.log);
+            } else {
+                assertEquals(List.of(), r.api.log);
+                assertEquals(moves, u.getMovesLeft());
+            }
+        }
+    }
+
+    /**
+     * An expert or a petty criminal ordered into the village by key
+     * ({@link ClassicGUI#illegalMoveKey}, FreeCol's {@code
+     * MOVE_NO_ACCESS_SKILL}): the village box first, «Mit den Ureinwohnern
+     * leben» brings @LEARNMASTER (@LEARNCRIMINAL) with the chief 18 frames
+     * after its close (V playthrough-4 048 #20572 then #20695); «Handlung
+     * abbrechen» and Escape nothing.  The controller never sees the order.
+     */
+    public void testTheExpertsVillageBoxBeforeTheRefusal() throws Exception {
+        final ClassicText t = pack("testTheExpertsVillageBoxBeforeTheRefusal");
+        if (t == null) return;
+        final Object[][] cases = {
+            { "model.unit.masterCottonPlanter", "LEARNMASTER" },
+            { "model.unit.pettyCriminal", "LEARNCRIMINAL" } };
+        for (Object[] c : cases) {
+            for (String keys : new String[] { "ENTER", "ESC", "DOWN ENTER" }) {
+                final Rig r = rig();
+                final Unit u = atVillage(r, "sioux", (String) c[0], null);
+                assertEquals(Unit.MoveType.MOVE_NO_ACCESS_SKILL, u.getMoveType(Direction.S));
+                final int moves = u.getMovesLeft();
+                r.keys.press(keys.split(" "));
+                final boolean[] refused = new boolean[1];
+                SwingUtilities.invokeAndWait(() ->
+                    refused[0] = r.gui.illegalMoveKey(u, Direction.S));
+                assertTrue(refused[0]);
+                assertEquals(List.of(), r.api.log);
+                assertEquals(moves, u.getMovesLeft());
+                final String what = c[0] + " " + keys;
+                if ("ENTER".equals(keys)) {
+                    assertEquals(what, List.of(ClassicVillageBox.HAPPY, c[1]), r.asked());
+                    final ClassicAdvisorBox.Request no = r.keys.boxes.get(1);
+                    assertEquals("IND6A0.SS.000", no.portrait.sprite);
+                    assertEquals(ClassicVillageBox.ANSWER_CHAIN_MS, no.chainMs);
+                } else {
+                    assertEquals(what, List.of(ClassicVillageBox.HAPPY), r.asked());
+                }
+                assertEquals(List.of("Mit den Ureinwohnern leben", "Handlung abbrechen"),
+                             List.of(r.keys.boxes.get(0).plainRows()));
+            }
+        }
     }
 }

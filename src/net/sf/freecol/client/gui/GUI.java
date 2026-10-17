@@ -426,6 +426,20 @@ public class GUI extends FreeColClientHolder {
     }
 
     /**
+     * Confirm a unit's entry into a native settlement before the server
+     * is asked: a colonist who may learn there, or a carrier with goods
+     * to trade.  FreeCol asks nothing here; the Classic UI shows the
+     * original's village box (part Z, Z2.1).
+     *
+     * @param unit The {@code Unit} entering.
+     * @param is The {@code IndianSettlement} entered.
+     * @return True to go on, false to cancel (nothing is sent).
+     */
+    public boolean confirmNativeSettlementEntry(Unit unit, IndianSettlement is) {
+        return true;
+    }
+
+    /**
      * Shows the pre-combat dialog if enabled, allowing the user to
      * view the odds and possibly cancel the attack.
      *

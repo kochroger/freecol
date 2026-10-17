@@ -113,15 +113,31 @@ public class ClassicGUISeamTest extends FreeColTestCase {
         /** The bar's row after the keys of the last box if it stayed open, else -2. */
         int lastRow = -2;
 
+        /** Keys per box, in the boxes' order (then {@link #keys}); empty: {@link #keys} for every box. */
+        final List<String[]> perBox = new ArrayList<>();
+
         KeyPrompter press(String... k) {
             this.keys = k;
+            return this;
+        }
+
+        /**
+         * Keys for the next boxes, one array per box in their order; the
+         * boxes after them get {@link #keys}.
+         *
+         * @param each The keys of each box.
+         * @return This.
+         */
+        KeyPrompter pressEach(String[]... each) {
+            this.perBox.clear();
+            this.perBox.addAll(java.util.Arrays.asList(each));
             return this;
         }
 
         @Override
         public int ask(ClassicAdvisorBox.Request r) {
             this.boxes.add(r);
-            return answer(r, this.keys);
+            return answer(r, (this.perBox.isEmpty()) ? this.keys : this.perBox.remove(0));
         }
 
         int answer(ClassicAdvisorBox.Request r, String... ks) {
