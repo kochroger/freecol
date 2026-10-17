@@ -1875,8 +1875,19 @@ public final class InGameController extends Controller {
      * which one comes, and how much, is a guess (I) that the clips do not
      * contradict:
      * <ul>
-     *   <li>the tribe angry or hateful: «no» (@EXTORTNO, never seen; its
-     *       words «Ihr müßt uns für wahre Dummköpfe halten»);</li>
+     *   <li>the tribe at war with us, or the village hateful towards us
+     *       (the village box Roger sees is then @VILLAGEWAR, the Classic
+     *       UI's {@code ClassicVillageBox.moodTag}): «no» (@EXTORTNO, never
+     *       seen, nor a tribute at war; its words «Ihr müßt uns für wahre
+     *       Dummköpfe halten»).  An angry village pays (part Z's fixer,
+     *       the fidelity review: V war-french #42284 @VILLAGEBAD, the
+     *       Tupi camp's box, «Zoll fordern» at #42477, then #42537
+     *       @EXTORTSTUFF, 64 furs to Prov., after three attacks on Tupi
+     *       camps, the analyses #20986, #22246, #22892; and #16955
+     *       @VILLAGEMEDIUM, then #17339, 46 furs; before the fixer an
+     *       angry or hateful tribe said «no»).  The village's mood is
+     *       FreeCol's alarm, so how soon after attacks a village turns
+     *       hateful is FreeCol's (I);</li>
      *   <li>the tribe has at least as many settlements as our land
      *       units' offence ({@code Player.calculateStrength}, FreeCol's
      *       own measure of an unwise demand, {@code
@@ -1908,8 +1919,7 @@ public final class InGameController extends Controller {
                                          IndianSettlement is, boolean recent,
                                          ChangeSet cs) {
         final Player tribe = is.getOwner();
-        final Tension.Level level = tribe.getTension(serverPlayer).getLevel();
-        if (level == Tension.Level.ANGRY || level == Tension.Level.HATEFUL) {
+        if (tributeRefused(tribe, is, serverPlayer)) {
             return tributeAnswer("scoutSettlement.tributeNo", unit, is);
         }
         if (tribe.getSettlementCount() >= serverPlayer.calculateStrength(false)) {
@@ -1930,6 +1940,23 @@ public final class InGameController extends Controller {
             .addAmount("%amount%", amount)
             .addNamed("%goods%", goods)
             .addName("%colony%", colony.getName());
+    }
+
+    /**
+     * Whether the original's tribute is «no» ({@link #originalTribute}):
+     * the tribe at war with us, or the village's own alarm towards us
+     * hateful, the two cases of the village box @VILLAGEWAR (I); an angry
+     * village pays (V war-french #42284 -&gt; #42537).
+     *
+     * @param tribe The village's owner.
+     * @param is The {@code IndianSettlement} demanded of.
+     * @param us The {@code Player} demanding.
+     * @return True for «no».
+     */
+    static boolean tributeRefused(Player tribe, IndianSettlement is, Player us) {
+        if (tribe != null && tribe.atWarWith(us)) return true;
+        final Tension alarm = is.getAlarm(us);
+        return alarm != null && alarm.getLevel() == Tension.Level.HATEFUL;
     }
 
     /**

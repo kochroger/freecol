@@ -611,10 +611,26 @@ public class ClassicNativeBoxesTest extends FreeColTestCase {
      * @return The unit.
      */
     private Unit atVillage(Rig r, String nation, String type, String role) {
+        return atVillage(r, nation, type, role, false);
+    }
+
+    /**
+     * A village ({@link #atVillage(Rig, String, String, String)}), the
+     * tribe's capital or not.
+     *
+     * @param r The rig.
+     * @param nation The tribe's nation suffix.
+     * @param type The unit's type id.
+     * @param role The unit's role id, or null.
+     * @param capital Whether the village is the tribe's capital.
+     * @return The unit.
+     */
+    private Unit atVillage(Rig r, String nation, String type, String role,
+                           boolean capital) {
         final ServerPlayer tribe = getServerPlayer(r.game, "model.nation." + nation);
         final IndianSettlement is = new FreeColTestCase.IndianSettlementBuilder(r.game)
             .player(tribe).settlementTile(r.game.getMap().getTile(5, 8))
-            .skillToTeach(cottonPlanter.getId()).capital(false).build();
+            .skillToTeach(cottonPlanter.getId()).capital(capital).build();
         Player.makeContact(tribe, r.dutch);
         is.setContacted(r.dutch);
         final Tile at = is.getTile().getNeighbourOrNull(Direction.N);
@@ -664,6 +680,40 @@ public class ClassicNativeBoxesTest extends FreeColTestCase {
                 assertEquals(keys, List.of(ClassicVillageBox.HAPPY), r.asked());
                 assertEquals("the move kept", moves, u.getMovesLeft());
             }
+        }
+    }
+
+    /**
+     * A capital's box says the tribe's word, not «eine Hauptstadt» (the
+     * fidelity review of part Z: V clip008 #50931, 1514, «Ihre Expedition
+     * hat ein Dorf der Araukaner erreicht» at the village (47,44) under
+     * the capital star ICONS.SS.017, #50656; acceptance N4 had «eine
+     * Hauptstadt der Irokesen» at Onondaga, Roger's dragoon's village):
+     * through the controller at the Iroquois', the Apache's and the
+     * Inca's capital.
+     */
+    public void testACapitalsBoxSaysTheTribesWord() throws Exception {
+        final ClassicText t = pack("testACapitalsBoxSaysTheTribesWord");
+        if (t == null) return;
+        final String[][] cases = {
+            { "iroquois", "ein Dorf der Irokesen" },
+            { "apache", "ein Lager der Apachen" },
+            { "inca", "eine Stadt der Inka" } };
+        for (String[] c : cases) {
+            final Rig r = rig();
+            final Unit u = atVillage(r, c[0], "model.unit.freeColonist",
+                                     "model.role.dragoon", true);
+            assertTrue(c[0], u.getTile().getNeighbourOrNull(Direction.S)
+                       .getIndianSettlement().isCapital());
+            r.keys.press("ESC");
+            r.igc().moveDirection(u, Direction.S, true);
+            flush();
+            final ClassicAdvisorBox.Request box = r.keys.boxes.get(0);
+            assertEquals(c[0], ClassicVillageBox.HAPPY, box.id);
+            assertTrue(box.plainText(), box.plainText().startsWith(
+                "Ihre Expedition hat " + c[1] + " erreicht."));
+            assertFalse(box.plainText(), box.plainText().contains("Hauptstadt"));
+            assertEquals(c[0], List.of(), r.api.log);
         }
     }
 
@@ -899,6 +949,57 @@ public class ClassicNativeBoxesTest extends FreeColTestCase {
         flush();
         assertEquals("the attack forgotten", List.of("message combat.unitSlaughtered.enemy.brave"),
                      r.asked());
+    }
+
+    /**
+     * The positive control of {@link #testOurWinOverNativesIsNotShown}
+     * (the regression review of part Z: its mutants "every attack noted"
+     * and "a European owner counts too" kept every suite green): our
+     * dragoon's attack on a French soldier and on a French colony, at
+     * war, through FreeCol's real controller, is not noted, so FreeCol's
+     * win notice of it is still shown (the fights with the other
+     * Europeans and the REF keep their result boxes).
+     */
+    public void testOurWinOverAEuropeanIsShown() throws Exception {
+        final ClassicText t = pack("testOurWinOverAEuropeanIsShown");
+        if (t == null) return;
+        for (boolean colony : new boolean[] { false, true }) {
+            final Rig r = rig();
+            final ServerPlayer france = getServerPlayer(r.game, "model.nation.french");
+            r.dutch.setStance(france, Stance.WAR);
+            france.setStance(r.dutch, Stance.WAR);
+            final Tile at = r.game.getMap().getTile(3, 3);
+            final Tile target = at.getNeighbourOrNull(Direction.S);
+            if (colony) {
+                net.sf.freecol.util.test.FreeColTestUtils.getColonyBuilder().player(france)
+                    .colonyName("Quebec").colonyTile(target).initialColonists(1).build();
+            } else {
+                new ServerUnit(r.game, target, france, colonist,
+                               spec().getRole("model.role.soldier"));
+            }
+            final Unit u = new ServerUnit(r.game, at, r.dutch, colonist,
+                                          spec().getRole("model.role.dragoon"));
+            r.active = u;
+            assertEquals("colony=" + colony, (colony) ? Unit.MoveType.ATTACK_SETTLEMENT
+                         : Unit.MoveType.ATTACK_UNIT, u.getMoveType(Direction.S));
+            assertFalse(ClassicNotices.attacksNatives(u, target));
+            r.keys.press("ENTER");
+            r.igc().moveDirection(u, Direction.S, true);
+            flush();
+            assertEquals("colony=" + colony, List.of("attack"), r.api.log);
+            final net.sf.freecol.common.model.ModelMessage win
+                = new net.sf.freecol.common.model.ModelMessage(
+                    net.sf.freecol.common.model.ModelMessage.MessageType.COMBAT_RESULT,
+                    "combat.unitSlaughtered.enemy", u)
+                .addName("%location%", "Grasland").addName("%unit%", "Dragoner")
+                .addStringTemplate("%enemyNation%", france.getNationLabel())
+                .addName("%enemyUnit%", "Soldat");
+            r.keys.boxes.clear();
+            SwingUtilities.invokeAndWait(() -> r.gui.showModelMessages(List.of(win)));
+            flush();
+            assertEquals("colony=" + colony, List.of("message combat.unitSlaughtered.enemy"),
+                         r.asked());
+        }
     }
 
 

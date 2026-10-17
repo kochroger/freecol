@@ -162,7 +162,8 @@ public class LeviNativeRulesTest extends FreeColTestCase {
     }
 
     /**
-     * The original's refusals: «no» (@EXTORTNO) from an angry tribe;
+     * The original's refusals: «no» (@EXTORTNO) from a village hateful
+     * towards us, or a tribe at war with us (the box @VILLAGEWAR, I);
      * «laugh» (@EXTORTLAUGH) from a tribe with as many settlements as our
      * land strength (the soldiers gone); «poor» (@EXTORTPOOR) after a
      * tribute in the last five turns, with fewer than 10 to give, or
@@ -170,7 +171,8 @@ public class LeviNativeRulesTest extends FreeColTestCase {
      */
     public void testTheOriginalTributesRefusals() {
         final Object[][] cases = {
-            { "angry", "scoutSettlement.tributeNo" },
+            { "hateful", "scoutSettlement.tributeNo" },
+            { "war", "scoutSettlement.tributeNo" },
             { "weak", "scoutSettlement.tributeLaugh" },
             { "lately", "scoutSettlement.tributePoor" },
             { "little", "scoutSettlement.tributePoor" },
@@ -179,8 +181,12 @@ public class LeviNativeRulesTest extends FreeColTestCase {
             final Scene s = scene(true, !"no colony".equals(c[0]));
             s.village.addGoods(furs, ("little".equals(c[0])) ? 19 : 80);
             switch ((String) c[0]) {
-            case "angry":
-                s.arawak.getTension(s.dutch).setValue(Tension.Level.ANGRY.getLimit());
+            case "hateful":
+                s.village.setAlarm(s.dutch, new Tension(Tension.Level.HATEFUL.getLimit()));
+                break;
+            case "war":
+                s.arawak.setStance(s.dutch, Stance.WAR);
+                s.dutch.setStance(s.arawak, Stance.WAR);
                 break;
             case "weak":
                 for (net.sf.freecol.common.model.Unit u : new java.util.ArrayList<>(
@@ -205,6 +211,36 @@ public class LeviNativeRulesTest extends FreeColTestCase {
             assertFalse(c[0] + "", cs.toString().contains("scoutSettlement.tributeGoods"));
             assertEquals(c[0] + "", had, s.village.getGoodsCount(furs));
             assertEquals(0, s.soldier.getMovesLeft());
+        }
+    }
+
+    /**
+     * An angry village pays (the fidelity review of part Z: V war-french
+     * #42284 the Tupi camp's @VILLAGEBAD, «Zoll fordern» at #42477, then
+     * #42537 @EXTORTSTUFF, 64 furs; before the fixer FreeCol's ANGRY,
+     * which the box shows as @VILLAGEBAD, said «no»): the tribe and the
+     * village angry, or the tribe hateful with the village angry (the
+     * village's own mood decides, as its box), or both displeased: half
+     * of its 80 furs to Base.
+     */
+    public void testAnAngryVillagePays() {
+        final Tension.Level[][] cases = {
+            { Tension.Level.ANGRY, Tension.Level.ANGRY },
+            { Tension.Level.HATEFUL, Tension.Level.ANGRY },
+            { Tension.Level.DISPLEASED, Tension.Level.DISPLEASED } };
+        for (Tension.Level[] c : cases) {
+            final Scene s = scene(true);
+            s.village.addGoods(furs, 80);
+            s.arawak.getTension(s.dutch).setValue(c[0].getLimit());
+            s.village.setAlarm(s.dutch, new Tension(c[1].getLimit()));
+            assertEquals(c[1], s.village.getAlarm(s.dutch).getLevel());
+            final int furs0 = s.near.getGoodsCount(furs);
+            final ChangeSet cs = s.igc.demandTribute(s.dutch, s.soldier, s.village);
+            final String what = c[0] + "/" + c[1];
+            assertTrue(what + " " + cs, cs.toString().contains("scoutSettlement.tributeGoods"));
+            assertFalse(what, cs.toString().contains("scoutSettlement.tributeNo"));
+            assertEquals(what, furs0 + 40, s.near.getGoodsCount(furs));
+            assertEquals(what, 40, s.village.getGoodsCount(furs));
         }
     }
 

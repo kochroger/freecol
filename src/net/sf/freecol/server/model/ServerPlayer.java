@@ -2809,12 +2809,6 @@ outer:  for (Effect effect : effects) {
     }
 
     /**
-     * Gets the amount to raise tension by when a unit is slaughtered.
-     *
-     * @param loser The {@code Unit} that dies.
-     * @return An amount to raise tension by.
-     */
-    /**
      * Whether the original's native war applies (levi {@code
      * model.option.originalNativeWar}, part Z, Z-ITEMS Z2.3; Roger's
      * decision F2, open, built as the original): an attack between a
@@ -2837,6 +2831,12 @@ outer:  for (Effect effect : effects) {
             && spec.getBoolean(GameOptions.ORIGINAL_NATIVE_WAR);
     }
 
+    /**
+     * Gets the amount to raise tension by when a unit is slaughtered.
+     *
+     * @param loser The {@code Unit} that dies.
+     * @return An amount to raise tension by.
+     */
     private int getSlaughterTension(Unit loser) {
         // Tension rises faster when units die.
         Settlement settlement = loser.getSettlement();

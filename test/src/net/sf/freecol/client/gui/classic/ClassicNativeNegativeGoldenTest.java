@@ -238,11 +238,11 @@ public class ClassicNativeNegativeGoldenTest extends FreeColTestCase {
               "INDIANCOMMENT", "begrüßt seine Freunde", "Wohlstand ihrer Nachbarn" },
             { "#11", 63964, new Rectangle(42, 73, 236, 54),
               ClassicVillageBox.builder(t, ClassicVillageBox.moodTag(Tension.Level.HAPPY,
-                  IROQUOIS, false), IROQUOIS, false, armed, null).build(),
+                  IROQUOIS, false), IROQUOIS, armed, null).build(),
               ClassicVillageBox.HAPPY, "Einen Tribut fordern", "ein Dorf der Irokesen" },
             { "#16", 69203, new Rectangle(42, 70, 236, 60),
               ClassicVillageBox.builder(t, ClassicVillageBox.moodTag(Tension.Level.HATEFUL,
-                  IROQUOIS, true), IROQUOIS, false, armed, null).build(),
+                  IROQUOIS, true), IROQUOIS, armed, null).build(),
               ClassicVillageBox.WAR, "klirren mit den Waffen", "Kriegstrommeln" } };
         final StringBuilder out = new StringBuilder();
         for (Object[] c : cases) {

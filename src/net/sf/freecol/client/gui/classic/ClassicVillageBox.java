@@ -67,10 +67,13 @@ import net.sf.freecol.common.model.Tension;
  * </ul>
  * The prompt's {@code %STRING0} is NAMES {@code @LEVELS} column 2 at the
  * tribe's level («ein Lager», «ein Dorf», «eine Stadt»: V for the Apache,
- * Tupi, Sioux, Iroquois, Arawak, Inca and Aztec), a capital's «eine
- * Hauptstadt» ({@code @LEVELS} row 5; I for this box: V in @LOOT,
- * playthrough-4 048 #8605 «… plündern {eine Hauptstadt} der Sioux»),
- * {@code %STRING1} the tribe.
+ * Tupi, Sioux, Iroquois, Arawak, Inca and Aztec), at a capital too (V
+ * clip008 #50931, 1514: «Ihre Expedition hat ein Dorf der Araukaner
+ * erreicht» at the village (47,44) under the capital star ICONS.SS.017,
+ * #50656; clip008-analysis 01-scout.md 3.1; part Z's fixer: before it a
+ * capital said «eine Hauptstadt», {@code @LEVELS} row 5, which the
+ * original shows in @LOOT only, playthrough-4 048 #8605 «… plündern
+ * {eine Hauptstadt} der Sioux»), {@code %STRING1} the tribe.
  *
  * <p><b>The mood (I, one table, {@link #moodTag}).</b>  The village's
  * alarm towards us, FreeCol's: HAPPY and CONTENT @VILLAGEHAPPY
@@ -112,7 +115,11 @@ final class ClassicVillageBox {
     /** The Arawak's {@link ClassicGUI#TRIBES} index (@VILLAGESAVAGE). */
     static final int ARAWAK = 2;
 
-    /** NAMES {@code @LEVELS}' row of a capital («eine Hauptstadt»). */
+    /**
+     * NAMES {@code @LEVELS}' row of a capital («eine Hauptstadt»): the
+     * original's @LOOT (playthrough-4 048 #8605), never this box (class
+     * comment).
+     */
     static final int CAPITAL_LEVEL = 4;
 
     /** NAMES' placeholder of the heresy row: the other mission's nation. */
@@ -211,14 +218,13 @@ final class ClassicVillageBox {
     /**
      * The prompt's values (class comment): {@code STRING0} NAMES
      * {@code @LEVELS} column 2 at the tribe's level ({@code @TRIBES}
-     * column 4), a capital's «eine Hauptstadt»; {@code STRING1} the tribe.
+     * column 4), at a capital too; {@code STRING1} the tribe.
      *
      * @param t The original texts.
      * @param tribe The tribe's {@link ClassicGUI#TRIBES} index.
-     * @param capital Whether the village is the tribe's capital.
      * @return The values, or null when one is not known.
      */
-    static Map<String, String> values(ClassicText t, int tribe, boolean capital) {
+    static Map<String, String> values(ClassicText t, int tribe) {
         final List<String[]> tribes = (t == null) ? null : t.names("TRIBES");
         if (tribes == null || tribe < 0 || tribe >= tribes.size()
             || tribes.get(tribe).length < 4) return null;
@@ -228,7 +234,6 @@ final class ClassicVillageBox {
         } catch (NumberFormatException e) {
             return null;
         }
-        if (capital) level = CAPITAL_LEVEL;
         final List<String[]> levels = t.names("LEVELS");
         if (level < 0 || level >= levels.size() || levels.get(level).length < 2) {
             return null;
@@ -248,7 +253,6 @@ final class ClassicVillageBox {
      * @param t The original texts, or null.
      * @param tag The mood's section ({@link #moodTag}).
      * @param tribe The tribe's {@link ClassicGUI#TRIBES} index.
-     * @param capital Whether the village is the tribe's capital.
      * @param actions The rows ({@link #rows}).
      * @param missionNation For the heresy row: NAMES {@code @NATIONABBREV}
      *     of the other mission's nation («Span.»), else null.
@@ -256,11 +260,10 @@ final class ClassicVillageBox {
      *     (FreeCol's box then).
      */
     static ClassicAdvisorBox.Builder builder(ClassicText t, String tag, int tribe,
-                                             boolean capital, int[] actions,
-                                             String missionNation) {
+                                             int[] actions, String missionNation) {
         final ClassicText.Message m = (t == null) ? null : t.message(tag);
         final Map<String, String> values = (m == null) ? null
-            : values(t, tribe, capital);
+            : values(t, tribe);
         final List<String[]> names = (values == null) ? null : t.names("ACTIONS");
         if (names == null || actions == null || actions.length == 0) return null;
         final Map<String, String> rowValues = new HashMap<>();

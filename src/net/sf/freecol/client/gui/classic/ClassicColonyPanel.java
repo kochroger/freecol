@@ -1098,6 +1098,11 @@ final class ClassicColonyPanel extends JPanel {
             this.pressedWasSelected = this.selectedUnit == h.unit;
             this.hovered = this.hoveredTile = this.hoveredBox = -1;
             this.hoverSeq++;
+            // The white cursor on a pressed tile worker's tile shows while
+            // the button is down (V clip 053, the comparison D2: press +1
+            // to +4 in 6 of 6); the blink stopped in its off half hid it
+            // (part Z's acceptance, L1: 3 of 8 holds, 2 of 2).
+            if (h.place == ClassicColonyMoves.Place.TILE) this.blinkOff = false;
             this.blink.stop();
             // Held without motion he is lifted (part Z D1), after a time
             // that depends on whether he was selected, where the white

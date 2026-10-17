@@ -1890,6 +1890,40 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         assertFalse(s.panel.dragging());
     }
 
+    /**
+     * The white cursor on a pressed tile worker's tile shows while the
+     * button is down, whatever half the blink was in (part Z's
+     * acceptance, L1: the press stopped the blink in its off half and the
+     * frame was missing in 3 of 8 holds; V clip 053, the comparison D2:
+     * press +1 to +4 in 6 of 6): the blink in its off half, a press on an
+     * unselected tile worker, the cursor on his tile and shown; the same
+     * on the selected one.
+     */
+    public void testThePressedTileShowsTheWhiteCursor() throws Exception {
+        final Scene s = scene(3, true);
+        final List<Unit> us = s.colony.getUnitList();
+        final Unit b = us.get(1), c = us.get(2);
+        b.setLocation(tileOf(s.colony, Direction.S));
+        c.setLocation(s.colony.getTile());
+        s.colony.invalidateCache();
+        final Field off = ClassicColonyPanel.class.getDeclaredField("blinkOff");
+        off.setAccessible(true);
+        for (boolean selected : new boolean[] { false, true }) {
+            s.panel.select((selected) ? b : c);
+            ClassicColonyPanel.setTileCursor(ClassicColonyLayout.CENTRE_TILE);
+            paint(s.panel);
+            off.setBoolean(s.panel, true);
+            assertTrue(s.panel.blinkOff());
+            final int[] pb = at(s.panel, b);
+            mouse(s.panel, MouseEvent.MOUSE_PRESSED, pb[0], pb[1]);
+            assertEquals("selected=" + selected, 7, ClassicColonyPanel.tileCursor());
+            assertFalse("selected=" + selected + ": the cursor shown", s.panel.blinkOff());
+            assertFalse("the blink stopped", s.panel.blink().isArmed());
+            mouse(s.panel, MouseEvent.MOUSE_RELEASED, pb[0], pb[1]);
+            s.boxes.asked.clear();
+        }
+    }
+
     /** The pure rule of the lift by holding (part Z D1, {@link ClassicColonyMoves#holdFrames}). */
     public void testTheHoldRule() {
         final int max = Integer.MAX_VALUE;

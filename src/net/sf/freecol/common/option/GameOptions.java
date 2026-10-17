@@ -280,7 +280,9 @@ public class GameOptions {
      * #44727 «28 Felle nach Silver City»: @EXTORTSTUFF), or refuses in one
      * of three ways: @EXTORTLAUGH (V 045 #30832, the Arawak at the first
      * demand of a soldier), @EXTORTPOOR (V 048 #48446), @EXTORTNO (never
-     * seen).  Which comes when and how much is a guess
+     * seen; at war or at a hateful village, I: the Tupi camp of #42537
+     * paid with the angry box @VILLAGEBAD, #42284).  Which comes when and
+     * how much is a guess
      * ({@code InGameController.originalTribute}).  On in the "levi" rules
      * (and a levi save from before the rule).
      */

@@ -204,8 +204,26 @@ public class ClassicNativeNoticesTest extends FreeColTestCase {
         }
         // An attack on natives: a village's owner, else the defender's.
         assertTrue(ClassicNotices.attacksNatives(w.soldier, w.siouxCamp.getTile()));
-        assertFalse(ClassicNotices.attacksNatives(w.soldier,
-            w.soldier.getTile().getNeighbourOrNull(net.sf.freecol.common.model.Direction.W)));
+        final net.sf.freecol.common.model.Tile west
+            = w.soldier.getTile().getNeighbourOrNull(net.sf.freecol.common.model.Direction.W);
+        assertFalse(ClassicNotices.attacksNatives(w.soldier, west));
+        // A European's unit or colony is no attack on natives (the review
+        // of part Z: no test had one, so a gate that counts every attack
+        // kept the suites green), so the «Sieg bei …» of a fight with the
+        // other Europeans stays.
+        new ServerUnit(w.game, west, france, spec().getUnitType("model.unit.freeColonist"),
+                       spec().getRole("model.role.soldier"));
+        assertFalse("a French soldier", ClassicNotices.attacksNatives(w.soldier, west));
+        final net.sf.freecol.common.model.Colony quebec
+            = net.sf.freecol.util.test.FreeColTestUtils.getColonyBuilder().player(france)
+                .colonyName("Quebec").colonyTile(w.game.getMap().getTile(5, 3)).build();
+        assertFalse("a French colony", ClassicNotices.attacksNatives(w.soldier,
+                                                                    quebec.getTile()));
+        // A brave on open land is natives.
+        final net.sf.freecol.common.model.Tile east
+            = w.soldier.getTile().getNeighbourOrNull(net.sf.freecol.common.model.Direction.E);
+        new ServerUnit(w.game, east, w.sioux, spec().getUnitType("model.unit.brave"));
+        assertTrue("a brave", ClassicNotices.attacksNatives(w.soldier, east));
     }
 
     /**

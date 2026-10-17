@@ -2397,8 +2397,11 @@ Roger's decisions of 2026-10-13: the original everywhere.
   #9331); a wagon train or a ship with goods «Mit Dorf handeln / Handlung
   abbrechen» (playthrough-3 #124831), then FreeCol's trade session until
   M6. `%STRING0` is @LEVELS column 2 at the tribe's level («ein Lager»,
-  «ein Dorf», «eine Stadt»), a capital's «eine Hauptstadt» (I; V in
-  @LOOT), `{%STRING1}` the tribe. The mood (I, one table): the village's
+  «ein Dorf», «eine Stadt»), a capital too: «ein Dorf» at the Arawak
+  capital (V clip008 #50931, 1514, the village (47,44) under the capital
+  star ICONS.SS.017 #50656; clip008-analysis 01-scout.md 3.1; part Z's
+  fixer, before it «eine Hauptstadt», which the original shows in @LOOT
+  only, 048 #8605), `{%STRING1}` the tribe. The mood (I, one table): the village's
   alarm HAPPY and CONTENT @VILLAGEHAPPY (@VILLAGESAVAGE for the Arawak),
   DISPLEASED @VILLAGEMEDIUM, ANGRY @VILLAGEBAD, HATEFUL or at war
   @VILLAGEWAR (never seen). The colonist's and the trader's box are new
@@ -2436,8 +2439,10 @@ Roger's decisions of 2026-10-13: the original everywhere.
   over 048 #48447), `@EXTORTLAUGH` (0 px over 045 #30833: the chief's
   head comes one frame after the box, #30832 shows him without it, as
   at #48446/#48447), `@EXTORTNO` (never seen; our title and leader's
-  name). Which answer and how much is a guess (I): angry or hateful
-  «no»; as many settlements as our land units' offence (FreeCol's
+  name). Which answer and how much is a guess (I): at war or at a
+  hateful village (the box @VILLAGEWAR) «no»; an angry village pays
+  (part Z's fixer: V war-french #42284 @VILLAGEBAD, «Zoll fordern»,
+  #42537 64 furs; before, an angry tribe said «no»); as many settlements as our land units' offence (FreeCol's
   `confirmTribute.unwise` measure; V 045 the Arawak laughed at a
   soldier's first demand at a happy village) «laugh»; a tribute in the
   last five turns, no colony, or fewer than 10 to give «poor»; else half
@@ -4298,8 +4303,10 @@ seen on the frames, I = our choice where no clip shows it.
 
 - **The press** on a colonist (in a building, on a tile, at the fence) freezes
   the blink and takes the hover label away (V clip 042 ×14). On a tile worker
-  the white cursor goes to his tile at once (V #5829; clip 053 press +1 to
-  +4), but he is **selected at the release** or the drag's start, the old
+  the white cursor goes to his tile at once and shows while the button is
+  down (V #5829; clip 053 press +1 to +4, 6 of 6; part Z's fixer: the blink
+  frozen in its off half hid it, acceptance L1), but he is **selected at
+  the release** or the drag's start, the old
   selected colonist's cell green while the button is down (part Z, Z-ITEMS
   Z1.1, clip 053's comparison D2: the colonist row's frame moves at the
   release in 6 of 6 cases, #8236, #8436, #8915, #10221, #11312, #45992; ours

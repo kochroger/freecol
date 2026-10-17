@@ -10101,8 +10101,7 @@ public class ClassicGUI extends GUI {
             ? ClassicVillageBox.nationAbbrev(t, missionary.getOwner()) : null;
         final ClassicAdvisorBox.Builder b = ClassicVillageBox.builder(t,
             ClassicVillageBox.moodTag(is, me), tribeIndex(is.getOwner()),
-            is.isCapital(), ClassicVillageBox.rows(kind, canEstablish, canDenounce),
-            missionNation);
+            ClassicVillageBox.rows(kind, canEstablish, canDenounce), missionNation);
         return (b == null) ? null
             : b.showAt(showAtNanos).stopgap(colony(is.getTile()), null).build();
     }

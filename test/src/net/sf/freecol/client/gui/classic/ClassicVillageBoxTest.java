@@ -138,8 +138,12 @@ public class ClassicVillageBoxTest extends FreeColTestCase {
     /**
      * The prompt's values: NAMES {@code @LEVELS} column 2 at the tribe's
      * level (V: «ein Lager» Apache, Tupi, Sioux; «ein Dorf» Iroquois,
-     * Arawak; «eine Stadt» Inca, Aztec), a capital's «eine Hauptstadt»
-     * (I), the tribe; none for a tribe the original does not have.
+     * Arawak; «eine Stadt» Inca, Aztec), the tribe; none for a tribe the
+     * original does not have.  «eine Hauptstadt» ({@code @LEVELS} row 5,
+     * {@link ClassicVillageBox#CAPITAL_LEVEL}) is never the box's: a
+     * capital's box says the tribe's word too (V clip008 #50931; the
+     * capital through the controller: {@link
+     * ClassicNativeBoxesTest#testACapitalsBoxSaysTheTribesWord}).
      */
     public void testThePromptsValues() {
         final ClassicText t = pack("testThePromptsValues");
@@ -149,16 +153,16 @@ public class ClassicVillageBoxTest extends FreeColTestCase {
             { SIOUX, "ein Lager", "Sioux" }, { IROQUOIS, "ein Dorf", "Irokesen" },
             { ARAWAK, "ein Dorf", "Araukaner" }, { INCA, "eine Stadt", "Inka" },
             { AZTEC, "eine Stadt", "Azteken" } };
+        assertEquals("eine Hauptstadt",
+                     t.names("LEVELS").get(ClassicVillageBox.CAPITAL_LEVEL)[1]);
         for (Object[] r : rows) {
-            final Map<String, String> v = ClassicVillageBox.values(t, (Integer) r[0], false);
+            final Map<String, String> v = ClassicVillageBox.values(t, (Integer) r[0]);
             assertEquals(r[2] + "", r[1], v.get("STRING0"));
             assertEquals(r[2], v.get("STRING1"));
-            assertEquals("eine Hauptstadt",
-                         ClassicVillageBox.values(t, (Integer) r[0], true).get("STRING0"));
         }
-        assertNull(ClassicVillageBox.values(t, -1, false));
-        assertNull(ClassicVillageBox.values(t, 8, false));
-        assertNull(ClassicVillageBox.values(null, IROQUOIS, false));
+        assertNull(ClassicVillageBox.values(t, -1));
+        assertNull(ClassicVillageBox.values(t, 8));
+        assertNull(ClassicVillageBox.values(null, IROQUOIS));
         final net.sf.freecol.common.model.Game game = getStandardGame();
         assertEquals("Span.", ClassicVillageBox.nationAbbrev(t,
             game.getPlayerByNationId("model.nation.spanish")));
@@ -185,7 +189,7 @@ public class ClassicVillageBoxTest extends FreeColTestCase {
             for (String tag : tags) {
                 final int[] rows = ClassicVillageBox.rows(kind, true, false);
                 final ClassicAdvisorBox.Builder b = ClassicVillageBox.builder(t, tag,
-                    IROQUOIS, false, rows, null);
+                    IROQUOIS, rows, null);
                 assertNotNull(kind + " " + tag, b);
                 final ClassicAdvisorBox.Request r = b.build();
                 assertEquals(tag, r.id);
@@ -205,17 +209,17 @@ public class ClassicVillageBoxTest extends FreeColTestCase {
         final int[] heresy = ClassicVillageBox.rows(ClassicVillageBox.Kind.MISSIONARY,
                                                     false, true);
         final ClassicAdvisorBox.Request h = ClassicVillageBox.builder(t,
-            ClassicVillageBox.HAPPY, SIOUX, false, heresy, "Span.").build();
+            ClassicVillageBox.HAPPY, SIOUX, heresy, "Span.").build();
         assertEquals(List.of("Span. Mission der Ketzerei beschuldigen", "Indianer aufwiegeln",
                              "Handlung abbrechen"), Arrays.asList(h.plainRows()));
         assertEquals(ClassicVillageBox.DENOUNCE, ClassicVillageBox.action(h, heresy, 0));
         // The other mission's nation not known: FreeCol's box.
-        assertNull(ClassicVillageBox.builder(t, ClassicVillageBox.HAPPY, SIOUX, false,
+        assertNull(ClassicVillageBox.builder(t, ClassicVillageBox.HAPPY, SIOUX,
                                              heresy, null));
         // A tribe the original does not have: FreeCol's box.
-        assertNull(ClassicVillageBox.builder(t, ClassicVillageBox.HAPPY, -1, false,
+        assertNull(ClassicVillageBox.builder(t, ClassicVillageBox.HAPPY, -1,
             ClassicVillageBox.rows(ClassicVillageBox.Kind.ARMED, false, false), null));
-        assertNull(ClassicVillageBox.builder(null, ClassicVillageBox.HAPPY, IROQUOIS, false,
+        assertNull(ClassicVillageBox.builder(null, ClassicVillageBox.HAPPY, IROQUOIS,
             ClassicVillageBox.rows(ClassicVillageBox.Kind.ARMED, false, false), null));
     }
 
@@ -266,7 +270,7 @@ public class ClassicVillageBoxTest extends FreeColTestCase {
             final String mission = (String) b[3];
             final int[] rows = ClassicVillageBox.rows(kind, mission == null, mission != null);
             final ClassicAdvisorBox.Request r = ClassicVillageBox.builder(t, (String) b[2],
-                (Integer) b[0], false, rows, mission).build();
+                (Integer) b[0], rows, mission).build();
             final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(r, tiny, null);
             assertNotNull((String) b[5], l);
             assertEquals((String) b[5], b[4], l.box);
@@ -339,7 +343,7 @@ public class ClassicVillageBoxTest extends FreeColTestCase {
             final ClassicVillageBox.Kind kind = (ClassicVillageBox.Kind) c[2];
             final String mission = (c.length > 4) ? (String) c[4] : null;
             final ClassicAdvisorBox.Request r = ClassicVillageBox.builder(t, (String) c[3],
-                (Integer) c[1], false, ClassicVillageBox.rows(kind, mission == null,
+                (Integer) c[1], ClassicVillageBox.rows(kind, mission == null,
                 mission != null), mission).build();
             final Rectangle skip = (c.length > 5) ? (Rectangle) c[5] : null;
             final int[] got = compare(ImageIO.read(f), r, p, 0, skip);
