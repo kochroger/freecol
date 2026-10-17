@@ -4223,7 +4223,10 @@ seen on the frames, I = our choice where no clip shows it.
   (the centre) to his figure in the band (V clip 042 #2457).
 - **The hover label** comes back by itself after a move, the pointer still:
   +13 frames on a tile, +16 in a building, +3 after a refused drop (V clip
-  042 #2876, #4716, #4344).
+  042 #2876, #4716, #4344); after a click that **selected** a colonist +7
+  frames on a tile (V clip 053 +5 to +7: #8241, #8444, #8923, #10229, #11320,
+  #45998), +9 at the fence (V #36204), +7 in a building (I) (part Z, Z-ITEMS
+  Z1.2; before, it came back only when the pointer moved).
 - **A click** (a release without motion): on the colonist who was already
   selected **J2** (+5 frames after the release; a first click only selects,
   V dago-colony2, clip 042), on a unit at the fence the same way **his job

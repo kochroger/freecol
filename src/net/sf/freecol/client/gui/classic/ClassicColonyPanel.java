@@ -919,6 +919,13 @@ final class ClassicColonyPanel extends JPanel {
                 // 042 #11168 a building worker; part Z D2, clip 053 #8236
                 // a tile worker, the cursor staying on his tile).
                 takePressed(u, from);
+                // The label the press took comes back by itself, the
+                // pointer still (part Z D3, clip 053).
+                if (result == ClassicDragGesture.Result.CLICK && !wasSelected) {
+                    hoverLater(vx, vy, (from == ClassicColonyMoves.Place.FENCE)
+                               ? ClassicColonyMoves.HOVER_SELECT_FENCE_FRAMES
+                               : ClassicColonyMoves.HOVER_SELECT_FRAMES);
+                }
             }
             return;
         }

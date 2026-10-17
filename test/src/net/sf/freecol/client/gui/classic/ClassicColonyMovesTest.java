@@ -1855,6 +1855,63 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
     }
 
     /**
+     * The hover label after a click that selected a colonist comes back by
+     * itself, the pointer still (part Z, Z-ITEMS Z1.2, clip 053's
+     * comparison D3): a tile worker's tile label 7 frames after the
+     * release (V #8241, #8444, #8923, #10229, #11320, #45998: +5 to +7), a
+     * unit at the fence 9 (V #36204), a building worker 7 (I); not after a
+     * click that opens the job menu, nor when the pointer moved meanwhile.
+     */
+    public void testTheLabelAfterASelectingClick() throws Exception {
+        final Scene s = scene(3, true);
+        final List<Unit> us = s.colony.getUnitList();
+        final Unit a = us.get(0), b = us.get(1), c = us.get(2);
+        a.setLocation(building(s.colony, "townHall"));
+        b.setLocation(tileOf(s.colony, Direction.S));
+        c.setLocation(s.colony.getTile());
+        s.colony.invalidateCache();
+        paint(s.panel);
+        s.panel.select(a);
+        final int[] pb = at(s.panel, b);
+        click(s.panel, pb[0], pb[1]);
+        assertSame(b, s.panel.selected());
+        assertEquals("the press took the label", -1, s.panel.hoveredTile());
+        assertEquals("[later 100]", s.events.toString());
+        s.later.get(0).run();
+        assertEquals("the tile's label 7 frames after the release", 7, s.panel.hoveredTile());
+        // The fence: 9 frames, its «(Außerhalb der Kolonie)».
+        final int[] pc = at(s.panel, c);
+        click(s.panel, pc[0], pc[1]);
+        assertSame(c, s.panel.selected());
+        assertEquals("[later 100, later 128]", s.events.toString());
+        s.later.get(1).run();
+        assertEquals(ClassicColonyPanel.slotAt(pc[0], pc[1]), s.panel.hovered());
+        assertEquals("the fence picture", ClassicColonyLayout.slot("X").index, s.panel.hovered());
+        // A building worker: 7 frames (I).
+        final int[] pa = at(s.panel, a);
+        click(s.panel, pa[0], pa[1]);
+        assertSame(a, s.panel.selected());
+        assertEquals("[later 100, later 128, later 100]", s.events.toString());
+        s.later.get(2).run();
+        assertEquals(ClassicColonyPanel.slotAt(pa[0], pa[1]), s.panel.hovered());
+        // The click on him selected opens J2: no label scheduled.
+        click(s.panel, pa[0], pa[1]);
+        assertEquals("J2", 1, s.boxes.asked.size());
+        assertEquals(3, s.later.size());
+        // The pointer moved before the label's time: the move's label.
+        paint(s.panel);
+        click(s.panel, pb[0], pb[1]);
+        assertSame(b, s.panel.selected());
+        assertEquals(4, s.later.size());
+        final int[] w = tile(3);
+        s.panel.dispatchEvent(new MouseEvent(s.panel, MouseEvent.MOUSE_MOVED,
+            System.currentTimeMillis(), 0, w[0] * 3 + 1, w[1] * 3 + 1, 0, false,
+            MouseEvent.NOBUTTON));
+        s.later.get(3).run();
+        assertEquals("W, where the pointer is", 3, s.panel.hoveredTile());
+    }
+
+    /**
      * A click on an empty spot of the fence opens the selected colonist's
      * role menu; he stays where he is, only a pick acts (V clip 043 #3326,
      * #7048, #8471; clip 042 #15119; Roger 2026-10-15): a colonist in the

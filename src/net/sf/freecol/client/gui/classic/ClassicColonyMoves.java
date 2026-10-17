@@ -125,6 +125,17 @@ final class ClassicColonyMoves {
         HOVER_REFUSED_FRAMES = 3;
 
     /**
+     * The hover label the press took, back after a click that selected a
+     * colonist, the pointer still (part Z, Z-ITEMS Z1.2, clip 053's
+     * comparison D3; ours brought it back only when the pointer moved): a
+     * tile worker's tile label +5 to +7 frames after the release (V #8241,
+     * #8444, #8923, #10229, #11320, #45998: 7 taken), a unit at the fence
+     * +9 (V #36204, «(Außerhalb der Kolonie)»); a building worker's 7 (I:
+     * not seen).
+     */
+    static final int HOVER_SELECT_FRAMES = 7, HOVER_SELECT_FENCE_FRAMES = 9;
+
+    /**
      * A click on an empty spot of the fence with a colonist selected: his
      * role menu (J1, or the roles of a unit at the fence) +3 frames after
      * the release (V clip 043: #3326 ≈ +3, #7048 +2, #8471 +3; clip 042
