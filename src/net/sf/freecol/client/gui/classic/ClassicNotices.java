@@ -67,6 +67,10 @@ import net.sf.freecol.common.model.UnitType;
  *       #20177: @BURIAL1, V): @LOSTCITY1-3, 5-7 and 9, @BURIAL1-3, and
  *       @SCREWED for a burial ground (with the tribe's chief, I).</li>
  *   <li>A unit that cannot found a colony: @ONLYCOL (I).</li>
+ *   <li>The chief's answer to «Zoll fordern» under the levi tribute
+ *       (part Z, Z2.2): @EXTORTSTUFF with our title, the tribe, the
+ *       goods and the colony they go to, @EXTORTPOOR, @EXTORTLAUGH,
+ *       @EXTORTNO, with the chief.</li>
  *   <li>A ship repaired: @REFIT with the admiral, «Handelsschiff:
  *       Reparaturen in Amsterdam abgeschlossen.» (fixer B after part X; V
  *       clip 049 #16294; the box's place not measured, and the original
@@ -156,7 +160,22 @@ final class ClassicNotices {
          * Where a ship was repaired: our port ("Amsterdam") for Europe,
          * else the colony's name (fixer B after part X, @REFIT).
          */
-        REPAIR_PLACE
+        REPAIR_PLACE,
+        /**
+         * Our title: NAMES {@code @DIFFICULTY} column 1 at the game's level
+         * («Entdecker»; part Z, @EXTORTSTUFF «Große Entdecker», V
+         * war-french #17339, 048 #44727).
+         */
+        TITLE,
+        /** Our leader's name (part Z, @EXTORTNO «%STRING0 %STRING1», I). */
+        LEADER,
+        /**
+         * NAMES {@code @CARGO} of FreeCol's {@code %goods%} («Felle»; part
+         * Z, @EXTORTSTUFF).
+         */
+        CARGO,
+        /** FreeCol's {@code %colony%}, a colony's name (part Z, @EXTORTSTUFF). */
+        COLONY
     }
 
     /** One notice in the original's words. */
@@ -231,6 +250,9 @@ final class ClassicNotices {
      */
     static final String LEARN_DONE = "learnSkill.done";
 
+    /** The levi tribute's goods (part Z, Z2.2; @EXTORTSTUFF). */
+    static final String TRIBUTE_GOODS = "scoutSettlement.tributeGoods";
+
     /** FreeCol's notices in the original's words (class comment). */
     static final Map<String, Rule> RULES = new HashMap<>();
     static {
@@ -265,6 +287,24 @@ final class ClassicNotices {
             "COUNTRY", Value.COUNTRY, "STRING0", Value.HOME_PORT,
             "STRING1", Value.UNIT_JOB2));
         RULES.put("buildColony.badUnit", new Rule("ONLYCOL", Who.NONE));
+        // Part Z, Z2.2: the chief's answers to «Zoll fordern» (the levi
+        // rule's messages, server InGameController.originalTribute), 15-18
+        // frames after the village box: @EXTORTSTUFF (V war-french #17339,
+        // 048 #44727), @EXTORTPOOR (V 048 #48446), @EXTORTLAUGH (V 045
+        // #30832), @EXTORTNO (never seen; its %STRING0 %STRING1 our title
+        // and name, I).
+        RULES.put(TRIBUTE_GOODS, new Rule("EXTORTSTUFF",
+            ClassicVillageBox.TRIBUTE_CHAIN_MS, Who.CHIEF,
+            "STRING0", Value.TITLE, "STRING1", Value.TRIBE, "NUMBER0", Value.AMOUNT,
+            "STRING2", Value.CARGO, "STRING3", Value.COLONY));
+        RULES.put("scoutSettlement.tributePoor", new Rule("EXTORTPOOR",
+            ClassicVillageBox.TRIBUTE_CHAIN_MS, Who.CHIEF,
+            "STRING0", Value.TITLE, "STRING1", Value.TRIBE));
+        RULES.put("scoutSettlement.tributeLaugh", new Rule("EXTORTLAUGH",
+            ClassicVillageBox.TRIBUTE_CHAIN_MS, Who.CHIEF, "STRING0", Value.TRIBE));
+        RULES.put("scoutSettlement.tributeNo", new Rule("EXTORTNO",
+            ClassicVillageBox.TRIBUTE_CHAIN_MS, Who.CHIEF,
+            "STRING0", Value.TITLE, "STRING1", Value.LEADER, "STRING2", Value.TRIBE));
         // A ship repaired (fixer B after part X; V clip 049 #16294:
         // «Handelsschiff: Reparaturen in Amsterdam abgeschlossen.» with the
         // admiral MSS0; the box's place not measured, I).
@@ -817,9 +857,40 @@ final class ClassicNotices {
             return jobName(t, key.substring(UNIT_PREFIX.length(),
                 key.length() - NAME_SUFFIX.length()), 0);
         }
+        case TITLE:
+            return title(t, me);
+        case LEADER:
+            return (me == null || me.getName() == null || me.getName().isEmpty())
+                ? null : me.getName();
+        case CARGO: {
+            // FreeCol's %goods% is the type's name key, "model.goods.X.name".
+            final String key = replacement(template, "%goods%");
+            if (key == null || !key.endsWith(NAME_SUFFIX)) return null;
+            final int row = ClassicTips.cargoRow(key.substring(0,
+                key.length() - NAME_SUFFIX.length()));
+            return ClassicTips.cargoName(t, row);
+        }
+        case COLONY:
+            return replacement(template, "%colony%");
         default:
             return null;
         }
+    }
+
+    /**
+     * Our title: NAMES {@code @DIFFICULTY} column 1 at the game's level
+     * («Entdecker» on the easiest).
+     *
+     * @param t The pack's texts, or null.
+     * @param me Our player, or null.
+     * @return The title, or null when the level is not known.
+     */
+    static String title(ClassicText t, Player me) {
+        final String level = (me == null || me.getSpecification() == null) ? null
+            : me.getSpecification().getDifficultyLevel();
+        final int i = (level == null) ? -1
+            : Arrays.asList(ClassicNewWorldScreens.DIFFICULTY_IDS).indexOf(level);
+        return (t == null) ? null : column(t.names("DIFFICULTY"), i);
     }
 
     /** A NAMES.TXT row's first column, or null. */

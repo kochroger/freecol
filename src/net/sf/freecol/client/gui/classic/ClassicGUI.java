@@ -9373,16 +9373,31 @@ public class ClassicGUI extends GUI {
     static final String MOUNDS_SECTION = "LOSTCITY4";
 
     /**
+     * FreeCol's question before a tribute is demanded of a village
+     * ({@code GUI.confirmNativeTribute}: «Es ist schwer, um sicher zu sein
+     * …»), by the village's mood and our strength.
+     */
+    static final List<String> TRIBUTE_QUESTIONS = List.of("confirmTribute.normal",
+        "confirmTribute.happy", "confirmTribute.warLikely", "confirmTribute.unwise");
+
+    /**
      * Whether a confirm is answered "yes" without a box: FreeCol's question
      * before every rumour (gap list Q2; the original has none: the unit
      * slides onto the rumour and the result follows, C32 playthrough-1
-     * #49467-#49506, clip004 and landfall).
+     * #49467-#49506, clip004 and landfall), and its question before a
+     * tribute is demanded of a village (part Z, Z2.2; Roger's test of
+     * 2026-10-16, event #12, frame_064125; the original's «Zoll fordern»
+     * asks nothing more, the chief answers 15-18 frames after the village
+     * box's close: V 045 #30817 -&gt; #30832, 048 #44709 -&gt; #44727,
+     * #48430 -&gt; #48446, war-french #17321 -&gt; #17339, the M3 verifier's
+     * W4).
      *
      * @param template The question.
      * @return True if it is never shown.
      */
     static boolean silentYes(StringTemplate template) {
-        return template != null && RUMOUR_QUESTION.equals(template.getId());
+        return template != null && (RUMOUR_QUESTION.equals(template.getId())
+                                    || TRIBUTE_QUESTIONS.contains(template.getId()));
     }
 
     /**

@@ -78,6 +78,7 @@ public class LeviRulesTest extends FreeColTestCase {
         CHANGED.put(GameOptions.ORIGINAL_ROAD_SILVER, Boolean.TRUE);       // the original's (X, 7)
         CHANGED.put(GameOptions.ORIGINAL_TORY_PENALTY, Boolean.TRUE);      // the original's (fixer B, must 7)
         CHANGED.put(GameOptions.ORIGINAL_FATHER_OFFER, Boolean.TRUE);      // the original's (fixer B, must 10)
+        CHANGED.put(GameOptions.ORIGINAL_TRIBUTE, Boolean.TRUE);          // the original's (Z2.2)
         CHANGED.put(GameOptions.CANCEL_KEEPS_MOVE, Boolean.TRUE);          // house rules
         CHANGED.put(GameOptions.REVENGE_MODE, Boolean.FALSE);
         CHANGED.put(GameOptions.LAST_COLONY_DEFEAT, Boolean.TRUE);
@@ -496,6 +497,28 @@ public class LeviRulesTest extends FreeColTestCase {
     }
 
     /**
+     * The original's native rules of part Z: on in levi, off in classic
+     * and freecol (from Specification.fixGameOptions), in the map group,
+     * with their names.  The effects: {@code LeviNativeRulesTest} on the
+     * server.
+     */
+    public void testOriginalNativeRules() {
+        final String[][] rows = {
+            { GameOptions.ORIGINAL_TRIBUTE, "Tribute as in the original" } };
+        for (String[] r : rows) {
+            assertTrue(r[0], spec(LEVI).getBoolean(r[0]));
+            assertFalse(r[0], spec("classic").getBoolean(r[0]));
+            assertFalse(r[0], spec("freecol").getBoolean(r[0]));
+            assertNotNull(r[0], spec(LEVI).getOptionGroup(GameOptions.GAMEOPTIONS_MAP)
+                          .getOption(r[0]));
+            assertEquals(r[1], Messages.getName(r[0]));
+        }
+        assertTrue(Specification.originalNativesDefault(LEVI));
+        assertFalse(Specification.originalNativesDefault("classic"));
+        assertFalse(Specification.originalNativesDefault(null));
+    }
+
+    /**
      * A save from before part V (its specification without the two
      * options) gets them through Specification.fixGameOptions: on for a
      * levi game, off for classic (the review of part V, regression L2);
@@ -513,7 +536,8 @@ public class LeviRulesTest extends FreeColTestCase {
                                GameOptions.ORIGINAL_HORSE_FOOD,
                                GameOptions.ORIGINAL_ROAD_SILVER,
                                GameOptions.ORIGINAL_TORY_PENALTY,
-                               GameOptions.ORIGINAL_FATHER_OFFER };
+                               GameOptions.ORIGINAL_FATHER_OFFER,
+                               GameOptions.ORIGINAL_TRIBUTE };
         for (String rules : new String[] { LEVI, "classic" }) {
             final java.io.StringWriter sw = new java.io.StringWriter();
             try (net.sf.freecol.common.io.FreeColXMLWriter xw

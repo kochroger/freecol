@@ -142,6 +142,15 @@ final class ClassicVillageBox {
      */
     static final double STAY_CHAIN_MS = 16 * FRAME_MS;
 
+    /**
+     * The chief's answer to «Zoll fordern» (@EXTORTSTUFF, @EXTORTPOOR,
+     * @EXTORTLAUGH, @EXTORTNO; part Z, Z2.2): 15-18 frames after the
+     * village box's close (the M3 verifier's W4: 045 #30817 -&gt; #30832,
+     * 048 #44709 -&gt; #44727, #48430 -&gt; #48446, war-french #17321 -&gt;
+     * #17339), 17 here, the chief's palette 3 of them.
+     */
+    static final double TRIBUTE_CHAIN_MS = 14 * FRAME_MS;
+
     private ClassicVillageBox() {}
 
     /**

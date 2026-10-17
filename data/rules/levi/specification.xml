@@ -382,6 +382,19 @@
              the same fathers again until one is chosen. -->
         <booleanOption id="model.option.originalFatherOffer"
                        defaultValue="true"/>
+        <!-- The original's tribute (part Z, Z2.2; Roger 2026-10-13:
+             tribute in goods): the village pays goods to our colony
+             nearest to it (war-french #17339 «46 Felle nach Prov.»,
+             playthrough-4 048 #44727 «28 Felle nach Silver City»), or
+             laughs (045 #30832), is poor (048 #48446) or sees through
+             the trick (never seen).  The rule which and how much is a
+             guess: angry or hateful «no», as many settlements as our
+             land strength «laugh», a tribute in the last five turns or
+             fewer than 10 of its best New World goods «poor», else half
+             of them, at most 100.  FreeCol (classic, freecol): gold, at
+             most 100, after a question. -->
+        <booleanOption id="model.option.originalTribute"
+                       defaultValue="true"/>
         <!-- The original's sailing time between Europe and the New
              World: two turns each way (landfall: off the map in 1503,
              in Amsterdam at the start of 1505; clip008: off the map in

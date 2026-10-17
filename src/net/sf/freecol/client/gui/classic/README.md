@@ -2413,6 +2413,32 @@ Roger's decisions of 2026-10-13: the original everywhere.
   before. Recorder `village-box <unit> <tag> <rows> <bar> chosen= action=`.
   Not offered: «Feindliches Dorf betreten» and the scout's «Indianer
   aufwiegeln» (never seen).
+- **The tribute** (part Z, Z2.2; M3 spec A2 with the verifier's W4;
+  Roger's test event #12, frame_064125): «Zoll fordern» asks nothing more
+  (FreeCol's `confirmTribute.normal/happy/warLikely/unwise` question,
+  «Es ist schwer, um sicher zu sein …», answered yes silently,
+  `ClassicGUI.TRIBUTE_QUESTIONS`); the chief answers 15-18 frames after
+  the village box's close (V 045 #30817 -> #30832, 048 #44709 -> #44727,
+  #48430 -> #48446, war-french #17321 -> #17339; 17 here,
+  `ClassicVillageBox.TRIBUTE_CHAIN_MS`). Under the levi rule
+  `model.option.originalTribute` (Roger 2026-10-13: tribute in goods) the
+  server's `InGameController.originalTribute` answers with the original's
+  four messages, shown in GAME.TXT's words with the tribe's chief:
+  `@EXTORTSTUFF` «Große Entdecker, … liefern mit Freuden {28 Felle} nach
+  {Silver City} …» (our title @DIFFICULTY column 1, the tribe, the
+  amount, @CARGO, the colony; 0 px over 048 #44727), `@EXTORTPOOR` (0 px
+  over 048 #48447), `@EXTORTLAUGH` (0 px over 045 #30833: the chief's
+  head comes one frame after the box, #30832 shows him without it, as
+  at #48446/#48447), `@EXTORTNO` (never seen; our title and leader's
+  name). Which answer and how much is a guess (I): angry or hateful
+  «no»; as many settlements as our land units' offence (FreeCol's
+  `confirmTribute.unwise` measure; V 045 the Arawak laughed at a
+  soldier's first demand at a happy village) «laugh»; a tribute in the
+  last five turns, no colony, or fewer than 10 to give «poor»; else half
+  of its most plentiful New World goods (sugar, tobacco, cotton, furs; V
+  furs 28, 46, 64), at most 100, to our colony nearest to the village.
+  The anger rises (FreeCol's amount). Classic and freecol: FreeCol's
+  gold and words (without the question).
 - **Learning** (`askLearn`, the learn question of `moveLearnSkill`):
   after the village box's «Mit den Ureinwohnern leben»,
   `@LEARNSTAY` with the chief (the tribe, @JOB column 1 of the skill), the

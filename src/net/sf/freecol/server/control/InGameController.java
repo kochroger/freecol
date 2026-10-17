@@ -1772,6 +1772,9 @@ public final class InGameController extends Controller {
      *
      * FIXME: Move TURNS_PER_TRIBUTE magic number to the spec.
      *
+     * The levi rules pay the original's tribute instead of FreeCol's gold
+     * ({@code GameOptions.ORIGINAL_TRIBUTE}, {@link #originalTribute}).
+     *
      * @param serverPlayer The {@code ServerPlayer} demanding the tribute.
      * @param unit The {@code Unit} that is demanding the tribute.
      * @param is The {@code IndianSettlement} demanded of.
@@ -1787,6 +1790,26 @@ public final class InGameController extends Controller {
         Player indianPlayer = is.getOwner();
         int gold = 0;
         int year = getGame().getTurn().getNumber();
+        // The original's tribute (levi, part Z, Z2.2): goods or one of
+        // three refusals, OriginalTribute's rule.
+        final Specification spec = getGame().getSpecification();
+        if (spec.hasOption(GameOptions.ORIGINAL_TRIBUTE, BooleanOption.class)
+            && spec.getBoolean(GameOptions.ORIGINAL_TRIBUTE)) {
+            final ModelMessage om = originalTribute(serverPlayer, unit, is,
+                is.getLastTribute() > 0
+                    && year - is.getLastTribute() <= TURNS_PER_TRIBUTE, cs);
+            ((ServerIndianSettlement)is).csModifyAlarm(serverPlayer,
+                Tension.TENSION_ADD_NORMAL, true, cs);
+            is.setLastTribute(year);
+            cs.addMessage(serverPlayer, om);
+            final Tile tile = is.getTile();
+            tile.updateIndianSettlement(serverPlayer);
+            cs.add(See.only(serverPlayer), tile);
+            unit.setMovesLeft(0);
+            cs.addPartial(See.only(serverPlayer), unit,
+                "movesLeft", String.valueOf(unit.getMovesLeft()));
+            return cs;
+        }
         RandomRange gifts = is.getType().getGifts();
         if (is.getLastTribute() + TURNS_PER_TRIBUTE < year
             && gifts != null) {
@@ -1837,6 +1860,133 @@ public final class InGameController extends Controller {
 
         // Do not update others, this is all private.
         return cs;
+    }
+
+    /** The original's tribute: the least of the goods a village gives (I). */
+    static final int TRIBUTE_GOODS_MINIMUM = 10;
+
+    /** The original's tribute: the most of the goods a village gives, one load (I). */
+    static final int TRIBUTE_GOODS_MAXIMUM = 100;
+
+    /**
+     * The original's tribute (levi {@code model.option.originalTribute},
+     * part Z, Z2.2; Roger 2026-10-13: tribute in goods).  The answers are
+     * the original's (the client shows GAME.TXT's words with the chief);
+     * which one comes, and how much, is a guess (I) that the clips do not
+     * contradict:
+     * <ul>
+     *   <li>the tribe angry or hateful: «no» (@EXTORTNO, never seen; its
+     *       words «Ihr müßt uns für wahre Dummköpfe halten»);</li>
+     *   <li>the tribe has at least as many settlements as our land
+     *       units' offence ({@code Player.calculateStrength}, FreeCol's
+     *       own measure of an unwise demand, {@code
+     *       confirmTribute.unwise}): it laughs (@EXTORTLAUGH: V 045 #30832,
+     *       the Arawak, six villages, at a soldier's first demand at a
+     *       happy village, early in the game);</li>
+     *   <li>a tribute in the last five turns (FreeCol's {@code
+     *       TURNS_PER_TRIBUTE}), no colony of ours, or fewer than
+     *       {@link #TRIBUTE_GOODS_MINIMUM} of what it would give: it is
+     *       poor (@EXTORTPOOR: V 048 #48446, the Sioux some turns after
+     *       their goods #44727);</li>
+     *   <li>else it gives half of its most plentiful New World goods
+     *       (sugar, tobacco, cotton, furs; V: furs every time, 28, 46 and
+     *       64), at most {@link #TRIBUTE_GOODS_MAXIMUM}, sent to our colony
+     *       nearest to it (V «nach {Silver City}», «nach {Prov.}»;
+     *       @EXTORTSTUFF).</li>
+     * </ul>
+     * The tribe's anger rises whatever the answer (the manual, p. 173;
+     * FreeCol's amount, applied by the caller).
+     *
+     * @param serverPlayer The {@code ServerPlayer} demanding.
+     * @param unit The {@code Unit} demanding.
+     * @param is The {@code IndianSettlement} demanded of.
+     * @param recent Whether it paid a tribute in the last five turns.
+     * @param cs A {@code ChangeSet} to update with the goods.
+     * @return The answer's message.
+     */
+    private ModelMessage originalTribute(ServerPlayer serverPlayer, ServerUnit unit,
+                                         IndianSettlement is, boolean recent,
+                                         ChangeSet cs) {
+        final Player tribe = is.getOwner();
+        final Tension.Level level = tribe.getTension(serverPlayer).getLevel();
+        if (level == Tension.Level.ANGRY || level == Tension.Level.HATEFUL) {
+            return tributeAnswer("scoutSettlement.tributeNo", unit, is);
+        }
+        if (tribe.getSettlementCount() >= serverPlayer.calculateStrength(false)) {
+            return tributeAnswer("scoutSettlement.tributeLaugh", unit, is);
+        }
+        final GoodsType goods = tributeGoods(is);
+        final int amount = (goods == null) ? 0
+            : Math.min(is.getGoodsCount(goods) / 2, TRIBUTE_GOODS_MAXIMUM);
+        final Colony colony = tributeColony(serverPlayer, is.getTile());
+        if (recent || colony == null || amount < TRIBUTE_GOODS_MINIMUM) {
+            return tributeAnswer("scoutSettlement.tributePoor", unit, is);
+        }
+        GoodsLocation.moveGoods(is, goods, amount, colony);
+        cs.add(See.only(serverPlayer), colony);
+        logger.info("Tribute of " + amount + " " + goods.getSuffix() + " from "
+            + is.getName() + " to " + colony.getName());
+        return tributeAnswer("scoutSettlement.tributeGoods", unit, is)
+            .addAmount("%amount%", amount)
+            .addNamed("%goods%", goods)
+            .addName("%colony%", colony.getName());
+    }
+
+    /**
+     * An answer to a tribute demand ({@link #originalTribute}).
+     *
+     * @param key The message key.
+     * @param unit The {@code Unit} demanding (the message's source).
+     * @param is The {@code IndianSettlement} (its display: the chief's tribe).
+     * @return The message.
+     */
+    private static ModelMessage tributeAnswer(String key, ServerUnit unit,
+                                              IndianSettlement is) {
+        return new ModelMessage(MessageType.FOREIGN_DIPLOMACY, key, unit, is)
+            .addStringTemplate("%nation%", is.getOwner().getNationLabel());
+    }
+
+    /**
+     * The goods of a tribute ({@link #originalTribute}): the village's most
+     * plentiful New World goods, the first of the specification's order on
+     * a tie.
+     *
+     * @param is The {@code IndianSettlement}.
+     * @return The goods type, or null when it has none.
+     */
+    static GoodsType tributeGoods(IndianSettlement is) {
+        GoodsType best = null;
+        int most = 0;
+        for (GoodsType gt : is.getSpecification().getGoodsTypeList()) {
+            if (!gt.isNewWorldGoodsType() || !gt.isStorable()) continue;
+            final int n = is.getGoodsCount(gt);
+            if (n > most) {
+                most = n;
+                best = gt;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Where a tribute goes ({@link #originalTribute}): our colony nearest
+     * to the village, the first of our colonies on a tie.
+     *
+     * @param serverPlayer The {@code ServerPlayer} demanding.
+     * @param tile The village's {@code Tile}.
+     * @return The colony, or null when we have none.
+     */
+    static Colony tributeColony(Player serverPlayer, Tile tile) {
+        Colony best = null;
+        int nearest = Integer.MAX_VALUE;
+        for (Colony c : serverPlayer.getColonyList()) {
+            final int d = tile.getDistanceTo(c.getTile());
+            if (d < nearest) {
+                nearest = d;
+                best = c;
+            }
+        }
+        return best;
     }
 
 

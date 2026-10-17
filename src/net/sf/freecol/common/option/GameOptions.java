@@ -272,6 +272,21 @@ public class GameOptions {
     public static final String ORIGINAL_FATHER_OFFER
         = "model.option.originalFatherOffer";
 
+    /**
+     * The original's tribute (part Z, Z-ITEMS Z2.2; Roger 2026-10-13:
+     * "Tribut in Waren, wie im Original"): a village pays in goods, not
+     * FreeCol's gold, sent to our colony nearest to it (V: war-french
+     * #17339 «46 Felle nach Prov.», #42537 64 furs, playthrough-4 048
+     * #44727 «28 Felle nach Silver City»: @EXTORTSTUFF), or refuses in one
+     * of three ways: @EXTORTLAUGH (V 045 #30832, the Arawak at the first
+     * demand of a soldier), @EXTORTPOOR (V 048 #48446), @EXTORTNO (never
+     * seen).  Which comes when and how much is a guess
+     * ({@code InGameController.originalTribute}).  On in the "levi" rules
+     * (and a levi save from before the rule).
+     */
+    public static final String ORIGINAL_TRIBUTE
+        = "model.option.originalTribute";
+
     /** Do missionaries provide extra benefits. */
     public static final String ENHANCED_MISSIONARIES
         = "model.option.enhancedMissionaries";

@@ -819,4 +819,36 @@ public class ClassicNativeBoxesTest extends FreeColTestCase {
             }
         }
     }
+
+
+    // Part Z, Z2.2: the tribute without FreeCol's question
+
+    /**
+     * «Zoll fordern» asks nothing more (Roger's event #12, frame_064125:
+     * FreeCol's «Es ist schwer, um sicher zu sein …» before it; the
+     * original's chief answers 15-18 frames after the village box, the
+     * M3 verifier's W4): the soldier's row 2 and the scout's row 2 send
+     * the demand at once, with no box between.
+     */
+    public void testTheTributeAsksNothingMore() throws Exception {
+        final ClassicText t = pack("testTheTributeAsksNothingMore");
+        if (t == null) return;
+        final Object[][] cases = {
+            { "iroquois", "model.role.soldier", List.of("demandTribute") },
+            { "apache", "model.role.scout", List.of("scoutSettlement", "demandTribute") } };
+        for (Object[] c : cases) {
+            final Rig r = rig();
+            final Unit u = atVillage(r, (String) c[0], "model.unit.freeColonist",
+                                     (String) c[1]);
+            final Player tribe = getServerPlayer(r.game, "model.nation." + c[0]);
+            r.dutch.putNationSummary(tribe,
+                new net.sf.freecol.common.model.NationSummary(tribe, r.dutch));
+            r.keys.press("DOWN", "ENTER");
+            r.igc().moveDirection(u, Direction.S, true);
+            flush();
+            assertEquals(c[1] + "", c[2], r.api.log);
+            assertEquals(c[1] + " no question", List.of(ClassicVillageBox.HAPPY), r.asked());
+            assertEquals(0, u.getMovesLeft());
+        }
+    }
 }
