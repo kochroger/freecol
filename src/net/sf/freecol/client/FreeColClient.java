@@ -980,12 +980,16 @@ public final class FreeColClient {
      * Public for FreeColClient.quit and showMain.  A turn start's autosave
      * still being written ends first where the view waits for it (the
      * Classic UI, part Z1: a load or the quit in that moment cut the save
-     * off; {@link GUI#awaitAutosave}).
+     * off; {@link GUI#awaitAutosave}).  That wait handles the events
+     * meanwhile, so another stop queued before may run inside it: the
+     * server is stopped only if it is still the one this stop found (part
+     * Z1's review), never twice and never a newer one.
      */
     public void stopServer() {
         final FreeColServer freeColServer = getFreeColServer();
         if (freeColServer != null) {
             if (gui != null) gui.awaitAutosave();
+            if (getFreeColServer() != freeColServer) return;
             freeColServer.getController().shutdown();
             setFreeColServer(null);
         }

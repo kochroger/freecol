@@ -112,6 +112,12 @@ public final class ConnectController extends FreeColClientHolder {
     /**
      * Request that this client log out from the server.
      *
+     * A turn start's autosave still being written ends first where the
+     * view waits for it (the Classic UI, part Z1's review;
+     * {@link GUI#awaitAutosave}): in a single player game the server ends
+     * its game at the logout, and its answer sends a quitting client back
+     * to the title, which then came up inside the quit's own wait.
+     *
      * @param reason The reason to logout from the server.
      * @return True if the player is already logged out,
      *     or a logout request was sent.
@@ -120,6 +126,8 @@ public final class ConnectController extends FreeColClientHolder {
         final FreeColClient fcc = getFreeColClient();
         final Player player = fcc.getMyPlayer();
         if (!fcc.isLoggedIn()) return true;
+        final GUI gui = getGUI();
+        if (gui != null) gui.awaitAutosave();
 
         // Save our active unit on reconnect.
         if (reason == LogoutReason.RECONNECT) {

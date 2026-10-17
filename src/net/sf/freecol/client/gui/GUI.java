@@ -1203,12 +1203,12 @@ public class GUI extends FreeColClientHolder {
     public void autosaveFinished() {}
 
     /**
-     * The client is about to stop its server (a load, the quit, back to
-     * the title): the view may first wait for a turn start's autosave that
-     * is still being written ({@link #autosaveStarting}; the Classic UI,
-     * part Z1).  The default does not wait.
+     * The client is about to log out or to stop its server (a load, the
+     * quit, back to the title): the view may first wait for a turn start's
+     * autosave that is still being written ({@link #autosaveStarting}; the
+     * Classic UI, part Z1).  The default does not wait.
      *
-     * Used by: FreeColClient.stopServer
+     * Used by: FreeColClient.stopServer, ConnectController.requestLogout
      */
     public void awaitAutosave() {}
 

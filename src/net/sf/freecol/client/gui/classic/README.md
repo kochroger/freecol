@@ -6684,7 +6684,13 @@ capture or a file, I = inferred, M = the manual.
   «Spiel sichern» and «Spiel laden» wait before their box (so row 10 shows
   the new turn), the row's write and the load wait once more, and every
   stop of the server waits (`FreeColClient.stopServer` →
-  `GUI.awaitAutosave`: the load's switch, the quit, back to the title). The
+  `GUI.awaitAutosave`: the load's switch, the quit, back to the title), and
+  so does the logout before it (`ConnectController.requestLogout`, part
+  Z1's review: in a single player game the server ends its game at the
+  logout, and its answer sends the client to the title, which «Beenden» in
+  that half second showed for a moment inside the stop's wait). A stop
+  that runs inside another stop's wait stops the server once: each stops
+  it only if it is still the server it found. The
   wait is a secondary event loop on the event thread: the map is drawn and
   keys and clicks are handled meanwhile, nothing asked for is lost; a
   second save or load box asked for while one waits is dropped (the first
@@ -6749,7 +6755,8 @@ capture or a file, I = inferred, M = the manual.
   replaced row, whole, and no save over a row without it; row 10 in one
   step, held half-way, failing, an unreadable old row 10, a
   before-last-turn file that cannot be replaced);
-  `ClassicAutosaveGateTest` (nested autosaves, a thread's wait, the bound
+  `ClassicAutosaveGateTest` (nested autosaves, a thread's wait, woken by
+  the end at once, the bound
   on a thread and on the event thread, the writer never waits for itself,
   the event thread handles events during a wait, nested waits);
   `ClassicAdvisorLayerTest.testAnInertRowKeepsTheBoxUp`
@@ -6769,7 +6776,10 @@ capture or a file, I = inferred, M = the manual.
   closed while the French still move, no box, the event thread free, a
   second request dropped, row 10 with the new turn, the switch after the
   autosave), a save box answered as the autosave begins, the bound, a
-  server stop, the gate open again after an autosave that throws);
+  server stop (the network server not shut down before the autosave is
+  written, a second stop inside the first one's wait, one shutdown), the
+  logout (asked of the server only after the autosave), the gate open
+  again after an autosave that throws);
   `ClassicKeepSavesTest` lists the write's move, its temporary file's
   delete and the kept copy's move to its name.
 

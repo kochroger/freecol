@@ -3080,18 +3080,20 @@ public class ClassicGUI extends GUI {
      * {@inheritDoc}
      *
      * A load (its switch to the save), the quit and every return to the
-     * title stop the server: never while the turn start's autosave is
-     * written (part Z1), at most {@link #autosaveWaitMs}.  On the event
-     * thread the screen and input go on meanwhile.
+     * title log out and stop the server: neither while the turn start's
+     * autosave is written (part Z1; the logout since part Z1's review: a
+     * quit then went to the title inside the stop's wait), at most
+     * {@link #autosaveWaitMs}.  On the event thread the screen and input
+     * go on meanwhile.
      */
     @Override
     public void awaitAutosave() {
         if (!this.autosaveGate.blocking()) return;
-        logger.info("Classic autosave: the server stop waits for the turn's autosave");
-        ClassicFrameRecorder.event("autosave", "server stop waits");
+        logger.info("Classic autosave: the logout or server stop waits for the turn's autosave");
+        ClassicFrameRecorder.event("autosave", "logout or server stop waits");
         if (!this.autosaveGate.awaitIdle(this.autosaveWaitMs)) {
             logger.warning("Classic autosave: still written after " + this.autosaveWaitMs
-                + " ms, the server stops all the same");
+                + " ms, the logout or server stop goes on all the same");
         }
     }
 

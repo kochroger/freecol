@@ -105,8 +105,9 @@ public class ClassicAutosaveGateTest extends TestCase {
     }
 
     /**
-     * Another thread waits until the autosave has ended (not before), and
-     * then sees the gate idle.
+     * Another thread waits until the autosave has ended (not before), is
+     * woken by its end at once (not by the wait's bound), and then sees
+     * the gate idle.
      */
     public void testAThreadWaitsForTheAutosave() throws Exception {
         final ClassicAutosaveGate g = new ClassicAutosaveGate();
@@ -128,6 +129,11 @@ public class ClassicAutosaveGateTest extends TestCase {
         w.join(30000L);
         assertTrue(idle.get());
         assertTrue(returnedAt.get() >= a.endedAt.get());
+        // Woken by the end, not by its bound (part Z1's review: without the
+        // end's notifyAll the wait ran its full 30 s and still passed; the
+        // only such waiter in the game is the shutdown hook's stop).
+        final long lateMs = (returnedAt.get() - a.endedAt.get()) / 1_000_000L;
+        assertTrue("woken " + lateMs + " ms after the end", lateMs < 2000L);
         assertFalse(g.running());
         assertFalse(g.blocking());
     }

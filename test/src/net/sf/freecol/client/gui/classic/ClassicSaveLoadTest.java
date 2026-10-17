@@ -1156,33 +1156,165 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
      * Every stop of the server (the load's switch, the quit, back to the
      * title) waits for the turn start's autosave (part Z1, C1;
      * {@code FreeColClient.stopServer}): the server runs on until the
-     * autosave is written, the event thread goes on meanwhile; then the
-     * turn's save is row 10 and the server is stopped.
+     * autosave is written (its network server not shut down, part Z1's
+     * review: the shutdown before the wait kept every test green), the
+     * event thread goes on meanwhile; then the turn's save is row 10 and
+     * the server is stopped.  A second stop that runs inside the first
+     * one's wait (its secondary event loop, as the title after a quit's
+     * logout did) waits too, and the server is shut down once.
      */
     public void testAServerStopWaitsForTheAutosave() throws Exception {
         final FreeColClient fcc = gameClient(baseOptions());
         final Game game = fcc.getGame();
         game.setTurn(turnOf(1495));
         final File last = new File(this.autosaves, "Autosave-last-turn.fsg");
-        final HeldAutosave h = new HeldAutosave(fcc, false, false);
-        h.awaitHalf();
-        final java.util.concurrent.CountDownLatch stopped
-            = new java.util.concurrent.CountDownLatch(1);
-        javax.swing.SwingUtilities.invokeLater(() -> {
-                fcc.stopServer();
-                stopped.countDown();
-            });
-        assertFalse(stopped.await(400, java.util.concurrent.TimeUnit.MILLISECONDS));
-        assertTrue("the event thread is frozen", eventThreadAnswers());
-        assertNotNull("the server stopped during the autosave", fcc.getFreeColServer());
-        assertFalse(last.exists());
-        h.finish();
-        assertTrue(stopped.await(30, java.util.concurrent.TimeUnit.SECONDS));
-        assertNull(fcc.getFreeColServer());
-        assertTrue(h.errors.toString(), h.errors.isEmpty());
+        assertNotNull("no network server to stop", fcc.getFreeColServer().getServer());
+        try (Shutdowns shutdowns = new Shutdowns()) {
+            final HeldAutosave h = new HeldAutosave(fcc, false, false);
+            h.awaitHalf();
+            final java.util.concurrent.CountDownLatch stopped
+                = new java.util.concurrent.CountDownLatch(1);
+            final java.util.concurrent.CountDownLatch inner
+                = new java.util.concurrent.CountDownLatch(1);
+            javax.swing.SwingUtilities.invokeLater(() -> {
+                    fcc.stopServer();
+                    stopped.countDown();
+                });
+            assertFalse(stopped.await(400, java.util.concurrent.TimeUnit.MILLISECONDS));
+            assertTrue("the event thread is frozen", eventThreadAnswers());
+            assertNotNull("the server stopped during the autosave", fcc.getFreeColServer());
+            assertEquals("the server was shut down during the autosave", 0, shutdowns.count.get());
+            javax.swing.SwingUtilities.invokeLater(() -> {
+                    fcc.stopServer();
+                    inner.countDown();
+                });
+            assertFalse(inner.await(400, java.util.concurrent.TimeUnit.MILLISECONDS));
+            assertTrue("the event thread is frozen", eventThreadAnswers());
+            assertEquals("the server was shut down during the autosave", 0, shutdowns.count.get());
+            assertFalse(last.exists());
+            h.finish();
+            assertTrue(stopped.await(30, java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue(inner.await(30, java.util.concurrent.TimeUnit.SECONDS));
+            assertNull(fcc.getFreeColServer());
+            assertEquals("shut down " + shutdowns.count.get() + " times", 1, shutdowns.count.get());
+            assertTrue(h.errors.toString(), h.errors.isEmpty());
+        }
         assertEquals(game.getTurn().getNumber(), ClassicSaveSlots.info(last).turn);
         // FreeCol's own GUI does not wait (its seam is empty).
         new net.sf.freecol.client.gui.GUI(null).awaitAutosave();
+    }
+
+    /**
+     * The network server's shutdowns, counted from its log line
+     * ("Server shutdown.", FINE; {@code Server.shutdown}).
+     */
+    private static final class Shutdowns extends java.util.logging.Handler
+        implements AutoCloseable {
+
+        final java.util.concurrent.atomic.AtomicInteger count
+            = new java.util.concurrent.atomic.AtomicInteger(0);
+        private final java.util.logging.Logger log = java.util.logging.Logger
+            .getLogger(net.sf.freecol.server.networking.Server.class.getName());
+        private final java.util.logging.Level was = this.log.getLevel();
+
+        Shutdowns() {
+            setLevel(java.util.logging.Level.ALL);
+            this.log.setLevel(java.util.logging.Level.FINE);
+            this.log.addHandler(this);
+        }
+
+        @Override
+        public void publish(java.util.logging.LogRecord r) {
+            if ("Server shutdown.".equals(r.getMessage())) this.count.incrementAndGet();
+        }
+
+        @Override
+        public void flush() {}
+
+        @Override
+        public void close() {
+            this.log.removeHandler(this);
+            this.log.setLevel(this.was);
+        }
+    }
+
+    /**
+     * The logout waits for the turn start's autosave too (part Z1's
+     * review): «Beenden» logs out before it stops the server, and in a
+     * single player game the server ends its game at the logout, whose
+     * answer sent the client to the title inside the stop's wait (the
+     * title came up for a moment before the program closed).  Now the
+     * logout is asked of the server only once the autosave is written; the
+     * event thread goes on meanwhile.  Not logged in, nothing waits.
+     */
+    public void testALogoutWaitsForTheAutosave() throws Exception {
+        final FreeColClient fcc = gameClient(baseOptions());
+        final Game game = fcc.getGame();
+        game.setTurn(turnOf(1495));
+        final File last = new File(this.autosaves, "Autosave-last-turn.fsg");
+        final List<Boolean> autosaveAtLogout = Collections.synchronizedList(new ArrayList<>());
+        final List<Game.LogoutReason> reasons = Collections.synchronizedList(new ArrayList<>());
+        set(fcc, "connectController",
+            new net.sf.freecol.client.control.ConnectController(fcc));
+        set(fcc, "serverAPI", new net.sf.freecol.common.networking.ServerAPI() {
+                @Override
+                public net.sf.freecol.common.networking.Connection connect(String name,
+                    String host, int port) {
+                    return null;
+                }
+                @Override
+                public boolean disconnect() {
+                    return true;
+                }
+                @Override
+                public net.sf.freecol.common.networking.Connection reconnect() {
+                    return null;
+                }
+                @Override
+                public net.sf.freecol.common.networking.Connection getConnection() {
+                    return null;
+                }
+                @Override
+                public boolean logout(Player player, Game.LogoutReason reason) {
+                    autosaveAtLogout.add(ClassicSaveLoadTest.this.gui.autosaveGate.running());
+                    reasons.add(reason);
+                    return true;
+                }
+            });
+        // Not logged in: no wait, no logout.
+        final HeldAutosave h0 = new HeldAutosave(fcc, false, false);
+        h0.awaitHalf();
+        final java.util.concurrent.atomic.AtomicLong ms
+            = new java.util.concurrent.atomic.AtomicLong(-1L);
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+                final long s = System.nanoTime();
+                assertTrue(fcc.getConnectController().requestLogout(Game.LogoutReason.QUIT));
+                ms.set((System.nanoTime() - s) / 1_000_000L);
+            });
+        assertTrue("waited " + ms.get() + " ms", ms.get() < 300L);
+        assertTrue(reasons.isEmpty());
+        h0.finish();
+        assertTrue(h0.errors.toString(), h0.errors.isEmpty());
+
+        set(fcc, "loggedIn", Boolean.TRUE);
+        game.setTurn(turnOf(1496));
+        final HeldAutosave h = new HeldAutosave(fcc, false, false);
+        h.awaitHalf();
+        final java.util.concurrent.CountDownLatch out
+            = new java.util.concurrent.CountDownLatch(1);
+        javax.swing.SwingUtilities.invokeLater(() -> {
+                fcc.getConnectController().requestLogout(Game.LogoutReason.QUIT);
+                out.countDown();
+            });
+        assertFalse(out.await(400, java.util.concurrent.TimeUnit.MILLISECONDS));
+        assertTrue("the event thread is frozen", eventThreadAnswers());
+        assertTrue("logged out during the autosave", reasons.isEmpty());
+        h.finish();
+        assertTrue(out.await(30, java.util.concurrent.TimeUnit.SECONDS));
+        assertEquals(Arrays.asList(Game.LogoutReason.QUIT), reasons);
+        assertEquals(Arrays.asList(Boolean.FALSE), autosaveAtLogout);
+        assertTrue(h.errors.toString(), h.errors.isEmpty());
+        assertEquals(game.getTurn().getNumber(), ClassicSaveSlots.info(last).turn);
     }
 
     /**
