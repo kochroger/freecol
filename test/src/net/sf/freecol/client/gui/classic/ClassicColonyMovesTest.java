@@ -185,6 +185,9 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         assertEquals(228.3, ClassicColonyMoves.ms(ClassicColonyMoves.HOVER_BUILDING_FRAMES), 0.1);
         assertEquals(42.8, ClassicColonyMoves.ms(ClassicColonyMoves.HOVER_REFUSED_FRAMES), 0.1);
         assertEquals(42.8, ClassicColonyMoves.ms(ClassicColonyMoves.ABANDON_FENCE_FRAMES), 0.1);
+        // @NODOCKS on screen 7 frames after the drop (Z-ITEMS Z1.3, V clip
+        // 053 #50460 -> #50467).
+        assertEquals(99.9, ClassicColonyMoves.ms(ClassicColonyMoves.NODOCKS_FRAMES), 0.1);
     }
 
 
@@ -1562,9 +1565,12 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
 
     /**
      * The ocean (the review of part U, play M4, L1, fidelity M3): without
-     * docks a drop on the water says @NODOCKS and nothing moves; with the
-     * docks a colonist from a building becomes a Fischer there, not a
-     * Farmer (I).
+     * docks a drop on the water says @NODOCKS and nothing moves, and so
+     * does a click on the water with a colonist selected (V clip 053
+     * #50365 - #50461, #31382); the box has the admiral and is on screen 7
+     * frames after the drop or the release (Z-ITEMS Z1.3; V #50460 -&gt;
+     * #50467), @MORETHANTHREE keeps MSS5 and its 32 frames; with the docks
+     * a colonist from a building becomes a Fischer there, not a Farmer (I).
      */
     public void testTheOceanAndTheDocks() throws Exception {
         final Scene s = scene(2, true);
@@ -1580,10 +1586,43 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         final int calls = s.api.log.size();
         int[] a = at(s.panel, u);
         final int[] ocean = tile(5);
+        final long seven = Math.round(ClassicColonyMoves.ms(ClassicColonyMoves.NODOCKS_FRAMES)
+                                      * 1e6);
+        long before = ClassicSlide.SYSTEM.now();
         drag(s.panel, a[0], a[1], ocean[0], ocean[1]);
+        long after = ClassicSlide.SYSTEM.now();
         assertSame(hall, u.getLocation());
         assertEquals(calls, s.api.log.size());
-        assertEquals("NODOCKS", s.boxes.asked.get(0).id);
+        final ClassicAdvisorBox.Request nd = s.boxes.asked.get(0);
+        assertEquals("NODOCKS", nd.id);
+        assertSame("the admiral", ClassicAdvisorBox.Portrait.ADMIRAL, nd.portrait);
+        assertTrue(nd.isNotice());
+        assertEquals("at its time, not after a delay", 0.0, nd.openDelayMs, 0.0);
+        assertTrue("on screen 7 frames after the drop: " + (nd.showAtNanos - before),
+                   nd.showAtNanos >= before + seven && nd.showAtNanos <= after + seven);
+        // The click on the water with him selected: the same box.
+        assertSame(u, s.panel.selected());
+        before = ClassicSlide.SYSTEM.now();
+        click(s.panel, ocean[0], ocean[1]);
+        after = ClassicSlide.SYSTEM.now();
+        assertSame(hall, u.getLocation());
+        assertEquals(calls, s.api.log.size());
+        assertEquals(2, s.boxes.asked.size());
+        final ClassicAdvisorBox.Request nc = s.boxes.asked.get(1);
+        assertEquals("NODOCKS", nc.id);
+        assertSame(ClassicAdvisorBox.Portrait.ADMIRAL, nc.portrait);
+        assertTrue("7 frames after the release",
+                   nc.showAtNanos >= before + seven && nc.showAtNanos <= after + seven);
+        // @MORETHANTHREE as before: MSS5, 32 frames (with the palette lead).
+        final ClassicAdvisorBox.Request full = ClassicColonyPanel.refusalRequest(
+            ClassicText.load(ClassicPackFiles.runtime()),
+            new ClassicColonyJobs.Refusal("MORETHANTHREE", null), "t", 0L);
+        if (full != null) {
+            assertSame(ClassicAdvisorBox.Portrait.COLONIST, full.portrait);
+            assertEquals(0L, full.showAtNanos);
+            assertEquals(ClassicColonyMoves.ms(32) - ClassicAdvisorLayer.PALETTE_LEAD_MS,
+                         full.openDelayMs, 0.01);
+        }
         addBuilding(s, "docks");
         paint(s.panel);
         a = at(s.panel, u);
@@ -1591,7 +1630,51 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         assertSame(s.api.log.toString(), tileOf(s.colony, Direction.E), u.getLocation());
         assertEquals("a Fischer on the water", ClassicColonyJobs.goodsOf(spec(),
             ClassicColonyLayout.JOB_FISHERMAN), u.getWorkType());
-        assertEquals(1, s.boxes.asked.size());
+        assertEquals(2, s.boxes.asked.size());
+    }
+
+    /**
+     * @NODOCKS over clip 053's frames (Z-ITEMS Z1.3, the golden #31394;
+     * the pack and {@code -Dclassic.clips}): the admiral at box + (-4,
+     * -71), the box (44, 121, 236, 30), the words with «Hafenanlagen» in
+     * gold, 0 px off box and portrait, after the click on the empty water
+     * (#31394) and after the drag onto it (#50468).
+     */
+    public void testTheNoDocksBoxAsClip053() throws Exception {
+        final ClassicText t = texts();
+        if (t == null) return;
+        final ClassicColonyGolden gold = ClassicColonyGolden.open(getName());
+        if (gold == null) return;
+        final ClassicPackFiles pack = gold.pack;
+        final ClassicFont tiny = pack.font(ClassicFont.TINY);
+        final BufferedImage wood = pack.image(ClassicMenuBar.WOOD_KEY);
+        final ClassicAdvisorBox.Request r = ClassicColonyPanel.refusalRequest(t,
+            new ClassicColonyJobs.Refusal(ClassicColonyJobs.NODOCKS, null), "Test", 0L);
+        assertNotNull(r);
+        final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(r, tiny,
+            pack.image(ClassicPackFiles.ssKey(r.portrait.sprite)));
+        assertEquals(new Rectangle(44, 121, 236, 30), l.box);
+        assertEquals(40, l.portraitAt.x);
+        assertEquals(50, l.portraitAt.y);
+        final java.io.File key = new java.io.File(gold.recordings, "colony-flow-analysis/key");
+        final StringBuilder out = new StringBuilder();
+        int bad = 0, n = 0;
+        for (String f : new String[] { "c053_031394_nodocks-click-admiral.png",
+                                       "c053_050468_nodocks-drag-admiral.png" }) {
+            final java.io.File file = new java.io.File(key, f);
+            if (!file.isFile()) {
+                System.err.println(getName() + ": no frame " + file + ", skipped");
+                continue;
+            }
+            final int[] got = overFrame(gold, javax.imageio.ImageIO.read(file), l, -1, wood,
+                                        tiny);
+            out.append(' ').append(f).append(' ').append(got[0]).append('/').append(got[1])
+                .append(" arrow ").append(got[2]);
+            bad += got[1];
+            n++;
+        }
+        System.out.println(getName() + ": " + n + " frames," + out);
+        assertEquals("pixels off:" + out, 0, bad);
     }
 
     /**

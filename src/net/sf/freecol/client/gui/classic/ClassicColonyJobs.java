@@ -512,12 +512,17 @@ final class ClassicColonyJobs {
         }
     }
 
+    /** Water without docks (GAME.TXT's section). */
+    static final String NODOCKS = "NODOCKS";
+
     /**
      * Why a work tile refuses a colonist: water without docks @NODOCKS
-     * (GAME.TXT; I: not seen); anything else (worked, the centre, a
-     * neighbour's, an enemy on it) silent (V clip 042 #4150, #4839: a
-     * worked tile, no box).  Null where he can go there (a native's tile
-     * too: FreeCol's land question).
+     * (GAME.TXT; V clip 053: the drag onto the water of Test #50365 -
+     * #50461 and the click on its empty water #31382 both refused, the box
+     * #31393 and #50467, the colonist where he was); anything else (worked,
+     * the centre, a neighbour's, an enemy on it) silent (V clip 042 #4150,
+     * #4839: a worked tile, no box).  Null where he can go there (a
+     * native's tile too: FreeCol's land question).
      *
      * @param ct The tile.
      * @param u The colonist.
@@ -527,7 +532,7 @@ final class ClassicColonyJobs {
         if (ct == null) return new Refusal(null, null);
         if (u.getLocation() == ct) return null;
         if (ct.getNoWorkReason() == NoAddReason.MISSING_ABILITY && ct.getWorkTile() != null
-            && !ct.getWorkTile().isLand()) return new Refusal("NODOCKS", null);
+            && !ct.getWorkTile().isLand()) return new Refusal(NODOCKS, null);
         return (free(ct)) ? null : new Refusal(null, null);
     }
 

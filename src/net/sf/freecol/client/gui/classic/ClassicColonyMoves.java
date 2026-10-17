@@ -60,8 +60,9 @@ import java.util.List;
  *   <tr><td>onto a school he may not teach in, a full school, water
  *       without docks</td><td>the original's box (@NOTEACHER, @TEACHCONVERT,
  *       @NEEDCOLLEGE, @NEEDUNIVERSITY, @SCHOOL1, @COLLEGE2, @UNIV3,
- *       @NODOCKS; GAME.TXT, the triggers I), nothing moves, nothing is
- *       asked of the server</td></tr>
+ *       @NODOCKS; GAME.TXT, the school's triggers I; @NODOCKS V clip 053,
+ *       the drag #50365 - #50461 and the click #31382, both refused with
+ *       the admiral), nothing moves, nothing is asked of the server</td></tr>
  *   <tr><td>onto his own place, the centre, an occupied tile, a
  *       placeholder, nowhere</td><td>nothing (V dago P1: a drag dropped
  *       in place did nothing; clip 042 #4150, #4839: two drops on a worked
@@ -142,11 +143,23 @@ final class ClassicColonyMoves {
 
     /**
      * @MORETHANTHREE after the drop: +32 frames (V dago-colony2 #10913 →
-     * #10945); the school's and the docks' refusals (@NOTEACHER,
-     * @NEEDCOLLEGE, @NEEDUNIVERSITY, @TEACHCONVERT, @SCHOOL1, @COLLEGE2,
-     * @UNIV3, @NODOCKS) the same (I: not seen).
+     * #10945); the school's refusals (@NOTEACHER, @NEEDCOLLEGE,
+     * @NEEDUNIVERSITY, @TEACHCONVERT, @SCHOOL1, @COLLEGE2, @UNIV3) the same
+     * (I: not seen); @NODOCKS has its own time ({@link #NODOCKS_FRAMES}).
      */
     static final int FULL_FRAMES = 32;
+
+    /**
+     * @NODOCKS (water without docks) on screen +7 frames after the drop or
+     * the click's release, the admiral's palette ahead of it where it goes
+     * in first (Z-ITEMS Z1.3, clip 053's comparison D4): V the drag N -&gt;
+     * S of Test, the drop drawn #50460, the box #50467 (+7, no palette
+     * change: MSS0's was in from the box before); the click on the empty
+     * water NE, the keylog's release #31388, MSS0's palette #31391, the box
+     * #31393 (+5 from the logged release, I +-2: the keylog's alignment).
+     * Ours had the 32 frames of @MORETHANTHREE.
+     */
+    static final int NODOCKS_FRAMES = 7;
 
     /**
      * After «Ja»: the map without the colony +31 frames (V #35574 →

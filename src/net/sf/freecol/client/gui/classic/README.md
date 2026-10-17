@@ -4202,8 +4202,14 @@ seen on the frames, I = our choice where no clip shows it.
   building **@MORETHANTHREE** (V dago-colony2), a full school **@SCHOOL1** /
   **@COLLEGE2** / **@UNIV3**, a school he may not teach in **@NOTEACHER**
   (a convert **@TEACHCONVERT**), a skill above the school **@NEEDCOLLEGE** /
-  **@NEEDUNIVERSITY** with the work's word, water without docks
-  **@NODOCKS** (GAME.TXT; the triggers I). His own place, the centre, a worked
+  **@NEEDUNIVERSITY** with the work's word (GAME.TXT; the school's triggers
+  I); water without docks **@NODOCKS**, by a drag and by a click alike, with
+  the **admiral** (MSS0 at box + (−4,−71), box (44,121,236,30)) on screen **7
+  frames** after the drop or the release, its palette ahead of it where it
+  goes in first (part Z, Z-ITEMS Z1.3; V clip 053: the drag #50460 → #50467,
+  the click #31388 → #31393, I ±2 by the keylog; golden
+  `testTheNoDocksBoxAsClip053` over #31394 and #50468, 0 px; ours showed MSS5
+  after 32 frames). His own place, the centre, a worked
   tile (V clip 042 #4150, #4839: no box), a neighbour's tile, a placeholder:
   nothing. Through `InGameController.work`, then `changeWorkType` for R2/R3.
 - **The white cursor after a move**: onto a tile, to that tile (V clip 020

@@ -1544,15 +1544,19 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * A refusal's box (@MORETHANTHREE, the school's, @NODOCKS), 32 frames
-     * after the drop, MSS5 over it, no rows; a silent one shows nothing.
+     * A refusal's box ({@link #refusalRequest}: @MORETHANTHREE and the
+     * school's 32 frames after the drop with MSS5, @NODOCKS 7 frames after
+     * it with the admiral), no rows; a silent one shows nothing.
      *
      * @param no The refusal, or null.
      * @return Whether a box was shown.
      */
     private boolean refuse(ClassicColonyJobs.Refusal no) {
         if (no == null || no.section == null) return false;
-        refusalBox(no, ClassicColonyMoves.ms(ClassicColonyMoves.FULL_FRAMES));
+        final ClassicAdvisorBox.Request r = refusalRequest(
+            ClassicText.load(ClassicPackFiles.runtime()), no, this.colony.getName(),
+            this.clock.now());
+        if (r != null) ask(r);
         return true;
     }
 
@@ -2207,15 +2211,25 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * A refusal's box: @MORETHANTHREE, a building full, nothing moves (V
+     * A refusal's box, nothing moves: @MORETHANTHREE, a building full (V
      * dago-colony2 #10945: 32 frames after the drop, MSS5 over it, no
-     * rows); the school's and @NODOCKS the same way (I).
+     * rows), the school's the same way (I); @NODOCKS, water without docks,
+     * with the admiral (MSS0 at box + (-4, -71), so the box (44, 121, 236,
+     * 30) with the portrait centred as one) on screen 7 frames after the
+     * drop or the click's release, its palette ahead of it where it goes
+     * in first ({@link ClassicColonyMoves#NODOCKS_FRAMES}; V clip 053
+     * #31393 the click, #50467 the drag; Z-ITEMS Z1.3: ours showed MSS5
+     * after 32 frames).
      *
+     * @param t The texts, or null.
      * @param no The refusal (its GAME.TXT section and {@code %STRING0}).
-     * @param delayMs When it comes.
+     * @param title The stopgap's title (the colony's name).
+     * @param now The drop's or release's time on the box layer's clock
+     *     (the screen's clock), for @NODOCKS's.
+     * @return The box, or null without its text.
      */
-    private void refusalBox(ClassicColonyJobs.Refusal no, double delayMs) {
-        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+    static ClassicAdvisorBox.Request refusalRequest(ClassicText t, ClassicColonyJobs.Refusal no,
+                                                    String title, long now) {
         java.util.Map<String, String> values = null;
         if (no.value != null) {
             values = new java.util.HashMap<>();
@@ -2223,11 +2237,20 @@ final class ClassicColonyPanel extends JPanel {
         }
         final ClassicAdvisorBox.Builder b = ClassicAdvisorBox.fromGameText(no.section,
             (t == null) ? null : t.message(no.section), values);
-        if (b == null) return;
-        // With the portrait's palette lead (3 frames) the layer adds.
-        ask(b.portrait(ClassicAdvisorBox.Portrait.COLONIST)
-            .openDelay(Math.max(0.0, delayMs - ClassicAdvisorLayer.PALETTE_LEAD_MS))
-            .stopgap(this.colony.getName(), null).build());
+        if (b == null) return null;
+        if (ClassicColonyJobs.NODOCKS.equals(no.section)) {
+            // On screen at its time, the layer putting the admiral's
+            // palette in ahead of it when another portrait was the last.
+            b.portrait(ClassicAdvisorBox.Portrait.ADMIRAL)
+                .showAt(now + Math.round(ClassicColonyMoves.ms(ClassicColonyMoves.NODOCKS_FRAMES)
+                                         * 1e6));
+        } else {
+            // With the portrait's palette lead (3 frames) the layer adds.
+            b.portrait(ClassicAdvisorBox.Portrait.COLONIST)
+                .openDelay(Math.max(0.0, ClassicColonyMoves.ms(ClassicColonyMoves.FULL_FRAMES)
+                                    - ClassicAdvisorLayer.PALETTE_LEAD_MS));
+        }
+        return b.stopgap(title, null).build();
     }
 
     /** Track which building the pointer is over, and repaint if it changed. */
