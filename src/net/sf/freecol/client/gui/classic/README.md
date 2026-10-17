@@ -2412,7 +2412,13 @@ Roger's decisions of 2026-10-13: the original everywhere.
   pack, or for a tribe the original does not have, FreeCol's box as
   before. Recorder `village-box <unit> <tag> <rows> <bar> chosen= action=`.
   Not offered: «Feindliches Dorf betreten» and the scout's «Indianer
-  aufwiegeln» (never seen).
+  aufwiegeln» (never seen). Open: the original keeps «Ihre Expedition hat
+  ein Lager der {Sioux} erreicht. Die Einwohner» (226 px; 047 #9331) and
+  «… eine Stadt der {Inka} erreicht. Die Einwohner» (225 px; 048 #8539)
+  on line 1, past the box measure's W - 6 = 224 (`ClassicTextLayout.BOX`),
+  so ours breaks before «Einwohner» there (the same box size; W - 4 breaks
+  five other goldens, tried): a wrap the rule misses, as @TUTORIAL13's
+  216 px; the 047 golden compares the box without its prompt.
 - **The tribute** (part Z, Z2.2; M3 spec A2 with the verifier's W4;
   Roger's test event #12, frame_064125): «Zoll fordern» asks nothing more
   (FreeCol's `confirmTribute.normal/happy/warLikely/unwise` question,

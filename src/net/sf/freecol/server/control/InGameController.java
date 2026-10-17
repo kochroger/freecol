@@ -1791,7 +1791,7 @@ public final class InGameController extends Controller {
         int gold = 0;
         int year = getGame().getTurn().getNumber();
         // The original's tribute (levi, part Z, Z2.2): goods or one of
-        // three refusals, OriginalTribute's rule.
+        // three refusals (originalTribute).
         final Specification spec = getGame().getSpecification();
         if (spec.hasOption(GameOptions.ORIGINAL_TRIBUTE, BooleanOption.class)
             && spec.getBoolean(GameOptions.ORIGINAL_TRIBUTE)) {
@@ -1881,13 +1881,13 @@ public final class InGameController extends Controller {
      *       units' offence ({@code Player.calculateStrength}, FreeCol's
      *       own measure of an unwise demand, {@code
      *       confirmTribute.unwise}): it laughs (@EXTORTLAUGH: V 045 #30832,
-     *       the Arawak, six villages, at a soldier's first demand at a
-     *       happy village, early in the game);</li>
+     *       the Arawak at a soldier's first demand at a happy village,
+     *       early in the game);</li>
      *   <li>a tribute in the last five turns (FreeCol's {@code
      *       TURNS_PER_TRIBUTE}), no colony of ours, or fewer than
      *       {@link #TRIBUTE_GOODS_MINIMUM} of what it would give: it is
-     *       poor (@EXTORTPOOR: V 048 #48446, the Sioux some turns after
-     *       their goods #44727);</li>
+     *       poor (@EXTORTPOOR: V 048 #48446, the Sioux after their goods
+     *       at #44727; whether the same village is not known, I);</li>
      *   <li>else it gives half of its most plentiful New World goods
      *       (sugar, tobacco, cotton, furs; V: furs every time, 28, 46 and
      *       64), at most {@link #TRIBUTE_GOODS_MAXIMUM}, sent to our colony
