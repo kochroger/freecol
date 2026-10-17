@@ -1397,8 +1397,10 @@ final class ClassicColonyPanel extends JPanel {
      * beside the figure: clip 020 #79104 -&gt; J2 #79143 (tile + (11,16),
      * left of his shadow), #50297 -&gt; #50310 (+ (12,12)), #22063 -&gt;
      * #22064 (+ (12,13)), clip 046 #98141 -&gt; #98152 (+ (13,12)); a tile
-     * worker's press frames the whole tile (clip 042 #5829); I: a press in
-     * the square's left 0-10 or top 0-8 px, never seen.  The right button
+     * worker's press frames the whole tile (clip 042 #5829); clip 053 down
+     * to + (3, y) (#6171, #6249, #7960 lifted him), + (4, y) (#24520
+     * selected him), + (x, 7) (#7960) and + (x, 10) (#9702, #10207); I: a
+     * press in the square's left 0-2 or top 0-6 px, never seen.  The right button
      * keeps the tile's terrain page ({@link #rightPressAt} looks at the
      * tile first).
      *

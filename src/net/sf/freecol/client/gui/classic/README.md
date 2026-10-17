@@ -4183,8 +4183,10 @@ seen on the frames, I = our choice where no clip shows it.
   in the square moves him (`ClassicColonyPanel.hitAt`, `ClassicColonyLayout.tileCell`;
   V presses beside his figure that opened J2: clip 020 #79104 → #79143 at
   tile + (11,16), #50297 → #50310, #22063 → #22064, clip 046 #98141 → #98152;
-  a tile worker's press frames the whole tile, clip 042 #5829; I: a press in
-  the square's left 0–10 or top 0–8 px, never seen). The right button on his
+  a tile worker's press frames the whole tile, clip 042 #5829; clip 053 down
+  to tile + (3, y) #6171, #6249, #7960, + (4, y) #24520, + (x, 7) #7960, + (x,
+  10) #9702, #10207; I: a press in the square's left 0–2 or top 0–6 px, never
+  seen). The right button on his
   square still asks the tile's terrain page.
 - **The drag**: the first motion starts it, the arrow is hidden, his own
   figure follows as the ghost at the hotspot − (1,8) with a black silhouette
@@ -4217,12 +4219,16 @@ seen on the frames, I = our choice where no clip shows it.
   is a **Farmer** (V clip 053 #3500 → #3920 the convert from the ocean onto the
   Nadel-Wald, corn and no sign, «Konvertierte Indianer(Farmer)» #9740; #25812 →
   #26045 the trapper), a Farmer onto water a **Fischer** (I, by symmetry; no clip),
-  any other job kept on water too, making nothing there (I); both only with the
+  any other job kept on water too, making nothing there (V clip 053 the expert
+  fur trapper E → SW, the ocean of Silver City with docks, #3964 → #4101: the
+  fur under the red sign #4582, «Erfahrene Pelzjäger:» with the bar on
+  Pelzjäger 0/0 #10674; part Z); both only with the
   levi option `model.option.originalDropJobs`
   (FreeCol's rules: the colony chooses the work); building or fence → an
   ocean tile with docks **Fischer** (I); tile → building and fence → building
   the building's work (the role's goods back to the warehouse: the server's
-  `work`); fence → tile Farmer (I); anything → fence **J1** (+5 frames).
+  `work`); fence → tile Farmer (V clip 053 #18764 → #18992 «Erfahrene
+  Soldaten(Farmer)» 3/3; part Z); anything → fence **J1** (+5 frames).
   Refusals are checked before the server is asked, with the original's
   boxes (+32 frames, MSS5, nothing moves, he stays selected): a full
   building **@MORETHANTHREE** (V dago-colony2), a full school **@SCHOOL1** /

@@ -49,8 +49,9 @@ import java.util.List;
  *       C15)</td></tr>
  *   <tr><td>fence &rarr; building</td><td>the building's work, the role's
  *       goods back to the warehouse (C8, C9, C13)</td></tr>
- *   <tr><td>fence &rarr; tile</td><td>Farmer (I: not seen; as from a
- *       building, the work the original gives a newcomer on a tile)</td></tr>
+ *   <tr><td>fence &rarr; tile</td><td>Farmer (V clip 053: the veteran
+ *       soldier made «Siedler» at the gate, dragged onto E #18764 -
+ *       #18892, «Erfahrene Soldaten(Farmer)» 3/3 #18992)</td></tr>
  *   <tr><td>building or fence &rarr; an ocean tile (with docks)</td><td>
  *       <b>Fischer</b>, not Farmer (I: the Farmer rule's evidence is land
  *       only, no clip shows a drop on water)</td></tr>
@@ -314,8 +315,11 @@ final class ClassicColonyMoves {
      * Farmer moved onto water a Fischer (I: by symmetry, as a colonist
      * from a building becomes one there; no clip shows it, named for
      * Roger).  Every other work is kept (V clip 053: the lumber, the furs,
-     * the silver), also on water where it makes nothing (I: no clip shows
-     * a land work dragged onto water).  Ours kept the fish on land, which
+     * the silver), also on water where it makes nothing (V clip 053, part
+     * Z: the expert fur trapper dragged E -&gt; SW, the ocean of Silver
+     * City with docks, #3964 - #4101, the fur under the red sign #4582,
+     * «Erfahrene Pelzjäger:» with the bar on Pelzjäger 0/0 #10674; a
+     * colonist who is no expert at his land work unseen, I).  Ours kept the fish on land, which
      * since part Y3's rule made nothing there under the red sign (the
      * review of part Y, fidelity; Z-ITEMS Z1 item 4).
      *

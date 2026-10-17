@@ -811,7 +811,9 @@ final class ClassicColonyLayout {
     /**
      * The good's icon under the prohibition sign: centred in the sign's 16
      * columns, x = tile x + floor((16 - w)/2) (V: sugar, w 8, at tile + 4;
-     * I for the other widths).
+     * clip 053 corn, w 7, at + 4, 44 of 44 px #21485; furs, w 9, at + 3,
+     * 59 of 59 px #13240; silver, w 10, at + 3, 33 of 33 px #13100; I for
+     * the other widths).
      *
      * @param tileX The tile's x.
      * @param w The icon's width.
