@@ -304,7 +304,8 @@ public class ClassicLossesTest extends FreeColTestCase {
             assertNull("a greyed row takes nothing", ClassicNativeLand.action(poor, 1));
             assertEquals(0, new ClassicAdvisorBox.Bar(poor).enter());
         }
-        final ClassicAdvisorBox.Request unknown = ClassicNativeLand.claimRequest(t, arawak,
+        // A tribe not met without the pack: FreeCol's words, leave and take.
+        final ClassicAdvisorBox.Request unknown = ClassicNativeLand.claimRequest(null, arawak,
             false, 146, true, "Base");
         assertEquals("leave and take", 2, unknown.rows.size());
         assertEquals(0, unknown.defaultRow);
@@ -314,6 +315,12 @@ public class ClassicLossesTest extends FreeColTestCase {
             pack("the claim box's text");
             return;
         }
+        // With the pack the original's box for a tribe not met too (part
+        // Z, Z2.4, N-F9; Roger's event #6): ClassicNativeNoticesTest.
+        final ClassicAdvisorBox.Request unmet = ClassicNativeLand.claimRequest(t, arawak,
+            false, 146, true, "Base");
+        assertEquals(3, unmet.rows.size());
+        assertTrue(unmet.plainText(), unmet.plainText().startsWith("\"Ihr seid in Araukaner-Land"));
         final ClassicAdvisorBox.Request r = ClassicNativeLand.claimRequest(t, arawak, true,
             146, true, "Base");
         assertEquals(ClassicNativeLand.SECTION, r.id);

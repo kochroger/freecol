@@ -900,4 +900,43 @@ public class ClassicNativeBoxesTest extends FreeColTestCase {
         assertEquals("the attack forgotten", List.of("message combat.unitSlaughtered.enemy.brave"),
                      r.asked());
     }
+
+
+    // Part Z, Z2.4: the village box at war
+
+    /**
+     * The village box of a tribe at war with us (Roger's event #16,
+     * frame_069203: FreeCol's hateful «Die Krieger der Irokesen klirren
+     * mit den Waffen …»): @VILLAGEWAR, «… Aus dem Dorf ertönt das
+     * unheilvolle Dröhnen von {Kriegstrommeln}.» (never seen, I), with the
+     * armed unit's rows; a hateful village at peace too.
+     */
+    public void testTheVillageBoxAtWar() throws Exception {
+        final ClassicText t = pack("testTheVillageBoxAtWar");
+        if (t == null) return;
+        for (boolean war : new boolean[] { true, false }) {
+            final Rig r = rig();
+            final Unit u = atVillage(r, "iroquois", "model.unit.freeColonist",
+                                     "model.role.dragoon");
+            final Player iroquois = getServerPlayer(r.game, "model.nation.iroquois");
+            final IndianSettlement is = u.getTile().getNeighbourOrNull(Direction.S)
+                .getIndianSettlement();
+            if (war) {
+                r.dutch.setStance(iroquois, Stance.WAR);
+                iroquois.setStance(r.dutch, Stance.WAR);
+            } else {
+                is.setAlarm(r.dutch, new net.sf.freecol.common.model.Tension(
+                    net.sf.freecol.common.model.Tension.Level.HATEFUL.getLimit()));
+            }
+            r.keys.press("ESC");
+            r.igc().moveDirection(u, Direction.S, true);
+            flush();
+            final ClassicAdvisorBox.Request box = r.keys.boxes.get(0);
+            assertEquals("war=" + war, ClassicVillageBox.WAR, box.id);
+            assertTrue(box.plainText(), box.plainText().contains("Kriegstrommeln"));
+            assertEquals(List.of("Dorf angreifen", "Zoll fordern", "Handlung abbrechen"),
+                         List.of(box.plainRows()));
+            assertEquals(List.of(), r.api.log);
+        }
+    }
 }

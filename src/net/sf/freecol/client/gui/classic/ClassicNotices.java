@@ -37,6 +37,7 @@ import net.sf.freecol.common.model.Ownable;
 import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Settlement;
 import net.sf.freecol.common.model.StringTemplate;
+import net.sf.freecol.common.model.Tension;
 import net.sf.freecol.common.model.Tile;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.model.UnitType;
@@ -177,7 +178,18 @@ final class ClassicNotices {
          */
         CARGO,
         /** FreeCol's {@code %colony%}, a colony's name (part Z, @EXTORTSTUFF). */
-        COLONY
+        COLONY,
+        /**
+         * NAMES {@code @ATTITUDE} at the village's alarm towards us
+         * («Zufrieden» HAPPY … «Kriegerisch» HATEFUL; part Z, @PISS0; I).
+         */
+        ATTITUDE,
+        /**
+         * NAMES {@code @ATTITUDINAL}: how far into its level the village's
+         * alarm is («Leicht» at the bottom … «Äußerst» at the top; part Z,
+         * @PISS0; I).
+         */
+        ATTITUDINAL
     }
 
     /** One notice in the original's words. */
@@ -307,6 +319,22 @@ final class ClassicNotices {
             "STRING0", Value.TITLE, "STRING1", Value.TRIBE));
         RULES.put("scoutSettlement.tributeLaugh", new Rule("EXTORTLAUGH",
             ClassicVillageBox.TRIBUTE_CHAIN_MS, Who.CHIEF, "STRING0", Value.TRIBE));
+        // Part Z, Z2.4: a village's alarm grown, at the turn start (FreeCol
+        // sends two keys, only when it worsens, ServerIndianSettlement
+        // .csCheckTension; Roger's test event #7, frame_054799: «Das
+        // Oberhaupt der Apachen in Igihua'-a begrüßt seine Freunde …»
+        // without the chief): «content» in the original's @INDIANCOMMENT
+        // words, which say nearly the same (V war-french #26477: «Die
+        // {Tupi} freuen sich über den Wohlstand ihrer Nachbarn, der
+        // {Holl.}. Wir sind jedoch besorgt …», the Tupi chief); «angry»
+        // the plain mood message @PISS0 «Der {Apachen}-Stamm ist nun …»
+        // (the M3 verifier's smaller correction 7; never seen, I: FreeCol's
+        // event names no cause, so none of PISS1-5), with the chief.
+        RULES.put("model.player.alarmIncrease.tension.content", new Rule("INDIANCOMMENT",
+            Who.CHIEF, "STRING0", Value.TRIBE, "STRING1", Value.NATION_ABBREV));
+        RULES.put("model.player.alarmIncrease.tension.angry", new Rule("PISS0", Who.CHIEF,
+            "STRING1", Value.TRIBE, "STRING2", Value.ATTITUDINAL,
+            "STRING3", Value.ATTITUDE));
         // Part Z, Z2.3: a tribe's own declaration of war (its tension
         // turned hateful; under the levi rule an attack starts none) in
         // GAME.TXT's @INDIANWAR words with the chief (SRC: never seen;
@@ -933,9 +961,47 @@ final class ClassicNotices {
         }
         case COLONY:
             return replacement(template, "%colony%");
+        case ATTITUDE: case ATTITUDINAL: {
+            final Tension alarm = (display instanceof IndianSettlement && me != null)
+                ? ((IndianSettlement) display).getAlarm(me) : null;
+            if (alarm == null) return null;
+            return (v == Value.ATTITUDE)
+                ? column(t.names("ATTITUDE"), attitudeRow(alarm))
+                : column(t.names("ATTITUDINAL"), attitudinalRow(alarm));
+        }
         default:
             return null;
         }
+    }
+
+    /**
+     * NAMES {@code @ATTITUDE}'s row of an alarm (part Z, @PISS0; I): its
+     * level, HAPPY «Zufrieden» 0 … HATEFUL «Kriegerisch» 4.
+     *
+     * @param alarm The alarm.
+     * @return The row.
+     */
+    static int attitudeRow(Tension alarm) {
+        return alarm.getLevel().ordinal();
+    }
+
+    /**
+     * NAMES {@code @ATTITUDINAL}'s row of an alarm (part Z, @PISS0; I):
+     * its place in its level's range in fifths, «Leicht» 4 at the bottom,
+     * «Etwas» 3, «Ziemlich» 2, «Sehr» 1, «Äußerst» 0 at the top.
+     *
+     * @param alarm The alarm.
+     * @return The row.
+     */
+    static int attitudinalRow(Tension alarm) {
+        final Tension.Level level = alarm.getLevel();
+        final int low = (level.ordinal() == 0) ? Tension.TENSION_MIN
+            : Tension.Level.values()[level.ordinal() - 1].getLimit();
+        final int high = (level == Tension.Level.HATEFUL) ? Tension.TENSION_MAX
+            : level.getLimit();
+        final int span = Math.max(1, high - low);
+        final int fifth = Math.min(4, Math.max(0, (alarm.getValue() - low) * 5 / span));
+        return 4 - fifth;
     }
 
     /**

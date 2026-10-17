@@ -209,6 +209,132 @@ public class ClassicNativeNoticesTest extends FreeColTestCase {
     }
 
     /**
+     * The turn start's mood notices (Z2.4; Roger's event #7,
+     * frame_054799: FreeCol's «Das Oberhaupt der Apachen in Igihua'-a
+     * begrüßt seine Freunde …» without the chief): FreeCol's «content»
+     * in the original's @INDIANCOMMENT words with the chief, «Die {Sioux}
+     * freuen sich über den Wohlstand ihrer Nachbarn, der {Holl.}.» (V
+     * war-french #26477, the words nearly FreeCol's); «angry» the plain
+     * @PISS0 «Der {Sioux}-Stamm ist nun …» with @ATTITUDINAL and
+     * @ATTITUDE at the village's alarm (I), with the chief.
+     */
+    public void testTheMoodNoticesWithTheChief() {
+        final ClassicText t = pack("testTheMoodNoticesWithTheChief");
+        if (t == null) return;
+        final World w = new World();
+        final ModelMessage content = mood(w, "content");
+        final ClassicAdvisorBox.Request c = ClassicNotices.request(t, "message "
+            + content.getId(), content, Messages.message(content), w.siouxCamp, w.dutch,
+            "x", null);
+        assertEquals("INDIANCOMMENT", c.id);
+        assertEquals(ClassicAdvisorBox.Portrait.chief(SIOUX).sprite, c.portrait.sprite);
+        assertTrue(c.plainText(), c.plainText().startsWith(
+            "Die Sioux freuen sich über den Wohlstand ihrer Nachbarn, der Holl.."));
+        final Object[][] alarms = {
+            // the village's alarm, the words
+            { 701, "Leicht Verärgert" }, { 721, "Etwas Verärgert" },
+            { 790, "Äußerst Verärgert" }, { 650, "Unruhig" }, { 1000, "Kriegerisch" } };
+        for (Object[] a : alarms) {
+            w.siouxCamp.setAlarm(w.dutch, new net.sf.freecol.common.model.Tension((Integer) a[0]));
+            final ModelMessage angry = mood(w, "angry");
+            final ClassicAdvisorBox.Request r = ClassicNotices.request(t, "message "
+                + angry.getId(), angry, Messages.message(angry), w.siouxCamp, w.dutch, "x", null);
+            assertEquals("PISS0", r.id);
+            assertEquals(ClassicAdvisorBox.Portrait.chief(SIOUX).sprite, r.portrait.sprite);
+            assertTrue(a[0] + ": " + r.plainText(), r.plainText().startsWith(
+                "Der Sioux-Stamm ist nun "));
+            assertTrue(a[0] + ": " + r.plainText(), r.plainText().contains((String) a[1]));
+        }
+        // The rows: the level, and fifths of it from the top.
+        final net.sf.freecol.common.model.Tension.Level[] levels
+            = net.sf.freecol.common.model.Tension.Level.values();
+        for (int i = 0; i < levels.length; i++) {
+            assertEquals(i, ClassicNotices.attitudeRow(
+                new net.sf.freecol.common.model.Tension(levels[i].getLimit())));
+        }
+        assertEquals(4, ClassicNotices.attitudinalRow(new net.sf.freecol.common.model.Tension(0)));
+        assertEquals(0, ClassicNotices.attitudinalRow(new net.sf.freecol.common.model.Tension(100)));
+        assertEquals(2, ClassicNotices.attitudinalRow(new net.sf.freecol.common.model.Tension(350)));
+        assertEquals(0, ClassicNotices.attitudinalRow(new net.sf.freecol.common.model.Tension(
+            net.sf.freecol.common.model.Tension.TENSION_MAX)));
+    }
+
+    /** FreeCol's mood notice of the Sioux camp as the server sends it. */
+    private static ModelMessage mood(World w, String level) {
+        return new ModelMessage(ModelMessage.MessageType.FOREIGN_DIPLOMACY,
+            "model.player.alarmIncrease.tension." + level, w.siouxCamp)
+            .addStringTemplate("%nation%", w.sioux.getNationLabel())
+            .addStringTemplate("%enemy%", w.dutch.getNationLabel())
+            .addName("%settlement%", w.siouxCamp.getName());
+    }
+
+    /**
+     * An uncontacted tribe's land (Z2.4, N-F9; Roger's event #6,
+     * frame_030679: FreeCol's «Einige unkontaktierte Menschen leben in
+     * diesen Ländern» with two rows): the original's @INDIANLAND with the
+     * tribe's name, its three rows, the pay row priced and greyed without
+     * the gold, the bar and Escape on leave, the chief.
+     */
+    public void testTheUncontactedTribesLand() {
+        final ClassicText t = pack("testTheUncontactedTribesLand");
+        if (t == null) return;
+        final World w = new World();
+        final Player iroquois = w.game.getPlayerByNationId("model.nation.iroquois");
+        assertFalse(iroquois.hasContacted(w.dutch));
+        final ClassicAdvisorBox.Request r = ClassicNativeLand.claimRequest(t, iroquois,
+            false, 146, true, "Base");
+        assertTrue(r.plainText(), r.plainText().startsWith("\"Ihr seid in Irokesen-Land"));
+        assertEquals(3, r.rows.size());
+        assertEquals("\"Wir bieten Euch 146$ für dieses Land.\"",
+                     ClassicAdvisorBox.plain(r.rows.get(ClassicNativeLand.PAY_ROW)));
+        assertEquals(ClassicNativeLand.LEAVE_ROW, r.defaultRow);
+        assertEquals(ClassicNativeLand.LEAVE_ROW, r.escapeAnswer());
+        assertEquals("IND3A0.SS.000", r.portrait.sprite);
+        assertEquals(net.sf.freecol.common.model.Constants.ClaimAction.CLAIM_ACCEPT,
+                     ClassicNativeLand.action(r, ClassicNativeLand.PAY_ROW));
+        assertFalse("pay greyed without the gold", ClassicNativeLand.claimRequest(t,
+            iroquois, false, 146, false, "Base").enabled(ClassicNativeLand.PAY_ROW));
+    }
+
+    /**
+     * The golden check of @INDIANCOMMENT (the pack and {@code
+     * -Dclassic.clips}): war-french #26477, the box (84,82,236,36) as the
+     * game builds it, with the Tupi chief in the frame's picture IND7A2 at
+     * (0,10) (which of his four pictures comes when is A7's G15; with A0
+     * the box would stand at 78), 0 px off on the box and the chief.
+     */
+    public void testTheCommentAgainstWarFrench() throws Exception {
+        final ClassicText t = pack("testTheCommentAgainstWarFrench");
+        final String clips = System.getProperty(ClassicTerrainGoldenTest.CLIPS_PROPERTY);
+        final ClassicPackFiles p = ClassicPackFiles.runtime();
+        final File f = (clips == null) ? null : new File(clips, "war-french/frame_026477.png");
+        if (t == null || f == null || !f.isFile() || p == null
+            || p.font(ClassicFont.TINY) == null) {
+            System.err.println(getClass().getSimpleName()
+                + ": INDIANCOMMENT golden skipped, no recordings or no pack");
+            return;
+        }
+        final World w = new World();
+        final Player tupi = w.game.getPlayerByNationId("model.nation.tupi");
+        final IndianSettlement camp = new FreeColTestCase.IndianSettlementBuilder(w.game)
+            .player(tupi).settlementTile(w.game.getMap().getTile(5, 12)).capital(false).build();
+        final ModelMessage m = new ModelMessage(ModelMessage.MessageType.FOREIGN_DIPLOMACY,
+            "model.player.alarmIncrease.tension.content", camp)
+            .addStringTemplate("%nation%", tupi.getNationLabel())
+            .addStringTemplate("%enemy%", w.dutch.getNationLabel())
+            .addName("%settlement%", camp.getName());
+        final ClassicAdvisorBox.Request r = ClassicNotices.request(t, "message " + m.getId(),
+            m, Messages.message(m), camp, w.dutch, "x", null);
+        assertEquals("INDIANCOMMENT", r.id);
+        final BufferedImage a2 = p.image(ClassicPackFiles.ssKey("IND7A2.SS.000"));
+        final int[] got = compare(ImageIO.read(f), r, p, new Rectangle(84, 82, 236, 36), a2);
+        System.out.println(getClass().getSimpleName() + ": INDIANCOMMENT golden, war-french"
+            + " #26477 " + got[0] + " px, off " + got[1] + ", arrow " + got[2]);
+        assertTrue("compared " + got[0], got[0] > 236 * 36);
+        assertEquals("pixels off", 0, got[1]);
+    }
+
+    /**
      * FreeCol's question before a tribute (Z2.2; Roger's event #12,
      * frame_064125) is never shown: its four versions answer «yes» at
      * once, no box; another confirm still asks.
@@ -296,8 +422,25 @@ public class ClassicNativeNoticesTest extends FreeColTestCase {
      */
     static int[] compare(BufferedImage frame, ClassicAdvisorBox.Request r,
                          ClassicPackFiles pack, Rectangle box) {
+        return compare(frame, r, pack, box, null);
+    }
+
+    /**
+     * The comparison ({@link #compare(BufferedImage, ClassicAdvisorBox.Request,
+     * ClassicPackFiles, Rectangle)}) with another picture of the portrait.
+     *
+     * @param frame The 320x200 frame.
+     * @param r The box.
+     * @param pack The pack.
+     * @param box The box's measured place.
+     * @param picture The portrait's picture, or null for the request's.
+     * @return {compared, off, arrow}.
+     */
+    static int[] compare(BufferedImage frame, ClassicAdvisorBox.Request r,
+                         ClassicPackFiles pack, Rectangle box, BufferedImage picture) {
         final ClassicFont tiny = pack.font(ClassicFont.TINY);
-        final BufferedImage pic = (r.portrait.sprite == null) ? null
+        final BufferedImage pic = (picture != null) ? picture
+            : (r.portrait.sprite == null) ? null
             : pack.image(ClassicPackFiles.ssKey(r.portrait.sprite));
         final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(r, tiny, pic);
         assertEquals(r.id, box, l.box);

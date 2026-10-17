@@ -2462,6 +2462,25 @@ Roger's decisions of 2026-10-13: the original everywhere.
   in the Classic UI (`FreeCol.getClassic()`) the attacker gets no notice
   of the natives' side of it (as at a treaty breach). Not changed: a
   burial ground's war (`ServerUnit.csNativeBurialGround`, A7's K-F8).
+- **The natives' words** (part Z, Z2.4; M3 spec A5 with the verifier's
+  smaller corrections 7 and 8): an uncontacted tribe's land (Roger's
+  event #6, frame_030679: FreeCol's «Einige unkontaktierte Menschen …»
+  with two rows) gets the original's `@INDIANLAND` with the tribe's name
+  and its three rows, the pay row priced as for a met tribe (N-F9, I:
+  never seen; `ClassicNativeLand`); without the pack FreeCol's words as
+  before. The turn start's mood notices (Roger's event #7,
+  frame_054799, FreeCol's `model.player.alarmIncrease.tension.content`
+  without the chief): «content» is `@INDIANCOMMENT` «Die {Sioux} freuen
+  sich über den Wohlstand ihrer Nachbarn, der {Holl.}. Wir sind jedoch
+  besorgt …» with the chief (V war-french #26477, 0 px with the Tupi
+  chief's picture IND7A2 of the frame; FreeCol's words say nearly the
+  same); «angry» is `@PISS0` «Der {Sioux}-Stamm ist nun Ziemlich
+  {Verärgert}.» with the chief, @ATTITUDE at the village's alarm level and
+  @ATTITUDINAL by its fifth of the level (I: never seen; the words as
+  NAMES has them, capitalised; FreeCol's event names no cause, so none of
+  @PISS1-5). The village box at war or at a hateful village is
+  `@VILLAGEWAR` (Roger's event #16, frame_069203, FreeCol's hateful line;
+  `ClassicVillageBox.moodTag`, Z2.1).
 - **Learning** (`askLearn`, the learn question of `moveLearnSkill`):
   after the village box's «Mit den Ureinwohnern leben»,
   `@LEARNSTAY` with the chief (the tribe, @JOB column 1 of the skill), the

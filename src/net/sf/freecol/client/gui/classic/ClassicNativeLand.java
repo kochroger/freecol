@@ -49,10 +49,16 @@ import net.sf.freecol.common.model.Constants.ClaimAction;
  * asks when a colony is founded on native land and before a pioneer's job
  * there; both get this box (I: the original's road and forest boxes,
  * @INDIANROAD and @INDIANFOREST, come with the pioneer work, M6).
- * Without the pack, for a tribe the original does not have, or for a
- * tribe not yet met (FreeCol's {@code indianLand.unknown}, no pay row):
- * FreeCol's words in the same order, leave first, with the same bar and
- * Escape.
+ * A tribe not yet met gets the same box (part Z, Z-ITEMS Z2.4; M3 spec
+ * A5, decision N-F9; Roger's test event #6, frame_030679: FreeCol's
+ * «Einige unkontaktierte Menschen leben in diesen Ländern» with two rows):
+ * the original has no words for it, so its @INDIANLAND with the tribe's
+ * name and its three rows, the pay row priced as for a met tribe (I: an
+ * uncontacted tribe's land was never seen; the server takes the price
+ * from a tribe not met as well).  Without the pack or for a tribe the
+ * original does not have: FreeCol's words in the same order, leave first,
+ * with the same bar and Escape (a tribe not met: FreeCol's {@code
+ * indianLand.unknown}, no pay row).
  */
 final class ClassicNativeLand {
 
@@ -91,8 +97,8 @@ final class ClassicNativeLand {
      *
      * @param t The original texts, or null.
      * @param owner The tribe owning the land.
-     * @param contacted Whether we have met the tribe (else FreeCol's
-     *     words without a pay row).
+     * @param contacted Whether we have met the tribe (without the
+     *     original's words: else FreeCol's words without a pay row).
      * @param price The price.
      * @param canPay Whether the gold pays it (else the pay row is greyed).
      * @param title The stopgap's window title.
@@ -102,8 +108,7 @@ final class ClassicNativeLand {
                                                   boolean contacted, int price,
                                                   boolean canPay, String title) {
         final int tribe = ClassicGUI.tribeIndex(owner);
-        final ClassicText.Message m = (t == null || !contacted) ? null
-            : t.message(SECTION);
+        final ClassicText.Message m = (t == null) ? null : t.message(SECTION);
         final Map<String, String> values = (m == null) ? null : values(t, tribe, price);
         ClassicAdvisorBox.Builder b = (values == null || m.options.size() < 3) ? null
             : ClassicAdvisorBox.fromGameText(SECTION, m, values);
