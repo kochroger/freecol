@@ -481,7 +481,11 @@
              unless there is a silver deposit in the square"; clip 048
              #47324 «Silber 1/1» for a servant on a mountain with a road
              and no deposit, FreeCol 2); FreeCol
-             everywhere.  A mineral deposit does not count (I). -->
+             everywhere.  A mineral deposit does not count (I).  And the
+             expert silver miner doubles silver only on a silver deposit
+             (part Z: clip 053 #2663, #6977 1 on Silver City's mountain
+             with a road and no deposit, FreeCol 2; clip 047 #5375 8 on
+             its deposit). -->
         <booleanOption id="model.option.originalRoadSilver"
                        defaultValue="true"/>
         <!-- The Tory penalty (fixer B after part X; clip 049 #39267: the

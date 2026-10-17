@@ -312,12 +312,18 @@ public class TileProductionCalculator {
                     && OriginalProduction.roadRaises(spec, tit, goodsType, tile))
                 .flatMap(tit -> tit.getProductionModifiers(goodsType, unitType, newTileType, 1));
         
+        // The expert's own modifiers: the original's fisherman (change 5),
+        // no silver expert's doubling without a silver deposit (change 7,
+        // part Z; a type change takes the resource away).
         return concat(productionModifiers,
                 additionalProductionModifiers,
                 (unitType != null)
-                    ? OriginalProduction.fishermanModifiers(spec,
-                        unitType.getModifiers(goodsType.getId(), newTileType, turn),
-                        unitType, goodsType, newTileType)
+                    ? OriginalProduction.silverModifiers(spec,
+                        OriginalProduction.fishermanModifiers(spec,
+                            unitType.getModifiers(goodsType.getId(), newTileType, turn),
+                            unitType, goodsType, newTileType),
+                        goodsType,
+                        !tileTypeChanged && OriginalProduction.hasSilverDeposit(tile))
                     : Stream.of(),
                 (owner != null && unitType != null) ? owner.getModifiers(goodsType.getId(), unitType, turn) : Stream.of(),
                 //(owner != null && unitType == null) ? owner.getModifiers(goodsType.getId(), tile.getType(), turn) : Stream.of()

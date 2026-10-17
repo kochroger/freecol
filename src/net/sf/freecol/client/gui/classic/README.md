@@ -3934,7 +3934,10 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   fisherman + 2, not + 3 (`originalFisherman`; V #46108 6, clip 048 #13896 12 on a fishery); the horses
   take half the surplus rounded up (`originalHorseFood`; dago Fur City 1 of 1); a road raises silver only
   on a silver deposit (`originalRoadSilver`; the manual, p. 27, and V clip 048 #47324 «Silber 1/1» on a
-  mountain with a road and no deposit, FreeCol 2); a river keeps its silver. The Sons of Liberty
+  mountain with a road and no deposit, FreeCol 2), and an expert silver miner doubles silver only there
+  (part Z, Z-ITEMS Z1.7; V clip 053 #2663, #6977: 1 on Silver City's mountain with a road and no
+  deposit, as anyone there, FreeCol 2; clip 047 #5375: 8 on its deposit; a mineral deposit's silver not
+  doubled, I); a river keeps its silver. The Sons of Liberty
   percentage keeps FreeCol's rounding (down, as the original's own pair in the saves). Goldens:
   `LeviProductionTest`.
 - **The Tory penalty as the original** (levi game option `originalToryPenalty`, fixer B after part X;

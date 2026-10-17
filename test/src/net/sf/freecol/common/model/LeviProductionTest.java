@@ -532,6 +532,41 @@ public class LeviProductionTest extends FreeColTestCase {
     }
 
     /**
+     * The expert silver miner doubles silver only on a silver deposit
+     * (part Z, Z-ITEMS Z1.7, clip 053's comparison P1): on Silver City's
+     * SE, mountains with a road and no deposit, he makes 1 as anyone there
+     * (V clip 053 #2663 one silver icon, #6977 his menu's «0/1»; the free
+     * colonist «1/1» #22336), FreeCol 2; on the deposit 8 (V clip 047
+     * #5375); his ore is still doubled; a mineral deposit's silver is not
+     * doubled (I); with the option off FreeCol's numbers.
+     */
+    public void testTheSilverExpertDoublesOnlyOnADeposit() {
+        final Rig r = new Rig("plains");
+        final Tile se = r.square(Direction.SE, "mountains", "road");
+        final Unit expert = r.on("expertSilverMiner", se, "silver");
+        rules(true);
+        assertEquals("053 #2663: 1, as anyone", 1, r.made(se, "silver"));
+        assertEquals("053 #6977: the menu's 1", 1, r.menu(se, "expertSilverMiner", "silver"));
+        assertEquals("a colonist the same", 1, r.menu(se, "freeColonist", "silver"));
+        assertEquals("his ore as a colonist's", r.menu(se, "freeColonist", "ore"),
+                     r.menu(se, "expertSilverMiner", "ore"));
+        assertEquals("the ore expert still doubles", 2 * r.menu(se, "freeColonist", "ore"),
+                     r.menu(se, "expertOreMiner", "ore"));
+        levi().setBoolean(GameOptions.ORIGINAL_ROAD_SILVER, false);
+        assertEquals("FreeCol: the road and the doubling", 4, r.made(se, "silver"));
+        levi().setBoolean(GameOptions.ORIGINAL_ROAD_SILVER, true);
+        // A tundra square with minerals (silver 0, the deposit + 1): not doubled (I).
+        final Tile w = r.square(Direction.W, "tundra");
+        r.resource(w, "minerals");
+        assertEquals(1, r.menu(w, "freeColonist", "silver"));
+        assertEquals("minerals: not doubled", 1, r.menu(w, "expertSilverMiner", "silver"));
+        // On the silver deposit he doubles: (1 + 2 + 1) x 2 (047 #5375).
+        r.resource(se, "silver");
+        assertEquals("047 #5375", 8, r.made(se, "silver"));
+        assertSame(r.colony.getColonyTile(se), expert.getLocation());
+    }
+
+    /**
      * A river keeps its silver where the road's goes (the review of part
      * X, mutation X6): tundra with a mineral deposit (silver 0, the
      * deposit + 1), a minor river (+ 1) and a road, worked for silver:

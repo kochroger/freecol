@@ -71,7 +71,10 @@ import net.sf.freecol.common.option.GameOptions;
  *       {@code TileImprovement} and {@code TileProductionCalculator}; D
  *       the manual, p. 27, and V clip 048 #47324, #57714: Silver City's
  *       servant «Silber-Bergarbeiter 1/1» on a mountain with a road and no
- *       deposit, where FreeCol makes 2);</li>
+ *       deposit, where FreeCol makes 2), and no expert's doubling there
+ *       either ({@link #silverModifiers}, part Z; V clip 053 #2663, #6977:
+ *       the expert silver miner 1 where FreeCol makes 2; clip 047 #5375
+ *       8 on the deposit);</li>
  *   <li>the Tory penalty (fixer B after part X, its own option
  *       {@code GameOptions.ORIGINAL_TORY_PENALTY}): one Tory later than
  *       FreeCol's classic levels ({@link #toryLimitOffset}; V «Entdecker»
@@ -318,7 +321,48 @@ public final class OriginalProduction {
             || !isSilver(goodsType) || !on(spec, GameOptions.ORIGINAL_ROAD_SILVER)) {
             return true;
         }
-        final Resource r = tile.getResource();
+        return hasSilverDeposit(tile);
+    }
+
+    /**
+     * An expert's own modifiers for silver under the levi rule (change 7,
+     * part Z: Z-ITEMS Z1.7, clip 053's comparison P1): on a square without
+     * a silver deposit his multiplier is not applied, he makes what anyone
+     * makes there; on a deposit he doubles as FreeCol has it.  V clip 053:
+     * Silver City's SE, mountains with a road and no deposit (its terrain
+     * page #9309 «Berge»), the expert silver miner makes 1 (#2663: one
+     * silver icon; #6977 his menu «Silber-Bergarbeiter 0/1»), as the free
+     * colonist («1/1» #22336) and the trapper (#13420) there, where FreeCol
+     * doubles to 2; V clip 047 #5375: on Silver City's deposit with a road
+     * he makes 8 = (1 + 2 + 1) x 2 (the colonists' 4, G15).  A mineral
+     * deposit's silver is not doubled either (I: no silver deposit), a
+     * river's keeps FreeCol's expert rule for an improvement (I: neither
+     * seen with an expert).
+     *
+     * @param spec The specification.
+     * @param mods The unit type's modifiers for the good.
+     * @param goodsType The good.
+     * @param deposit Whether the square has a silver deposit.
+     * @return The modifiers to use.
+     */
+    public static Stream<Modifier> silverModifiers(Specification spec,
+                                                   Stream<Modifier> mods,
+                                                   GoodsType goodsType,
+                                                   boolean deposit) {
+        if (deposit || !isSilver(goodsType)
+            || !on(spec, GameOptions.ORIGINAL_ROAD_SILVER)) return mods;
+        return mods.filter(m -> m.getType() != Modifier.ModifierType.MULTIPLICATIVE
+                           || m.getValue() <= 1.0f);
+    }
+
+    /**
+     * Whether a square has the silver deposit ({@link #SILVER_DEPOSIT}).
+     *
+     * @param tile The square, or null.
+     * @return True if so.
+     */
+    public static boolean hasSilverDeposit(Tile tile) {
+        final Resource r = (tile == null) ? null : tile.getResource();
         return r != null && r.getType() != null
             && SILVER_DEPOSIT.equals(r.getType().getId());
     }

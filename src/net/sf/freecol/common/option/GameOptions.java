@@ -230,8 +230,12 @@ public class GameOptions {
      * 27: "Building a road in a mountain square does not increase the
      * production of silver unless there is a silver deposit in the
      * square"): a road raises silver only on a square with a silver
-     * deposit, FreeCol everywhere.  On in the "levi" rules (and a levi
-     * save from before the rule).
+     * deposit, FreeCol everywhere; and (part Z) an expert silver miner
+     * doubles silver only on such a square (V clip 053 #2663, #6977: 1
+     * on a mountain with a road and no deposit, FreeCol 2; clip 047
+     * #5375: 8 on a deposit with a road; {@code
+     * OriginalProduction.silverModifiers}).  On in the "levi" rules (and
+     * a levi save from before the rule).
      */
     public static final String ORIGINAL_ROAD_SILVER
         = "model.option.originalRoadSilver";
