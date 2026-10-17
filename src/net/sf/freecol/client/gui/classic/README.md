@@ -4189,6 +4189,27 @@ seen on the frames, I = our choice where no clip shows it.
 - **The drag**: the first motion starts it, the arrow is hidden, his own
   figure follows as the ghost at the hotspot − (1,8) with a black silhouette
   2 px left (V dago), no hover label; the source keeps its figure.
+- **The lift by holding** (part Z, Z-ITEMS Z1.5, clip 053's comparison D1
+  with its verifier's corrections; the original's behaviour, Roger's rule
+  "überall Original", named for him: it explains his "dead" touchpad taps):
+  a press **held without motion** starts the drag as a motion would
+  (`ClassicDragGesture.hold`, the screen's timer `ClassicColonyMoves.holdFrames`):
+  on the colonist already selected after **10 frames** (V presses of 4-9
+  frames opened his menu, #4829, #22314, #29807, #30783, #45206; of 12 and
+  more lifted him, #6050, #6171, #7529, #8288, #59615; 10-11 both; I: 10),
+  on another after **16 frames**, a shorter press only selecting him (V
+  #8219, #8421, #8900, #10207 held 15-16 only selected; #48071, #66029,
+  #24520 held 16-21 lifted; I: 16). Letting go on his own place then does
+  nothing but bring the label back (V #6070, #8304, #59630). **No lift**
+  on the second tap of a double tap, a press within 20 frames of the click
+  that selected him (V 11 of 11 opened the menu, held 10-12 frames: #6958,
+  #9717, #10656 ...; 20 I), nor on a tile worker whose tile the white
+  cursor was not on before the press (V the first press after a drop from
+  the fence or a building onto a field, held 15 frames, opened the menu,
+  #18970, #21768). V for tile workers and units at the fence (#36231
+  lifted, #36405 the menu), building workers alike (I). The original
+  shows the copy 7-9 frames after the press while still deciding; ours at
+  the threshold (I). The motion still starts the drag at once (dago).
 - **The drop** (`ClassicColonyMoves.resolve`): building → building the target's
   work; building → tile **Farmer** (R2), tile → tile **his work kept**, even at
   0 (R3; V clip 053 the lumber, the furs, the silver), but a food job follows the
@@ -4217,8 +4238,12 @@ seen on the frames, I = our choice where no clip shows it.
   after 32 frames). His own place, the centre, a worked
   tile (V clip 042 #4150, #4839: no box), a neighbour's tile, a placeholder:
   nothing. Through `InGameController.work`, then `changeWorkType` for R2/R3.
-- **The white cursor after a move**: onto a tile, to that tile (V clip 020
-  #50260); off a tile it stays on the emptied tile where it stood (V dago D2
+- **The white cursor after a move**: from a tile onto a tile, to that tile
+  (V clip 020 #50260); from a building or the fence onto a tile it stays
+  where it is: after a drag on his figure in the band, his cell green (part
+  Z, V clip 053 #18900 the gate → E, #21490 the Gerber's house → SE; ours
+  moved it to the tile before), after a click on the empty tile there, where
+  the press put it (I); off a tile it stays on the emptied tile where it stood (V dago D2
   #4016, clip008 #43301, dago-colony2 #5812, clip 042 #6047), from elsewhere
   (the centre) to his figure in the band (V clip 042 #2457).
 - **The hover label** comes back by itself after a move, the pointer still:
@@ -4227,7 +4252,8 @@ seen on the frames, I = our choice where no clip shows it.
   frames on a tile (V clip 053 +5 to +7: #8241, #8444, #8923, #10229, #11320,
   #45998), +9 at the fence (V #36204), +7 in a building (I) (part Z, Z-ITEMS
   Z1.2; before, it came back only when the pointer moved).
-- **A click** (a release without motion): on the colonist who was already
+- **A click** (a release without motion, shorter than the lift by holding):
+  on the colonist who was already
   selected **J2** (+5 frames after the release; a first click only selects,
   V dago-colony2, clip 042), on a unit at the fence the same way **his job
   menu** (+5 frames after the release, V clip 042 #15426, #15901); on an

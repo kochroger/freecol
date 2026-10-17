@@ -25,11 +25,13 @@ package net.sf.freecol.client.gui.classic;
  * M4.0 target 3; dago {@code 01-interact.md} §3-4, V): the press picks
  * the source (and moves the white cursor there); the first motion while
  * pressed starts a drag (dago: even a motion that does not move the
- * arrow; five presses, a hold time does not fit); the release is then the
- * drop, else a click.  During the drag the arrow is hidden
- * ({@link ClassicPointer}), the ghost follows the pointer, no hover label
- * and no blink.  A pure state machine on device-pixel motion, tested
- * headless; the colony's moves use it from M4.8 on (until then the
+ * arrow; five presses); so does a press held without motion long enough
+ * ({@link #hold}, part Z, Z-ITEMS Z1.5: clip 053 shows the original
+ * lifting a colonist held about 10 frames, the screen's timer calls it);
+ * the release is then the drop, else a click.  During the drag the arrow
+ * is hidden ({@link ClassicPointer}), the ghost follows the pointer, no
+ * hover label and no blink.  A pure state machine on device-pixel motion,
+ * tested headless; the colony's moves use it from M4.8 on (until then the
  * colony screen acts on the press as before).
  */
 final class ClassicDragGesture {
@@ -48,10 +50,18 @@ final class ClassicDragGesture {
     /** The press in device pixels, and in canvas pixels. */
     private int pressX, pressY, pressVx, pressVy;
 
+    /** The presses so far: which press a timer made at a press belongs to. */
+    private int presses = 0;
+
 
     /** @return The state. */
     State state() {
         return this.state;
+    }
+
+    /** @return The number of the last press (a hold timer's check). */
+    int presses() {
+        return this.presses;
     }
 
     /** @return Whether a drag runs (the arrow hidden, the ghost shown). */
@@ -81,6 +91,24 @@ final class ClassicDragGesture {
         this.pressVy = vy;
         this.pressX = dx;
         this.pressY = dy;
+        this.presses++;
+    }
+
+    /**
+     * The button has been held without motion as long as a lift needs
+     * (part Z, Z-ITEMS Z1.5; the screen's timer, {@link
+     * ClassicColonyMoves#holdFrames}): the drag starts as with a motion.
+     *
+     * @param press The press the timer was made at ({@link #presses}).
+     * @return True if the drag starts now: that press is still down, on
+     *     something draggable, without a drag yet.
+     */
+    boolean hold(int press) {
+        if (press != this.presses || this.state != State.PRESSED || !this.draggable) {
+            return false;
+        }
+        this.state = State.DRAGGING;
+        return true;
     }
 
     /**

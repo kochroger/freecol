@@ -322,6 +322,24 @@ public class ClassicColonyKitTest extends FreeColTestCase {
         g.cancel();
         assertEquals(ClassicDragGesture.State.IDLE, g.state());
         assertEquals(ClassicDragGesture.Result.NONE, g.release());
+        // The lift by holding (part Z D1): the press still down, no motion.
+        g.press(10, 20, 50, 100, true);
+        final int p = g.presses();
+        assertTrue("held: the drag starts", g.hold(p));
+        assertTrue(g.dragging());
+        assertFalse("only once", g.hold(p));
+        assertFalse("then no motion starts it again", g.motion(70, 100));
+        assertEquals(ClassicDragGesture.Result.DROP, g.release());
+        assertFalse("let go: nothing", g.hold(p));
+        g.press(10, 20, 50, 100, true);
+        assertFalse("an older press's timer", g.hold(p));
+        assertEquals(p + 1, g.presses());
+        assertTrue(g.motion(51, 100));
+        assertFalse("a drag already", g.hold(p + 1));
+        g.release();
+        g.press(10, 20, 50, 100, false);
+        assertFalse("nothing to drag", g.hold(g.presses()));
+        assertEquals(ClassicDragGesture.Result.CLICK, g.release());
     }
 
 

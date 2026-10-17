@@ -197,6 +197,75 @@ final class ClassicColonyMoves {
     /** The ghost's sprite at the hotspot − (1, 8) (V dago, 3 drops). */
     static final int GHOST_DX = -1, GHOST_DY = -8;
 
+    /**
+     * A press held without motion on the colonist already selected lifts
+     * him as a drag's start after 10 frames ({@link #holdFrames}; part Z,
+     * Z-ITEMS Z1.5, clip 053's comparison D1 and its verifier's item 3,
+     * the press lengths from the keylog): presses of 4-9 frames opened the
+     * job menu (#4829, #22314, #29807, #30783, #45206 and 18 more), every
+     * isolated press of 12 frames or more lifted him (#6050, #6171, #7529,
+     * #7601, #7688, #8288, #59615, #66083, #26195 ...), at 10 and 11
+     * frames both happened (#10318 and #25539 lifted, #66212 the menu;
+     * #43706 and #7447 lifted at 11): the threshold between 9 and 11, 10
+     * taken (I).  The original shows the copy 7-9 frames after the press
+     * while still deciding; ours shows it at the threshold.
+     */
+    static final int HOLD_LIFT_FRAMES = 10;
+
+    /**
+     * A press held without motion on a colonist not yet selected lifts him
+     * after 16 frames ({@link #holdFrames}; I, between 15 and 17: V clip
+     * 053, the copy shown +12 to +15 after the press when it was held 16 to
+     * 21 frames, #48071, #66029, #43681, #24520 and every long drag from an
+     * unselected worker, but presses held 15 or 16 frames that only
+     * selected him, #8219, #8421, #8900, #10207, #11297, the gate unit
+     * #36179; the selected one's copy shows about 3 frames before his
+     * threshold as well).
+     */
+    static final int HOLD_LIFT_UNSELECTED_FRAMES = 16;
+
+    /**
+     * No lift by holding within this many frames after the click that
+     * selected him: the second tap of a double tap opens the job menu
+     * even when held 10-12 frames (V clip 053, 11 of 11: #6958, #9717,
+     * #10656, #11037, #12121, #13234, #14527, #16026, #17194, #17891,
+     * #21783; the taps 15-17 frames apart; a press 69 frames after the
+     * selecting click and held 16 lifted him, #8219 / #8288); 20 is the
+     * comparison's guess (I).
+     */
+    static final int DOUBLE_TAP_FRAMES = 20;
+
+    /**
+     * How long a press on a colonist must be held without motion to lift
+     * him (part Z, Z-ITEMS Z1.5, clip 053's comparison D1 with its
+     * verifier's corrections; the original's behaviour, Roger's rule
+     * "überall Original"; the motion still starts a drag at once, dago):
+     * on the one already selected {@link #HOLD_LIFT_FRAMES}, a shorter
+     * press is a click (his job menu); on another {@link
+     * #HOLD_LIFT_UNSELECTED_FRAMES}, a shorter press only selects him.
+     * Never on the selected one when the press is the second tap of a
+     * double tap ({@link #DOUBLE_TAP_FRAMES}), nor on a tile worker whose
+     * tile the white cursor was not on before the press (V the first press
+     * after a drop from the fence or a building onto a field: his cell
+     * green, the cursor on his figure in the band, one press held 15
+     * frames opened the menu, #18900 / #18970, #21490 / #21768).  V for
+     * tile workers and units at the fence (#36231 lifted, #36405 the
+     * menu, #36179 a first press only selecting); building workers the
+     * same (I: not seen).
+     *
+     * @param selected Whether he was the selected colonist before the press.
+     * @param cursorThere Whether the white cursor was on his tile before
+     *     the press (true for a colonist in a building or at the fence).
+     * @param sinceSelect Frames since the click that selected him
+     *     ({@link Integer#MAX_VALUE} for none).
+     * @return The frames, or -1 for no lift by holding.
+     */
+    static int holdFrames(boolean selected, boolean cursorThere, int sinceSelect) {
+        if (!selected) return HOLD_LIFT_UNSELECTED_FRAMES;
+        if (!cursorThere || sinceSelect < DOUBLE_TAP_FRAMES) return -1;
+        return HOLD_LIFT_FRAMES;
+    }
+
 
     private ClassicColonyMoves() {}   // static helpers only
 

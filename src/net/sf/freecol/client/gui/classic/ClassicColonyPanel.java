@@ -113,7 +113,9 @@ import net.sf.freecol.common.model.Unit;
  * as the ghost, the arrow hidden; the drop acts by the drop matrix (a
  * building's work, a tile as Farmer, Fischer on the ocean, or keeping his
  * work, the fence's J1), the original's refusal boxes (@MORETHANTHREE, the
- * school's, @NODOCKS) checked before the server is asked.  A release
+ * school's, @NODOCKS) checked before the server is asked.  A press held
+ * without motion lifts him as a drag's start ({@link #armHold}, part Z:
+ * 10 frames on the selected one, 16 on another, clip 053).  A short release
  * without motion on the colonist who was already selected opens J2 (on a
  * unit at the fence his job menu); on an empty tile or a building, where
  * the button goes up, it moves the selected colonist there; on an empty
@@ -920,11 +922,14 @@ final class ClassicColonyPanel extends JPanel {
                 // a tile worker, the cursor staying on his tile).
                 takePressed(u, from);
                 // The label the press took comes back by itself, the
-                // pointer still (part Z D3, clip 053).
+                // pointer still (part Z D3, clip 053); the next press on
+                // him soon after is a double tap's second (D1).
                 if (result == ClassicDragGesture.Result.CLICK && !wasSelected) {
                     hoverLater(vx, vy, (from == ClassicColonyMoves.Place.FENCE)
                                ? ClassicColonyMoves.HOVER_SELECT_FENCE_FRAMES
                                : ClassicColonyMoves.HOVER_SELECT_FRAMES);
+                    this.clickSelected = u;
+                    this.clickSelectedAt = this.clock.now();
                 }
             }
             return;
@@ -1050,6 +1055,7 @@ final class ClassicColonyPanel extends JPanel {
         // another pressed colonist (M4.4; the original's keys move it too,
         // M4.8).
         final int tile = ClassicColonyLayout.tileAt(vx, vy);
+        final int cursorBefore = tileCursor;
         if (tile >= 0 && this.tiles.cell(tile) != null) tileCursor = tile;
 
         // A carrier in port (M4.6, clip 040 §1.4): the press brings the
@@ -1093,6 +1099,13 @@ final class ClassicColonyPanel extends JPanel {
             this.hovered = this.hoveredTile = this.hoveredBox = -1;
             this.hoverSeq++;
             this.blink.stop();
+            // Held without motion he is lifted (part Z D1), after a time
+            // that depends on whether he was selected, where the white
+            // cursor was and how soon after the click that selected him.
+            armHold(ClassicColonyMoves.holdFrames(this.pressedWasSelected,
+                h.place != ClassicColonyMoves.Place.TILE || cursorBefore == h.tile,
+                (h.unit == this.clickSelected) ? framesSince(this.clickSelectedAt)
+                    : Integer.MAX_VALUE));
             if (h.place == ClassicColonyMoves.Place.TILE) {
                 tileCursor = h.tile;
             } else if (this.pressedWasSelected) {
@@ -1294,6 +1307,49 @@ final class ClassicColonyPanel extends JPanel {
         if (u == null || u == this.selectedUnit) return;
         if (from != ClassicColonyMoves.Place.TILE) tileCursor = CURSOR_OFF_TILES;
         select(u);
+    }
+
+    /**
+     * The colonist the last selecting click selected, and when (the
+     * clock's nanoseconds): a press on him soon after is the second tap
+     * of a double tap ({@link ClassicColonyMoves#DOUBLE_TAP_FRAMES}).
+     */
+    private Unit clickSelected = null;
+    private long clickSelectedAt = 0L;
+
+    /**
+     * The lift by holding (part Z, Z-ITEMS Z1.5, clip 053's comparison D1;
+     * the original's behaviour, Roger's rule "überall Original"): the
+     * press on a colonist starts a timer, and if the same press is still
+     * down without motion when it runs, the drag starts as with a motion
+     * ({@link ClassicDragGesture#hold}): the arrow goes, his copy at the
+     * pointer − (1, 8), no menu at the release; letting go on his own
+     * place then does nothing but bring the label back (V clip 053 #6070,
+     * #8304, #59630).
+     *
+     * @param frames The time ({@link ClassicColonyMoves#holdFrames}), or
+     *     -1 for none.
+     */
+    private void armHold(int frames) {
+        if (frames < 0) return;
+        final int press = this.gesture.presses();
+        final Later l = (this.holdLater != null) ? this.holdLater : this.later;
+        l.run((int) Math.round(ClassicColonyMoves.ms(frames)), () -> {
+                if (this.leaving || this.asking || this.pressedUnit == null) return;
+                if (!this.gesture.hold(press)) return;
+                ClassicFrameRecorder.event("colony-lift", this.pressedUnit.getId()
+                    + " after " + frames);
+                dragStarted();
+            });
+    }
+
+    /**
+     * @param at A time on the screen's clock (nanoseconds).
+     * @return The original's frames since then.
+     */
+    private int framesSince(long at) {
+        final double f = (this.clock.now() - at) / 1e6 / ClassicColonyLayout.FRAME_MS;
+        return (f >= Integer.MAX_VALUE) ? Integer.MAX_VALUE : (int) Math.floor(f);
     }
 
     /**
@@ -1687,7 +1743,9 @@ final class ClassicColonyPanel extends JPanel {
      * education given up), then for the levi rule the Farmer's work or the
      * work he had ({@code changeWorkType}, R2/R3).  The selection stays on
      * him (V #97000, dago-colony2 §4); the white cursor goes to his new
-     * tile (V clip 020 #50260), off a tile as {@link #cursorOffTile} says.
+     * tile from a tile (V clip 020 #50260) and stays where it is from a
+     * building or the fence (V clip 053 #18900, #21490), off a tile as
+     * {@link #cursorOffTile} says.
      *
      * @param u The colonist.
      * @param a The action.
@@ -1731,8 +1789,15 @@ final class ClassicColonyPanel extends JPanel {
             break;
         }
         if (ct != null && u.getLocation() == ct) {
+            // From a tile the cursor follows him to his new tile (V clip
+            // 020 #50260); from a building or the fence it stays where it
+            // is: after a drag on his figure in the band, his cell green
+            // (part Z, V clip 053 #18900 the gate -> E, #21490 the
+            // Gerber's house -> SE; the next press only brings the cursor,
+            // a click then his menu, ClassicColonyMoves.holdFrames), after
+            // a click on the empty tile there, where the press put it (I).
             final int at = this.tiles.placeOfTile(ct);
-            if (at >= 0) tileCursor = at;
+            if (at >= 0 && was instanceof ColonyTile) tileCursor = at;
         } else if (a != ClassicColonyMoves.Action.NOTHING && u.getLocation() != was) {
             cursorOffTile(was);
         }
@@ -2194,6 +2259,14 @@ final class ClassicColonyPanel extends JPanel {
     /** @param l What runs things later (tests: at once, or recorded). */
     void setLater(Later l) {
         this.later = l;
+    }
+
+    /** The lift-by-holding timers' {@link Later} (tests apart), or null for {@link #later}. */
+    private Later holdLater = null;
+
+    /** @param l What runs the lift-by-holding timers (tests: recorded apart), or null. */
+    void setHoldLater(Later l) {
+        this.holdLater = l;
     }
 
     /**

@@ -788,6 +788,29 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         ClassicColonyPanel panel;
         final List<String> events = new ArrayList<>();
         final List<Runnable> later = new ArrayList<>();
+        /** The lift-by-holding timers (part Z D1): their ms, and what they run. */
+        final List<Integer> holds = new ArrayList<>();
+        final List<Runnable> holdRuns = new ArrayList<>();
+    }
+
+    /** A clock the test moves (part Z D1: the double tap's window). */
+    private static final class TestClock implements ClassicSlide.Clock {
+        long t = 1_000_000_000L;
+
+        @Override
+        public long now() {
+            return this.t;
+        }
+
+        @Override
+        public void waitUntil(long due) {
+            this.t = Math.max(this.t, due);
+        }
+
+        /** @param frames The original's frames to go on by. */
+        void frames(int frames) {
+            this.t += Math.round(frames * ClassicColonyLayout.FRAME_MS * 1e6);
+        }
     }
 
     /**
@@ -797,6 +820,12 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
      * tiles by the test), the screen over it (scale 3).
      */
     private Scene scene(int colonists, boolean original) throws Exception {
+        return scene(colonists, original, ClassicSlide.SYSTEM);
+    }
+
+    /** {@link #scene(int, boolean)} with the screen on a clock of the test's. */
+    private Scene scene(int colonists, boolean original, ClassicSlide.Clock clock)
+        throws Exception {
         final Scene s = new Scene();
         spec().setBoolean(GameOptions.ORIGINAL_DROP_JOBS, original);
         s.game = ServerTestHelper.startServerGame(getTestMap(true));
@@ -812,10 +841,14 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         ClassicColonyPanel.forgetFigureOrders();
         ClassicColonyPanel.forgetSelections();
         s.panel = new ClassicColonyPanel(s.fcc, ClassicColonyBuildingsTest.library(), s.colony,
-            () -> s.events.add("closed"), s.boxes, ClassicSlide.SYSTEM, false);
+            () -> s.events.add("closed"), s.boxes, clock, false);
         s.panel.setLater((ms, r) -> {
                 s.events.add("later " + ms);
                 s.later.add(r);
+            });
+        s.panel.setHoldLater((ms, r) -> {
+                s.holds.add(ms);
+                s.holdRuns.add(r);
             });
         s.panel.setSize(960, 600);
         paint(s.panel);
@@ -959,7 +992,10 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
                                + u.getWorkType());
         }
         assertSame("he stays selected", u, s.panel.selected());
-        assertEquals("the cursor on his tile", 2, ClassicColonyPanel.tileCursor());
+        // From a building the white cursor stays on his figure in the
+        // band, his cell green (part Z: V clip 053 #18900, #21490).
+        assertEquals("the cursor on his figure", ClassicColonyPanel.CURSOR_OFF_TILES,
+                     ClassicColonyPanel.tileCursor());
         assertFalse(s.panel.dragging());
     }
 
@@ -1852,6 +1888,167 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
         assertSame("the drag's start selects", a, s.panel.selected());
         mouse(s.panel, MouseEvent.MOUSE_RELEASED, pa[0], pa[1]);
         assertFalse(s.panel.dragging());
+    }
+
+    /** The pure rule of the lift by holding (part Z D1, {@link ClassicColonyMoves#holdFrames}). */
+    public void testTheHoldRule() {
+        final int max = Integer.MAX_VALUE;
+        assertEquals(10, ClassicColonyMoves.holdFrames(true, true, max));
+        assertEquals(16, ClassicColonyMoves.holdFrames(false, true, max));
+        assertEquals("not selected: the cursor and the tap do not matter", 16,
+                     ClassicColonyMoves.holdFrames(false, false, 3));
+        assertEquals("a double tap's second", -1, ClassicColonyMoves.holdFrames(true, true, 19));
+        assertEquals(10, ClassicColonyMoves.holdFrames(true, true, 20));
+        assertEquals("the cursor not on his tile", -1,
+                     ClassicColonyMoves.holdFrames(true, false, max));
+        assertEquals(142.7, ClassicColonyMoves.ms(ClassicColonyMoves.HOLD_LIFT_FRAMES), 0.1);
+        assertEquals(228.3, ClassicColonyMoves.ms(ClassicColonyMoves.HOLD_LIFT_UNSELECTED_FRAMES),
+                     0.1);
+    }
+
+    /**
+     * The lift by holding (part Z, Z-ITEMS Z1.5, clip 053's comparison D1
+     * with its verifier's corrections; the original's behaviour, Roger's
+     * rule "überall Original"): a press held without motion on the
+     * colonist already selected (a tile worker with the white cursor on
+     * his tile) lifts him after 10 frames as a drag's start, and letting
+     * go on his own tile then does nothing (V clip 053 #6050 -&gt; #6070,
+     * #8288 -&gt; #8304); a shorter press opens his job menu (#4829,
+     * #22314, #29807); on a colonist not yet selected only after 16
+     * frames, a shorter press only selecting him (#8219; #24520, #48071
+     * lifted); the second tap of a double tap opens the menu even held
+     * long (#6958, #9717 ...); the first press after a drop from a building
+     * onto a field only brings the cursor, the click opens the menu
+     * (#18970, #21768); a unit at the fence (#36231) and a building worker
+     * (I) alike.
+     */
+    public void testTheLiftByHolding() throws Exception {
+        final TestClock clock = new TestClock();
+        final Scene s = scene(4, true, clock);
+        final List<Unit> us = s.colony.getUnitList();
+        final Unit a = us.get(0), b = us.get(1), c = us.get(2), d = us.get(3);
+        final Building hall = building(s.colony, "townHall");
+        a.setLocation(hall);
+        b.setLocation(tileOf(s.colony, Direction.S));
+        c.setLocation(s.colony.getTile());
+        d.setLocation(building(s.colony, "carpenterHouse"));
+        s.colony.invalidateCache();
+        final List<Object> arrow = new ArrayList<>();
+        s.panel.addPropertyChangeListener(ClassicPointer.DRAGGING,
+                                          e -> arrow.add(e.getNewValue()));
+        paint(s.panel);
+        final int[] pb = at(s.panel, b);
+        // 1. b selected, the cursor on his tile: held 10 frames, lifted.
+        s.panel.select(b);
+        ClassicColonyPanel.setTileCursor(7);
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, pb[0], pb[1]);
+        assertEquals("10 frames", List.of(143), s.holds);
+        assertFalse(s.panel.dragging());
+        s.holdRuns.get(0).run();
+        assertTrue("lifted", s.panel.dragging());
+        assertEquals("the arrow hidden", List.of((Object) Boolean.TRUE), arrow);
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, pb[0], pb[1]);
+        paint(s.panel);
+        assertFalse(s.panel.dragging());
+        assertTrue("no menu", s.boxes.asked.isEmpty());
+        assertSame("he stays", tileOf(s.colony, Direction.S), b.getLocation());
+        assertSame(b, s.panel.selected());
+        assertTrue("his label again: " + s.events, s.events.contains("later 43"));
+        // 2. A short press: released before the timer, J2; the timer then does nothing.
+        clock.frames(40);
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, pb[0], pb[1]);
+        assertEquals(2, s.holds.size());
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, pb[0], pb[1]);
+        assertEquals("J2", 1, s.boxes.asked.size());
+        s.holdRuns.get(1).run();
+        assertFalse(s.panel.dragging());
+        // 3. Not selected: 16 frames; before them he is not yet selected.
+        s.panel.select(a);
+        paint(s.panel);
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, pb[0], pb[1]);
+        assertEquals("16 frames", (Integer) 228, s.holds.get(2));
+        assertSame(a, s.panel.selected());
+        s.holdRuns.get(2).run();
+        assertTrue(s.panel.dragging());
+        assertSame("the lift selects him", b, s.panel.selected());
+        assertEquals(7, ClassicColonyPanel.tileCursor());
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, pb[0], pb[1]);
+        assertSame(tileOf(s.colony, Direction.S), b.getLocation());
+        assertEquals(1, s.boxes.asked.size());
+        // 4. A double tap: the first click selects, the second 10 frames
+        //    later arms no lift and opens J2; 25 frames later it is armed.
+        s.panel.select(a);
+        paint(s.panel);
+        clock.frames(40);
+        click(s.panel, pb[0], pb[1]);
+        assertSame(b, s.panel.selected());
+        final int armed = s.holds.size();
+        clock.frames(10);
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, pb[0], pb[1]);
+        assertEquals("no lift on the second tap", armed, s.holds.size());
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, pb[0], pb[1]);
+        assertEquals("J2", 2, s.boxes.asked.size());
+        clock.frames(25);
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, pb[0], pb[1]);
+        assertEquals(armed + 1, s.holds.size());
+        assertEquals((Integer) 143, s.holds.get(armed));
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, pb[0], pb[1]);
+        assertEquals(3, s.boxes.asked.size());
+        // 5. A drop from a building onto a field: the cursor stays on his
+        //    figure; the first press on him only brings it, no lift, J2.
+        paint(s.panel);
+        final int[] pa = at(s.panel, a);
+        final int[] sw = tile(6);
+        drag(s.panel, pa[0], pa[1], sw[0], sw[1]);
+        assertSame(s.api.log.toString(), tileOf(s.colony, Direction.SW), a.getLocation());
+        assertSame(a, s.panel.selected());
+        assertEquals(ClassicColonyPanel.CURSOR_OFF_TILES, ClassicColonyPanel.tileCursor());
+        final int[] pa2 = at(s.panel, a);
+        clock.frames(40);
+        final int before = s.holds.size();
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, pa2[0], pa2[1]);
+        assertEquals("no lift: the cursor was not on his tile", before, s.holds.size());
+        assertEquals(6, ClassicColonyPanel.tileCursor());
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, pa2[0], pa2[1]);
+        assertEquals("J2", 4, s.boxes.asked.size());
+        clock.frames(40);
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, pa2[0], pa2[1]);
+        assertEquals("now the cursor is there", before + 1, s.holds.size());
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, pa2[0], pa2[1]);
+        // 6. The unit at the fence, selected: 10 frames, lifted; dropped
+        //    on the fence again, nothing.
+        paint(s.panel);
+        final int[] pc = at(s.panel, c);
+        s.panel.select(c);
+        clock.frames(40);
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, pc[0], pc[1]);
+        assertEquals((Integer) 143, s.holds.get(s.holds.size() - 1));
+        s.holdRuns.get(s.holdRuns.size() - 1).run();
+        assertTrue(s.panel.dragging());
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, pc[0], pc[1]);
+        assertSame(s.colony.getTile(), c.getLocation());
+        assertEquals("no menu", 5, s.boxes.asked.size());
+        // 7. A building worker selected: the same (I).
+        paint(s.panel);
+        final int[] pd = at(s.panel, d);
+        s.panel.select(d);
+        clock.frames(40);
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, pd[0], pd[1]);
+        assertEquals((Integer) 143, s.holds.get(s.holds.size() - 1));
+        s.holdRuns.get(s.holdRuns.size() - 1).run();
+        assertTrue(s.panel.dragging());
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, pd[0], pd[1]);
+        assertSame(building(s.colony, "carpenterHouse"), d.getLocation());
+        assertEquals(5, s.boxes.asked.size());
+        // A timer of a press already let go, or of an older press, does nothing.
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, pd[0], pd[1]);
+        final Runnable stale = s.holdRuns.get(s.holdRuns.size() - 1);
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, pd[0], pd[1]);
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, pd[0], pd[1]);
+        stale.run();
+        assertFalse("an older press's timer", s.panel.dragging());
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, pd[0], pd[1]);
+        ClassicColonyPanel.setTileCursor(ClassicColonyLayout.CENTRE_TILE);
     }
 
     /**
