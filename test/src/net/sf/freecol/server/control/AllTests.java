@@ -29,6 +29,7 @@ public class AllTests {
         TestSuite suite = new TestSuite("Test for net.sf.freecol.server.control");
         //$JUnit-BEGIN$
         suite.addTestSuite(InGameControllerTest.class);
+        suite.addTestSuite(LeviNativeRulesTest.class);
         //$JUnit-END$
         return suite;
     }
