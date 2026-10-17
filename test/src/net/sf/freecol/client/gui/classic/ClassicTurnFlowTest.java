@@ -1734,11 +1734,14 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         assertSame(s.b, r.flow.pending().unit);
         r.advanceMs(500);
         assertEquals(1, r.count("activate " + s.b.getId()));
-        // Once: the same stale unit up again is left to the player.
+        // b came up: the same stale unit up again later is passed again
+        // (part Z, the check of part Y: before, once for the whole game).
         r.host.active = s.a;
         r.flow.tick();
-        assertNull(r.flow.pending());
-        assertEquals(1, r.count("activate " + s.b.getId()));
+        assertNotNull("passed again after another unit came up", r.flow.pending());
+        assertSame(s.b, r.flow.pending().unit);
+        r.advanceMs(500);
+        assertEquals(2, r.count("activate " + s.b.getId()));
         // A screen up holds the backstop.
         final BaseScene h = new BaseScene();
         h.r.flow.unitShown(h.a);
@@ -1774,6 +1777,57 @@ public class ClassicTurnFlowTest extends FreeColTestCase {
         f.r.advanceMs(200);
         assertEquals(1, f.r.count("activate " + f.c.getId()));
         assertEquals(0, f.r.count("activate " + f.b.getId()));
+    }
+
+    /**
+     * The backstop's memory (part Z, the check of part Y: {@code staleSeen}
+     * was never forgotten, so the same unit stuck in a colony again on a
+     * later turn got nothing): while the stale unit stays up and nothing
+     * else came up, more polls do not pass him again, also when the
+     * controller brings him back (no loop); at our next turn's wipe he is
+     * passed again; after another unit came up too (above,
+     * {@link #testAUnitAtWorkUpIsDoneAtThePoll}).
+     */
+    public void testTheBackstopAnewAtTheNextTurn() {
+        final BaseScene s = new BaseScene();
+        final Rig r = s.r;
+        s.b.setMovesLeft(0);
+        s.c.setMovesLeft(0);
+        // The controller brings the stale unit back as its "next unit".
+        r.host.onNext = () -> choose(r, s.a);
+        r.flow.unitShown(s.a);
+        r.host.activate(s.a);
+        s.field(s.a);
+        r.flow.tick();
+        final int next = r.count("next");
+        assertTrue("passed: the controller asked " + r.host.calls, next >= 1);
+        for (int i = 0; i < 5; i++) {
+            r.advanceMs(200);
+            r.flow.tick();
+        }
+        assertSame(s.a, r.host.active);
+        assertEquals("no loop " + r.host.calls, next, r.count("next"));
+        // Another unit up that a poll sees (made active outside the flow),
+        // then the stale one again: passed again.
+        r.host.active = s.b;
+        r.flow.tick();
+        r.host.active = s.a;
+        r.flow.tick();
+        final int again = r.count("next");
+        assertEquals("passed again after b was seen up " + r.host.calls, next + 1, again);
+        // Our next turn, the same unit stuck again: passed again.
+        nextTurn(r, 2);
+        choose(r, s.a);
+        for (int i = 0; i < 5; i++) {
+            r.advanceMs(200);
+            r.flow.tick();
+        }
+        // After the wipe: the turn start's ask (nothing due), the
+        // controller brings him back, and the backstop passes him anew.
+        final List<String> turn2 = r.host.calls.subList(r.host.calls.lastIndexOf("wipe"),
+                                                        r.host.calls.size());
+        assertEquals("passed anew at the next turn " + turn2, 2,
+                     java.util.Collections.frequency(turn2, "next"));
     }
 
     /**

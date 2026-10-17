@@ -674,7 +674,14 @@ final class ClassicTurnFlow {
     /** The turn {@link #freed} was freed in. */
     private int freedTurn = NO_TURN;
 
-    /** The last stale active unit the backstop moved past ({@link #catchUp}), or null. */
+    /**
+     * The last stale active unit the backstop moved past ({@link #catchUp}),
+     * or null: it is not moved past again while it stays up, so the poll
+     * never loops when the controller brings nothing or brings him back;
+     * forgotten at our next turn's wipe and when another unit comes up
+     * (part Z, the check of part Y: before, once per unit for the whole
+     * game, so the same unit stuck in a colony again later stood still).
+     */
     private Unit staleSeen = null;
 
     /** The state for the recorder's probe (another thread). */
@@ -1154,6 +1161,9 @@ final class ClassicTurnFlow {
      * @param why How (for the recorder).
      */
     private void cameUp(Unit unit, String why) {
+        // Another unit up: the backstop's last one may be passed again
+        // ({@link #staleSeen}, part Z).
+        if (unit != null && unit != this.staleSeen) this.staleSeen = null;
         if (unit == null || !unit.hasTile() || !this.host.myTurn() || this.ending) return;
         final int turn = this.host.turnNumber();
         if (turn == this.cameUpTurn) return;
@@ -1650,8 +1660,9 @@ final class ClassicTurnFlow {
      * stood still with no unit up, the review of part M).  And the
      * backstop of Roger's test 2026-10-16: an active unit that works in a
      * colony ({@link #staleUp}) with nothing pending is done, the next due
-     * unit comes as after a unit gone (once per unit: no poll loop when the
-     * controller brings nothing).
+     * unit comes as after a unit gone (once while he stays up: no poll
+     * loop when the controller brings nothing or brings him back; anew
+     * after another unit came up or at our next turn, {@link #staleSeen}).
      */
     private void catchUp() {
         if (!this.host.myTurn() || this.ending || this.host.blocked()) return;
@@ -1682,6 +1693,9 @@ final class ClassicTurnFlow {
         }
         if (this.freed != null && bringFreed()) return;
         final Unit up = this.host.activeUnit();
+        // Another unit up: the one passed before may be passed again
+        // when he is stuck again later (part Z).
+        if (up != null && up != this.staleSeen) this.staleSeen = null;
         if (p == null && !this.prompt && this.gotoRuns == 0 && up != this.staleSeen
             && staleUp(up)) {
             this.staleSeen = up;
@@ -1985,6 +1999,7 @@ final class ClassicTurnFlow {
         }
         flashOwnColour();
         this.turnStarted = true;
+        this.staleSeen = null;   // a new turn: the backstop anew (part Z)
         this.unwipedSince = 0L;
         this.wipeNanos = this.clock.now();
         ClassicFrameRecorder.event("turn-wipe", "turn=" + this.host.turnNumber());

@@ -4118,7 +4118,9 @@ is gone: `ClassicGUI.showBuildQueuePanel` now asks the colony screen for its woo
   farmer, given his field, came up inside Base with no moves and the turn stood still;
   `ClassicTurnFlow.staleTarget`, `usable` without units in a colony or in Europe, a unit put to work
   counts as done, `ranOut`). Backstops: an active unit at work in a colony with nothing pending is
-  passed at the next poll (once), the game's host refuses to bring one up (`refusesActivation`, the
+  passed at the next poll (once while he stays up, so the poll never loops; anew after another unit
+  came up or at our next turn, part Z: before, once for the whole game), the game's host refuses
+  to bring one up (`refusesActivation`, the
   flow then brings the next unit), and Enter treats it as no unit. **Every later docking** (V clip 047 #3430, clip 048 #12837, #36882, #78919,
   #109748, #146248 — a hand move —, clip 020 #44590): no screen, also not for a goto's arrival; the
   band holds the turn flow and the map's input for 138 frames and then stays until our next unit comes
