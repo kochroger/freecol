@@ -87,6 +87,14 @@ final class ClassicSaveGames {
         /** The row text; EDT only.  Starts as {@link #fallbackLabel}. */
         String label;
 
+        /**
+         * The save's facts once peeked ({@link #fillLabelsAsync}), else
+         * null; EDT only.  The page draws the row from them with the
+         * leader's name cut and the season and year kept
+         * ({@link ClassicSaveSlots#fitLabel}), as the ten rows.
+         */
+        Info info;
+
         Entry(File file) {
             this.file = file;
             this.modified = file.lastModified();
@@ -114,14 +122,19 @@ final class ClassicSaveGames {
 
 
     /**
-     * All loadable saves: manual saves, then autosaves, each newest first.
-     * Never calls {@code FreeColDirectories.setSavegameFile}, which would
+     * All loadable saves: manual saves, then autosaves, then the save rows'
+     * files kept when they were saved over ({@code <save>/ersetzt},
+     * {@link ClassicSaveSlots#keepReplaced}), each newest first.  Never
+     * calls {@code FreeColDirectories.setSavegameFile}, which would
      * relocate the save directory (see {@code InGameController.loadGame}).
      */
     static List<Entry> list() {
         final List<Entry> out = new ArrayList<>();
-        addSaves(out, FreeColDirectories.getSaveDirectory());
+        final File save = FreeColDirectories.getSaveDirectory();
+        addSaves(out, save);
         addSaves(out, FreeColDirectories.getAutosaveDirectory());
+        final File root = ClassicSaveSlots.saveRoot(save);
+        if (root != null) addSaves(out, new File(root, ClassicSaveSlots.REPLACED_FOLDER));
         return out;
     }
 
@@ -318,6 +331,7 @@ final class ClassicSaveGames {
                     SwingUtilities.invokeLater(() -> {
                             try {
                                 e.label = formatLabel(info);
+                                e.info = info;
                             } catch (RuntimeException ex) {
                                 logger.log(Level.FINE, "Bad save label", ex);
                             }

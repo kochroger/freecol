@@ -36,6 +36,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.regex.Matcher;
@@ -49,6 +50,7 @@ import net.sf.freecol.client.ClientOptions;
 import net.sf.freecol.client.FreeColClient;
 import net.sf.freecol.client.control.InGameController;
 import net.sf.freecol.client.control.PreGameController;
+import net.sf.freecol.common.i18n.Messages;
 import net.sf.freecol.common.io.FreeColDirectories;
 import net.sf.freecol.common.io.FreeColSavegameFile;
 import net.sf.freecol.common.model.Colony;
@@ -57,6 +59,7 @@ import net.sf.freecol.common.model.Player;
 import net.sf.freecol.common.model.Turn;
 import net.sf.freecol.common.model.Unit;
 import net.sf.freecol.common.option.IntegerOption;
+import net.sf.freecol.common.option.TextOption;
 import net.sf.freecol.server.FreeColServer;
 import net.sf.freecol.server.ServerTestHelper;
 import net.sf.freecol.server.model.ServerPlayer;
@@ -159,6 +162,9 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
 
         final List<File> switched = new ArrayList<>();
 
+        /** Per switch, the boxes the prompter had been asked by then. */
+        final List<List<String>> boxesAtSwitch = new ArrayList<>();
+
         SlGUI(FreeColClient fcc) {
             super(fcc);
         }
@@ -166,6 +172,9 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
         @Override
         void switchToSave(File file) {
             this.switched.add(file);
+            this.boxesAtSwitch.add((this.prompter instanceof Answers)
+                ? new ArrayList<>(((Answers) this.prompter).ids())
+                : Collections.<String>emptyList());
         }
     }
 
@@ -316,6 +325,8 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
         assertTrue(box.outsideCancels);
         assertEquals(190, box.width);
         for (String r : box.plainRows()) assertEquals(ClassicSaveSlots.EMPTY, r);
+        // In the save box an "(EMPTY)" row is taken as any row.
+        for (int i = 0; i < 8; i++) assertTrue(box.enabled(i));
         final File row3 = new File(this.saves, "COLONY02.fsg");
         assertTrue(row3.isFile());
         assertEquals(Arrays.asList("COLONY02.fsg", "autosave"), names(this.saves));
@@ -324,7 +335,10 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
         assertEquals(this.saves, FreeColDirectories.getSaveDirectory());
         assertNull(FreeColDirectories.getSavegameFile());
 
-        // The box again: row 3 shows the save; saved over without a question.
+        // The box again: row 3 shows the save; saved over without a
+        // question, the save it held kept in save/ersetzt (I).
+        final byte[] first = Files.readAllBytes(row3.toPath());
+        final long firstTime = row3.lastModified();
         a = new Answers(2);
         this.gui.prompter = a;
         assertEquals(2, this.gui.showSaveBox());
@@ -332,6 +346,16 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
                      a.ids());
         assertFalse(ClassicSaveSlots.EMPTY.equals(a.boxes.get(0).plainRows()[2]));
         assertEquals(ClassicSaveSlots.EMPTY, a.boxes.get(0).plainRows()[3]);
+        final File kept = new File(this.saves, ClassicSaveSlots.REPLACED_FOLDER);
+        final List<String> keptNames = names(kept);
+        assertEquals(keptNames.toString(), 1, keptNames.size());
+        assertTrue(keptNames.get(0),
+                   keptNames.get(0).matches("COLONY02_\\d{4}-\\d\\d-\\d\\d_\\d{6}\\.fsg"));
+        final File copy = new File(kept, keptNames.get(0));
+        assertTrue(Arrays.equals(first, Files.readAllBytes(copy.toPath())));
+        assertEquals(firstTime, copy.lastModified());
+        assertEquals(Arrays.asList("COLONY02.fsg", "autosave", ClassicSaveSlots.REPLACED_FOLDER),
+                     names(this.saves));
 
         // Escape: nothing.
         final Map<String, String> before = census(this.saves);
@@ -381,7 +405,14 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
                 + ": this file system replaces a read-only file");
         }
         assertTrue(row6.setWritable(true));
-        assertEquals(Arrays.asList("COLONY04.fsg", "COLONY05.fsg", "autosave"),
+        // The copy of the row was made before the move, either way: the
+        // old save twice, never none.
+        final File kept = new File(this.saves, ClassicSaveSlots.REPLACED_FOLDER);
+        assertEquals(1, names(kept).size());
+        assertTrue(Arrays.equals(old, Files.readAllBytes(
+            new File(kept, names(kept).get(0)).toPath())));
+        assertEquals(Arrays.asList("COLONY04.fsg", "COLONY05.fsg", "autosave",
+                                   ClassicSaveSlots.REPLACED_FOLDER),
                      names(this.saves));
 
         // No server: the error, nothing written.
@@ -447,11 +478,13 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
 
     /**
      * The load box (V E3): @LOADGAME, 10 rows (8 save rows, the 2 autosave
-     * rows), the bar on row 1; an "(EMPTY)" row does nothing and the box
-     * comes back with the bar on it (D-SL7); a row that is no save says
-     * @LOADNOT and the game goes on; a good row @LOADGOOD with
-     * "COLONY02.SAV", then the switch to that file; row 10 is FreeCol's
-     * last-turn autosave; Escape loads nothing; the save folder stays.
+     * rows), the bar on row 1; an "(EMPTY)" row is inert, the box never
+     * answers it (D-SL7; ClassicAdvisorLayerTest.testAnInertRowKeepsTheBoxUp),
+     * and a prompter that does gets the box again with the bar on it; a
+     * row that is no save says @LOADNOT and the game goes on; a good row
+     * @LOADGOOD with "COLONY02.SAV", then (after it) the switch to that
+     * file; row 10 is FreeCol's last-turn autosave; Escape loads nothing;
+     * the save folder stays.
      */
     public void testTheLoadBox() throws Exception {
         final FreeColClient fcc = gameClient(baseOptions());
@@ -479,8 +512,21 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
         assertTrue(rows[2], rows[2].contains(owner()));
         assertTrue(rows[9], rows[9].contains(owner()));
         assertEquals(ClassicSaveSlots.EMPTY, rows[8]);
+        // The "(EMPTY)" rows are inert: the box itself never answers them
+        // and stays up (D-SL7), drawn as the others, not grey; the other
+        // rows, the broken one too, can be taken.
+        for (int i = 0; i < 10; i++) {
+            final boolean empty = ClassicSaveSlots.EMPTY.equals(rows[i]);
+            assertEquals("row " + (i + 1), !empty, box.enabled(i));
+            assertFalse("row " + (i + 1), box.greyed(i));
+        }
+        assertTrue(box.enabled(4));
         assertTrue(text(a.last()), text(a.last()).contains("COLONY02.SAV"));
         assertEquals(Arrays.asList(slots.slotFile(2)), this.gui.switched);
+        // The original's order (V E10): «erfolgreich geladen» first, then
+        // the switch to the save.
+        assertEquals(Arrays.asList(ClassicSaveSlots.LOAD_SECTION, ClassicSaveSlots.LOAD_SECTION,
+                                   ClassicSaveSlots.LOAD_GOOD), this.gui.boxesAtSwitch.get(0));
 
         a = new Answers(4);
         this.gui.prompter = a;
@@ -504,6 +550,40 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
         assertNull(FreeColDirectories.getSavegameFile());
     }
 
+
+    /**
+     * While another nation's turn is played (the AI phase: the server
+     * moves its units on its own threads, a save would read the game with
+     * no lock) «Spiel sichern» and «Spiel laden» do nothing: no box, no
+     * file (the review of part SL; I, the original takes no input then);
+     * in our turn again they work.
+     */
+    public void testNothingWhileOthersMove() throws Exception {
+        final FreeColClient fcc = gameClient(baseOptions());
+        final Game game = fcc.getGame();
+        final ClassicSaveSlots slots = ClassicSaveSlots.of(fcc.getClientOptions());
+        ClassicSaveSlots.writeAtomic(slots.slotFile(9),
+            f -> fcc.getFreeColServer().saveGame(f, fcc.getClientOptions(), (Unit) null));
+        final Map<String, String> before = census(this.saves);
+        game.setCurrentPlayer(getServerPlayer(game, "model.nation.french"));
+        assertTrue(this.gui.othersMoving());
+        Answers a = new Answers(2, 9);
+        this.gui.prompter = a;
+        assertEquals(-1, this.gui.showSaveBox());
+        assertFalse(this.gui.showLoadBox());
+        assertTrue(a.ids().toString(), a.ids().isEmpty());
+        assertTrue(this.gui.switched.isEmpty());
+        assertEquals(before, census(this.saves));
+        // Our turn again.
+        game.setCurrentPlayer(fcc.getMyPlayer());
+        assertFalse(this.gui.othersMoving());
+        a = new Answers(2);
+        this.gui.prompter = a;
+        assertEquals(2, this.gui.showSaveBox());
+        assertTrue(new File(this.saves, "COLONY02.fsg").isFile());
+        // No client, no game: never "others".
+        assertFalse(new ClassicGUI(null).othersMoving());
+    }
 
     /**
      * A classic load that fails says the original's @LOADERROR ("Fehler
@@ -539,6 +619,18 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
         // No load under way: FreeCol's box.
         javax.swing.SwingUtilities.invokeAndWait(() -> g.showErrorPanel("boom", () -> {}));
         assertEquals(Arrays.asList("error", "error"), a.ids());
+        // The loaded game arrived (reconnectGUI): an error that ends
+        // something now is the game's, FreeCol's box, never @LOADERROR --
+        // also one that comes before the queued view build.
+        titles.clear();
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+                g.loadSavedGame(row3);
+                g.reconnectGUI(null, null);
+                g.showErrorPanel("a game error", () -> {});
+            });
+        assertEquals(Arrays.asList("error", "error", "error"), a.ids());
+        for (int i = 0; i < 3; i++) javax.swing.SwingUtilities.invokeAndWait(() -> {});
+        for (String t : titles) assertFalse(t, t.contains("COLONY02.SAV"));
         // Another file's name as the file's own.
         final ClassicSaveSlots slots = ClassicSaveSlots.of(null);
         assertEquals("COLONY02.SAV", slots.nameOf(row3));
@@ -668,6 +760,47 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
         assertEquals(new ArrayList<String>(), names(this.autosaves));
         // A GUI without a client does nothing.
         new ClassicGUI(null).autosaveFirstTurn();
+    }
+
+    /**
+     * The 1492 save's hand-over (D-SL17): a new single-player game marks
+     * its first turn in {@code showStartGamePanel}, and the game view's
+     * build ({@code reconnectGUI}, here its step
+     * {@code autosaveFirstTurnIfPending}) saves it into row 10 once; a load
+     * clears the mark, so a loaded game's view never saves its turn again.
+     */
+    public void testTheFirstTurnHandOver() throws Exception {
+        final FreeColClient fcc = gameClient(baseOptions());
+        final Game game = fcc.getGame();
+        final File last = new File(this.autosaves, "Autosave-last-turn.fsg");
+        game.setTurn(new Turn(1));
+        fcc.changeClientState(true);
+        this.gui.prompter = new Answers();
+        assertFalse(this.gui.autosaveFirstTurnIfPending());
+        startGame(fcc);
+        assertFalse(last.exists());
+        assertTrue(this.gui.autosaveFirstTurnIfPending());
+        assertTrue(last.isFile());
+        assertEquals(1, ClassicSaveSlots.info(last).turn);
+        assertFalse("once", this.gui.autosaveFirstTurnIfPending());
+        // A load after the start: no first-turn save at its view.
+        startGame(fcc);
+        javax.swing.SwingUtilities.invokeAndWait(() ->
+            this.gui.loadSavedGame(new File(this.saves, "COLONY02.fsg")));
+        assertFalse(this.gui.autosaveFirstTurnIfPending());
+        for (int i = 0; i < 3; i++) javax.swing.SwingUtilities.invokeAndWait(() -> {});
+    }
+
+    /**
+     * {@code showStartGamePanel} of a single-player game (its launch request
+     * needs a connection the rig has not: only the marks before it count).
+     */
+    private void startGame(FreeColClient fcc) {
+        try {
+            this.gui.showStartGamePanel(fcc.getGame(), fcc.getMyPlayer(), true);
+        } catch (RuntimeException e) {
+            // the launch request without a server connection
+        }
     }
 
     /**
@@ -821,9 +954,22 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
         assertEquals(ClassicMainMenuPanel.Mode.LOAD, p.mode());
         assertEquals(5, p.pageRow());
         assertTrue(loaded.isEmpty());
-        // PageDown: every save; Escape back to the page.
+        // PageDown: every save; a file there that is no save says
+        // @LOADNOT with its name and loads nothing, then the page of all
+        // saves again; Escape back to the load page.
         key(p, "classic_menuPageDown");
         assertEquals(ClassicMainMenuPanel.Mode.ARCHIVE, p.mode());
+        final int broken = p.archiveFiles().indexOf(slots.slotFile(5));
+        assertTrue(p.archiveFiles().toString(), broken >= 0);
+        for (int i = 0; i < broken; i++) key(p, "classic_menuDown");
+        assertEquals(broken, p.archiveRow());
+        key(p, "classic_menuEnter");
+        assertEquals(ClassicMainMenuPanel.Mode.NOTICE, p.mode());
+        assertTrue(String.join(" ", p.noticeLines()),
+                   String.join(" ", p.noticeLines()).contains("COLONY05.FSG"));
+        click(p, new Point(10, 10));
+        assertEquals(ClassicMainMenuPanel.Mode.ARCHIVE, p.mode());
+        assertTrue(loaded.isEmpty());
         key(p, "classic_menuEscape");
         assertEquals(ClassicMainMenuPanel.Mode.LOAD, p.mode());
         // A good row: @LOADGOOD over the page, its dismissal loads.
@@ -860,6 +1006,86 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
         assertTrue(String.join(" ", p.noticeLines()).contains("COLONY09.SAV"));
         click(p, new Point(10, 10));
         assertEquals(slots.slotFile(9), loaded.get(1));
+    }
+
+
+    /**
+     * The title's load page takes the client's names of FreeCol's
+     * last-turn autosave, as the in-game boxes do: row 10 is the same file
+     * on the page and in game.
+     */
+    public void testTheTitleUsesTheClientsNames() throws Exception {
+        final ClientOptions co = baseOptions();
+        co.getOption(ClientOptions.LAST_TURN_NAME, TextOption.class).setValue("zuletzt");
+        final FreeColClient fcc = gameClient(co);
+        final File row10 = new File(this.autosaves, "Autosave-zuletzt.fsg");
+        assertEquals(row10, ClassicSaveSlots.of(fcc.getClientOptions()).slotFile(9));
+        assertEquals(row10, this.gui.titleSaveSlots().slotFile(9));
+    }
+
+    /**
+     * The page of all saves (PageDown, D-SL5): manual saves, then
+     * autosaves, then the rows' kept copies ({@code save/ersetzt}), each
+     * newest first; a long label keeps its season and year with the
+     * leader's name cut, as the ten rows (D-SL8; the acceptance of part SL
+     * saw "... der Holl., Frühjah" there, every numbered copy of one game
+     * alike): with the pack's FONTTINY "Entdecker Michiel De R... der
+     * Holl., Frühjahr 1496".
+     */
+    public void testThePageOfAllSavesKeepsTheYear() throws Exception {
+        final ClassicPackFiles pack = ClassicPackFiles.runtime();
+        final ClassicMainMenuPanel p = new ClassicMainMenuPanel(
+            new ClassicMainMenuPanel.Actions() {
+                @Override public void newWorld(ClassicGUI.NewWorldSetup s) {}
+                @Override public void loadGame(File file) {}
+                @Override public void hallOfFame() {}
+                @Override public void quit() {}
+            });
+        if (pack != null) p.useAssets(ClassicMainMenuPanel.MenuAssets.fromPackFiles(pack));
+        final ClassicSaveSlots slots = new ClassicSaveSlots(this.saves, this.autosaves,
+                                                            "Autosave-last-turn.fsg");
+        p.useSaveSlots(() -> slots);
+        final File numbered = new File(this.autosaves, "Autosave-4d46fd9d_Niederländisch_1496.fsg");
+        final File row2 = slots.slotFile(1);
+        final File keptDir = new File(this.saves, ClassicSaveSlots.REPLACED_FOLDER);
+        assertTrue(keptDir.mkdirs());
+        final File kept = new File(keptDir, "COLONY01_2026-10-17_031205.fsg");
+        try {
+            Messages.loadMessageBundle(Locale.GERMANY);
+            ClassicSaveSlotsTest.writeSave(numbered, "Michiel De Ruyter", 5,
+                "model.difficulty.veryEasy", "model.nation.dutch");
+            ClassicSaveSlotsTest.writeSave(row2, "Dago", 368,
+                "model.difficulty.veryEasy", "model.nation.dutch");
+            ClassicSaveSlotsTest.writeSave(kept, "Probelauf", 14,
+                "model.difficulty.veryEasy", "model.nation.dutch");
+            p.showTitle(null);
+            click(p, centre(ClassicMenuBox.rowHitRect(
+                ClassicMainMenuPanel.titleBounds(5), 1, ClassicMainMenuPanel.ITEM_LOAD)));
+            key(p, "classic_menuPageDown");
+            assertEquals(ClassicMainMenuPanel.Mode.ARCHIVE, p.mode());
+            assertEquals(Arrays.asList(row2, numbered, kept), p.archiveFiles());
+            // The labels come from the label thread.
+            List<String> rows = p.archiveRows();
+            for (int i = 0; i < 200 && !String.join("|", rows).contains("Probelauf"); i++) {
+                Thread.sleep(25);
+                javax.swing.SwingUtilities.invokeAndWait(() -> {});
+                rows = p.archiveRows();
+            }
+            assertEquals(3, rows.size());
+            assertEquals("Entdecker Dago der Holl., Herbst 1729", rows.get(0));
+            assertTrue(rows.get(1), rows.get(1).endsWith(", Frühjahr 1496"));
+            assertTrue(rows.get(2), rows.get(2).contains("Probelauf"));
+            final ClassicFont tiny = (pack == null) ? null : pack.font(ClassicFont.TINY);
+            if (tiny == null) {
+                System.err.println(getClass().getSimpleName()
+                    + ": the page's cut not measured, no pack");
+                return;
+            }
+            assertEquals("Entdecker Michiel De R... der Holl., Frühjahr 1496", rows.get(1));
+            assertTrue(tiny.stringWidth(rows.get(1)) <= ClassicSaveSlots.ROW_TEXT_MAX);
+        } finally {
+            Messages.loadMessageBundle(Locale.US);
+        }
     }
 
 

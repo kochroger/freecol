@@ -1488,6 +1488,11 @@ final class ClassicMainMenuPanel extends JPanel {
         if (source != null) this.slotSource = source;
     }
 
+    /** @return The rows the load page would show now ({@link #slotSource}; tests). */
+    ClassicSaveSlots saveSlots() {
+        return this.slotSource.get();
+    }
+
     /**
      * Title «Spiel LADEN» (part SL, spec SL7): the original's load page
      * (V E5, clip006 #0; I that it is the title's path, D-SL12) with the
@@ -1941,16 +1946,44 @@ final class ClassicMainMenuPanel extends JPanel {
             visibleLoadRows(a), this.loadSel - this.loadTop);
     }
 
-    /** The labels of the visible rows of the page of all saves, cut to the box. */
+    /**
+     * The labels of the visible rows of the page of all saves, fitted to
+     * the box as the ten rows are: a peeked save's label with the leader's
+     * name cut and the season and year kept ({@link ClassicSaveSlots#fitLabel},
+     * I D-SL8: every numbered copy of one game differs only in its year,
+     * which the plain cut of the end lost -- "... der Holl., Frühjah", the
+     * acceptance of part SL); a file not (yet) peeked its name and date cut
+     * at the end.
+     */
     private List<String> visibleLoadRows(MenuAssets a) {
         final int n = Math.min(LOAD_VISIBLE_ROWS, this.saves.size() - this.loadTop);
         final int max = ClassicMenuBox.rowTextMaxWidth(loadBounds(n));
         final List<String> rows = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
-            rows.add(ClassicMenuBox.fit(a.font,
-                this.saves.get(this.loadTop + i).label, max));
+            final ClassicSaveGames.Entry e = this.saves.get(this.loadTop + i);
+            rows.add((e.info != null && a.font != null)
+                ? ClassicSaveSlots.fitLabel(a.font, e.info, max)
+                : ClassicMenuBox.fit(a.font, e.label, max));
         }
         return rows;
+    }
+
+    /** @return The visible rows of the page of all saves as drawn (tests). */
+    List<String> archiveRows() {
+        return (this.mode == Mode.ARCHIVE) ? visibleLoadRows(assets())
+            : Collections.<String>emptyList();
+    }
+
+    /** @return The selected entry's index on the page of all saves (tests). */
+    int archiveRow() {
+        return this.loadSel;
+    }
+
+    /** @return The files of the page of all saves, in its order (tests). */
+    List<File> archiveFiles() {
+        final List<File> out = new ArrayList<>(this.saves.size());
+        for (ClassicSaveGames.Entry e : this.saves) out.add(e.file);
+        return out;
     }
 
 

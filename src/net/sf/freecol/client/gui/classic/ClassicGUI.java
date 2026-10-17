@@ -1181,6 +1181,14 @@ public class ClassicGUI extends GUI {
         return this.mainMenuPanel;
     }
 
+    /**
+     * @return The rows of the title's load page: the client's autosave
+     *     names, as the in-game boxes (part SL; tests).
+     */
+    ClassicSaveSlots titleSaveSlots() {
+        return mainMenu().saveSlots();
+    }
+
     /** The title menu's actions, routed into this GUI. */
     private ClassicMainMenuPanel.Actions menuActions() {
         return new ClassicMainMenuPanel.Actions() {
@@ -1947,9 +1955,12 @@ public class ClassicGUI extends GUI {
      */
     @Override
     public void reconnectGUI(Unit active, Tile tile) {
+        // A classic load arrived: an error from now on is the game's, not
+        // the load's @LOADERROR (part SL; at once, not in the queued build,
+        // so an error queued before the build is the game's too).
+        this.loadingName = null;
         SwingUtilities.invokeLater(() -> {
             if (this.frame == null) return;
-            this.loadingName = null;    // a classic load arrived (part SL)
             final boolean built = this.mapViewer == null;
             if (built) {
                 this.mapViewer = new ClassicMapViewer(getFreeColClient(),
@@ -2045,10 +2056,7 @@ public class ClassicGUI extends GUI {
             // load fallback and guard are gone, Roger 2026-10-08).
             // A new game's first turn into row 10 (part SL), before its
             // first scene: the view is built, the game's options set.
-            if (this.firstTurnAutosavePending) {
-                this.firstTurnAutosavePending = false;
-                autosaveFirstTurn();
-            }
+            autosaveFirstTurnIfPending();
             if (this.firstScenePending) {
                 this.firstScenePending = false;
                 if (!showFirstScene()) flushHeldMessages();
@@ -3002,6 +3010,28 @@ public class ClassicGUI extends GUI {
     }
 
     /**
+     * Whether another nation's turn is being played (the AI phase): our
+     * player is not the game's current one.  The server then moves the
+     * other nations' units on its own threads while a save would read the
+     * game on the EDT, with no lock (FreeColServer.saveGame), so a save
+     * could catch a move half done, and a load would cut their turn off
+     * (the review of part SL).  "Spiel sichern" and "Spiel laden" wait
+     * for our turn, as the map's own keys do then (W5d, "While the player
+     * waits" in the README); the original, one program, takes no input
+     * while the others move (I).
+     *
+     * @return True while another nation's turn is played.
+     */
+    boolean othersMoving() {
+        final FreeColClient fcc = getFreeColClient();
+        if (fcc == null) return false;
+        final Game game = fcc.getGame();
+        final Player me = fcc.getMyPlayer();
+        final Player current = (game == null) ? null : game.getCurrentPlayer();
+        return me != null && current != null && !me.equals(current);
+    }
+
+    /**
      * The client's options, or null without a client (tests).
      *
      * @return The options.
@@ -3031,11 +3061,17 @@ public class ClassicGUI extends GUI {
      * occupied row is saved over without a question (I, D-SL6: GAME.TXT
      * has no such question).  Escape or a click outside saves nothing.
      * Never FreeCol's {@code saveGame}, which would move the save folder.
-     * EDT only.
+     * While another nation's turn is played nothing happens
+     * ({@link #othersMoving}).  EDT only.
      *
      * @return The row saved into (0-based), or -1.
      */
     int showSaveBox() {
+        if (othersMoving()) {
+            logger.info("Classic save: not while another nation's turn is played");
+            ClassicFrameRecorder.event("save-box", "others' turn: nothing");
+            return -1;
+        }
         final FreeColClient fcc = getFreeColClient();
         final ClientOptions co = clientOptions();
         final ClassicSaveSlots slots = ClassicSaveSlots.of(co);
@@ -3057,7 +3093,8 @@ public class ClassicGUI extends GUI {
 
     /**
      * Save into a row and say so: the row's file written in one step
-     * ({@link ClassicSaveSlots#writeAtomic}), then @SAVEGOOD with the row's
+     * ({@link ClassicSaveSlots#writeAtomic}; the file it replaces kept in
+     * {@code <save>/ersetzt}, I), then @SAVEGOOD with the row's
      * file and its new label ({@code %STRING1}, I: D-SL13), or @SAVEERROR
      * ({@code %STRING0} the row's file) and the old file unchanged.  EDT
      * only.
@@ -3073,7 +3110,8 @@ public class ClassicGUI extends GUI {
         boolean ok = false;
         if (f != null && writer != null) {
             try {
-                ClassicSaveSlots.writeAtomic(f, writer);
+                // The game a row held is kept when it is saved over (I).
+                ClassicSaveSlots.writeAtomic(f, writer, slots.keepDir());
                 ok = true;
             } catch (IOException | RuntimeException e) {
                 logger.log(Level.WARNING, "Classic save: " + name + " not written to "
@@ -3097,18 +3135,28 @@ public class ClassicGUI extends GUI {
      * box stays (I, D-SL7); a row whose file cannot be read says
      * @LOADNOT and the game goes on; any other row loads
      * ({@link #loadRow}).  Escape or a click outside loads nothing.  No
-     * question before the current game goes (V E10, clip005).  EDT only.
+     * question before the current game goes (V E10, clip005).  While
+     * another nation's turn is played nothing happens
+     * ({@link #othersMoving}).  EDT only.
      *
      * @return Whether a game is being loaded.
      */
     boolean showLoadBox() {
+        if (othersMoving()) {
+            logger.info("Classic load: not while another nation's turn is played");
+            ClassicFrameRecorder.event("load-box", "others' turn: nothing");
+            return false;
+        }
         final ClassicSaveSlots slots = ClassicSaveSlots.of(clientOptions());
         final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
         final ClassicFont tiny = tinyFont();
         int bar = 0;
-        // An empty row asks the same box again with the bar on it: the
-        // box stays as it was.  The bound only guards against a prompter
-        // that answers by itself.
+        // The box never answers an "(EMPTY)" row: it is inert there and
+        // stays up (ClassicSaveSlots.boxRequest).  Only the stopgap, the
+        // tests' prompters or a row whose file went while the box was up
+        // answer one; the box is then asked again with the bar on that
+        // row.  The bound only guards against a prompter that answers by
+        // itself.
         for (int asked = 0; asked < 1000; asked++) {
             final ClassicAdvisorBox.Request r = ClassicSaveSlots.boxRequest(t,
                 ClassicSaveSlots.LOAD_SECTION, slots.labels(ClassicSaveSlots.LOAD_ROWS,
@@ -3304,6 +3352,21 @@ public class ClassicGUI extends GUI {
         } catch (RuntimeException e) {
             logger.log(Level.WARNING, "Classic autosave: the first turn not saved", e);
         }
+    }
+
+    /**
+     * The hand-over of {@link #showStartGamePanel} to the game view: a new
+     * game's first turn is saved once ({@link #autosaveFirstTurn}), a load
+     * never ({@link #loadSavedGame} and every teardown clear the mark).
+     * EDT, from {@link #reconnectGUI}.
+     *
+     * @return Whether a first turn was due (and saved if it could be).
+     */
+    boolean autosaveFirstTurnIfPending() {
+        if (!this.firstTurnAutosavePending) return false;
+        this.firstTurnAutosavePending = false;
+        autosaveFirstTurn();
+        return true;
     }
 
 

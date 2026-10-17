@@ -422,6 +422,74 @@ public class ClassicSaveSlotsTest extends FreeColTestCase {
     }
 
     /**
+     * A row saved over keeps the save it held (I, the ground rule "never
+     * lose a save" where the original's question is unknown, D-SL6): a
+     * copy in {@code save/ersetzt}, named by the row and the time of the
+     * replacement, with the old bytes and the old file time; a second
+     * replacement in the same second gets its own name; an empty row and a
+     * failed write keep nothing; without the folder argument nothing (row
+     * 9); a copy that cannot be made never stops the save.
+     */
+    public void testAReplacedRowIsKept() throws Exception {
+        final ClassicSaveSlots s = slots();
+        final File keep = s.keepDir();
+        assertEquals(new File(this.saves, "ersetzt"), keep);
+        final File row = s.slotFile(2);
+        ClassicSaveSlots.writeAtomic(row, f -> writeSave(f, "Erst", 9,
+            "model.difficulty.veryEasy", "model.nation.dutch"), keep);
+        assertFalse("an empty row keeps nothing", keep.exists());
+        assertTrue(row.setLastModified(row.lastModified() - 3_600_000L));
+        final byte[] erst = bytes(row);
+        final long erstTime = row.lastModified();
+        ClassicSaveSlots.writeAtomic(row, f -> writeSave(f, "Zweit", 14,
+            "model.difficulty.veryEasy", "model.nation.dutch"), keep);
+        assertEquals("Zweit", ClassicSaveGames.peek(row).owner);
+        String[] kept = keep.list();
+        assertEquals(1, kept.length);
+        assertTrue(kept[0], kept[0].matches("COLONY02_\\d{4}-\\d\\d-\\d\\d_\\d{6}\\.fsg"));
+        assertTrue(Arrays.equals(erst, bytes(new File(keep, kept[0]))));
+        assertEquals(erstTime, new File(keep, kept[0]).lastModified());
+        final byte[] zweit = bytes(row);
+        ClassicSaveSlots.writeAtomic(row, f -> writeSave(f, "Dritt", 15,
+            "model.difficulty.veryEasy", "model.nation.dutch"), keep);
+        kept = keep.list();
+        assertEquals(2, kept.length);
+        int both = 0;
+        for (String k : kept) {
+            final byte[] b = bytes(new File(keep, k));
+            if (Arrays.equals(erst, b) || Arrays.equals(zweit, b)) both++;
+        }
+        assertEquals(2, both);
+        // A failed write: the old row stays, no copy of it.
+        try {
+            ClassicSaveSlots.writeAtomic(row, f -> Files.write(f.toPath(),
+                "PK not a save".getBytes(StandardCharsets.UTF_8)), keep);
+            fail("the write should fail");
+        } catch (IOException e) {
+            // expected
+        }
+        assertEquals(2, keep.list().length);
+        assertEquals("Dritt", ClassicSaveGames.peek(row).owner);
+        // No folder given (row 9): nothing kept.
+        final File nine = s.slotFile(8);
+        writeSave(nine, "Neun", 9, "model.difficulty.veryEasy", "model.nation.dutch");
+        ClassicSaveSlots.writeAtomic(nine, f -> writeSave(f, "Neun", 19,
+            "model.difficulty.veryEasy", "model.nation.dutch"));
+        assertEquals(2, keep.list().length);
+        assertFalse(new File(this.autosaves, "ersetzt").exists());
+        // A folder that cannot be made (a file in its place): no copy, the
+        // row written all the same.
+        final File blocked = new File(this.root, "blocked");
+        Files.write(blocked.toPath(), "x".getBytes(StandardCharsets.UTF_8));
+        assertNull(ClassicSaveSlots.keepReplaced(row, blocked));
+        ClassicSaveSlots.writeAtomic(row, f -> writeSave(f, "Viert", 16,
+            "model.difficulty.veryEasy", "model.nation.dutch"), blocked);
+        assertEquals("Viert", ClassicSaveGames.peek(row).owner);
+        assertEquals(new ArrayList<String>(), strays(this.saves));
+        assertNull(new ClassicSaveSlots(null, null, null).keepDir());
+    }
+
+    /**
      * A row whose label was just read (the box opens with the labels) can
      * be saved over at once: the peek leaves no file open, which on Windows
      * would refuse the replace.

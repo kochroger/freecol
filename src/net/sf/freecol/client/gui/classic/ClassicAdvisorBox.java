@@ -52,7 +52,9 @@ import java.util.Map;
  *       top {@code y + 13 + 6P + 8i}; the bar a flat index-138 strip
  *       {@code (x + 4, rowTop - 1, w - 8, 7)} under the row's text, which
  *       keeps its colour.  A greyed row is drawn in
- *       {@link ClassicMenuBox#DISABLED_INK} (dago-colony2, the job menu).</li>
+ *       {@link ClassicMenuBox#DISABLED_INK} (dago-colony2, the job menu);
+ *       an inert row ({@link Request#inert}: the load box's "(EMPTY)"
+ *       rows) in the rows' own ink, and it cannot be taken either.</li>
  *   <li><b>Size (V).</b>  {@code w = @width + 6}, {@code h = 6P + 8R + 18}
  *       ({@link ClassicMenuBox#dialogHeight}), the text reflowed to the box
  *       ({@link ClassicTextLayout#BOX}: GAME.TXT's own line breaks are
@@ -681,6 +683,15 @@ final class ClassicAdvisorBox {
         /** Per row, whether it is greyed (it cannot be taken). */
         final boolean[] disabled;
 
+        /**
+         * Per row, whether it cannot be taken although it is drawn as any
+         * row (no grey): the load box's "(EMPTY)" rows, where Enter or a
+         * click does nothing and the box stays (part SL, I D-SL7; V E3
+         * {@code opening_055}: the "(EMPTY)" rows in the rows' own ink).
+         * The bar still goes there.
+         */
+        final boolean[] inert;
+
         /** The row the bar starts on; -1 without rows. */
         final int defaultRow;
 
@@ -833,6 +844,7 @@ final class ClassicAdvisorBox {
             this.y = b.y;
             this.rows = Collections.unmodifiableList(new ArrayList<>(b.rows));
             this.disabled = Arrays.copyOf(b.disabled, this.rows.size());
+            this.inert = Arrays.copyOf(b.inert, this.rows.size());
             final int n = this.rows.size();
             this.defaultRow = (n == 0) ? -1 : ClassicHud.clamp(b.defaultRow, 0, n - 1);
             this.cancelRow = (b.cancelRow < 0 || b.cancelRow >= n) ? -1 : b.cancelRow;
@@ -906,9 +918,14 @@ final class ClassicAdvisorBox {
             return this.checks != null;
         }
 
-        /** @return Whether row {@code i} can be taken. */
+        /** @return Whether row {@code i} can be taken (neither greyed nor inert). */
         boolean enabled(int i) {
-            return i >= 0 && i < this.rows.size() && !this.disabled[i];
+            return i >= 0 && i < this.rows.size() && !this.disabled[i] && !this.inert[i];
+        }
+
+        /** @return Whether row {@code i} is drawn grey ({@link #disabled}; an inert row is not). */
+        boolean greyed(int i) {
+            return i >= 0 && i < this.rows.size() && this.disabled[i];
         }
 
         /**
@@ -973,6 +990,7 @@ final class ClassicAdvisorBox {
         private Integer y = null;
         private final List<String> rows = new ArrayList<>();
         private boolean[] disabled = new boolean[0];
+        private boolean[] inert = new boolean[0];
         private int defaultRow = 0;
         private int cancelRow = Integer.MIN_VALUE;
         private Portrait portrait = Portrait.NONE;
@@ -1155,6 +1173,12 @@ final class ClassicAdvisorBox {
         /** Per row, whether it is greyed. */
         Builder disabled(boolean[] d) {
             this.disabled = (d == null) ? new boolean[0] : d.clone();
+            return this;
+        }
+
+        /** Per row, whether it cannot be taken but is not greyed ({@link Request#inert}). */
+        Builder inert(boolean[] d) {
+            this.inert = (d == null) ? new boolean[0] : d.clone();
             return this;
         }
 
@@ -1806,7 +1830,7 @@ final class ClassicAdvisorBox {
             final ClassicTextLayout.Line cell = l.rightOf(i);
             final String s = (checks != null && i < checks.length)
                 ? checkRow(line.marked, checks[i]) : line.marked;
-            if (!l.request.enabled(i)) {
+            if (l.request.greyed(i)) {
                 // Grey, the whole row (clip008 #42539: Späher, Dragoner).
                 tiny.draw(g, plain(s), line.x, line.y, grey);
                 if (cell != null) tiny.draw(g, plain(cell.marked), cell.x, cell.y, grey);

@@ -21,10 +21,14 @@ package net.sf.freecol.client.gui.classic;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -91,10 +95,14 @@ import net.sf.freecol.common.model.Turn;
  * </ul>
  *
  * <p><b>Never lose a save.</b>  A row is written to a temporary file in
- * the row's own folder, read back, and only then moved over the row's file
- * in one step ({@link #writeAtomic}); a failure at any point leaves the
- * row's old file as it was.  Nothing here deletes a saved game: the only
- * delete is of the temporary file of a write that failed.  The directories
+ * the row's own folder, flushed to the disk, read back, and only then
+ * moved over the row's file in one step ({@link #writeAtomic}); a failure
+ * of the program at any point leaves the row's old file as it was, and
+ * after a power cut the moved file's bytes are on the disk.  A save row
+ * 1-8 saved over is first copied into {@code <save>/ersetzt}
+ * ({@link #keepReplaced}; I, the original asks no question and keeps no
+ * copy).  Nothing here deletes a saved game: the only delete is of the
+ * temporary file of a write that failed.  The directories
  * come from the constructor, so the tests run on temporary folders; the
  * game's are {@link #of}.  Nothing here ever calls
  * {@code FreeColDirectories.setSavegameFile}, which moves the save folder
@@ -133,6 +141,16 @@ final class ClassicSaveSlots {
 
     /** FreeCol's autosave folder inside the save folder. */
     static final String AUTOSAVE_FOLDER = "autosave";
+
+    /**
+     * The folder inside the save folder that keeps a save row's file each
+     * time it is saved over ({@link #keepReplaced}; I, for Roger).
+     */
+    static final String REPLACED_FOLDER = "ersetzt";
+
+    /** The time in a kept copy's name ({@link #keepReplaced}). */
+    private static final DateTimeFormatter KEEP_TIME
+        = DateTimeFormatter.ofPattern("yyyy-MM-dd_HHmmss", Locale.ROOT);
 
     /**
      * FreeCol's defaults of the autosave prefix and the last-turn name
@@ -454,14 +472,9 @@ final class ClassicSaveSlots {
     // Writing a row
 
     /**
-     * Write a save over a row's file in one step: into a temporary file in
-     * the same folder, read it back ({@link ClassicSaveGames#peek}), then
-     * move it over the file ({@code ATOMIC_MOVE}, or a plain replacing move
-     * where the file system has none).  If the writer fails, the save
-     * cannot be read back or the move is refused (the old file read-only,
-     * open elsewhere), the temporary file is removed and the old file stays
-     * exactly as it was (pitfall 2 of the spec: FreeCol's own saveGame
-     * writes into the target and a failure destroys it).
+     * {@link #writeAtomic(File, SaveWriter, File)} keeping no copy of the
+     * file it replaces (the decade row 9: an autosave, FreeCol's numbered
+     * copies keep every turn).
      *
      * @param target The row's file.
      * @param writer Writes the save.
@@ -469,6 +482,40 @@ final class ClassicSaveSlots {
      *     is then unchanged.
      */
     static void writeAtomic(File target, SaveWriter writer) throws IOException {
+        writeAtomic(target, writer, null);
+    }
+
+    /**
+     * Write a save over a row's file in one step: into a temporary file in
+     * the same folder, flushed to the disk ({@code FileChannel.force}),
+     * read back ({@link ClassicSaveGames#peek}), then moved over the file
+     * ({@code ATOMIC_MOVE}, or a plain replacing move where the file system
+     * has none).  If the writer fails, the flush fails, the save cannot be
+     * read back or the move is refused (the old file read-only, open
+     * elsewhere), the temporary file is removed and the old file stays
+     * exactly as it was (pitfall 2 of the spec: FreeCol's own saveGame
+     * writes into the target and a failure destroys it).  The flush comes
+     * first so that a power cut or a hard reset just after the move finds
+     * the new save's bytes on the disk, not only the move (NTFS logs the
+     * rename, not the data; the review of part SL); FreeCol's own saves
+     * never flushed.
+     *
+     * <p>With {@code keepDir}, the file being replaced is first copied
+     * there ({@link #keepReplaced}), so a row saved over -- without a
+     * question, as in the original (I, D-SL6), the bar on row 1 -- never
+     * loses the game it held (the ground rule "never lose a save" where the
+     * original's question is unknown; I, for Roger).  A copy that cannot be
+     * made is logged and the row is written anyway, as the original would.
+     *
+     * @param target The row's file.
+     * @param writer Writes the save.
+     * @param keepDir The folder for the copy of the replaced file, or null
+     *     for none.
+     * @exception IOException if the row could not be written; the old file
+     *     is then unchanged.
+     */
+    static void writeAtomic(File target, SaveWriter writer, File keepDir)
+        throws IOException {
         final File dir = target.getAbsoluteFile().getParentFile();
         if (dir == null) throw new IOException("No folder for " + target);
         if (!dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) {
@@ -481,9 +528,13 @@ final class ClassicSaveSlots {
         boolean moved = false;
         try {
             writer.write(tmp.toFile());
+            try (FileChannel ch = FileChannel.open(tmp, StandardOpenOption.WRITE)) {
+                ch.force(true);
+            }
             if (ClassicSaveGames.peek(tmp.toFile()) == null) {
                 throw new IOException("The new save cannot be read back: " + tmp);
             }
+            if (keepDir != null && target.isFile()) keepReplaced(target, keepDir);
             try {
                 Files.move(tmp, target.toPath(), StandardCopyOption.REPLACE_EXISTING,
                            StandardCopyOption.ATOMIC_MOVE);
@@ -502,6 +553,59 @@ final class ClassicSaveSlots {
         }
     }
 
+    /**
+     * The folder where a save row's replaced file is kept
+     * ({@link #keepReplaced}): {@code <save>/ersetzt}, beside {@code autosave}.
+     *
+     * @return The folder, or null without the save folder.
+     */
+    File keepDir() {
+        return (this.saveDir == null) ? null : new File(this.saveDir, REPLACED_FOLDER);
+    }
+
+    /**
+     * Copy a save row's file before it is saved over, into {@code keepDir}
+     * as {@code <stem>_<yyyy-MM-dd_HHmmss>.fsg} (the time of the
+     * replacement; the copy keeps the file's own time): "COLONY00.fsg" ->
+     * "ersetzt/COLONY00_2026-10-17_031205.fsg".  Never over another copy
+     * (a second one in the same second gets "-2"), never deleted by the
+     * game, and listed last on the title's page of all saves
+     * ({@link ClassicSaveGames#list}), so the player can load it again.  A
+     * failure is logged, never thrown: the row is still written (the
+     * original keeps no copy at all).
+     *
+     * @param target The row's file.
+     * @param keepDir The folder for the copy.
+     * @return The copy, or null if none could be made.
+     */
+    static File keepReplaced(File target, File keepDir) {
+        try {
+            if (!keepDir.isDirectory() && !keepDir.mkdirs() && !keepDir.isDirectory()) {
+                throw new IOException("Cannot make the folder " + keepDir);
+            }
+            final String name = target.getName();
+            final int dot = name.lastIndexOf('.');
+            final String stem = (dot > 0) ? name.substring(0, dot) : name;
+            final String ext = (dot > 0) ? name.substring(dot) : "";
+            final String when = KEEP_TIME.format(LocalDateTime.now());
+            File copy = new File(keepDir, stem + "_" + when + ext);
+            for (int n = 2; copy.exists(); n++) {
+                copy = new File(keepDir, stem + "_" + when + "-" + n + ext);
+            }
+            Files.copy(target.toPath(), copy.toPath());   // never over a file
+            if (!copy.setLastModified(target.lastModified())) {
+                logger.fine("Classic save rows: the copy " + copy + " keeps today's time");
+            }
+            logger.info("Classic save rows: " + target.getName() + " kept as " + copy
+                + " before it is saved over");
+            return copy;
+        } catch (IOException | RuntimeException e) {
+            logger.log(Level.WARNING, "Classic save rows: no copy of " + target
+                + " kept before it is saved over", e);
+            return null;
+        }
+    }
+
 
     // The boxes and their messages
 
@@ -510,8 +614,13 @@ final class ClassicSaveSlots {
      * box ({@code @LOADGAME}, V E3 {@code opening_055}): GAME.TXT's prompt
      * and {@code @width}, one row per label, the bar on row 1 (V in every
      * capture, D-SL14), no portrait, centred; Escape and a click outside
-     * answer no row ({@link ClassicAdvisorBox.Bar#DISMISSED}).  Without the
-     * pack's text a FreeCol prompt of the same width.
+     * answer no row ({@link ClassicAdvisorBox.Bar#DISMISSED}).  In the load
+     * box an "(EMPTY)" row is inert ({@link ClassicAdvisorBox.Request#inert}):
+     * drawn as the other rows (V {@code opening_055}), but Enter or a click
+     * on it does nothing and the box stays up (I, D-SL7; the box never
+     * closes and comes back, which showed the bare map for 0.2 s, the
+     * acceptance of part SL); in the save box it is a row like any other.
+     * Without the pack's text a FreeCol prompt of the same width.
      *
      * @param t The original texts, or null.
      * @param section {@link #SAVE_SECTION} or {@link #LOAD_SECTION}.
@@ -531,8 +640,13 @@ final class ClassicSaveSlots {
                     ? "classic.save.prompt" : "classic.mainMenu.loadPrompt"));
         }
         final List<String> rows = new ArrayList<>(labels.size());
-        for (String s : labels) rows.add(ClassicAdvisorBox.literal(s));
-        return b.rows(rows).defaultRow(bar).noCancelRow()
+        final boolean[] inert = new boolean[labels.size()];
+        final boolean load = LOAD_SECTION.equals(section);
+        for (int i = 0; i < labels.size(); i++) {
+            rows.add(ClassicAdvisorBox.literal(labels.get(i)));
+            inert[i] = load && EMPTY.equals(labels.get(i));
+        }
+        return b.rows(rows).inert(inert).defaultRow(bar).noCancelRow()
             .portrait(ClassicAdvisorBox.Portrait.NONE).stopgap(title, null).build();
     }
 

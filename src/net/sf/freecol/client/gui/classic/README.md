@@ -3308,7 +3308,9 @@ map must keep winning as it did over the old accelerators.
 or the turn's first unit, and the AI phase; `ClassicGUI.turnInputBlocked`)
 every key of the table does nothing, as the map's own keys (build spec W5d;
 logged `key-blocked`); only Ctrl+N still works there (`WHILE_WAITING`,
-`waitAllows`; FINAL "Open" item 7).
+`waitAllows`; FINAL "Open" item 7). The menu strip itself still opens in
+the AI phase, but its «Spiel sichern» and «Spiel laden» do nothing then
+(part SL, `ClassicGUI.othersMoving`).
 
 This ends the old F7 Naval/Military clash and replaces
 `remapClassicReportAccelerators` (deleted, with `styleClassicMenuBar`,
@@ -5458,9 +5460,10 @@ differing pixels.
     Enter, or a left press on a row and its release there, takes it; Esc or a
     right press goes back. PageDown opens the page of every saved game on
     disk (mode ARCHIVE, `ClassicSaveGames`: manual saves, then autosaves,
-    each newest first, labelled on a daemon thread), the list of the builds
-    before part SL, so their saves stay loadable; Esc or a right press goes
-    back to the page.
+    then the save rows' kept copies, each newest first, labelled on a daemon
+    thread and fitted as the ten rows, the season and year kept), the list
+    of the builds before part SL, so their saves stay loadable; Esc or a
+    right press goes back to the page.
   - RUHMESHALLE → `showHighScoresPanel(null, HighScore.loadHighScores())`. It
     runs on the client side and works before any game.
   - NEUE WELT and loading catch any `RuntimeException`, show it and return to
@@ -6347,10 +6350,16 @@ capture or a file, I = inferred, M = the manual.
   (below), then @SAVEGOOD (`%STRING0` the file, `%STRING1` the row's new
   label, I D-SL13), or @SAVEERROR with the row's old file kept. An
   occupied row is saved over without a question (I D-SL6: GAME.TXT has no
-  such question). Escape or a click outside: nothing.
+  such question); the save it held is first copied to
+  `<save>/ersetzt/COLONY0n_<yyyy-MM-dd_HHmmss>.fsg` (below). Escape or a
+  click outside: nothing.
 - **The load box** (SPIEL row 5, `showLoadBox`; V E3 `opening_055`, 0 px):
   @LOADGAME, 10 rows (the 8 save rows, then rows 9 and 10), box
-  (62,48,196,104). An "(EMPTY)" row does nothing, the box stays (I D-SL7);
+  (62,48,196,104). An "(EMPTY)" row does nothing, the box stays (I D-SL7):
+  the row is inert (`ClassicAdvisorBox.Request.inert`: drawn in the rows'
+  own ink, the bar goes there, Enter or a click on it does nothing), so
+  the box never closes and comes back (the acceptance saw that: the bare
+  map for 0.2 s between, `CHAIN_MS`);
   a file whose head cannot be read gives @LOADNOT and the game goes on;
   any other row gives @LOADGOOD ("COLONY00.SAV erfolgreich geladen.", V
   E10 clip005 #0, 0 px) over the current map without a question, then the
@@ -6368,9 +6377,20 @@ capture or a file, I = inferred, M = the manual.
   game shows (V E11: 0.47 s of black; ours lasts our load, I D-SL9; the
   old "Spiel wird geladen ..." notice is gone). Without any save the page
   shows ten "(EMPTY)" rows (I). **PageDown** opens the page of every saved
-  game on disk (mode ARCHIVE, the list of the builds before part SL), so
-  Roger's older games, the numbered autosaves above all, stay loadable;
-  nothing is moved, renamed or hidden (I D-SL5).
+  game on disk (mode ARCHIVE, the list of the builds before part SL, and
+  last the rows' kept copies of `<save>/ersetzt`), so Roger's older games,
+  the numbered autosaves above all, stay loadable; nothing is moved,
+  renamed or hidden (I D-SL5). Its labels are fitted as the ten rows, the
+  leader's name cut and the season and year kept (every numbered copy of
+  one game differs only in its year; the plain cut of the end lost it,
+  "... der Holl., Frühjah", the acceptance of part SL).
+- **Not while the others move:** during another nation's turn (the AI
+  phase) «Spiel sichern» and «Spiel laden» do nothing
+  (`ClassicGUI.othersMoving`): the server moves their units on its own
+  threads while a save reads the game with no lock, and a load would cut
+  their turn off (the review of part SL). The map's own keys wait then
+  too ("While the player waits"); I: the original takes no input while
+  the others move.
 - **The autosave rows** (`ClassicGUI.autosaveTurn` through the new
   `GUI.autosaveTurn` hook in `InGameController.autoSaveGame`, now public):
   with «Autom. Sichern» off nothing is saved (M, the manual's Game Options
@@ -6386,11 +6406,24 @@ capture or a file, I = inferred, M = the manual.
   1492", D-SL17; FreeCol alone saves first at the second turn). FreeCol's
   numbered copy of every turn stays and is never deleted (D-SL4).
 - **Never lose a save** (`ClassicSaveSlots.writeAtomic`): a row is written
-  to a temporary file in its own folder, read back, then moved over the row
-  in one step (`ATOMIC_MOVE`, or a plain replacing move where there is
-  none); a failure anywhere (the writer, a save that cannot be read back, a
-  read-only or open row) removes only the temporary file and leaves the old
-  row as it was. Never FreeCol's `loadGame()`/`saveGame()` and never
+  to a temporary file in its own folder, flushed to the disk
+  (`FileChannel.force`), read back, then moved over the row in one step
+  (`ATOMIC_MOVE`, or a plain replacing move where there is none); a failure
+  of the program anywhere (the writer, the flush, a save that cannot be
+  read back, a read-only or open row) removes only the temporary file and
+  leaves the old row as it was, and a power cut just after the move finds
+  the new save's bytes on the disk (NTFS logs the rename, not the data;
+  FreeCol's own saves never flushed). A save row 1-8 saved over is first
+  copied to `<save>/ersetzt/COLONY0n_<yyyy-MM-dd_HHmmss>.fsg`
+  (`keepReplaced`: never over another copy, the copy keeps the file's time,
+  never deleted, listed last on the page of all saves; a copy that cannot
+  be made is logged and the row is written anyway). I: the original asks
+  no question and keeps no copy, so one extra Enter (the bar starts on row
+  1) replaced row 1 for good; the copy shows nothing on the screen (the
+  ground rule "never lose a save" where the original is unknown; for
+  Roger: the folder grows by one save per save over a row). Rows 9 and 10
+  keep no copy (autosaves; FreeCol's numbered copies keep every turn).
+  Never FreeCol's `loadGame()`/`saveGame()` and never
   `FreeColDirectories.setSavegameFile`, which moves the save folder to the
   file's (after a load of row 10 every later save went into `autosave`;
   pinned by `ClassicSaveLoadTest.testTheSaveFolderNeverMoves`).
@@ -6411,17 +6444,27 @@ capture or a file, I = inferred, M = the manual.
   "(EMPTY)" row does nothing; the cut leader's name; the black on the
   title's load lasts as long as our load; with «Autom. Sichern» off even
   FreeCol's last-turn autosave is not written (as the original's manual
-  says).
+  says); a row saved over is kept in `<save>/ersetzt` (the end of the page
+  of all saves); «Spiel sichern» and «Spiel laden» do nothing while the
+  other nations move.
 - **Tests:** `ClassicSaveSlotsTest` (the rows, the guard, the labels and
   their cache, the decade table, the cut with the pack's FONTTINY, the
   one-step write: a failing writer, a save that cannot be read back, a
-  read-only and an open row, a row read just before);
-  `ClassicSaveLoadTest` (the menu rows, the save box through the real
-  server, @SAVEERROR, the round trip through the server, the load box, a
-  failed load's @LOADERROR, the autosave rows through FreeCol's real `autoSaveGame`, a new game's 1492,
-  the title's page, the pin of `setSavegameFile`, and the golden frames
-  054, 055, clip005 #0, clip006 #0 and #243); `ClassicKeepSavesTest`
-  lists the write's move and its temporary file's delete.
+  read-only and an open row, a row read just before; the kept copy of a
+  replaced row); `ClassicAdvisorLayerTest.testAnInertRowKeepsTheBoxUp`
+  (Enter and a click on an inert row: no close, no answer; drawn as any
+  row); `ClassicSaveLoadTest` (the menu rows, the save box through the
+  real server and its kept copy, @SAVEERROR, the round trip through the
+  server, the load box with its inert "(EMPTY)" rows and @LOADGOOD before
+  the switch, nothing while the others move, a failed load's @LOADERROR
+  and none once the game arrived, the autosave rows through FreeCol's
+  real `autoSaveGame`, a new game's 1492 and its hand-over from
+  `showStartGamePanel`, the title's page and its page of all saves
+  (@LOADNOT there, the year kept, the kept copies last), the client's
+  autosave names on the title, the pin of `setSavegameFile`, and the
+  golden frames 054, 055, clip005 #0, clip006 #0 and #243);
+  `ClassicKeepSavesTest` lists the write's move and its temporary file's
+  delete.
 
 ## Saved games are never deleted (part O3)
 
@@ -6450,7 +6493,8 @@ delete, move or rename of a file in `src` (pinned by
 - **A save row** (part SL, `ClassicSaveSlots.writeAtomic`): the new save is
   moved over the row in one step; only its own temporary file (`*.tmp`,
   never a saved game) is deleted, when the write failed. The player's
-  own save into an occupied row replaces it, as the original's does.
+  own save into an occupied row replaces it, as the original's does, but
+  a copy of the old save stays in `<save>/ersetzt` (a copy, no delete).
 - **The last guard:** `Utils.deleteFile` does not delete a `.fsg` in the
   Classic UI (warning `Utils.KEPT_SAVE`); every delete above goes through it.
 - Not saves: the log file and the comms log (`FreeColDirectories`), and two
