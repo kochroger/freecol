@@ -4165,12 +4165,17 @@ Every way the original moves a colonist on the colony screen, with its menus
 seen on the frames, I = our choice where no clip shows it.
 
 - **The press** on a colonist (in a building, on a tile, at the fence) freezes
-  the blink and takes the hover label away (V clip 042 ×14). A tile worker is
-  selected at once, the white cursor on his tile (V #5829); the colonist
-  already selected keeps it, the cursor goes to his figure in the band; an
-  unselected building worker or unit at the fence changes nothing until the
-  release or the drag's start, which select him (V dago-colony2 #7520 →
-  #7532, clip 042 #11157 → #11168, #3374). Where figures overlap, the first
+  the blink and takes the hover label away (V clip 042 ×14). On a tile worker
+  the white cursor goes to his tile at once (V #5829; clip 053 press +1 to
+  +4), but he is **selected at the release** or the drag's start, the old
+  selected colonist's cell green while the button is down (part Z, Z-ITEMS
+  Z1.1, clip 053's comparison D2: the colonist row's frame moves at the
+  release in 6 of 6 cases, #8236, #8436, #8915, #10221, #11312, #45992; ours
+  selected him at the press before); the colonist already selected keeps it,
+  the cursor goes to his figure in the band (a tile worker's stays on his
+  tile); an unselected building worker or unit at the fence changes nothing
+  until the release or the drag's start, which select him (V dago-colony2
+  #7520 → #7532, clip 042 #11157 → #11168, #3374). Where figures overlap, the first
   drawn wins (as the buildings, I). A press on a figure of the band's row
   only selects (I). **A tile worker answers his whole 24×24 square** (part Y4,
   Roger 2026-10-16: "ein Klick auf das Feld-Quadrat muss reichen"): the first

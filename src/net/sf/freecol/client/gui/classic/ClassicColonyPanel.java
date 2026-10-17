@@ -107,9 +107,9 @@ import net.sf.freecol.common.model.Unit;
  *
  * <p><b>Moving colonists</b> (M4.8, {@link ClassicColonyMoves},
  * {@link ClassicColonyJobs}): the press on a colonist freezes the blink and
- * takes the hover label away; a tile worker is selected at once (the white
- * cursor on his tile), an unselected building worker or unit at the fence
- * at the release or the drag's start (clip 042); motion drags his figure
+ * takes the hover label away; on a tile worker the white cursor goes to his
+ * tile at once; an unselected colonist is selected at the release or the
+ * drag's start (clip 042; a tile worker too, clip 053, part Z); motion drags his figure
  * as the ghost, the arrow hidden; the drop acts by the drop matrix (a
  * building's work, a tile as Farmer, Fischer on the ocean, or keeping his
  * work, the fence's J1), the original's refusal boxes (@MORETHANTHREE, the
@@ -915,11 +915,10 @@ final class ClassicColonyPanel extends JPanel {
                         ? ClassicColonyJobs.Kind.OUTSIDE : ClassicColonyJobs.Kind.WORKER,
                         ClassicColonyMoves.ms(ClassicColonyMoves.J2_FRAMES));
             } else {
-                // An unselected building worker or unit at the fence: the
-                // release selects him (V clip 042 #11168).
-                this.pressedUnit = u;
-                takePressed();
-                this.pressedUnit = null;
+                // An unselected colonist: the release selects him (V clip
+                // 042 #11168 a building worker; part Z D2, clip 053 #8236
+                // a tile worker, the cursor staying on his tile).
+                takePressed(u, from);
             }
             return;
         }
@@ -1064,13 +1063,20 @@ final class ClassicColonyPanel extends JPanel {
         // A colonist in a building, on a tile or at the fence (M4.8): the
         // press freezes the blink and his hover label goes (dago §0.1,
         // dago-colony2 §4, clip 042: the label's removal is the press's
-        // first sign, V ×14).  A tile worker is selected at once, the
-        // white cursor on his tile (V clip 042 #5829); the one already
-        // selected keeps it, the cursor to his figure in the band (his
-        // frame green meanwhile, dago-colony2 #8886); an unselected
-        // building worker or unit at the fence changes nothing until the
-        // release or the drag's start (V dago-colony2 #7520 → #7532, clip
-        // 042 #11157, #11498; the drag's start #3374).
+        // first sign, V ×14).  On a tile worker the white cursor goes to
+        // his tile at once (V clip 042 #5829; clip 053: press +1 to +4),
+        // the selection only at the release or the drag's start, the old
+        // selected colonist's cell green while the button is down (part
+        // Z, Z-ITEMS Z1.1, clip 053's comparison D2: the colonist row's
+        // frame moves at the release, -1 to +1, in 6 of 6 cases #8236,
+        // #8436, #8915, #10221, #11312, #45992; the old green frame goes
+        // at the release +2 to +4; ours selected at the press); the one
+        // already selected keeps it, the cursor to his figure in the band
+        // for a building worker or a unit at the fence (his frame green
+        // meanwhile, dago-colony2 #8886); an unselected building worker or
+        // unit at the fence changes nothing until the release or the
+        // drag's start (V dago-colony2 #7520 → #7532, clip 042 #11157,
+        // #11498; the drag's start #3374).
         final Hit h = hitAt(vx, vy);
         if (h != null) {
             this.pressedUnit = h.unit;
@@ -1082,7 +1088,6 @@ final class ClassicColonyPanel extends JPanel {
             this.blink.stop();
             if (h.place == ClassicColonyMoves.Place.TILE) {
                 tileCursor = h.tile;
-                select(h.unit);
             } else if (this.pressedWasSelected) {
                 tileCursor = CURSOR_OFF_TILES;
             }
@@ -1269,15 +1274,18 @@ final class ClassicColonyPanel extends JPanel {
     }
 
     /**
-     * The pressed colonist becomes the selected one (an unselected
-     * building worker or unit at the fence: at the release or the drag's
-     * start, V clip 042 #11168, #3374): the white cursor to his figure in
-     * the band.
+     * The pressed colonist becomes the selected one, at the release or the
+     * drag's start (an unselected building worker or unit at the fence, V
+     * clip 042 #11168, #3374: the white cursor to his figure in the band;
+     * a tile worker, part Z D2, V clip 053 #8236: the cursor stays on his
+     * tile, where the press put it).
+     *
+     * @param u The pressed colonist, or null.
+     * @param from Where he stands.
      */
-    private void takePressed() {
-        final Unit u = this.pressedUnit;
+    private void takePressed(Unit u, ClassicColonyMoves.Place from) {
         if (u == null || u == this.selectedUnit) return;
-        tileCursor = CURSOR_OFF_TILES;
+        if (from != ClassicColonyMoves.Place.TILE) tileCursor = CURSOR_OFF_TILES;
         select(u);
     }
 
@@ -3151,7 +3159,7 @@ final class ClassicColonyPanel extends JPanel {
     private void dragStarted() {
         this.blink.stop();
         // The drag's start selects the dragged one (V clip 042 #3374).
-        takePressed();
+        takePressed(this.pressedUnit, this.pressedPlace);
         final int[] p = this.gesture.pressPoint();
         this.ghostX = p[0];
         this.ghostY = p[1];

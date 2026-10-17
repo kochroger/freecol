@@ -1790,8 +1790,11 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
      * The press's look (the review of part U, fidelity M2; clip 042): an
      * unselected building worker or fence unit changes nothing at the
      * press, the release selects him (#11157 → #11168, dago-colony2 #7520
-     * → #7532), the drag's start too (#3374); a tile worker is selected at
-     * the press with the white cursor on his tile (#5829).
+     * → #7532), the drag's start too (#3374); on a tile worker the white
+     * cursor goes to his tile at the press (#5829), the selection waits
+     * for the release (part Z, Z-ITEMS Z1.1: V clip 053 #8236, #8436,
+     * #8915, #10221, #11312, #45992), the cursor staying on his tile; the
+     * drag's start from an unselected tile worker selects him too.
      */
     public void testThePressLook() throws Exception {
         final Scene s = scene(3, true);
@@ -1818,11 +1821,29 @@ public class ClassicColonyMovesTest extends FreeColTestCase {
             assertTrue("a first click: no menu", s.boxes.asked.isEmpty());
         }
         paint(s.panel);
+        assertSame(c, s.panel.selected());
+        ClassicColonyPanel.setTileCursor(ClassicColonyLayout.CENTRE_TILE);
         final int[] pb = at(s.panel, b);
         mouse(s.panel, MouseEvent.MOUSE_PRESSED, pb[0], pb[1]);
-        assertSame("a tile worker at the press", b, s.panel.selected());
+        assertSame("a tile worker: not yet at the press", c, s.panel.selected());
+        assertEquals("the white cursor on his tile at once", 7, ClassicColonyPanel.tileCursor());
+        mouse(s.panel, MouseEvent.MOUSE_RELEASED, pb[0], pb[1]);
+        assertSame("the release selects him", b, s.panel.selected());
+        assertEquals("the cursor stays on his tile", 7, ClassicColonyPanel.tileCursor());
+        assertTrue("a first click: no menu", s.boxes.asked.isEmpty());
+        // The drag's start from an unselected tile worker selects him.
+        s.panel.select(a);
+        ClassicColonyPanel.setTileCursor(ClassicColonyPanel.CURSOR_OFF_TILES);
+        paint(s.panel);
+        mouse(s.panel, MouseEvent.MOUSE_PRESSED, pb[0], pb[1]);
+        assertSame(a, s.panel.selected());
+        mouse(s.panel, MouseEvent.MOUSE_DRAGGED, pb[0] + 3, pb[1]);
+        assertTrue(s.panel.dragging());
+        assertSame("the drag's start selects him", b, s.panel.selected());
         assertEquals(7, ClassicColonyPanel.tileCursor());
         mouse(s.panel, MouseEvent.MOUSE_RELEASED, pb[0], pb[1]);
+        assertFalse(s.panel.dragging());
+        assertSame(tileOf(s.colony, Direction.S), b.getLocation());
         paint(s.panel);
         final int[] pa = at(s.panel, a);
         mouse(s.panel, MouseEvent.MOUSE_PRESSED, pa[0], pa[1]);
