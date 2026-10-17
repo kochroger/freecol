@@ -2510,6 +2510,21 @@ answer and the war, the learning with its moves, the taught skill named),
 builds them over the frames that show them, 0 px off), the server's
 `InGameControllerTest.testRefusedFirstContactIsWar`,
 `testTaughtSkillIsKept`, `TensionTest.testWarFromTheFirstContact`.
+Part Z: `ClassicVillageBoxTest` (rows, moods, values, 14 boxes' geometry,
+0 px over war-french #16955 and #22020, playthrough-1 #8480 and #46977,
+playthrough-3 #107633 and #124831), `ClassicNativeBoxesTest` (the village
+boxes, the tribute, the dropped win notice and the box at war through the
+real controller), `ClassicNativeNoticesTest` (the tribute answers, 0 px
+over 048 #44727, #48447 and 045 #30833; @INDIANWAR; the mood notices,
+@INDIANCOMMENT 0 px over war-french #26477; the uncontacted land), the
+server's `LeviNativeRulesTest` (the tribute and the war rule, on and
+off), and `ClassicNativeNegativeGoldenTest`: Roger's eight wrong native
+boxes of 2026-10-16 (the M3 verifier's W10/W11: frame_030679, 054799,
+063964, 064125, 064810, 065184, 069203, 069337 of
+`our-recordings/2026-10-16_1521`) are checked in their frames and must
+not come back: the four in FreeCol's words now come in the original's
+(at least a fifth of the old box's pixels differ, FreeCol's words gone),
+the four without a counterpart come no more.
 
 ### Refusals (`ClassicIllegalMoves`; R3, Part H1)
 
