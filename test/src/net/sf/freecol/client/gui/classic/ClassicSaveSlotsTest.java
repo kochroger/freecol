@@ -428,7 +428,8 @@ public class ClassicSaveSlotsTest extends FreeColTestCase {
      * replacement, with the old bytes and the old file time; a second
      * replacement in the same second gets its own name; an empty row and a
      * failed write keep nothing; without the folder argument nothing (row
-     * 9); a copy that cannot be made never stops the save.
+     * 9); a copy that cannot be made stops the save, the row keeps its game
+     * (part Z1, C2 of part Z's check), and an empty row is still written.
      */
     public void testAReplacedRowIsKept() throws Exception {
         final ClassicSaveSlots s = slots();
@@ -477,16 +478,167 @@ public class ClassicSaveSlotsTest extends FreeColTestCase {
             "model.difficulty.veryEasy", "model.nation.dutch"));
         assertEquals(2, keep.list().length);
         assertFalse(new File(this.autosaves, "ersetzt").exists());
-        // A folder that cannot be made (a file in its place): no copy, the
-        // row written all the same.
+        // A folder that cannot be made (a file in its place): no copy, so
+        // the row is not saved over (part Z1, C2): the write fails, the
+        // row keeps its game and its time, no temporary file is left.
         final File blocked = new File(this.root, "blocked");
         Files.write(blocked.toPath(), "x".getBytes(StandardCharsets.UTF_8));
         assertNull(ClassicSaveSlots.keepReplaced(row, blocked));
-        ClassicSaveSlots.writeAtomic(row, f -> writeSave(f, "Viert", 16,
+        final byte[] dritt = bytes(row);
+        final long drittTime = row.lastModified();
+        try {
+            ClassicSaveSlots.writeAtomic(row, f -> writeSave(f, "Viert", 16,
+                "model.difficulty.veryEasy", "model.nation.dutch"), blocked);
+            fail("a row whose game cannot be kept is not saved over");
+        } catch (IOException e) {
+            assertTrue(e.getMessage(), e.getMessage().contains("not saved over"));
+        }
+        assertTrue(Arrays.equals(dritt, bytes(row)));
+        assertEquals(drittTime, row.lastModified());
+        assertEquals("Dritt", ClassicSaveGames.peek(row).owner);
+        assertEquals(new ArrayList<String>(), strays(this.saves));
+        assertEquals(2, keep.list().length);
+        // An empty row has no game to keep: it is written all the same.
+        final File empty = s.slotFile(7);
+        ClassicSaveSlots.writeAtomic(empty, f -> writeSave(f, "Leer", 16,
             "model.difficulty.veryEasy", "model.nation.dutch"), blocked);
-        assertEquals("Viert", ClassicSaveGames.peek(row).owner);
+        assertEquals("Leer", ClassicSaveGames.peek(empty).owner);
         assertEquals(new ArrayList<String>(), strays(this.saves));
         assertNull(new ClassicSaveSlots(null, null, null).keepDir());
+    }
+
+    /**
+     * The copy into {@code ersetzt} is made in a temporary file, flushed,
+     * then given its name (part Z1): a copy that fails half-way leaves no
+     * temporary file and no broken copy there; a read-only row is copied
+     * (Windows copies its attribute, which the flush would refuse) and the
+     * copy keeps the row's bytes and time.
+     */
+    public void testTheCopyOfAReplacedRowIsWhole() throws Exception {
+        final ClassicSaveSlots s = slots();
+        final File keep = s.keepDir();
+        // A "row" that cannot be copied as a file (a folder): no copy,
+        // nothing left in ersetzt.
+        final File folder = new File(this.saves, "COLONY03.fsg");
+        assertTrue(folder.mkdirs());
+        assertNull(ClassicSaveSlots.keepReplaced(folder, keep));
+        assertTrue(keep.isDirectory());
+        assertEquals(Arrays.asList(), Arrays.asList(keep.list()));
+        // A read-only row: copied whole, with its time.
+        final File row = s.slotFile(4);
+        writeSave(row, "Alt", 9, "model.difficulty.veryEasy", "model.nation.dutch");
+        assertTrue(row.setLastModified(row.lastModified() - 7_200_000L));
+        assertTrue(row.setReadOnly());
+        try {
+            final File copy = ClassicSaveSlots.keepReplaced(row, keep);
+            assertNotNull(copy);
+            assertTrue(Arrays.equals(bytes(row), bytes(copy)));
+            assertEquals(row.lastModified(), copy.lastModified());
+            assertEquals(new ArrayList<String>(), strays(keep));
+        } finally {
+            assertTrue(row.setWritable(true));
+        }
+    }
+
+    /**
+     * Row 10, the turn start's autosave, written in one step (part Z1, C1
+     * of part Z's check; FreeCol wrote it straight into the file): while
+     * the new save is being written the row keeps its old save whole and
+     * the before-last-turn autosave is untouched; then the old row 10 is
+     * the before-last-turn autosave (its bytes and time, as FreeCol's move)
+     * and the new save is row 10.  A write that fails leaves both as they
+     * were; an old row 10 that cannot be read is not copied (the
+     * before-last-turn keeps its older game); a before-last-turn that
+     * cannot be replaced never stops the turn's save; no temporary file is
+     * left.
+     */
+    public void testTheLastTurnIsWrittenInOneStep() throws Exception {
+        final ClassicSaveSlots s = slots();
+        final File last = s.slotFile(ClassicSaveSlots.LAST_TURN_ROW);
+        final File before = new File(this.autosaves, "Autosave-before-last-turn.fsg");
+        writeSave(before, "Vorvorher", 7, "model.difficulty.veryEasy", "model.nation.dutch");
+        writeSave(last, "Vorher", 8, "model.difficulty.veryEasy", "model.nation.dutch");
+        assertTrue(last.setLastModified(last.lastModified() - 3_600_000L));
+        final byte[] old = bytes(last), older = bytes(before);
+        final long oldTime = last.lastModified();
+
+        // A slow write, watched half-way.
+        final java.util.concurrent.CountDownLatch half
+            = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch go
+            = new java.util.concurrent.CountDownLatch(1);
+        final Throwable[] failed = new Throwable[1];
+        final Thread t = new Thread(() -> {
+                try {
+                    ClassicSaveSlots.writeLastTurn(last, before, f -> {
+                            Files.write(f.toPath(), Arrays.copyOf(old, old.length / 2));
+                            half.countDown();
+                            try {
+                                go.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                            } catch (InterruptedException e) {
+                                throw new IOException(e);
+                            }
+                            writeSave(f, "Neu", 9, "model.difficulty.veryEasy",
+                                      "model.nation.dutch");
+                        });
+                } catch (Throwable e) {
+                    failed[0] = e;
+                }
+            }, "slow autosave");
+        t.start();
+        assertTrue(half.await(30, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(Arrays.equals(old, bytes(last)));
+        assertEquals("Vorher", ClassicSaveGames.peek(last).owner);
+        assertTrue(Arrays.equals(older, bytes(before)));
+        assertEquals(1, strays(this.autosaves).size());       // the temporary file
+        go.countDown();
+        t.join(30000L);
+        assertNull(String.valueOf(failed[0]), failed[0]);
+        assertEquals("Neu", ClassicSaveGames.peek(last).owner);
+        assertTrue(Arrays.equals(old, bytes(before)));
+        assertEquals(oldTime, before.lastModified());
+        assertEquals(new ArrayList<String>(), strays(this.autosaves));
+
+        // A write that fails: both as they were.
+        final byte[] neu = bytes(last), vorher = bytes(before);
+        final long neuTime = last.lastModified(), vorherTime = before.lastModified();
+        try {
+            ClassicSaveSlots.writeLastTurn(last, before, f -> {
+                    Files.write(f.toPath(), Arrays.copyOf(neu, neu.length / 2));
+                    throw new IOException("disk full (test)");
+                });
+            fail("the write should fail");
+        } catch (IOException e) {
+            // expected
+        }
+        assertTrue(Arrays.equals(neu, bytes(last)));
+        assertEquals(neuTime, last.lastModified());
+        assertTrue(Arrays.equals(vorher, bytes(before)));
+        assertEquals(vorherTime, before.lastModified());
+        assertEquals(new ArrayList<String>(), strays(this.autosaves));
+
+        // A broken row 10: not copied, the before-last-turn keeps its game.
+        Files.write(last.toPath(), "PK broken".getBytes(StandardCharsets.UTF_8));
+        ClassicSaveSlots.writeLastTurn(last, before, f -> writeSave(f, "Danach", 10,
+            "model.difficulty.veryEasy", "model.nation.dutch"));
+        assertEquals("Danach", ClassicSaveGames.peek(last).owner);
+        assertTrue(Arrays.equals(vorher, bytes(before)));
+        assertEquals(new ArrayList<String>(), strays(this.autosaves));
+
+        // A before-last-turn that cannot be replaced (a folder in its
+        // place): the turn is saved all the same.
+        assertTrue(before.renameTo(new File(this.root, "before.keep")));
+        assertTrue(before.mkdirs());
+        Files.write(new File(before, "keep.txt").toPath(), "x".getBytes(StandardCharsets.UTF_8));
+        ClassicSaveSlots.writeLastTurn(last, before, f -> writeSave(f, "Zuletzt", 11,
+            "model.difficulty.veryEasy", "model.nation.dutch"));
+        assertEquals("Zuletzt", ClassicSaveGames.peek(last).owner);
+        assertTrue(new File(before, "keep.txt").isFile());
+        assertEquals(new ArrayList<String>(), strays(this.autosaves));
+        // No before-last-turn file given: row 10 alone.
+        ClassicSaveSlots.writeLastTurn(last, null, f -> writeSave(f, "Allein", 12,
+            "model.difficulty.veryEasy", "model.nation.dutch"));
+        assertEquals("Allein", ClassicSaveGames.peek(last).owner);
     }
 
     /**

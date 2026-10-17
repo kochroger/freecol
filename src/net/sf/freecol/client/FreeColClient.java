@@ -977,11 +977,15 @@ public final class FreeColClient {
     /**
      * Stop a server if present.
      *
-     * Public for FreeColClient.quit and showMain.
+     * Public for FreeColClient.quit and showMain.  A turn start's autosave
+     * still being written ends first where the view waits for it (the
+     * Classic UI, part Z1: a load or the quit in that moment cut the save
+     * off; {@link GUI#awaitAutosave}).
      */
     public void stopServer() {
         final FreeColServer freeColServer = getFreeColServer();
         if (freeColServer != null) {
+            if (gui != null) gui.awaitAutosave();
             freeColServer.getController().shutdown();
             setFreeColServer(null);
         }

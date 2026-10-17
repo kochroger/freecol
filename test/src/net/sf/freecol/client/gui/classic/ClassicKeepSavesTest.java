@@ -624,11 +624,13 @@ public class ClassicKeepSavesTest extends FreeColTestCase {
         known.put("server/FreeColServer.java", 1);
         // autoSaveGame: last-turn -> before-last-turn, a move, no delete.
         known.put("client/control/InGameController.java", 1);
-        // Part SL, ClassicSaveSlots.writeAtomic: the new save moved over a
-        // save row in one step (ATOMIC_MOVE, or a plain replacing move),
-        // and the delete of its own temporary file (*.tmp, never a saved
-        // game) when a write failed.
-        known.put("client/gui/classic/ClassicSaveSlots.java", 3);
+        // Part SL, ClassicSaveSlots.replace (writeAtomic, writeLastTurn):
+        // the new save moved over a save row in one step (ATOMIC_MOVE, or
+        // a plain replacing move), and the delete of its own temporary
+        // file (*.tmp, never a saved game) when a write failed; part Z1,
+        // keepReplaced: the flushed copy of a replaced row given its name
+        // in ersetzt by a move that never replaces a file.
+        known.put("client/gui/classic/ClassicSaveSlots.java", 4);
         // Tools, never run by the game: the art pack's output folder, a
         // map converter that renames its input to .old.
         known.put("tools/classicassets/ClassicAssetConverter.java", 3);

@@ -165,6 +165,17 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
         /** Per switch, the boxes the prompter had been asked by then. */
         final List<List<String>> boxesAtSwitch = new ArrayList<>();
 
+        /** Per switch, whether the turn start's autosave was still written (part Z1). */
+        final List<Boolean> autosaveAtSwitch = new ArrayList<>();
+
+        /** The game's current player each time an autosave began (part Z1). */
+        final List<Player> currentAtAutosave
+            = Collections.synchronizedList(new ArrayList<>());
+
+        /** Wraps the autosave rows' writer (a slow or failing autosave), or null. */
+        volatile java.util.function.UnaryOperator<ClassicSaveSlots.SaveWriter> autosaveWrap
+            = null;
+
         SlGUI(FreeColClient fcc) {
             super(fcc);
         }
@@ -175,6 +186,33 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
             this.boxesAtSwitch.add((this.prompter instanceof Answers)
                 ? new ArrayList<>(((Answers) this.prompter).ids())
                 : Collections.<String>emptyList());
+            this.autosaveAtSwitch.add(this.autosaveGate.running());
+        }
+
+        @Override
+        ClassicSaveSlots.SaveWriter autosaveWriter(FreeColServer server, ClientOptions co) {
+            final ClassicSaveSlots.SaveWriter real = super.autosaveWriter(server, co);
+            final java.util.function.UnaryOperator<ClassicSaveSlots.SaveWriter> w
+                = this.autosaveWrap;
+            return (w == null) ? real : w.apply(real);
+        }
+
+        @Override
+        public void autosaveStarting() {
+            final FreeColClient fcc = getFreeColClient();
+            this.currentAtAutosave.add((fcc == null || fcc.getGame() == null) ? null
+                : fcc.getGame().getCurrentPlayer());
+            super.autosaveStarting();
+        }
+
+        /** Thrown by the turn's autosave (a crash in it), or null. */
+        volatile RuntimeException autosaveCrash = null;
+
+        @Override
+        public boolean autosaveTurn(Turn turn, File lastTurnFile, File beforeLastTurnFile) {
+            final RuntimeException crash = this.autosaveCrash;
+            if (crash != null) throw crash;
+            return super.autosaveTurn(turn, lastTurnFile, beforeLastTurnFile);
         }
     }
 
@@ -370,7 +408,9 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
     /**
      * @SAVEERROR, and the row's old save untouched: a row that cannot be
      * replaced (a folder in its place; on Windows also a read-only file,
-     * acceptance A9) and a game without a server.
+     * acceptance A9), a row whose game cannot be copied into
+     * {@code ersetzt} (part Z1; an empty row is still saved) and a game
+     * without a server.
      */
     public void testAFailedSaveKeepsTheRow() throws Exception {
         gameClient(baseOptions());
@@ -412,6 +452,34 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
         assertTrue(Arrays.equals(old, Files.readAllBytes(
             new File(kept, names(kept).get(0)).toPath())));
         assertEquals(Arrays.asList("COLONY04.fsg", "COLONY05.fsg", "autosave",
+                                   ClassicSaveSlots.REPLACED_FOLDER),
+                     names(this.saves));
+
+        // The copy into ersetzt cannot be made (a file where the folder
+        // goes): row 6 is not saved over, @SAVEERROR, its game stays
+        // (part Z1, C2 of part Z's check: our choice).
+        final File keptFolder = new File(this.saves, ClassicSaveSlots.REPLACED_FOLDER);
+        final File parked = new File(this.root, "ersetzt.parked");
+        Files.move(keptFolder.toPath(), parked.toPath());
+        Files.write(keptFolder.toPath(), "x".getBytes(StandardCharsets.UTF_8));
+        final byte[] six = Files.readAllBytes(row6.toPath());
+        final long sixTime = row6.lastModified();
+        a = new Answers(5);
+        this.gui.prompter = a;
+        assertEquals(-1, this.gui.showSaveBox());
+        assertEquals(Arrays.asList(ClassicSaveSlots.SAVE_SECTION, ClassicSaveSlots.SAVE_ERROR),
+                     a.ids());
+        assertTrue(text(a.last()), text(a.last()).contains("COLONY05.SAV"));
+        assertTrue(Arrays.equals(six, Files.readAllBytes(row6.toPath())));
+        assertEquals(sixTime, row6.lastModified());
+        // An empty row needs no copy: saved.
+        a = new Answers(6);
+        this.gui.prompter = a;
+        assertEquals(6, this.gui.showSaveBox());
+        assertEquals(ClassicSaveSlots.SAVE_GOOD, a.last().id);
+        assertTrue(keptFolder.delete());
+        Files.move(parked.toPath(), keptFolder.toPath());
+        assertEquals(Arrays.asList("COLONY04.fsg", "COLONY05.fsg", "COLONY06.fsg", "autosave",
                                    ClassicSaveSlots.REPLACED_FOLDER),
                      names(this.saves));
 
@@ -727,6 +795,430 @@ public class ClassicSaveLoadTest extends FreeColTestCase {
         assertEquals(game.getTurn().getNumber(), ClassicSaveSlots.info(last).turn);
         assertTrue(new File(oldDecade, "keep.txt").isFile());
         assertTrue(Arrays.equals(nineBytes, Files.readAllBytes(elsewhere.toPath())));
+    }
+
+    // The turn start's autosave and those who wait for it (part Z1, C1 of
+    // part Z's check)
+
+    /**
+     * A turn start's autosave held half-way through row 10's write, on a
+     * thread of its own as FreeCol's network thread writes it: either the
+     * whole turn change through FreeCol's real controller
+     * ({@code setCurrentPlayerHandler}) or its autosave alone (with the
+     * gate's seams around it, as the controller calls them).  The writer
+     * puts a half file into the temporary file, says so, waits for the
+     * release, then writes the real save (or fails).
+     */
+    private final class HeldAutosave {
+
+        final java.util.concurrent.CountDownLatch half
+            = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch release
+            = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.atomic.AtomicBoolean written
+            = new java.util.concurrent.atomic.AtomicBoolean(false);
+        final List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
+        /** How long the writing thread waited for its own autosave (ms), -1 unasked. */
+        final java.util.concurrent.atomic.AtomicLong selfWait
+            = new java.util.concurrent.atomic.AtomicLong(-1L);
+        final Thread thread;
+
+        HeldAutosave(FreeColClient fcc, boolean turnChange, boolean fail) {
+            gui.autosaveWrap = real -> tmp -> {
+                Files.write(tmp.toPath(), "PK half".getBytes(StandardCharsets.UTF_8));
+                this.half.countDown();
+                final long s = System.nanoTime();
+                gui.awaitAutosave();
+                gui.autosaveGate.awaitIdle(20000L);
+                this.selfWait.set((System.nanoTime() - s) / 1_000_000L);
+                try {
+                    if (!this.release.await(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                        throw new IOException("never released (test)");
+                    }
+                } catch (InterruptedException e) {
+                    throw new IOException(e);
+                }
+                if (fail) throw new IOException("disk full (test)");
+                real.write(tmp);
+                this.written.set(true);
+            };
+            final Player me = fcc.getMyPlayer();
+            this.thread = new Thread(() -> {
+                    try {
+                        if (turnChange) {
+                            fcc.getInGameController().setCurrentPlayerHandler(me);
+                        } else {
+                            gui.autosaveStarting();
+                            try {
+                                fcc.getInGameController().autoSaveGame();
+                            } finally {
+                                gui.autosaveFinished();
+                            }
+                        }
+                    } catch (Throwable e) {
+                        this.errors.add(e);
+                    }
+                }, "test network thread");
+            this.thread.start();
+        }
+
+        void awaitHalf() throws InterruptedException {
+            assertTrue("the autosave never began",
+                this.half.await(30, java.util.concurrent.TimeUnit.SECONDS));
+        }
+
+        void finish() throws InterruptedException {
+            this.release.countDown();
+            this.thread.join(60000L);
+            assertFalse("the network thread hangs", this.thread.isAlive());
+            gui.autosaveWrap = null;
+        }
+    }
+
+    /** The names in a folder that are a write's temporary files. */
+    private static List<String> temporaries(File dir) {
+        final List<String> out = new ArrayList<>();
+        for (String n : names(dir)) if (n.endsWith(".tmp")) out.add(n);
+        return out;
+    }
+
+    /** Wait (at most 10 s) until the event thread waits for the autosave. */
+    private void awaitTheWait() throws Exception {
+        for (int i = 0; i < 1000 && !this.gui.awaitingAutosave(); i++) Thread.sleep(10L);
+        assertTrue("nothing waits for the autosave", this.gui.awaitingAutosave());
+    }
+
+    /** Whether the event thread handles an event within 10 s. */
+    private static boolean eventThreadAnswers() throws InterruptedException {
+        final java.util.concurrent.CountDownLatch ping
+            = new java.util.concurrent.CountDownLatch(1);
+        javax.swing.SwingUtilities.invokeLater(ping::countDown);
+        return ping.await(10, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    /** The prompter's boxes so far, read on the event thread. */
+    private static List<String> idsOnTheEventThread(Answers a) throws Exception {
+        final List<String> out = new ArrayList<>();
+        javax.swing.SwingUtilities.invokeAndWait(() -> out.addAll(a.ids()));
+        return out;
+    }
+
+    /**
+     * Row 10 through FreeCol's real autosave, held half-way (part Z1, C1):
+     * while the turn's save is written row 10 keeps the last turn's save
+     * whole (FreeCol had moved it away and wrote into the file), the
+     * before-last-turn autosave is untouched, the new save is a temporary
+     * file; then the last turn's save is the before-last-turn autosave
+     * (bytes and time) and row 10 the new turn.  An autosave that fails
+     * keeps both rows' files as they were, still makes the turn's numbered
+     * copy, and leaves no temporary file.
+     */
+    public void testTheTurnsAutosaveIsWrittenInOneStep() throws Exception {
+        final FreeColClient fcc = gameClient(baseOptions());
+        final Game game = fcc.getGame();
+        final File last = new File(this.autosaves, "Autosave-last-turn.fsg");
+        final File before = new File(this.autosaves, "Autosave-before-last-turn.fsg");
+        game.setTurn(turnOf(1495));
+        autoSave(fcc);
+        assertTrue(last.setLastModified(last.lastModified() - 120000L));
+        final byte[] turn1495 = Files.readAllBytes(last.toPath());
+        final long time1495 = last.lastModified();
+
+        game.setTurn(turnOf(1496));
+        HeldAutosave h = new HeldAutosave(fcc, false, false);
+        h.awaitHalf();
+        assertTrue(Arrays.equals(turn1495, Files.readAllBytes(last.toPath())));
+        assertEquals(time1495, last.lastModified());
+        assertFalse(before.exists());
+        assertEquals(1, temporaries(this.autosaves).size());
+        assertTrue(this.gui.autosaveGate.running());
+        h.finish();
+        assertTrue(h.errors.toString(), h.errors.isEmpty());
+        assertTrue(h.written.get());
+        assertEquals(game.getTurn().getNumber(), ClassicSaveSlots.info(last).turn);
+        assertTrue(Arrays.equals(turn1495, Files.readAllBytes(before.toPath())));
+        assertEquals(time1495, before.lastModified());
+        assertEquals(new ArrayList<String>(), temporaries(this.autosaves));
+        assertFalse(this.gui.autosaveGate.running());
+        // The writing thread never waited for its own autosave.
+        assertTrue("waited " + h.selfWait.get() + " ms",
+                   h.selfWait.get() >= 0L && h.selfWait.get() < 2000L);
+
+        // A failing autosave.
+        assertTrue(last.setLastModified(last.lastModified() - 60000L));
+        final byte[] turn1496 = Files.readAllBytes(last.toPath());
+        final long time1496 = last.lastModified();
+        final byte[] beforeBytes = Files.readAllBytes(before.toPath());
+        final int files = names(this.autosaves).size();
+        game.setTurn(turnOf(1497));
+        h = new HeldAutosave(fcc, false, true);
+        h.awaitHalf();
+        h.finish();
+        assertTrue(h.errors.toString(), h.errors.isEmpty());
+        assertTrue(Arrays.equals(turn1496, Files.readAllBytes(last.toPath())));
+        assertEquals(time1496, last.lastModified());
+        assertTrue(Arrays.equals(beforeBytes, Files.readAllBytes(before.toPath())));
+        assertEquals("the numbered copy of 1497", files + 1, names(this.autosaves).size());
+        assertEquals(new ArrayList<String>(), temporaries(this.autosaves));
+        assertFalse(this.gui.autosaveGate.running());
+    }
+
+    /**
+     * «Spiel laden» during the turn start's autosave, through FreeCol's
+     * real turn change on a thread of its own (part Z1, C1): the gate
+     * closes before the turn becomes ours (the current player is still the
+     * French when it closes), and once the turn is ours (the AI-phase
+     * guard lets the boxes through) the load box waits for the autosave:
+     * no box meanwhile, the event thread goes on handling events, a second
+     * request (the save box) is dropped; once the autosave is written the
+     * box comes, its row 10 shows the new turn, and the load and its
+     * switch come after the autosave.
+     */
+    public void testALoadWaitsForTheAutosave() throws Exception {
+        final FreeColClient fcc = gameClient(baseOptions());
+        fcc.setSinglePlayer(true);
+        final Game game = fcc.getGame();
+        final ClassicSaveSlots slots = ClassicSaveSlots.of(fcc.getClientOptions());
+        ClassicSaveSlots.writeAtomic(slots.slotFile(2),
+            f -> fcc.getFreeColServer().saveGame(f, fcc.getClientOptions(), (Unit) null));
+        game.setTurn(turnOf(1495));
+        autoSave(fcc);
+        game.setTurn(turnOf(1496));
+        final Player french = getServerPlayer(game, "model.nation.french");
+        game.setCurrentPlayer(french);
+        final Answers a = new Answers(2);
+        this.gui.prompter = a;
+
+        final HeldAutosave h = new HeldAutosave(fcc, true, false);
+        h.awaitHalf();
+        assertEquals(Arrays.asList(french), new ArrayList<>(this.gui.currentAtAutosave));
+        assertTrue(this.gui.autosaveGate.running());
+        assertFalse("the turn is ours while the autosave is written", this.gui.othersMoving());
+        final java.util.concurrent.atomic.AtomicReference<Boolean> loaded
+            = new java.util.concurrent.atomic.AtomicReference<>();
+        javax.swing.SwingUtilities.invokeLater(() -> loaded.set(this.gui.showLoadBox()));
+        awaitTheWait();
+        assertTrue("the event thread is frozen", eventThreadAnswers());
+        assertEquals(new ArrayList<String>(), idsOnTheEventThread(a));
+        assertTrue(this.gui.switched.isEmpty());
+        // A second request while the first waits: dropped, no box.
+        final java.util.concurrent.atomic.AtomicInteger second
+            = new java.util.concurrent.atomic.AtomicInteger(99);
+        javax.swing.SwingUtilities.invokeAndWait(() -> second.set(this.gui.showSaveBox()));
+        assertEquals(-1, second.get());
+        assertEquals(new ArrayList<String>(), idsOnTheEventThread(a));
+        assertNull(loaded.get());
+
+        h.finish();
+        for (int i = 0; i < 1000 && loaded.get() == null; i++) Thread.sleep(10L);
+        assertEquals(Boolean.TRUE, loaded.get());
+        assertTrue(h.written.get());
+        assertEquals(Arrays.asList(slots.slotFile(2)), this.gui.switched);
+        assertEquals(Arrays.asList(Boolean.FALSE), this.gui.autosaveAtSwitch);
+        assertEquals(Arrays.asList(ClassicSaveSlots.LOAD_SECTION, ClassicSaveSlots.LOAD_GOOD),
+                     idsOnTheEventThread(a));
+        final String row10 = a.boxes.get(0).plainRows()[9];
+        assertTrue(row10, row10.contains("1496"));
+        assertFalse(this.gui.autosaveGate.running());
+        assertEquals(game.getTurn().getNumber(),
+                     ClassicSaveSlots.info(slots.slotFile(ClassicSaveSlots.LAST_TURN_ROW)).turn);
+        if (!h.errors.isEmpty()) {
+            System.err.println(getClass().getSimpleName()
+                + ": the headless turn change after its autosave: " + h.errors);
+        }
+    }
+
+    /**
+     * A save box answered while the turn start's autosave begins (part Z1):
+     * the row's write waits until the autosave is written -- the row is
+     * not there while it waits, and comes after it.
+     */
+    public void testASaveWaitsForTheAutosave() throws Exception {
+        final FreeColClient fcc = gameClient(baseOptions());
+        final Game game = fcc.getGame();
+        game.setTurn(turnOf(1495));
+        final File row3 = new File(this.saves, "COLONY02.fsg");
+        final HeldAutosave[] held = new HeldAutosave[1];
+        final List<String> asked = Collections.synchronizedList(new ArrayList<>());
+        this.gui.prompter = r -> {
+            asked.add(r.id);
+            if (r.isNotice()) return 0;
+            // The box is answered as the autosave begins.
+            held[0] = new HeldAutosave(fcc, false, false);
+            try {
+                held[0].awaitHalf();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            return 2;
+        };
+        final java.util.concurrent.atomic.AtomicInteger saved
+            = new java.util.concurrent.atomic.AtomicInteger(99);
+        javax.swing.SwingUtilities.invokeLater(() -> saved.set(this.gui.showSaveBox()));
+        awaitTheWait();
+        assertTrue("the event thread is frozen", eventThreadAnswers());
+        assertFalse("the row is written while the autosave is", row3.exists());
+        assertEquals(99, saved.get());
+        held[0].finish();
+        for (int i = 0; i < 1000 && saved.get() == 99; i++) Thread.sleep(10L);
+        assertEquals(2, saved.get());
+        assertTrue(row3.isFile());
+        assertTrue(held[0].written.get());
+        assertEquals(Arrays.asList(ClassicSaveSlots.SAVE_SECTION, ClassicSaveSlots.SAVE_GOOD),
+                     new ArrayList<>(asked));
+    }
+
+    /**
+     * A load box answered as the turn start's autosave begins (part Z1):
+     * the load (its notice and the switch, which stops the server) waits
+     * until the autosave is written, and comes after it.
+     */
+    public void testALoadAnsweredAsTheAutosaveBeginsWaits() throws Exception {
+        final FreeColClient fcc = gameClient(baseOptions());
+        final Game game = fcc.getGame();
+        final ClassicSaveSlots slots = ClassicSaveSlots.of(fcc.getClientOptions());
+        ClassicSaveSlots.writeAtomic(slots.slotFile(2),
+            f -> fcc.getFreeColServer().saveGame(f, fcc.getClientOptions(), (Unit) null));
+        game.setTurn(turnOf(1495));
+        final HeldAutosave[] held = new HeldAutosave[1];
+        final List<String> asked = Collections.synchronizedList(new ArrayList<>());
+        this.gui.prompter = r -> {
+            asked.add(r.id);
+            if (r.isNotice()) return 0;
+            held[0] = new HeldAutosave(fcc, false, false);
+            try {
+                held[0].awaitHalf();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            return 2;
+        };
+        final java.util.concurrent.atomic.AtomicReference<Boolean> loaded
+            = new java.util.concurrent.atomic.AtomicReference<>();
+        javax.swing.SwingUtilities.invokeLater(() -> loaded.set(this.gui.showLoadBox()));
+        awaitTheWait();
+        assertTrue("the event thread is frozen", eventThreadAnswers());
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+                assertTrue(this.gui.switched.isEmpty());
+            });
+        assertEquals(Arrays.asList(ClassicSaveSlots.LOAD_SECTION), new ArrayList<>(asked));
+        held[0].finish();
+        for (int i = 0; i < 1000 && loaded.get() == null; i++) Thread.sleep(10L);
+        assertEquals(Boolean.TRUE, loaded.get());
+        assertEquals(Arrays.asList(slots.slotFile(2)), this.gui.switched);
+        assertEquals(Arrays.asList(Boolean.FALSE), this.gui.autosaveAtSwitch);
+        assertEquals(Arrays.asList(ClassicSaveSlots.LOAD_SECTION, ClassicSaveSlots.LOAD_GOOD),
+                     new ArrayList<>(asked));
+        assertTrue(held[0].written.get());
+    }
+
+    /**
+     * An autosave that hangs (part Z1): the load waits only its bound
+     * ({@code autosaveWaitMs}, here 300 ms), then goes on; row 10 is the
+     * last turn's save, whole (the hanging save is only a temporary file).
+     */
+    public void testTheWaitIsBounded() throws Exception {
+        final FreeColClient fcc = gameClient(baseOptions());
+        final Game game = fcc.getGame();
+        game.setTurn(turnOf(1495));
+        autoSave(fcc);
+        final File last = new File(this.autosaves, "Autosave-last-turn.fsg");
+        final byte[] turn1495 = Files.readAllBytes(last.toPath());
+        game.setTurn(turnOf(1496));
+        this.gui.autosaveWaitMs = 300L;
+        final Answers a = new Answers(9);
+        this.gui.prompter = a;
+        final HeldAutosave h = new HeldAutosave(fcc, false, false);
+        try {
+            h.awaitHalf();
+            final java.util.concurrent.atomic.AtomicLong ms
+                = new java.util.concurrent.atomic.AtomicLong(-1L);
+            final java.util.concurrent.atomic.AtomicBoolean loaded
+                = new java.util.concurrent.atomic.AtomicBoolean(false);
+            javax.swing.SwingUtilities.invokeAndWait(() -> {
+                    final long s = System.nanoTime();
+                    loaded.set(this.gui.showLoadBox());
+                    ms.set((System.nanoTime() - s) / 1_000_000L);
+                });
+            assertTrue(loaded.get());
+            // The box waited 300 ms, the load once more.
+            assertTrue("waited " + ms.get() + " ms", ms.get() >= 500L && ms.get() < 20000L);
+            assertEquals(Arrays.asList(last), this.gui.switched);
+            assertEquals(Arrays.asList(Boolean.TRUE), this.gui.autosaveAtSwitch);
+            assertTrue(Arrays.equals(turn1495, Files.readAllBytes(last.toPath())));
+        } finally {
+            h.finish();
+        }
+        assertEquals(game.getTurn().getNumber(), ClassicSaveSlots.info(last).turn);
+    }
+
+    /**
+     * Every stop of the server (the load's switch, the quit, back to the
+     * title) waits for the turn start's autosave (part Z1, C1;
+     * {@code FreeColClient.stopServer}): the server runs on until the
+     * autosave is written, the event thread goes on meanwhile; then the
+     * turn's save is row 10 and the server is stopped.
+     */
+    public void testAServerStopWaitsForTheAutosave() throws Exception {
+        final FreeColClient fcc = gameClient(baseOptions());
+        final Game game = fcc.getGame();
+        game.setTurn(turnOf(1495));
+        final File last = new File(this.autosaves, "Autosave-last-turn.fsg");
+        final HeldAutosave h = new HeldAutosave(fcc, false, false);
+        h.awaitHalf();
+        final java.util.concurrent.CountDownLatch stopped
+            = new java.util.concurrent.CountDownLatch(1);
+        javax.swing.SwingUtilities.invokeLater(() -> {
+                fcc.stopServer();
+                stopped.countDown();
+            });
+        assertFalse(stopped.await(400, java.util.concurrent.TimeUnit.MILLISECONDS));
+        assertTrue("the event thread is frozen", eventThreadAnswers());
+        assertNotNull("the server stopped during the autosave", fcc.getFreeColServer());
+        assertFalse(last.exists());
+        h.finish();
+        assertTrue(stopped.await(30, java.util.concurrent.TimeUnit.SECONDS));
+        assertNull(fcc.getFreeColServer());
+        assertTrue(h.errors.toString(), h.errors.isEmpty());
+        assertEquals(game.getTurn().getNumber(), ClassicSaveSlots.info(last).turn);
+        // FreeCol's own GUI does not wait (its seam is empty).
+        new net.sf.freecol.client.gui.GUI(null).awaitAutosave();
+    }
+
+    /**
+     * The gate opens again when the turn start's autosave throws (part
+     * Z1): FreeCol's controller closes it in a {@code finally}, so a failed
+     * autosave never leaves the boxes waiting.
+     */
+    public void testTheGateOpensAfterAFailedAutosave() throws Exception {
+        final FreeColClient fcc = gameClient(baseOptions());
+        fcc.setSinglePlayer(true);
+        final Game game = fcc.getGame();
+        game.setTurn(turnOf(1495));
+        game.setCurrentPlayer(getServerPlayer(game, "model.nation.french"));
+        final IllegalStateException crash = new IllegalStateException("crash (test)");
+        this.gui.autosaveCrash = crash;
+        final List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
+        final Thread t = new Thread(() -> {
+                try {
+                    fcc.getInGameController().setCurrentPlayerHandler(fcc.getMyPlayer());
+                } catch (Throwable e) {
+                    errors.add(e);
+                }
+            }, "test network thread");
+        t.start();
+        t.join(60000L);
+        assertFalse(t.isAlive());
+        assertEquals(Arrays.asList(crash), errors);
+        assertEquals(1, this.gui.currentAtAutosave.size());
+        assertFalse("the gate stays closed", this.gui.autosaveGate.running());
+        assertFalse(new File(this.autosaves, "Autosave-last-turn.fsg").exists());
+        this.gui.autosaveCrash = null;
+        // The boxes work at once (no wait).
+        final Answers a = new Answers();
+        this.gui.prompter = a;
+        assertFalse(this.gui.showLoadBox());
+        assertEquals(Arrays.asList(ClassicSaveSlots.LOAD_SECTION), a.ids());
     }
 
     /**

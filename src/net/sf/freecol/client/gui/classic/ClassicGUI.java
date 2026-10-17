@@ -3032,6 +3032,115 @@ public class ClassicGUI extends GUI {
     }
 
     /**
+     * The longest wait of a save, a load or a server stop for the turn
+     * start's autosave (ms): a turn's save takes well under a second, so
+     * only an autosave that hangs reaches it; the request then goes on
+     * (the rows are written in one step, none breaks).
+     */
+    static final long AUTOSAVE_WAIT_MS = 20000L;
+
+    /**
+     * The turn start's autosave, which the save and load boxes and every
+     * server stop wait for (part Z1, C1 of part Z's check;
+     * {@link ClassicAutosaveGate}).
+     */
+    final ClassicAutosaveGate autosaveGate = new ClassicAutosaveGate();
+
+    /** The bound of {@link #waitForAutosave} (the tests shorten it). */
+    long autosaveWaitMs = AUTOSAVE_WAIT_MS;
+
+    /** Whether a save or load request waits for the autosave right now. */
+    private volatile boolean awaitingAutosave = false;
+
+    /**
+     * {@inheritDoc}
+     *
+     * The gate closes before the turn becomes ours (part Z1): until the
+     * autosave is written, «Spiel sichern», «Spiel laden» and a server stop
+     * wait ({@link #waitForAutosave}).  On the network thread.
+     */
+    @Override
+    public void autosaveStarting() {
+        this.autosaveGate.begin();
+        ClassicFrameRecorder.event("autosave", "begins");
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * The gate opens again; whatever waits goes on.  On the network thread.
+     */
+    @Override
+    public void autosaveFinished() {
+        this.autosaveGate.end();
+        ClassicFrameRecorder.event("autosave", "ends");
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * A load (its switch to the save), the quit and every return to the
+     * title stop the server: never while the turn start's autosave is
+     * written (part Z1), at most {@link #autosaveWaitMs}.  On the event
+     * thread the screen and input go on meanwhile.
+     */
+    @Override
+    public void awaitAutosave() {
+        if (!this.autosaveGate.blocking()) return;
+        logger.info("Classic autosave: the server stop waits for the turn's autosave");
+        ClassicFrameRecorder.event("autosave", "server stop waits");
+        if (!this.autosaveGate.awaitIdle(this.autosaveWaitMs)) {
+            logger.warning("Classic autosave: still written after " + this.autosaveWaitMs
+                + " ms, the server stops all the same");
+        }
+    }
+
+    /**
+     * Let a save or a load wait for the turn start's autosave (part Z1, C1
+     * of part Z's check): FreeCol writes it on its network thread just as
+     * the turn becomes ours, when the boxes can already be used.  The
+     * request waits until it is written, at most {@link #autosaveWaitMs}
+     * (then it goes on, logged); on the event thread in a secondary event
+     * loop, so the map is drawn and input is handled meanwhile and nothing
+     * the player asked for is lost.  A second save or load box asked for
+     * while one waits is dropped (the first one comes); the write or load
+     * of a box already answered always waits.  EDT only (any thread in the
+     * tests).
+     *
+     * @param what Who waits, for the log ("save-box", "load" ...).
+     * @param box Whether a box is asked for (a second one is dropped).
+     * @return False only for such a second box.
+     */
+    boolean waitForAutosave(String what, boolean box) {
+        if (!this.autosaveGate.blocking()) return true;
+        if (box && this.awaitingAutosave) {
+            logger.info("Classic " + what + ": another request waits for the autosave,"
+                + " this one is dropped");
+            ClassicFrameRecorder.event(what, "dropped, another waits for the autosave");
+            return false;
+        }
+        logger.info("Classic " + what + ": waits for the turn's autosave");
+        ClassicFrameRecorder.event(what, "waits for the autosave");
+        final boolean was = this.awaitingAutosave;
+        this.awaitingAutosave = true;
+        try {
+            if (!this.autosaveGate.awaitIdle(this.autosaveWaitMs)) {
+                logger.warning("Classic " + what + ": the autosave is still written after "
+                    + this.autosaveWaitMs + " ms, going on");
+            }
+        } finally {
+            this.awaitingAutosave = was;
+        }
+        ClassicFrameRecorder.event(what, "the autosave is written");
+        return true;
+    }
+
+    /** @return Whether a save or load request waits for the autosave (tests). */
+    boolean awaitingAutosave() {
+        return this.awaitingAutosave;
+    }
+
+    /**
      * The client's options, or null without a client (tests).
      *
      * @return The options.
@@ -3062,11 +3171,13 @@ public class ClassicGUI extends GUI {
      * has no such question).  Escape or a click outside saves nothing.
      * Never FreeCol's {@code saveGame}, which would move the save folder.
      * While another nation's turn is played nothing happens
-     * ({@link #othersMoving}).  EDT only.
+     * ({@link #othersMoving}); while the turn start's autosave is written
+     * the box waits for it ({@link #waitForAutosave}, part Z1).  EDT only.
      *
      * @return The row saved into (0-based), or -1.
      */
     int showSaveBox() {
+        if (!waitForAutosave("save-box", true)) return -1;
         if (othersMoving()) {
             logger.info("Classic save: not while another nation's turn is played");
             ClassicFrameRecorder.event("save-box", "others' turn: nothing");
@@ -3096,8 +3207,10 @@ public class ClassicGUI extends GUI {
      * ({@link ClassicSaveSlots#writeAtomic}; the file it replaces kept in
      * {@code <save>/ersetzt}, I), then @SAVEGOOD with the row's
      * file and its new label ({@code %STRING1}, I: D-SL13), or @SAVEERROR
-     * ({@code %STRING0} the row's file) and the old file unchanged.  EDT
-     * only.
+     * ({@code %STRING0} the row's file) and the old file unchanged -- also
+     * when the copy into {@code ersetzt} cannot be made (our choice, part
+     * Z1).  Never while the turn start's autosave is written
+     * ({@link #waitForAutosave}).  EDT only.
      *
      * @param slots The rows.
      * @param row The row (0-based).
@@ -3108,6 +3221,7 @@ public class ClassicGUI extends GUI {
         final File f = slots.slotFile(row);
         final String name = ClassicSaveSlots.displayName(row);
         boolean ok = false;
+        waitForAutosave("save", false);
         if (f != null && writer != null) {
             try {
                 // The game a row held is kept when it is saved over (I).
@@ -3137,11 +3251,14 @@ public class ClassicGUI extends GUI {
      * ({@link #loadRow}).  Escape or a click outside loads nothing.  No
      * question before the current game goes (V E10, clip005).  While
      * another nation's turn is played nothing happens
-     * ({@link #othersMoving}).  EDT only.
+     * ({@link #othersMoving}); while the turn start's autosave is written
+     * the box waits for it, so row 10 shows the new turn
+     * ({@link #waitForAutosave}, part Z1).  EDT only.
      *
      * @return Whether a game is being loaded.
      */
     boolean showLoadBox() {
+        if (!waitForAutosave("load-box", true)) return false;
         if (othersMoving()) {
             logger.info("Classic load: not while another nation's turn is played");
             ClassicFrameRecorder.event("load-box", "others' turn: nothing");
@@ -3181,7 +3298,9 @@ public class ClassicGUI extends GUI {
      * map, which the original shows before its new map (V E10; here
      * before the load itself, I: D-SL11 -- the file was read first, a
      * later failure brings FreeCol's error and the title), then the switch
-     * ({@link #switchToSave}).  EDT only.
+     * ({@link #switchToSave}).  Never while the turn start's autosave is
+     * written ({@link #waitForAutosave}, part Z1: the switch stops the
+     * server, and row 10 may be the row being loaded).  EDT only.
      *
      * @param slots The rows.
      * @param row The row (0-based).
@@ -3191,6 +3310,7 @@ public class ClassicGUI extends GUI {
         final File f = slots.slotFile(row);
         final String name = ClassicSaveSlots.displayName(row);
         final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        waitForAutosave("load", false);
         if (f == null || !slots.readable(row)) {
             logger.info("Classic load: " + name + " (" + f + ") cannot be read");
             ClassicFrameRecorder.event("load", name + " not a save");
@@ -3292,14 +3412,20 @@ public class ClassicGUI extends GUI {
      *       row 10, whose last-turn autosave stays as it was (I, rule H1,
      *       E8, D-SL3).  If row 9 cannot be written, row 10 takes the turn
      *       as usual (no turn goes unsaved).</li>
-     *   <li>Any other turn: FreeCol's last-turn autosave, row 10.</li>
+     *   <li>Any other turn: FreeCol's last-turn autosave, row 10, in one
+     *       step like every row ({@link ClassicSaveSlots#writeLastTurn},
+     *       part Z1, C1 of part Z's check), the old one kept as FreeCol's
+     *       before-last-turn autosave.  FreeCol wrote it straight into the
+     *       file, while the boxes could already load or quit.  If it
+     *       cannot be written, row 10 keeps its old save (never FreeCol's
+     *       direct write; the turn's numbered copy is still made).</li>
      * </ul>
      * FreeCol's numbered copy of every turn stays (D-SL4, the evidence of
      * our bug hunts; the Classic UI never deletes it).  Runs on the thread
      * that saves (plain files, no Swing).
      */
     @Override
-    public boolean autosaveTurn(Turn turn, File lastTurnFile) {
+    public boolean autosaveTurn(Turn turn, File lastTurnFile, File beforeLastTurnFile) {
         final FreeColClient fcc = getFreeColClient();
         final ClientOptions co = (fcc == null) ? null : fcc.getClientOptions();
         if (co == null) return false;
@@ -3314,20 +3440,49 @@ public class ClassicGUI extends GUI {
             ClassicFrameRecorder.event("autosave", "off " + turn);
             return true;
         }
-        if (!ClassicSaveSlots.isDecadeTurn(turn)) return false;
         final FreeColServer server = fcc.getFreeColServer();
-        final File f = ClassicSaveSlots.of(co).slotFile(ClassicSaveSlots.DECADE_ROW);
-        if (server == null || f == null) return false;
-        try {
-            ClassicSaveSlots.writeAtomic(f, tmp -> server.saveGame(tmp, co, getActiveUnit()));
-        } catch (IOException | RuntimeException e) {
-            logger.log(Level.WARNING, "Classic autosave: row 9 (" + f + ") not written,"
-                + " the last-turn autosave instead", e);
-            return false;
+        if (server == null) {
+            // FreeCol would move row 10 away and then save nothing.
+            logger.warning("Classic autosave: no server, " + turn + " not saved");
+            return true;
         }
-        logger.info("Classic autosave: " + turn + " in row 9, " + f);
-        ClassicFrameRecorder.event("autosave", "row 9 " + turn);
+        final ClassicSaveSlots.SaveWriter writer = autosaveWriter(server, co);
+        if (ClassicSaveSlots.isDecadeTurn(turn)) {
+            final File f = ClassicSaveSlots.of(co).slotFile(ClassicSaveSlots.DECADE_ROW);
+            try {
+                if (f == null) throw new IOException("No autosave folder");
+                ClassicSaveSlots.writeAtomic(f, writer);
+                logger.info("Classic autosave: " + turn + " in row 9, " + f);
+                ClassicFrameRecorder.event("autosave", "row 9 " + turn);
+                return true;
+            } catch (IOException | RuntimeException e) {
+                logger.log(Level.WARNING, "Classic autosave: row 9 (" + f + ") not written,"
+                    + " the last-turn autosave instead", e);
+            }
+        }
+        try {
+            ClassicSaveSlots.writeLastTurn(lastTurnFile, beforeLastTurnFile, writer);
+            logger.info("Classic autosave: " + turn + " in row 10, " + lastTurnFile);
+            ClassicFrameRecorder.event("autosave", "row 10 " + turn);
+        } catch (IOException | RuntimeException e) {
+            logger.log(Level.WARNING, "Classic autosave: row 10 (" + lastTurnFile
+                + ") not written, its old save is kept", e);
+            ClassicFrameRecorder.event("autosave", "row 10 failed " + turn);
+        }
         return true;
+    }
+
+    /**
+     * How the autosave rows are written: the server's save of the game
+     * with the client's options and the active unit.  A seam for the tests
+     * (a slow or failing autosave).
+     *
+     * @param server The server.
+     * @param co The client's options.
+     * @return The writer.
+     */
+    ClassicSaveSlots.SaveWriter autosaveWriter(FreeColServer server, ClientOptions co) {
+        return tmp -> server.saveGame(tmp, co, getActiveUnit());
     }
 
     /**

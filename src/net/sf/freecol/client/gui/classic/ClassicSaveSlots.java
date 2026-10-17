@@ -71,9 +71,9 @@ import net.sf.freecol.common.model.Turn;
  *       "Raleigh ... Frühjahr 1492", a new game's first turn.  Here it is
  *       FreeCol's own last-turn autosave,
  *       {@code <save>/autosave/Autosave-last-turn.fsg} (the name from the
- *       client options), which FreeCol writes at each of our turn starts;
- *       so the game a player of an older build played last is on row 10 at
- *       once.</li>
+ *       client options), written at each of our turn starts (in one step,
+ *       {@link #writeLastTurn}); so the game a player of an older build
+ *       played last is on row 10 at once.</li>
  *   <li><b>Row 9, the decade autosave (V data, I rule; E8, rule H1).</b>
  *       055's row 9 "Dago Frühjahr 1720", clip006's "Dago Frühjahr 1730",
  *       Roger's COLONY08 1570 against COLONY09 1571: on the first turn of
@@ -98,11 +98,15 @@ import net.sf.freecol.common.model.Turn;
  * the row's own folder, flushed to the disk, read back, and only then
  * moved over the row's file in one step ({@link #writeAtomic}); a failure
  * of the program at any point leaves the row's old file as it was, and
- * after a power cut the moved file's bytes are on the disk.  A save row
- * 1-8 saved over is first copied into {@code <save>/ersetzt}
- * ({@link #keepReplaced}; I, the original asks no question and keeps no
- * copy).  Nothing here deletes a saved game: the only delete is of the
- * temporary file of a write that failed.  The directories
+ * after a power cut the moved file's bytes are on the disk.  The turn
+ * start's autosave of row 10 goes the same way ({@link #writeLastTurn},
+ * part Z1; FreeCol wrote it straight into the file, so a load or a quit
+ * while it was written could leave row 10 broken).  A save row 1-8 saved
+ * over is first copied into {@code <save>/ersetzt} ({@link #keepReplaced};
+ * I, the original asks no question and keeps no copy); if that copy
+ * cannot be made, the row is not saved over (our choice, part Z1).
+ * Nothing here deletes a saved game: the only delete is of the
+ * temporary file of a write or a copy that failed.  The directories
  * come from the constructor, so the tests run on temporary folders; the
  * game's are {@link #of}.  Nothing here ever calls
  * {@code FreeColDirectories.setSavegameFile}, which moves the save folder
@@ -175,6 +179,19 @@ final class ClassicSaveSlots {
          * @exception IOException if the save cannot be written.
          */
         void write(File file) throws IOException;
+    }
+
+    /**
+     * What becomes of a row's old file just before the new save replaces
+     * it ({@link #replace}): a copy in {@code ersetzt} for rows 1-8, the
+     * before-last-turn autosave for row 10.
+     */
+    private interface Keeper {
+        /**
+         * @param old The row's file, about to be replaced.
+         * @exception IOException if the row must not be replaced.
+         */
+        void keep(File old) throws IOException;
     }
 
 
@@ -482,7 +499,81 @@ final class ClassicSaveSlots {
      *     is then unchanged.
      */
     static void writeAtomic(File target, SaveWriter writer) throws IOException {
-        writeAtomic(target, writer, null);
+        replace(target, writer, null);
+    }
+
+    /**
+     * Write a save over a row's file in one step ({@link #replace}).
+     *
+     * <p>With {@code keepDir}, the file being replaced is first copied
+     * there ({@link #keepReplaced}), so a row saved over -- without a
+     * question, as in the original (I, D-SL6), the bar on row 1 -- never
+     * loses the game it held (the ground rule "never lose a save" where the
+     * original's question is unknown; I, for Roger).  If that copy cannot
+     * be made, the row is not saved over and the write fails: the player
+     * sees @SAVEERROR and the row keeps its game (our choice, part Z1; the
+     * original keeps no copy and would write the row).
+     *
+     * @param target The row's file.
+     * @param writer Writes the save.
+     * @param keepDir The folder for the copy of the replaced file, or null
+     *     for none.
+     * @exception IOException if the row could not be written (or its old
+     *     file could not be kept); the old file is then unchanged.
+     */
+    static void writeAtomic(File target, SaveWriter writer, File keepDir)
+        throws IOException {
+        replace(target, writer, (keepDir == null) ? null : old -> {
+                if (keepReplaced(old, keepDir) == null) {
+                    throw new IOException("No copy of " + old + " in " + keepDir
+                        + ": the row is not saved over");
+                }
+            });
+    }
+
+    /**
+     * Write the turn start's autosave into row 10, FreeCol's last-turn
+     * autosave, in one step ({@link #replace}; part Z1, C1 of part Z's
+     * check).  FreeCol moved the last-turn file onto the before-last-turn
+     * one and then wrote the new save straight into the last-turn file, on
+     * its network thread, while the save and load boxes could already be
+     * used: a load (which stops the server) or a quit in that moment left
+     * row 10 missing or broken.  Here the new save is written and read
+     * back first; only then is the old last-turn file copied onto the
+     * before-last-turn one (in one step too, with the old file's time, as
+     * FreeCol's move kept it; an old file that cannot be read is not
+     * copied, so the before-last-turn autosave keeps its older game), and
+     * the new save replaces row 10.  Row 10 is never missing.  A copy that
+     * fails is logged and the turn is still saved (as FreeCol did when its
+     * move failed; the turn's numbered copy keeps the old turn too).
+     *
+     * @param target The last-turn autosave (row 10).
+     * @param beforeLastTurn FreeCol's before-last-turn autosave, or null.
+     * @param writer Writes the save.
+     * @exception IOException if row 10 could not be written; it is then
+     *     unchanged.
+     */
+    static void writeLastTurn(File target, File beforeLastTurn, SaveWriter writer)
+        throws IOException {
+        replace(target, writer, (beforeLastTurn == null) ? null : old -> {
+                try {
+                    replace(beforeLastTurn, tmp -> {
+                            Files.copy(old.toPath(), tmp.toPath(),
+                                       StandardCopyOption.REPLACE_EXISTING);
+                            if (!tmp.canWrite() && !tmp.setWritable(true)) {
+                                logger.fine("Classic save rows: " + tmp + " stays read-only");
+                            }
+                            if (!tmp.setLastModified(old.lastModified())) {
+                                logger.fine("Classic save rows: " + beforeLastTurn
+                                    + " keeps today's time");
+                            }
+                        }, null);
+                } catch (IOException | RuntimeException e) {
+                    logger.log(Level.WARNING, "Classic save rows: " + old.getName()
+                        + " not kept as " + beforeLastTurn.getName()
+                        + "; the turn is saved all the same", e);
+                }
+            });
     }
 
     /**
@@ -491,30 +582,23 @@ final class ClassicSaveSlots {
      * read back ({@link ClassicSaveGames#peek}), then moved over the file
      * ({@code ATOMIC_MOVE}, or a plain replacing move where the file system
      * has none).  If the writer fails, the flush fails, the save cannot be
-     * read back or the move is refused (the old file read-only, open
-     * elsewhere), the temporary file is removed and the old file stays
-     * exactly as it was (pitfall 2 of the spec: FreeCol's own saveGame
-     * writes into the target and a failure destroys it).  The flush comes
-     * first so that a power cut or a hard reset just after the move finds
-     * the new save's bytes on the disk, not only the move (NTFS logs the
-     * rename, not the data; the review of part SL); FreeCol's own saves
-     * never flushed.
-     *
-     * <p>With {@code keepDir}, the file being replaced is first copied
-     * there ({@link #keepReplaced}), so a row saved over -- without a
-     * question, as in the original (I, D-SL6), the bar on row 1 -- never
-     * loses the game it held (the ground rule "never lose a save" where the
-     * original's question is unknown; I, for Roger).  A copy that cannot be
-     * made is logged and the row is written anyway, as the original would.
+     * read back, the keeper refuses or the move is refused (the old file
+     * read-only, open elsewhere), the temporary file is removed and the old
+     * file stays exactly as it was (pitfall 2 of the spec: FreeCol's own
+     * saveGame writes into the target and a failure destroys it).  The
+     * flush comes first so that a power cut or a hard reset just after the
+     * move finds the new save's bytes on the disk, not only the move (NTFS
+     * logs the rename, not the data; the review of part SL); FreeCol's own
+     * saves never flushed.
      *
      * @param target The row's file.
      * @param writer Writes the save.
-     * @param keepDir The folder for the copy of the replaced file, or null
-     *     for none.
+     * @param keeper What becomes of the old file just before the move
+     *     (only when there is one), or null.
      * @exception IOException if the row could not be written; the old file
      *     is then unchanged.
      */
-    static void writeAtomic(File target, SaveWriter writer, File keepDir)
+    private static void replace(File target, SaveWriter writer, Keeper keeper)
         throws IOException {
         final File dir = target.getAbsoluteFile().getParentFile();
         if (dir == null) throw new IOException("No folder for " + target);
@@ -534,7 +618,7 @@ final class ClassicSaveSlots {
             if (ClassicSaveGames.peek(tmp.toFile()) == null) {
                 throw new IOException("The new save cannot be read back: " + tmp);
             }
-            if (keepDir != null && target.isFile()) keepReplaced(target, keepDir);
+            if (keeper != null && target.isFile()) keeper.keep(target);
             try {
                 Files.move(tmp, target.toPath(), StandardCopyOption.REPLACE_EXISTING,
                            StandardCopyOption.ATOMIC_MOVE);
@@ -543,13 +627,20 @@ final class ClassicSaveSlots {
             }
             moved = true;
         } finally {
-            if (!moved) {
-                try {
-                    Files.deleteIfExists(tmp);    // our temporary file, never a save
-                } catch (IOException | SecurityException e) {
-                    logger.log(Level.WARNING, "Classic save rows: cannot remove " + tmp, e);
-                }
-            }
+            if (!moved) removeTemporary(tmp);
+        }
+    }
+
+    /**
+     * Remove a write's own temporary file ({@code *.tmp}, never a save).
+     *
+     * @param tmp The temporary file.
+     */
+    private static void removeTemporary(Path tmp) {
+        try {
+            Files.deleteIfExists(tmp);    // our temporary file, never a save
+        } catch (IOException | SecurityException e) {
+            logger.log(Level.WARNING, "Classic save rows: cannot remove " + tmp, e);
         }
     }
 
@@ -570,8 +661,13 @@ final class ClassicSaveSlots {
      * "ersetzt/COLONY00_2026-10-17_031205.fsg".  Never over another copy
      * (a second one in the same second gets "-2"), never deleted by the
      * game, and listed last on the title's page of all saves
-     * ({@link ClassicSaveGames#list}), so the player can load it again.  A
-     * failure is logged, never thrown: the row is still written (the
+     * ({@link ClassicSaveGames#list}), so the player can load it again.
+     * The copy is made in a temporary file, flushed to the disk and only
+     * then given its name (part Z1): a copy cut short (a full disk) never
+     * stands in {@code ersetzt} as a save, and after a power cut the copy's
+     * bytes are on the disk before the row is replaced.  A failure is
+     * logged and answered with null; {@link #writeAtomic(File, SaveWriter,
+     * File)} then does not save over the row (our choice, part Z1; the
      * original keeps no copy at all).
      *
      * @param target The row's file.
@@ -579,6 +675,7 @@ final class ClassicSaveSlots {
      * @return The copy, or null if none could be made.
      */
     static File keepReplaced(File target, File keepDir) {
+        Path tmp = null;
         try {
             if (!keepDir.isDirectory() && !keepDir.mkdirs() && !keepDir.isDirectory()) {
                 throw new IOException("Cannot make the folder " + keepDir);
@@ -592,7 +689,18 @@ final class ClassicSaveSlots {
             for (int n = 2; copy.exists(); n++) {
                 copy = new File(keepDir, stem + "_" + when + "-" + n + ext);
             }
-            Files.copy(target.toPath(), copy.toPath());   // never over a file
+            tmp = Files.createTempFile(keepDir.toPath(), stem + "-", ".tmp");
+            Files.copy(target.toPath(), tmp, StandardCopyOption.REPLACE_EXISTING);
+            // Windows copies a read-only row's attribute, which the flush
+            // would refuse; the copy need not be read-only.
+            if (!tmp.toFile().canWrite() && !tmp.toFile().setWritable(true)) {
+                logger.fine("Classic save rows: " + tmp + " stays read-only");
+            }
+            try (FileChannel ch = FileChannel.open(tmp, StandardOpenOption.WRITE)) {
+                ch.force(true);
+            }
+            Files.move(tmp, copy.toPath());   // never over a file
+            tmp = null;
             if (!copy.setLastModified(target.lastModified())) {
                 logger.fine("Classic save rows: the copy " + copy + " keeps today's time");
             }
@@ -603,6 +711,8 @@ final class ClassicSaveSlots {
             logger.log(Level.WARNING, "Classic save rows: no copy of " + target
                 + " kept before it is saved over", e);
             return null;
+        } finally {
+            if (tmp != null) removeTemporary(tmp);
         }
     }
 

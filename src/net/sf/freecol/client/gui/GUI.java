@@ -1165,21 +1165,52 @@ public class GUI extends FreeColClientHolder {
      * The autosave of a turn start: the view may take the turn's own
      * autosave (the one FreeCol writes to the last-turn file) itself.  The
      * Classic UI writes the original's decade row on a year's first turn
-     * divisible by 10, and nothing while the original's "Autom. Sichern"
-     * is off (part SL).  Called on the thread that saves, never the EDT
+     * divisible by 10, every other turn into the last-turn file in one
+     * step, and nothing while the original's "Autom. Sichern" is off
+     * (parts SL and Z1).  Called on the thread that saves, never the EDT
      * by itself.
      *
      * Used by: InGameController.autoSaveGame
      *
      * @param turn The turn being saved.
      * @param lastTurnFile The last-turn autosave FreeCol would write.
+     * @param beforeLastTurnFile The before-last-turn autosave FreeCol would
+     *     move the last-turn one onto.
      * @return True if the view has taken the turn's autosave, so FreeCol
      *     neither moves the last-turn autosave nor writes it; false (the
      *     default) for FreeCol's own.
      */
-    public boolean autosaveTurn(Turn turn, File lastTurnFile) {
+    public boolean autosaveTurn(Turn turn, File lastTurnFile,
+                                File beforeLastTurnFile) {
         return false;
     }
+
+    /**
+     * The autosave of our turn's start begins: called before the turn
+     * becomes ours, then {@link #autosaveFinished} once it is written (or
+     * failed), on the thread that saves.  The Classic UI's save, load and
+     * server stop wait in between (part Z1).
+     *
+     * Used by: InGameController.setCurrentPlayer
+     */
+    public void autosaveStarting() {}
+
+    /**
+     * The autosave of our turn's start has ended ({@link #autosaveStarting}).
+     *
+     * Used by: InGameController.setCurrentPlayer
+     */
+    public void autosaveFinished() {}
+
+    /**
+     * The client is about to stop its server (a load, the quit, back to
+     * the title): the view may first wait for a turn start's autosave that
+     * is still being written ({@link #autosaveStarting}; the Classic UI,
+     * part Z1).  The default does not wait.
+     *
+     * Used by: FreeColClient.stopServer
+     */
+    public void awaitAutosave() {}
 
     /**
      * Shows the {@code VideoPanel}.

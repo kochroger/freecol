@@ -891,10 +891,12 @@ public final class InGameController extends FreeColClientHolder {
         File beforeLastTurnFile
             = FreeColDirectories.getAutosaveFile(beforeLastTurnName);
         // The view may take this turn's autosave itself (the Classic UI:
-        // the original's decade row, or none while its "Autom. Sichern"
-        // is off); then the last-turn autosave stays as it is.
+        // the original's decade row, the last-turn file in one step, or
+        // none while its "Autom. Sichern" is off); then FreeCol neither
+        // moves nor writes the last-turn autosave.
         if (lastTurnFile != null
-            && getGUI().autosaveTurn(game.getTurn(), lastTurnFile)) {
+            && getGUI().autosaveTurn(game.getTurn(), lastTurnFile,
+                                     beforeLastTurnFile)) {
             lastTurnFile = null;
         }
         // if "last-turn" file exists, shift it to "before-last-turn" file
@@ -5276,21 +5278,33 @@ public final class InGameController extends FreeColClientHolder {
         }
 
         final Game game = getGame();
-        game.setCurrentPlayer(player);
+        final boolean mine = getMyPlayer().equals(player);
+        // Save the game (if it isn't newly loaded).  The view hears of the
+        // autosave before the turn becomes ours and again once it is
+        // written, so nothing that waits for our turn (the Classic UI's
+        // save, load and server stop) starts while it is written (part Z1).
+        final boolean autosave = mine && getFreeColServer() != null
+            && game.getTurn().getNumber() > 0;
+        if (autosave) getGUI().autosaveStarting();
+        try {
+            game.setCurrentPlayer(player);
 
-        if (getMyPlayer().equals(player)) {
-            moveMode = MoveMode.NEXT_ACTIVE_UNIT;
-            
-            FreeColDebugger.finishDebugRun(getFreeColClient(), false);
-            if (FreeColDebugger.isInDebugMode(FreeColDebugger.DebugMode.DESYNC)
-                && DebugUtils.checkDesyncAction(getFreeColClient())) {
-                FreeCol.fatal(logger, "Exiting on desynchronization");
+            if (mine) {
+                moveMode = MoveMode.NEXT_ACTIVE_UNIT;
+
+                FreeColDebugger.finishDebugRun(getFreeColClient(), false);
+                if (FreeColDebugger.isInDebugMode(FreeColDebugger.DebugMode.DESYNC)
+                    && DebugUtils.checkDesyncAction(getFreeColClient())) {
+                    FreeCol.fatal(logger, "Exiting on desynchronization");
+                }
+
+                if (autosave) autoSaveGame();
             }
+        } finally {
+            if (autosave) getGUI().autosaveFinished();
+        }
 
-            // Save the game (if it isn't newly loaded)
-            if (getFreeColServer() != null
-                && game.getTurn().getNumber() > 0) autoSaveGame();
-
+        if (mine) {
             // Get turn report out quickly before more message display occurs.
             player.removeDisplayedModelMessages();
             displayModelMessages(true, true);

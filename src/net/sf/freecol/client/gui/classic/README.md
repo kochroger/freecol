@@ -6660,10 +6660,39 @@ capture or a file, I = inferred, M = the manual.
   of E8; D-SL3 as the original's best fit: 055 row 9 "Dago Frühjahr 1720",
   clip006 row 10 unchanged after the 1729 -> 1730 turn); if row 9 cannot be
   written, row 10 takes the turn. Every other turn FreeCol's last-turn
-  autosave is row 10. A new game's first turn is saved into row 10 too
+  autosave is row 10, written in one step like every row
+  (`ClassicSaveSlots.writeLastTurn`, part Z1, C1 of part Z's check):
+  FreeCol moved the last-turn file onto the before-last-turn one and wrote
+  the new save straight into the file, on its network thread, just as the
+  turn became ours, so a load or a quit in that moment could leave row 10
+  missing or broken. Now the new save is written and read back first, then
+  the old row 10 is copied onto `Autosave-before-last-turn.fsg` (in one
+  step too, with its time; an old row 10 that cannot be read is not copied,
+  so the before-last-turn file keeps its older game; a copy that fails is
+  logged and the turn is saved all the same), then the new save replaces
+  row 10. If row 10 cannot be written, it keeps its old save (never
+  FreeCol's direct write; the numbered copy is still made). A new game's
+  first turn is saved into row 10 too
   (`autosaveFirstTurn` from `reconnectGUI`, V E8 "Raleigh ... Frühjahr
   1492", D-SL17; FreeCol alone saves first at the second turn). FreeCol's
   numbered copy of every turn stays and is never deleted (D-SL4).
+- **Waiting for the turn start's autosave** (part Z1, C1 of part Z's
+  check; `ClassicAutosaveGate`): FreeCol's controller
+  (`InGameController.setCurrentPlayer`) tells the view before the turn
+  becomes ours (`GUI.autosaveStarting`) and again once the autosave is
+  written or failed (`GUI.autosaveFinished`, in a `finally`). In between,
+  «Spiel sichern» and «Spiel laden» wait before their box (so row 10 shows
+  the new turn), the row's write and the load wait once more, and every
+  stop of the server waits (`FreeColClient.stopServer` →
+  `GUI.awaitAutosave`: the load's switch, the quit, back to the title). The
+  wait is a secondary event loop on the event thread: the map is drawn and
+  keys and clicks are handled meanwhile, nothing asked for is lost; a
+  second save or load box asked for while one waits is dropped (the first
+  one comes). It is bounded (`ClassicGUI.AUTOSAVE_WAIT_MS`, 20 s; a turn's
+  save takes well under a second): after it the request goes on, logged,
+  and since the rows are written in one step none breaks. The thread that
+  writes the autosave never waits for itself. I: the original, one
+  program, takes no input while it saves.
 - **Never lose a save** (`ClassicSaveSlots.writeAtomic`): a row is written
   to a temporary file in its own folder, flushed to the disk
   (`FileChannel.force`), read back, then moved over the row in one step
@@ -6675,13 +6704,18 @@ capture or a file, I = inferred, M = the manual.
   FreeCol's own saves never flushed). A save row 1-8 saved over is first
   copied to `<save>/ersetzt/COLONY0n_<yyyy-MM-dd_HHmmss>.fsg`
   (`keepReplaced`: never over another copy, the copy keeps the file's time,
-  never deleted, listed last on the page of all saves; a copy that cannot
-  be made is logged and the row is written anyway). I: the original asks
+  never deleted, listed last on the page of all saves; made in a temporary
+  file, flushed and only then named, so a copy cut short never stands
+  there as a save). If that copy cannot be made (a full disk, a folder
+  that cannot be made), the row is **not** saved over: @SAVEERROR, the row
+  keeps its game (our choice, part Z1, C2 of part Z's check; before, the
+  row was written anyway, as the original would). I: the original asks
   no question and keeps no copy, so one extra Enter (the bar starts on row
   1) replaced row 1 for good; the copy shows nothing on the screen (the
   ground rule "never lose a save" where the original is unknown; for
   Roger: the folder grows by one save per save over a row). Rows 9 and 10
-  keep no copy (autosaves; FreeCol's numbered copies keep every turn).
+  keep no copy in `ersetzt` (autosaves; FreeCol's numbered copies keep
+  every turn, and row 10's last turn becomes the before-last-turn file).
   Never FreeCol's `loadGame()`/`saveGame()` and never
   `FreeColDirectories.setSavegameFile`, which moves the save folder to the
   file's (after a load of row 10 every later save went into `autosave`;
@@ -6704,13 +6738,21 @@ capture or a file, I = inferred, M = the manual.
   title's load lasts as long as our load; with «Autom. Sichern» off even
   FreeCol's last-turn autosave is not written (as the original's manual
   says); a row saved over is kept in `<save>/ersetzt` (the end of the page
-  of all saves); «Spiel sichern» and «Spiel laden» do nothing while the
-  other nations move.
+  of all saves), and a row whose copy cannot be made is not saved over
+  (@SAVEERROR); «Spiel sichern» and «Spiel laden» do nothing while the
+  other nations move, and wait (the screen goes on) while the turn
+  start's autosave is written.
 - **Tests:** `ClassicSaveSlotsTest` (the rows, the guard, the labels and
   their cache, the decade table, the cut with the pack's FONTTINY, the
   one-step write: a failing writer, a save that cannot be read back, a
   read-only and an open row, a row read just before; the kept copy of a
-  replaced row); `ClassicAdvisorLayerTest.testAnInertRowKeepsTheBoxUp`
+  replaced row, whole, and no save over a row without it; row 10 in one
+  step, held half-way, failing, an unreadable old row 10, a
+  before-last-turn file that cannot be replaced);
+  `ClassicAutosaveGateTest` (nested autosaves, a thread's wait, the bound
+  on a thread and on the event thread, the writer never waits for itself,
+  the event thread handles events during a wait, nested waits);
+  `ClassicAdvisorLayerTest.testAnInertRowKeepsTheBoxUp`
   (Enter and a click on an inert row: no close, no answer; drawn as any
   row); `ClassicSaveLoadTest` (the menu rows, the save box through the
   real server and its kept copy, @SAVEERROR, the round trip through the
@@ -6720,10 +6762,16 @@ capture or a file, I = inferred, M = the manual.
   real `autoSaveGame`, a new game's 1492 and its hand-over from
   `showStartGamePanel`, the title's page and its page of all saves
   (@LOADNOT there, the year kept, the kept copies last), the client's
-  autosave names on the title, the pin of `setSavegameFile`, and the
-  golden frames 054, 055, clip005 #0, clip006 #0 and #243);
-  `ClassicKeepSavesTest` lists the write's move and its temporary file's
-  delete.
+  autosave names on the title, the pin of `setSavegameFile`, the golden
+  frames 054, 055, clip005 #0, clip006 #0 and #243, and part Z1: the
+  turn's autosave through FreeCol's real controller held half-way and
+  failing, a load during the autosave of a real turn change (the gate
+  closed while the French still move, no box, the event thread free, a
+  second request dropped, row 10 with the new turn, the switch after the
+  autosave), a save box answered as the autosave begins, the bound, a
+  server stop, the gate open again after an autosave that throws);
+  `ClassicKeepSavesTest` lists the write's move, its temporary file's
+  delete and the kept copy's move to its name.
 
 ## Saved games are never deleted (part O3)
 
@@ -6749,11 +6797,16 @@ delete, move or rename of a file in `src` (pinned by
   every turn stays.
 - **The map editor's start map** (`FreeColServer.readGame`, a map import of
   `autosave/startMap.fsg` consumed it): never in the Classic UI.
-- **A save row** (part SL, `ClassicSaveSlots.writeAtomic`): the new save is
-  moved over the row in one step; only its own temporary file (`*.tmp`,
-  never a saved game) is deleted, when the write failed. The player's
-  own save into an occupied row replaces it, as the original's does, but
-  a copy of the old save stays in `<save>/ersetzt` (a copy, no delete).
+- **A save row** (part SL, `ClassicSaveSlots.writeAtomic`; row 10 since
+  part Z1 too, `writeLastTurn`): the new save is moved over the row in one
+  step; only its own temporary file (`*.tmp`, never a saved game) is
+  deleted, when the write failed. The player's own save into an occupied
+  row replaces it, as the original's does, but a copy of the old save
+  stays in `<save>/ersetzt` (a copy, no delete; moved from its flushed
+  temporary file to its name, never over a file), and without that copy
+  the row is not replaced (part Z1). In the Classic UI row 10's old save
+  becomes the before-last-turn autosave by a copy, not by
+  `InGameController.replaceFile`'s move (which FreeCol's own GUI keeps).
 - **The last guard:** `Utils.deleteFile` does not delete a `.fsg` in the
   Classic UI (warning `Utils.KEPT_SAVE`); every delete above goes through it.
 - Not saves: the log file and the comms log (`FreeColDirectories`), and two
