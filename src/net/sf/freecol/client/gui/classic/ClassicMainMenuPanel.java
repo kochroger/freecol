@@ -49,6 +49,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -90,7 +91,9 @@ import net.sf.freecol.common.resources.ResourceManager;
  * skips straight to the title and is used up by the skip),
  * {@link Mode#PASSIVE} (just the picture: the backdrop while
  * {@code --fast} loads a game, before {@code showMainPanel} makes the menu
- * live), {@link Mode#TITLE}, {@link Mode#LOAD}, {@link Mode#NOTICE},
+ * live), {@link Mode#TITLE}, {@link Mode#LOAD} (the original's load page
+ * of the ten save rows, part SL), {@link Mode#ARCHIVE} (every saved game on
+ * disk, the page's second page), {@link Mode#NOTICE},
  * {@link Mode#BUSY}, {@link Mode#QUIT} (the "Colonization beenden?" box
  * that Escape opens on the title -- in borderless full screen there is no
  * window close button, see {@code ClassicGUI.applyFrameMode} -- and that
@@ -146,7 +149,7 @@ final class ClassicMainMenuPanel extends JPanel {
     }
 
     /** What the canvas currently shows. */
-    enum Mode { PASSIVE, INTRO, TITLE, LOAD, NOTICE, BUSY, QUIT, NEW_WORLD, DEPARTURE, STARTING }
+    enum Mode { PASSIVE, INTRO, TITLE, LOAD, ARCHIVE, NOTICE, BUSY, QUIT, NEW_WORLD, DEPARTURE, STARTING }
 
     /** The images and font the static painters use; any may be null. */
     static final class MenuAssets {
@@ -157,6 +160,9 @@ final class ClassicMainMenuPanel extends JPanel {
         /** The mouse arrow, ready to draw (see {@link #cursorSprite}). */
         final BufferedImage cursor;
 
+        /** {@code WOODPANL.PIK}, the load page's ground (part SL, E5), or null. */
+        final BufferedImage woodPanel;
+
         MenuAssets(BufferedImage title, BufferedImage openTile,
                    BufferedImage woodTile, ClassicFont font) {
             this(title, openTile, woodTile, font, null);
@@ -165,11 +171,18 @@ final class ClassicMainMenuPanel extends JPanel {
         MenuAssets(BufferedImage title, BufferedImage openTile,
                    BufferedImage woodTile, ClassicFont font,
                    BufferedImage cursor) {
+            this(title, openTile, woodTile, font, cursor, null);
+        }
+
+        MenuAssets(BufferedImage title, BufferedImage openTile,
+                   BufferedImage woodTile, ClassicFont font,
+                   BufferedImage cursor, BufferedImage woodPanel) {
             this.title = title;
             this.openTile = openTile;
             this.woodTile = woodTile;
             this.font = font;
             this.cursor = cursor;
+            this.woodPanel = woodPanel;
         }
 
         /** Load from the {@code classic_original} pack with silent probes. */
@@ -178,7 +191,8 @@ final class ClassicMainMenuPanel extends JPanel {
                 image(ClassicMenuBox.TITLE.fillKey),
                 image(ClassicMenuBox.GAME.fillKey),
                 ClassicFont.get(ClassicFont.TINY),
-                cursorSprite(image(CURSOR_KEY)));
+                cursorSprite(image(CURSOR_KEY)),
+                image(ClassicPedia.WOODPANL_KEY));
         }
 
         /**
@@ -207,7 +221,8 @@ final class ClassicMainMenuPanel extends JPanel {
             if (title == null || openTile == null || font == null) return null;
             return new MenuAssets(title, openTile,
                 p.image(ClassicMenuBox.GAME.fillKey), font,
-                cursorSprite(p.image(CURSOR_KEY)));
+                cursorSprite(p.image(CURSOR_KEY)),
+                p.image(ClassicPedia.WOODPANL_KEY));
         }
 
         private static BufferedImage image(String key) {
@@ -347,6 +362,59 @@ final class ClassicMainMenuPanel extends JPanel {
         ClassicMenuBox.paintDialog(g, loadBounds(visibleRows.size()), t,
             a.tileFor(t), a.font, Collections.singletonList(prompt),
             visibleRows, selectedInWindow);
+    }
+
+    // The load page of the ten save rows (part SL, V E5: clip006 #0,
+    // harness A 0 / 64,000 px, clips-004-007-analysis/clip006-01-deep.md 2.1)
+
+    /** The page's prompt: x 65, glyph top 67 (V E5). */
+    static final int PAGE_PROMPT_X = 65, PAGE_PROMPT_TOP = 67;
+
+    /** The page's rows: x 69, glyph tops 75 + 6i -- a pitch of 6, not the boxes' 8 (V E5). */
+    static final int PAGE_ROW_X = 69, PAGE_ROW_TOP = 75, PAGE_PITCH = 6;
+
+    /** The page's bar: (65, 74 + 6i, 190, 8), the GAME theme's dark #3C2018, behind the text (V E5). */
+    static final int PAGE_BAR_X = 65, PAGE_BAR_TOP = 74, PAGE_BAR_W = 190, PAGE_BAR_H = 8;
+
+    /** @return The page's bar behind row {@code i} (V E5; it overlaps the next row's top by 2). */
+    static Rectangle pageBarRect(int i) {
+        return new Rectangle(PAGE_BAR_X, PAGE_BAR_TOP + PAGE_PITCH * i, PAGE_BAR_W, PAGE_BAR_H);
+    }
+
+    /** @return The mouse target of the page's row {@code i}: the bar's width, one pitch high (I). */
+    static Rectangle pageRowHitRect(int i) {
+        return new Rectangle(PAGE_BAR_X, PAGE_BAR_TOP + PAGE_PITCH * i, PAGE_BAR_W, PAGE_PITCH);
+    }
+
+    /**
+     * The original's load page (V E5, clip006 #0): {@code WOODPANL.PIK}
+     * full screen at (0,0), no box, no frame and no WOODTILE; the prompt
+     * and the rows in the GAME ink #559634, drawn plain; the bar behind the
+     * barred row.  Without the panel picture the title picture is the
+     * ground.
+     *
+     * @param prompt GAME.TXT's {@code @LOADGAME} prompt.
+     * @param rows The ten rows' labels, already fitted.
+     * @param selected The barred row, or -1.
+     */
+    static void paintLoadPage(Graphics2D g, MenuAssets a, String prompt,
+                              List<String> rows, int selected) {
+        if (a.woodPanel != null) {
+            g.drawImage(a.woodPanel, 0, 0, null);
+        } else {
+            paintBackground(g, a);
+        }
+        if (selected >= 0 && selected < rows.size()) {
+            final Rectangle bar = pageBarRect(selected);
+            g.setColor(ClassicMenuBox.GAME.dark);
+            g.fillRect(bar.x, bar.y, bar.width, bar.height);
+        }
+        ClassicMenuBox.text(g, a.font, prompt, PAGE_PROMPT_X, PAGE_PROMPT_TOP,
+                            ClassicMenuBox.GAME, false);
+        for (int i = 0; i < rows.size(); i++) {
+            ClassicMenuBox.text(g, a.font, rows.get(i), PAGE_ROW_X,
+                                PAGE_ROW_TOP + PAGE_PITCH * i, ClassicMenuBox.GAME, false);
+        }
     }
 
     /**
@@ -520,10 +588,48 @@ final class ClassicMainMenuPanel extends JPanel {
     /** The item texts (from Messages). */
     private List<String> items = Collections.emptyList();
 
-    /** The load box's saves, its selection and the first visible row. */
+    /** The page of all saves' ({@link Mode#ARCHIVE}) saves, its selection and the first visible row. */
     private List<ClassicSaveGames.Entry> saves = Collections.emptyList();
     private int loadSel = 0;
     private int loadTop = 0;
+
+    /**
+     * Where the load page's rows come from: the game's folders and
+     * FreeCol's default autosave names ({@link ClassicSaveSlots#of});
+     * {@code ClassicGUI} gives the client's options, a test its own
+     * folders.  EDT only.
+     */
+    private Supplier<ClassicSaveSlots> slotSource = () -> ClassicSaveSlots.of(null);
+
+    /** The load page's rows, read when it opens (part SL), or null. */
+    private ClassicSaveSlots slotRows = null;
+
+    /** The load page's labels, fitted to the row. */
+    private List<String> slotLabels = Collections.emptyList();
+
+    /** The load page's prompt (GAME.TXT {@code @LOADGAME}). */
+    private String pagePrompt = "";
+
+    /** The load page's barred row (row 1 at each opening, V: D-SL14). */
+    private int slotSel = 0;
+
+    /** The save a dismissed @LOADGOOD loads, or null for an ordinary notice. */
+    private File pendingLoad = null;
+
+    /**
+     * What a notice is drawn over: {@link Mode#LOAD} (the load page, the
+     * GAME theme's box as clip006 #243), {@link Mode#ARCHIVE} (the page of
+     * all saves), or null (the title picture, the TITLE theme).
+     */
+    private Mode noticeOver = null;
+
+    /**
+     * Whether the passive picture ({@link #frozenFrame}) stays when the
+     * engine asks for the passive title again ({@code closeMainPanel} at
+     * the game's start): a load's picture, the old map or black, until the
+     * loaded game's view replaces this panel.
+     */
+    private boolean holdStill = false;
 
     /**
      * Bumped whenever the load box opens or closes, so stale label updates
@@ -1009,7 +1115,8 @@ final class ClassicMainMenuPanel extends JPanel {
                 + " screen";
             break;
         case QUIT: screen = "quit box"; break;
-        case LOAD: screen = "load box"; break;
+        case LOAD: screen = "load page"; break;
+        case ARCHIVE: screen = "page of all saves"; break;
         default: screen = this.mode.toString().toLowerCase(java.util.Locale.ROOT); break;
         }
         final boolean painted = this.mode == this.shownMode && st == this.shownStep;
@@ -1120,7 +1227,7 @@ final class ClassicMainMenuPanel extends JPanel {
      * {@link #updatePointerShape}).
      */
     private void setMode(Mode m) {
-        if (this.mode == Mode.LOAD && m != Mode.LOAD) {
+        if (this.mode == Mode.ARCHIVE && m != Mode.ARCHIVE) {
             this.loadGeneration.incrementAndGet();
         }
         if (m != Mode.INTRO) stopIntroPlayer();
@@ -1132,30 +1239,60 @@ final class ClassicMainMenuPanel extends JPanel {
         if (m != Mode.TITLE) this.titleAfterSkip = false;
         this.swallowedButton = MouseEvent.NOBUTTON;   // its release may never come (P4)
         noteScreen();
-        if (isLive()) this.frozenFrame = null;
+        if (isLive()) {
+            this.frozenFrame = null;
+            this.holdStill = false;
+        }
         updatePointerShape();
     }
 
     /**
      * Just the picture; all input ignored.  Coming from STARTING (the game
      * is about to be shown, see {@code ClassicGUI.closeMainPanel}) the
-     * departure's last picture stays up; any other way it is the title
-     * picture -- e.g. the backdrop of an in-game load, long after the
-     * departure.
+     * departure's last picture stays up, and so does a load's picture
+     * ({@link #showPassive(BufferedImage)}, part SL); any other way it is
+     * the title picture.
      */
     void showPassive() {
-        if (this.mode != Mode.STARTING) this.frozenFrame = null;
+        if (this.mode != Mode.STARTING && !(this.mode == Mode.PASSIVE && this.holdStill)) {
+            this.frozenFrame = null;
+            this.holdStill = false;
+        }
         setMode(Mode.PASSIVE);
         repaint();
     }
 
     /**
+     * Just a picture; all input ignored: the backdrop of a load (part
+     * SL), the map as it was for an in-game load (V E10: the new map comes
+     * over the old one), black for the title's (V E11: 0.47 s of black
+     * after @LOADGOOD), held until the loaded game's view replaces this
+     * panel ({@link #showPassive()} keeps it).  Painted at once: the
+     * caller is about to block the EDT with the load.
+     *
+     * @param still The 320x200 picture, or null for {@link #showPassive()}.
+     */
+    void showPassive(BufferedImage still) {
+        if (still == null) {
+            showPassive();
+            return;
+        }
+        this.frozenFrame = still;
+        this.holdStill = true;
+        setMode(Mode.PASSIVE);
+        paintImmediately(0, 0, getWidth(), getHeight());
+    }
+
+    /**
      * The game view has replaced this panel: the frozen departure picture
-     * has done its job.
+     * (or a load's) has done its job.
      */
     @Override
     public void removeNotify() {
-        if (this.mode == Mode.PASSIVE) this.frozenFrame = null;
+        if (this.mode == Mode.PASSIVE) {
+            this.frozenFrame = null;
+            this.holdStill = false;
+        }
         super.removeNotify();
     }
 
@@ -1313,34 +1450,162 @@ final class ClassicMainMenuPanel extends JPanel {
      */
     void showBusy(String msg) {
         this.noticeLines = wrapNotice(assets(), msg);
+        this.noticeOver = null;
         setMode(Mode.BUSY);
         paintImmediately(0, 0, getWidth(), getHeight());
     }
 
     private void showNotice(String msg, Mode back) {
+        showNotice(msg, back, null, null);
+    }
+
+    /**
+     * A notice, any key or click dismisses it.
+     *
+     * @param msg The text.
+     * @param back The mode it returns to.
+     * @param over What it is drawn over ({@link #noticeOver}).
+     * @param load The save its dismissal loads (@LOADGOOD), or null.
+     */
+    private void showNotice(String msg, Mode back, Mode over, File load) {
         this.noticeLines = wrapNotice(assets(), msg);
         this.noticeReturn = back;
+        this.noticeOver = over;
+        this.pendingLoad = load;
         setMode(Mode.NOTICE);
         repaint();
     }
 
-    private void openLoadBox() {
+
+    // The load page and the page of all saves (part SL)
+
+    /**
+     * Where the load page's rows come from ({@link #slotSource}).  EDT only.
+     *
+     * @param source The rows' source.
+     */
+    void useSaveSlots(Supplier<ClassicSaveSlots> source) {
+        if (source != null) this.slotSource = source;
+    }
+
+    /** @return The rows the load page would show now ({@link #slotSource}; tests). */
+    ClassicSaveSlots saveSlots() {
+        return this.slotSource.get();
+    }
+
+    /**
+     * Title «Spiel LADEN» (part SL, spec SL7): the original's load page
+     * (V E5, clip006 #0; I that it is the title's path, D-SL12) with the
+     * same ten rows as the in-game load box ({@link ClassicSaveSlots}):
+     * rows 1-8 the save rows, 9 the decade autosave, 10 the latest one --
+     * so the game a player of an older build played last is on row 10.
+     * Without any save the page shows ten "(EMPTY)" rows (I).  The bar on
+     * row 1 at every opening (V, D-SL14).
+     */
+    private void openLoadPage() {
+        this.slotSel = 0;
+        showLoadPage();
+    }
+
+    /** The load page with its rows read again, the bar where it was. */
+    private void showLoadPage() {
+        this.slotRows = this.slotSource.get();
+        this.slotLabels = this.slotRows.labels(ClassicSaveSlots.LOAD_ROWS,
+            assets().font, ClassicSaveSlots.ROW_TEXT_MAX);
+        this.pagePrompt = pagePrompt();
+        setMode(Mode.LOAD);
+        repaint();
+    }
+
+    /**
+     * The page's prompt, GAME.TXT {@code @LOADGAME} ("Spiel zum Laden
+     * wählen"), or FreeCol's words without the pack's text.
+     *
+     * @return The prompt.
+     */
+    private static String pagePrompt() {
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        final ClassicText.Message m = (t == null) ? null
+            : t.message(ClassicSaveSlots.LOAD_SECTION);
+        if (m == null || m.text.isEmpty()) {
+            return Messages.message("classic.mainMenu.loadPrompt");
+        }
+        return ClassicAdvisorBox.plain(String.join(" ", m.text));
+    }
+
+    /**
+     * A row of the load page taken: an "(EMPTY)" row does nothing and the
+     * page stays (I, D-SL7); a row whose file cannot be read says
+     * @LOADNOT over the page and comes back to it; any other row
+     * @LOADGOOD over the page (V E11, clip006 #243, box (62,88,196,24)),
+     * whose dismissal loads ({@link #startLoad}).
+     *
+     * @param row The row (0-based).
+     */
+    private void pickSlot(int row) {
+        final ClassicSaveSlots s = this.slotRows;
+        if (s == null || row < 0 || row >= ClassicSaveSlots.LOAD_ROWS) return;
+        if (s.isEmpty(row)) {
+            logger.info("Classic load page: row " + (row + 1) + " is empty");
+            return;
+        }
+        final String name = ClassicSaveSlots.displayName(row);
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (!s.readable(row)) {
+            logger.info("Classic load page: " + name + " (" + s.slotFile(row)
+                + ") cannot be read");
+            showNotice(ClassicSaveSlots.noticeText(t, ClassicSaveSlots.LOAD_NOT, name),
+                       Mode.LOAD, Mode.LOAD, null);
+            return;
+        }
+        showNotice(ClassicSaveSlots.noticeText(t, ClassicSaveSlots.LOAD_GOOD, name),
+                   Mode.LOAD, Mode.LOAD, s.slotFile(row));
+    }
+
+    /**
+     * After @LOADGOOD: black (V E11: 0.47 s in the original; here the time
+     * our load takes, I: D-SL9 -- the old "Spiel wird geladen ..." notice is
+     * gone), input ignored, then the load; the black stays until the game's
+     * view replaces this panel, a failed load brings the title back.
+     *
+     * @param file The save.
+     */
+    private void startLoad(File file) {
+        logger.info("Classic load page: loading " + file);
+        final BufferedImage black = new BufferedImage(VW, VH, BufferedImage.TYPE_INT_RGB);
+        showPassive(black);
+        this.actions.loadGame(file);
+    }
+
+    /**
+     * The page of every saved game on disk (PageDown on the load page; I,
+     * D-SL5): the list of the builds before part SL, every manual save and
+     * every autosave, newest first, so a game of an older build -- the
+     * numbered autosaves above all -- can still be loaded; nothing is moved,
+     * renamed or hidden.  Escape or a right press goes back to the page.
+     */
+    private void openArchive() {
         final List<ClassicSaveGames.Entry> list = ClassicSaveGames.list();
         if (list.isEmpty()) {
-            showNotice(Messages.message("classic.mainMenu.noSaves"), Mode.TITLE);
+            showNotice(Messages.message("classic.mainMenu.noSaves"), Mode.LOAD);
             return;
         }
         this.saves = list;
         this.loadSel = 0;
         this.loadTop = 0;
-        setMode(Mode.LOAD);
+        setMode(Mode.ARCHIVE);
+        fillArchiveLabels();
+        repaint();
+    }
+
+    /** Label the page of all saves on the label thread (anew after a notice stopped it). */
+    private void fillArchiveLabels() {
         final int gen = this.loadGeneration.incrementAndGet();
-        ClassicSaveGames.fillLabelsAsync(list, gen, this.loadGeneration, g -> {
-                if (g == this.loadGeneration.get() && this.mode == Mode.LOAD) {
+        ClassicSaveGames.fillLabelsAsync(this.saves, gen, this.loadGeneration, g -> {
+                if (g == this.loadGeneration.get() && this.mode == Mode.ARCHIVE) {
                     repaint();
                 }
             });
-        repaint();
     }
 
     private void backToTitle() {
@@ -1382,7 +1647,7 @@ final class ClassicMainMenuPanel extends JPanel {
             this.chainData = null;
             openQuitBox();
             return true;
-        case TITLE: case LOAD: case NOTICE:
+        case TITLE: case LOAD: case ARCHIVE: case NOTICE:
             openQuitBox();
             return true;
         case QUIT:
@@ -1447,11 +1712,11 @@ final class ClassicMainMenuPanel extends JPanel {
      * live too: it is still running in the early window when that call
      * comes (~4 s after launch) and must not be cut to the title.
      *
-     * @return True in INTRO, TITLE, LOAD, NOTICE, QUIT and NEW_WORLD.
+     * @return True in INTRO, TITLE, LOAD, ARCHIVE, NOTICE, QUIT and NEW_WORLD.
      */
     boolean isLive() {
         switch (this.mode) {
-        case INTRO: case TITLE: case LOAD: case NOTICE: case QUIT: case NEW_WORLD:
+        case INTRO: case TITLE: case LOAD: case ARCHIVE: case NOTICE: case QUIT: case NEW_WORLD:
             return true;
         default:
             return false;
@@ -1509,14 +1774,24 @@ final class ClassicMainMenuPanel extends JPanel {
                 paintTitleScreen(g, a, TITLE_LINE, this.items, this.selected);
                 break;
             case LOAD:
-                paintBackground(g, a);
-                paintLoadBox(g, a, ClassicMenuBox.TITLE,
-                    Messages.message("classic.mainMenu.loadPrompt"),
-                    visibleLoadRows(a), this.loadSel - this.loadTop);
+                paintLoadPage(g, a, this.pagePrompt, this.slotLabels, this.slotSel);
+                break;
+            case ARCHIVE:
+                paintArchive(g, a);
                 break;
             case NOTICE: case BUSY:
-                paintBackground(g, a);
-                paintNotice(g, a, ClassicMenuBox.TITLE, this.noticeLines);
+                if (this.noticeOver == Mode.LOAD) {
+                    // @LOADGOOD / @LOADNOT over the page, the bar kept
+                    // (V clip006 #243: the GAME theme's box over the list).
+                    paintLoadPage(g, a, this.pagePrompt, this.slotLabels, this.slotSel);
+                    paintNotice(g, a, ClassicMenuBox.GAME, this.noticeLines);
+                } else if (this.noticeOver == Mode.ARCHIVE) {
+                    paintArchive(g, a);
+                    paintNotice(g, a, ClassicMenuBox.TITLE, this.noticeLines);
+                } else {
+                    paintBackground(g, a);
+                    paintNotice(g, a, ClassicMenuBox.TITLE, this.noticeLines);
+                }
                 break;
             case QUIT:
                 paintQuitBox(g, a, quitPrompt(), quitRows(), this.quitSel);
@@ -1590,6 +1865,7 @@ final class ClassicMainMenuPanel extends JPanel {
     private boolean drawsPointer() {
         return this.pointerX >= 0 && this.pointerY >= 0
             && (this.mode == Mode.TITLE || this.mode == Mode.LOAD
+                || this.mode == Mode.ARCHIVE
                 || this.mode == Mode.NOTICE || this.mode == Mode.QUIT
                 || this.mode == Mode.NEW_WORLD)
             && assets().cursor != null && blankCursor() != null;
@@ -1662,16 +1938,52 @@ final class ClassicMainMenuPanel extends JPanel {
         return this.blankCursor;
     }
 
-    /** The labels of the visible load rows, cut to the box. */
+    /** The page of all saves: the box of the builds before part SL over the title picture. */
+    private void paintArchive(Graphics2D g, MenuAssets a) {
+        paintBackground(g, a);
+        paintLoadBox(g, a, ClassicMenuBox.TITLE,
+            Messages.message("classic.mainMenu.loadPrompt"),
+            visibleLoadRows(a), this.loadSel - this.loadTop);
+    }
+
+    /**
+     * The labels of the visible rows of the page of all saves, fitted to
+     * the box as the ten rows are: a peeked save's label with the leader's
+     * name cut and the season and year kept ({@link ClassicSaveSlots#fitLabel},
+     * I D-SL8: every numbered copy of one game differs only in its year,
+     * which the plain cut of the end lost -- "... der Holl., Frühjah", the
+     * acceptance of part SL); a file not (yet) peeked its name and date cut
+     * at the end.
+     */
     private List<String> visibleLoadRows(MenuAssets a) {
         final int n = Math.min(LOAD_VISIBLE_ROWS, this.saves.size() - this.loadTop);
         final int max = ClassicMenuBox.rowTextMaxWidth(loadBounds(n));
         final List<String> rows = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
-            rows.add(ClassicMenuBox.fit(a.font,
-                this.saves.get(this.loadTop + i).label, max));
+            final ClassicSaveGames.Entry e = this.saves.get(this.loadTop + i);
+            rows.add((e.info != null && a.font != null)
+                ? ClassicSaveSlots.fitLabel(a.font, e.info, max)
+                : ClassicMenuBox.fit(a.font, e.label, max));
         }
         return rows;
+    }
+
+    /** @return The visible rows of the page of all saves as drawn (tests). */
+    List<String> archiveRows() {
+        return (this.mode == Mode.ARCHIVE) ? visibleLoadRows(assets())
+            : Collections.<String>emptyList();
+    }
+
+    /** @return The selected entry's index on the page of all saves (tests). */
+    int archiveRow() {
+        return this.loadSel;
+    }
+
+    /** @return The files of the page of all saves, in its order (tests). */
+    List<File> archiveFiles() {
+        final List<File> out = new ArrayList<>(this.saves.size());
+        for (ClassicSaveGames.Entry e : this.saves) out.add(e.file);
+        return out;
     }
 
 
@@ -1771,6 +2083,14 @@ final class ClassicMainMenuPanel extends JPanel {
                 repaint();
             }
         } else if (this.mode == Mode.LOAD) {
+            // Ten fixed rows: one row per key, no wrap, no scrolling.
+            final int n = clamp((long) this.slotSel + delta, 0,
+                                ClassicSaveSlots.LOAD_ROWS - 1);
+            if (n != this.slotSel) {
+                this.slotSel = n;
+                repaint();
+            }
+        } else if (this.mode == Mode.ARCHIVE) {
             setLoadSel(clamp((long) this.loadSel + delta, 0, this.saves.size() - 1));
         } else if (this.mode == Mode.QUIT) {
             final int n = clamp((long) this.quitSel + delta, QUIT_YES, QUIT_NO);
@@ -1783,6 +2103,9 @@ final class ClassicMainMenuPanel extends JPanel {
 
     private void page(int dir) {
         if (this.mode == Mode.LOAD) {
+            // PageDown: the page of all saves (I, D-SL5); PageUp nothing.
+            if (dir > 0) openArchive();
+        } else if (this.mode == Mode.ARCHIVE) {
             move(dir * LOAD_VISIBLE_ROWS);
         } else {
             move(dir < 0 ? Integer.MIN_VALUE / 2 : Integer.MAX_VALUE / 2);
@@ -1807,7 +2130,8 @@ final class ClassicMainMenuPanel extends JPanel {
     private void enter() {
         switch (this.mode) {
         case TITLE: activate(this.selected); break;
-        case LOAD: loadSelected(); break;
+        case LOAD: pickSlot(this.slotSel); break;
+        case ARCHIVE: loadSelected(); break;
         case NOTICE: dismissNotice(); break;
         case QUIT: answerQuit(this.quitSel); break;
         default: break;
@@ -1836,13 +2160,31 @@ final class ClassicMainMenuPanel extends JPanel {
             answerQuit(QUIT_NO);
         } else if (this.mode == Mode.LOAD) {
             backToTitle();
+        } else if (this.mode == Mode.ARCHIVE) {
+            showLoadPage();
         } else if (this.mode == Mode.NOTICE) {
             dismissNotice();
         }
     }
 
+    /**
+     * The notice goes: a @LOADGOOD's save loads ({@link #startLoad}), any
+     * other notice returns to where it came from (the load page with its
+     * rows read again).
+     */
     private void dismissNotice() {
+        final File load = this.pendingLoad;
+        this.pendingLoad = null;
+        if (load != null) {
+            startLoad(load);
+            return;
+        }
+        if (this.noticeReturn == Mode.LOAD) {
+            showLoadPage();
+            return;
+        }
         setMode(this.noticeReturn);
+        if (this.mode == Mode.ARCHIVE) fillArchiveLabels();
         repaint();
     }
 
@@ -1858,7 +2200,7 @@ final class ClassicMainMenuPanel extends JPanel {
             showNotice(Messages.message("classic.mainMenu.notYet"), Mode.TITLE);
             break;
         case ITEM_LOAD:
-            openLoadBox();
+            openLoadPage();
             break;
         case ITEM_HALL_OF_FAME:
             this.actions.hallOfFame();
@@ -2302,11 +2644,33 @@ final class ClassicMainMenuPanel extends JPanel {
         handleChain(this.chain.typed(c));
     }
 
+    /**
+     * A save of the page of all saves taken: as a row of the load page,
+     * @LOADNOT for a file whose head cannot be read, else @LOADGOOD with
+     * the file's name in capitals ({@link ClassicSaveSlots#displayName(File)},
+     * I), then the load.
+     */
     private void loadSelected() {
         if (this.loadSel < 0 || this.loadSel >= this.saves.size()) return;
         final File file = this.saves.get(this.loadSel).file;
-        showBusy(Messages.message("classic.mainMenu.loading"));
-        this.actions.loadGame(file);
+        final String name = ClassicSaveSlots.displayName(file);
+        final ClassicText t = ClassicText.load(ClassicPackFiles.runtime());
+        if (ClassicSaveSlots.info(file) == null) {
+            logger.info("Classic page of all saves: " + file + " cannot be read");
+            showNotice(ClassicSaveSlots.noticeText(t, ClassicSaveSlots.LOAD_NOT, name),
+                       Mode.ARCHIVE, Mode.ARCHIVE, null);
+            return;
+        }
+        showNotice(ClassicSaveSlots.noticeText(t, ClassicSaveSlots.LOAD_GOOD, name),
+                   Mode.ARCHIVE, Mode.ARCHIVE, file);
+    }
+
+    /** The load page's row under a virtual point, or -1. */
+    private int pageRowAt(int x, int y) {
+        for (int i = 0; i < ClassicSaveSlots.LOAD_ROWS; i++) {
+            if (pageRowHitRect(i).contains(x, y)) return i;
+        }
+        return -1;
     }
 
     /** The virtual x of a mouse event (floorDiv: exact in the letterbox). */
@@ -2336,7 +2700,7 @@ final class ClassicMainMenuPanel extends JPanel {
         return -1;
     }
 
-    /** The save index under a virtual point, or -1. */
+    /** The save index of the page of all saves under a virtual point, or -1. */
     private int loadRowAt(int x, int y) {
         final int n = Math.min(LOAD_VISIBLE_ROWS, this.saves.size() - this.loadTop);
         final Rectangle b = loadBounds(n);
@@ -2366,6 +2730,26 @@ final class ClassicMainMenuPanel extends JPanel {
     /** @return The barred quit-box row (tests). */
     int quitRow() {
         return this.quitSel;
+    }
+
+    /** @return The load page's barred row (tests). */
+    int pageRow() {
+        return this.slotSel;
+    }
+
+    /** @return The load page's labels (tests). */
+    List<String> pageLabels() {
+        return Collections.unmodifiableList(this.slotLabels);
+    }
+
+    /** @return The notice's lines (tests). */
+    List<String> noticeLines() {
+        return Collections.unmodifiableList(this.noticeLines);
+    }
+
+    /** @return The passive picture shown instead of the title picture, or null (tests). */
+    BufferedImage stillShown() {
+        return this.frozenFrame;
     }
 
     /**
@@ -2453,13 +2837,29 @@ final class ClassicMainMenuPanel extends JPanel {
             }
             break;
         case LOAD:
+            // As the title: a right press is "back"; a left press bars
+            // the row, its release there takes it (W20; I: clip006 #176
+            // shows the pointer resting on the barred row before the box).
             if (e.getButton() == MouseEvent.BUTTON3) {
                 backToTitle();
+            } else if (e.getButton() == MouseEvent.BUTTON1) {
+                final int i = pageRowAt(x, y);
+                if (i >= 0) {
+                    this.slotSel = i;
+                    this.pressMode = Mode.LOAD;
+                    this.pressItem = i;
+                    repaint();
+                }
+            }
+            break;
+        case ARCHIVE:
+            if (e.getButton() == MouseEvent.BUTTON3) {
+                showLoadPage();
             } else if (e.getButton() == MouseEvent.BUTTON1) {
                 final int i = loadRowAt(x, y);
                 if (i >= 0) {
                     setLoadSel(i);
-                    this.pressMode = Mode.LOAD;
+                    this.pressMode = Mode.ARCHIVE;
                     this.pressItem = i;
                 }
             }
@@ -2502,7 +2902,8 @@ final class ClassicMainMenuPanel extends JPanel {
         if (m == null) return;
         final int x = vx(e), y = vy(e);
         final int under = (m == Mode.TITLE) ? titleItemAt(x, y)
-            : (m == Mode.LOAD) ? loadRowAt(x, y)
+            : (m == Mode.LOAD) ? pageRowAt(x, y)
+            : (m == Mode.ARCHIVE) ? loadRowAt(x, y)
             : (m == Mode.QUIT) ? quitRowAt(x, y) : -1;
         if (!releaseFires(m, i, this.mode, under)) return;
         switch (m) {
@@ -2510,6 +2911,9 @@ final class ClassicMainMenuPanel extends JPanel {
             activate(i);
             break;
         case LOAD:
+            pickSlot(i);
+            break;
+        case ARCHIVE:
             loadSelected();
             break;
         case QUIT:
@@ -2526,7 +2930,7 @@ final class ClassicMainMenuPanel extends JPanel {
      * {@code getWheelRotation()} stays 0.
      */
     private void onWheel(MouseWheelEvent e) {
-        if (this.mode != Mode.LOAD) {
+        if (this.mode != Mode.LOAD && this.mode != Mode.ARCHIVE) {
             this.wheelRest = 0.0;
             return;
         }

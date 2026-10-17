@@ -550,6 +550,71 @@ public class ClassicAdvisorLayerTest extends TestCase {
         assertEquals(2, b.get());                      // as Escape
     }
 
+    /** A box painted with the test font, the bar on {@code bar}: its pixels. */
+    private int[] painted(ClassicAdvisorBox.Request r, int bar) {
+        final ClassicAdvisorBox.Layout l = ClassicAdvisorBox.layout(r, this.host.font, null);
+        assertNotNull(l);
+        final BufferedImage img = new BufferedImage(320, 200, BufferedImage.TYPE_INT_RGB);
+        final Graphics2D g = img.createGraphics();
+        ClassicAdvisorBox.paint(g, l, bar, null, this.host.font);
+        g.dispose();
+        return img.getRGB(0, 0, 320, 200, null, 0, 320);
+    }
+
+    /**
+     * An inert row (the load box's "(EMPTY)" rows, part SL, I D-SL7): Enter
+     * and a click on it do nothing and the box stays up, with no close in
+     * between (the acceptance of part SL saw the box close and come back
+     * 0.2 s later, the bare map between, sl-acc a5 events 48398.9 -&gt;
+     * 48600.8 ms); the bar goes there; another row answers; the inert row
+     * is drawn as the others, not grey (V {@code opening_055}).
+     */
+    public void testAnInertRowKeepsTheBoxUp() throws Exception {
+        final boolean[] inert = { true, false, true };
+        final ClassicAdvisorBox.Request r = ClassicAdvisorBox.Request.builder("load")
+            .freeColText("a a a").rows("a", "a a", "a a a").inert(inert)
+            .noCancelRow().build();
+        assertFalse(r.enabled(0));
+        assertTrue(r.enabled(1));
+        assertFalse(r.enabled(2));
+        assertFalse(r.greyed(0));
+        assertFalse(r.greyed(2));
+        final Answer a = ask(r);
+        flush();
+        assertTrue(up());
+        assertEquals(0, bar());
+        key(KeyEvent.VK_ENTER);
+        flush();
+        assertTrue(up());
+        assertFalse(a.isDone());
+        assertEquals(0, this.host.closed);
+        final ClassicAdvisorBox.Layout l = edt(() -> this.layer.currentLayout());
+        final java.awt.Rectangle row3 = l.barRect(2);
+        mouse(MouseEvent.MOUSE_PRESSED, row3.x + 10, row3.y + 2);
+        assertEquals(2, bar());
+        mouse(MouseEvent.MOUSE_RELEASED, row3.x + 10, row3.y + 2);
+        flush();
+        assertTrue(up());
+        assertFalse(a.isDone());
+        assertEquals(1, this.host.opened);
+        assertEquals(0, this.host.closed);
+        assertEquals(0, this.host.idle);
+        key(KeyEvent.VK_UP);
+        assertEquals(1, bar());
+        key(KeyEvent.VK_ENTER);
+        assertEquals(1, a.get());
+        assertEquals(1, this.host.closed);
+        // Drawn as any row: the same pixels as the box without the mark,
+        // where a greyed row differs.
+        final ClassicAdvisorBox.Request plain = ClassicAdvisorBox.Request.builder("load")
+            .freeColText("a a a").rows("a", "a a", "a a a").noCancelRow().build();
+        final ClassicAdvisorBox.Request grey = ClassicAdvisorBox.Request.builder("load")
+            .freeColText("a a a").rows("a", "a a", "a a a").disabled(inert)
+            .noCancelRow().build();
+        assertTrue(java.util.Arrays.equals(painted(plain, 1), painted(r, 1)));
+        assertFalse(java.util.Arrays.equals(painted(plain, 1), painted(grey, 1)));
+    }
+
     /**
      * E acceptance must-fix: on a box like the King's (a click outside does
      * not cancel), neither a click on his portrait nor one outside answers

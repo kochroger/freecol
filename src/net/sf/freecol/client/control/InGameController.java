@@ -867,8 +867,13 @@ public final class InGameController extends FreeColClientHolder {
      * Creates at least one autosave game file of the currently played
      * game in the autosave directory.  Does nothing if there is no
      * game running.
+     *
+     * Public for the Classic UI, which also saves a new game's first turn
+     * (the original's autosave of 1492, part SL; FreeCol's first autosave
+     * comes at the second turn), and the view may take the turn's
+     * last-turn autosave itself ({@link GUI#autosaveTurn}).
      */
-    private void autoSaveGame () {
+    public void autoSaveGame () {
         final Game game = getGame();
         if (game == null) return;
 
@@ -881,10 +886,17 @@ public final class InGameController extends FreeColClientHolder {
         final String beforeLastTurnName = prefix + "-"
             + options.getText(ClientOptions.BEFORE_LAST_TURN_NAME)
             + "." + FreeCol.FREECOL_SAVE_EXTENSION;
-       
+
         File lastTurnFile = FreeColDirectories.getAutosaveFile(lastTurnName);
         File beforeLastTurnFile
             = FreeColDirectories.getAutosaveFile(beforeLastTurnName);
+        // The view may take this turn's autosave itself (the Classic UI:
+        // the original's decade row, or none while its "Autom. Sichern"
+        // is off); then the last-turn autosave stays as it is.
+        if (lastTurnFile != null
+            && getGUI().autosaveTurn(game.getTurn(), lastTurnFile)) {
+            lastTurnFile = null;
+        }
         // if "last-turn" file exists, shift it to "before-last-turn" file
         if (lastTurnFile != null) {
             if (lastTurnFile.exists()) {
